@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
+import { assertSafePattern } from "./guardrails.js";
 import type { SweepConfig } from "./types.js";
 
 export const DEFAULT_PATTERNS: string[] = [
@@ -97,19 +98,27 @@ export function loadConfig(
     project = findProjectConfig(cwd) ?? {};
   }
 
+  const patterns = mergeStringArrays(
+    DEFAULT_CONFIG.patterns,
+    global.patterns,
+    project.patterns,
+    cliOverrides.patterns,
+  );
+  const ignore = mergeStringArrays(
+    DEFAULT_CONFIG.ignore,
+    global.ignore,
+    project.ignore,
+    cliOverrides.ignore,
+  );
+
+  // Validate all patterns (including those from config files) against guardrails.
+  // CLI patterns are also validated in index.ts, but config-file patterns are not.
+  for (const p of patterns) assertSafePattern(p);
+  for (const p of ignore) assertSafePattern(p);
+
   return {
-    patterns: mergeStringArrays(
-      DEFAULT_CONFIG.patterns,
-      global.patterns,
-      project.patterns,
-      cliOverrides.patterns,
-    ),
-    ignore: mergeStringArrays(
-      DEFAULT_CONFIG.ignore,
-      global.ignore,
-      project.ignore,
-      cliOverrides.ignore,
-    ),
+    patterns,
+    ignore,
     maxSizeGB:
       cliOverrides.maxSizeGB ?? project.maxSizeGB ?? global.maxSizeGB ?? DEFAULT_CONFIG.maxSizeGB,
     depth: cliOverrides.depth ?? project.depth ?? global.depth ?? DEFAULT_CONFIG.depth,

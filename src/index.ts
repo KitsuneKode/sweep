@@ -19,12 +19,17 @@ import type { CliOptions } from "./types.js";
 
 // ─── CLI definition ───────────────────────────────────────────────────────────
 
+// Injected at build time by scripts/build.ts via Bun.build define.
+// Falls back to package.json version for `bun run dev`.
+declare const __SWEEP_VERSION__: string | undefined;
+const VERSION = typeof __SWEEP_VERSION__ !== "undefined" ? __SWEEP_VERSION__ : "0.0.0-dev";
+
 const program = new Command();
 
 program
   .name("sweep")
   .description("Safe, fast artifact cleanup for any project tree")
-  .version("0.1.0", "-V, --version")
+  .version(VERSION, "-V, --version")
   .argument("[path]", "Directory to sweep", ".")
   .option("-n, --dry-run", "Preview deletions without making changes", false)
   .option("-y, --yes", "Skip confirmation prompt", false)
@@ -45,14 +50,23 @@ program
   .option("--config <path>", "Explicit config file path")
   .option("--no-color", "Disable color output")
   .action(async (pathArg: string, opts: CliOptions) => {
-    // Disable color globally if requested
-    if (!opts.color) process.env["NO_COLOR"] = "1";
+    // --no-color: env var set here is too late for picocolors (module-level init).
+    // The real NO_COLOR injection is prepended to the bundle by scripts/build.ts.
+    // This assignment keeps it consistent for any code that reads process.env directly.
+    if (!opts.color) process.env.NO_COLOR = "1";
 
     const targetDir = resolve(pathArg);
 
     try {
       // ── 1. Guardrails: validate the target directory ──────────────────────
       assertSafeCwd(targetDir);
+
+      // --force-large requires --yes (no interactive bypass for oversized deletes)
+      if (opts.forceLarge && !opts.yes) {
+        throw new GuardrailError(
+          "--force-large requires --yes. Large deletes must be non-interactive.",
+        );
+      }
 
       // ── 2. Validate any extra patterns from CLI ───────────────────────────
       for (const p of opts.pattern) assertSafePattern(p);

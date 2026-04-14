@@ -7,28 +7,26 @@ import { normalize, parse, resolve } from "node:path";
 /**
  * Paths that must never be the target directory.
  * Evaluated AFTER resolve() — these are canonical absolute paths.
+ * Built once at module load (not per-call) for performance.
  */
-function buildBlockedRoots(): Set<string> {
-  const roots = new Set([
-    "/",
-    "/home",
-    "/usr",
-    "/usr/local",
-    "/etc",
-    "/opt",
-    "/var",
-    "/bin",
-    "/sbin",
-    "/lib",
-    "/lib64",
-    "/boot",
-    "/sys",
-    "/proc",
-    "/dev",
-    homedir(),
-  ]);
-  return roots;
-}
+const BLOCKED_ROOTS: Set<string> = new Set([
+  "/",
+  "/home",
+  "/usr",
+  "/usr/local",
+  "/etc",
+  "/opt",
+  "/var",
+  "/bin",
+  "/sbin",
+  "/lib",
+  "/lib64",
+  "/boot",
+  "/sys",
+  "/proc",
+  "/dev",
+  homedir(),
+]);
 
 // ─── Error type ───────────────────────────────────────────────────────────────
 
@@ -60,9 +58,8 @@ export function assertSafeCwd(targetPath: string): void {
   }
 
   const resolved = normalize(resolve(targetPath));
-  const blockedRoots = buildBlockedRoots();
 
-  if (blockedRoots.has(resolved)) {
+  if (BLOCKED_ROOTS.has(resolved)) {
     throw new GuardrailError(
       `Refusing to operate on protected path: ${resolved}\n` +
         `  sweep must be run inside a project directory, not at a system root.`,

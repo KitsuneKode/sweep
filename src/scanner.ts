@@ -6,21 +6,29 @@ import type { ScanEntry, ScanResult, SweepConfig } from "./types.js";
 // ─── Pattern matching ─────────────────────────────────────────────────────────
 
 /**
- * Test if a filename matches any of the given patterns.
- * Supports exact names ("node_modules") and simple globs ("*.tsbuildinfo").
+ * Pre-compile a pattern list into a fast matcher function.
  *
- * TODO: Consider replacing with `micromatch` for full glob semantics.
- * Current implementation covers all built-in default patterns correctly.
+ * Exact patterns use a Set for O(1) lookup.
+ * Glob patterns ("*.tsbuildinfo") are compiled to RegExp once, not per entry.
+ *
+ * Called once per scan, not per directory entry.
  */
-function matchesPattern(name: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => {
-    if (!pattern.includes("*")) {
-      return name === pattern;
+function compileMatcher(patterns: string[]): (name: string) => boolean {
+  const exact = new Set<string>();
+  const regexes: RegExp[] = [];
+
+  for (const p of patterns) {
+    if (!p.includes("*")) {
+      exact.add(p);
+    } else {
+      // Simple glob → regex: only *.ext style is supported (covers all default patterns)
+      const escaped = p.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+      regexes.push(new RegExp(`^${escaped}$`));
     }
-    // Simple glob: only handles leading/trailing * and *.ext style
-    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-    return new RegExp(`^${escaped}$`).test(name);
-  });
+  }
+
+  if (regexes.length === 0) return (name) => exact.has(name);
+  return (name) => exact.has(name) || regexes.some((re) => re.test(name));
 }
 
 /**
@@ -134,6 +142,10 @@ export function scan(targetDir: string, config: SweepConfig, exact = false): Sca
   const entries: ScanEntry[] = [];
   let scannedDirs = 0;
 
+  // Compile patterns once — O(1) exact lookups + pre-built regexes for globs.
+  // This avoids rebuilding regexes for every directory entry (can be thousands).
+  const matches = compileMatcher(config.patterns);
+
   function walk(dir: string, depth: number): void {
     if (config.depth !== -1 && depth > config.depth) return;
 
@@ -152,20 +164,27 @@ export function scan(targetDir: string, config: SweepConfig, exact = false): Sca
 
       if (shouldIgnore(fullPath, config.ignore)) continue;
 
-      // Check symlink status via lstat (never follow links)
-      let symlink = false;
-      try {
-        symlink = lstatSync(fullPath).isSymbolicLink();
-      } catch {
-        continue; // Can't stat — skip
+      // item.isSymbolicLink() from readdirSync is accurate on modern Linux/macOS
+      // (getdents64 d_type includes link info). On exotic filesystems (DT_UNKNOWN),
+      // all type methods return false — we fall back to lstatSync only then.
+      // Safety: a symlink deleted via rmSync({recursive}) follows the link and
+      // destroys the real directory, so we must never misclassify a symlink.
+      let isLink = item.isSymbolicLink();
+      if (!isLink && !item.isFile() && !item.isDirectory()) {
+        // DT_UNKNOWN — fall back to lstat
+        try {
+          isLink = lstatSync(fullPath).isSymbolicLink();
+        } catch {
+          continue; // can't stat — skip
+        }
       }
 
-      if (matchesPattern(item.name, config.patterns)) {
+      if (matches(item.name)) {
         entries.push({
           path: fullPath,
           name: item.name,
           estimatedBytes: exact ? exactSize(fullPath) : estimateSize(fullPath),
-          isSymlink: symlink,
+          isSymlink: isLink,
         });
         // Critical: do NOT recurse into matched directories.
         // This prevents double-counting and infinite loops.
@@ -173,7 +192,7 @@ export function scan(targetDir: string, config: SweepConfig, exact = false): Sca
       }
 
       // Recurse into non-matched, non-symlink directories
-      if (item.isDirectory() && !symlink) {
+      if (item.isDirectory() && !isLink) {
         walk(fullPath, depth + 1);
       }
     }
