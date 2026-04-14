@@ -34,6 +34,7 @@
   },
   "scripts": {
     "dev": "bun run src/index.ts",
+    "clean": "rm -rf dist",
     "build": "bun run scripts/build.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src tests",
@@ -41,8 +42,12 @@
     "fmt": "oxfmt src tests scripts",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "prepare": "husky",
-    "prepublishOnly": "bun run typecheck && bun run lint && bun run test && bun run build"
+    "preflight": "bun run scripts/preflight.ts",
+    "pack:preview": "npm pack --dry-run",
+    "pack": "npm pack",
+    "preversion": "bun run typecheck && bun run lint && bun run test",
+    "prepare": "husky || true",
+    "prepublishOnly": "bun run typecheck && bun run lint && bun run test && bun run build && bun run preflight"
   },
   "dependencies": {
     "commander": "^12.1.0",
