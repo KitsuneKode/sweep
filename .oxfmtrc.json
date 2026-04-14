@@ -1,10 +1,4 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": [
-    "dist/**",
-    "node_modules/**",
-    "coverage/**",
-    "package.json",
-    "package-lock.json"
-  ]
+  "ignorePatterns": ["dist/**", "node_modules/**", "coverage/**"]
 }

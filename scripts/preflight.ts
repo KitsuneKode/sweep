@@ -152,7 +152,7 @@ check("publishConfig.access is 'public' (required for scoped packages)", () => {
 
 check("bin points to dist/sweep.js", () => {
   const { bin } = pkg() as { bin?: Record<string, string> };
-  assert(bin?.["sweep"] === "./dist/sweep.js", `got: ${JSON.stringify(bin)}`);
+  assert(bin?.["sweep"] === "dist/sweep.js", `got: ${JSON.stringify(bin)}`);
 });
 
 check("files array includes 'dist'", () => {
