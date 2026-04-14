@@ -43,42 +43,60 @@ function shouldIgnore(fullPath: string, ignore: string[]): boolean {
 
 const platform = process.platform;
 
-/**
- * Fast size estimate via `du`.
- *
- * - Linux:   `du -sb <path>`  → bytes (GNU du)
- * - macOS:   `du -sk <path>`  → kilobytes (BSD du, no -b flag)
- * - Windows: not supported — falls back to statSync
- * - Any error: falls back to statSync (directory entry size, ~4 KB, inaccurate)
- *
- * For --dry-run exact sizes, use exactSize() instead.
- */
-function estimateSize(entryPath: string): number {
-  try {
-    if (platform === "linux") {
-      const out = execFileSync("du", ["-sb", entryPath], {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-      const bytes = Number.parseInt(out.split("\t")[0] ?? "0", 10);
-      return Number.isNaN(bytes) ? 0 : bytes;
-    }
+// Max paths per du invocation — stays well under ARG_MAX on all platforms.
+const DU_CHUNK_SIZE = 50;
 
-    if (platform === "darwin") {
-      const out = execFileSync("du", ["-sk", entryPath], {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-      const kb = Number.parseInt(out.split("\t")[0] ?? "0", 10);
-      return Number.isNaN(kb) ? 0 : kb * 1024;
-    }
-  } catch {
-    // Fall through to statSync
+/**
+ * Batch size estimate for multiple paths via a single `du` invocation per chunk.
+ *
+ * Drastically faster than one subprocess per entry: a monorepo with 20
+ * node_modules goes from 20 process spawns down to 1.
+ *
+ * Returns a Map<path, bytes>. Paths not in the map fell back to statSync.
+ *
+ * - Linux:   `du -sb paths...`  → bytes (GNU du)
+ * - macOS:   `du -sk paths...`  → kilobytes (BSD du, no -b flag)
+ * - Other:   skipped — callers use statSync fallback
+ */
+function batchEstimate(paths: string[]): Map<string, number> {
+  const result = new Map<string, number>();
+  if (paths.length === 0 || (platform !== "linux" && platform !== "darwin")) {
+    return result;
   }
 
-  // Fallback: directory entry size — inaccurate but safe
+  const flag = platform === "linux" ? "-sb" : "-sk";
+  const multiplier = platform === "linux" ? 1 : 1024;
+
+  // Process in chunks to stay under ARG_MAX
+  for (let i = 0; i < paths.length; i += DU_CHUNK_SIZE) {
+    const chunk = paths.slice(i, i + DU_CHUNK_SIZE);
+    try {
+      const out = execFileSync("du", [flag, ...chunk], {
+        encoding: "utf8",
+        timeout: 30_000,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+
+      for (const line of out.split("\n")) {
+        if (!line) continue;
+        const tab = line.indexOf("\t");
+        if (tab === -1) continue;
+        const raw = Number.parseInt(line.slice(0, tab), 10);
+        const path = line.slice(tab + 1);
+        if (!Number.isNaN(raw)) {
+          result.set(path, raw * multiplier);
+        }
+      }
+    } catch {
+      // Chunk failed — paths in this chunk will use statSync fallback
+    }
+  }
+
+  return result;
+}
+
+/** Fallback size for a single path when du is unavailable or fails. */
+function statFallback(entryPath: string): number {
   try {
     return statSync(entryPath).size;
   } catch {
@@ -88,7 +106,7 @@ function estimateSize(entryPath: string): number {
 
 /**
  * Exact recursive size by walking all files under a path.
- * Slow on large node_modules — only call this for --dry-run.
+ * Slow on large node_modules — only called for --dry-run.
  */
 export function exactSize(entryPath: string): number {
   let total = 0;
@@ -137,14 +155,17 @@ export function exactSize(entryPath: string): number {
  * - Does NOT follow symlinks (marks them as isSymlink: true, doesn't recurse)
  * - Skips entries in config.ignore
  * - Respects config.depth (-1 = unlimited)
+ * - Fast path: sizes estimated via a single batched `du` call after the walk
+ * - Exact path (--dry-run): recursive stat walk per entry
  */
 export function scan(targetDir: string, config: SweepConfig, exact = false): ScanResult {
   const entries: ScanEntry[] = [];
   let scannedDirs = 0;
 
-  // Compile patterns once — O(1) exact lookups + pre-built regexes for globs.
-  // This avoids rebuilding regexes for every directory entry (can be thousands).
+  // Compile patterns once — O(1) Set lookup for exact names, pre-built regexes for globs.
   const matches = compileMatcher(config.patterns);
+
+  // ── Walk ────────────────────────────────────────────────────────────────────
 
   function walk(dir: string, depth: number): void {
     if (config.depth !== -1 && depth > config.depth) return;
@@ -166,7 +187,7 @@ export function scan(targetDir: string, config: SweepConfig, exact = false): Sca
 
       // item.isSymbolicLink() from readdirSync is accurate on modern Linux/macOS
       // (getdents64 d_type includes link info). On exotic filesystems (DT_UNKNOWN),
-      // all type methods return false — we fall back to lstatSync only then.
+      // all type methods return false — fall back to lstatSync only then.
       // Safety: a symlink deleted via rmSync({recursive}) follows the link and
       // destroys the real directory, so we must never misclassify a symlink.
       let isLink = item.isSymbolicLink();
@@ -183,7 +204,7 @@ export function scan(targetDir: string, config: SweepConfig, exact = false): Sca
         entries.push({
           path: fullPath,
           name: item.name,
-          estimatedBytes: exact ? exactSize(fullPath) : estimateSize(fullPath),
+          estimatedBytes: 0, // filled below
           isSymlink: isLink,
         });
         // Critical: do NOT recurse into matched directories.
@@ -199,6 +220,21 @@ export function scan(targetDir: string, config: SweepConfig, exact = false): Sca
   }
 
   walk(targetDir, 0);
+
+  // ── Size estimation ─────────────────────────────────────────────────────────
+
+  if (exact) {
+    // Exact mode: recursive stat walk per entry (slow but accurate, used for --dry-run)
+    for (const entry of entries) {
+      entry.estimatedBytes = exactSize(entry.path);
+    }
+  } else {
+    // Fast mode: single batched du call for all entries, then fill gaps with statSync
+    const sizeMap = batchEstimate(entries.map((e) => e.path));
+    for (const entry of entries) {
+      entry.estimatedBytes = sizeMap.get(entry.path) ?? statFallback(entry.path);
+    }
+  }
 
   return {
     entries,

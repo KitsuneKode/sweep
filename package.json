@@ -45,7 +45,9 @@
     "preflight": "bun run scripts/preflight.ts",
     "pack:preview": "npm pack --dry-run",
     "pack": "npm pack",
-    "preversion": "bun run typecheck && bun run lint && bun run test",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "bun run prepublishOnly && changeset publish",
     "prepare": "husky || true",
     "prepublishOnly": "bun run typecheck && bun run lint && bun run test && bun run build && bun run preflight"
   },
@@ -54,6 +56,7 @@
     "picocolors": "^1.1.1"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.30.0",
     "@commitlint/cli": "^19.6.0",
     "@commitlint/config-conventional": "^19.6.0",
     "@types/node": "^22.0.0",
