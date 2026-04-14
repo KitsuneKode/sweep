@@ -11,7 +11,16 @@
     "monorepo",
     "node_modules"
   ],
+  "homepage": "https://github.com/KitsuneKode/sweep#readme",
+  "bugs": {
+    "url": "https://github.com/KitsuneKode/sweep/issues"
+  },
   "license": "MIT",
+  "author": "KitsuneKode",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KitsuneKode/sweep.git"
+  },
   "bin": {
     "sweep": "./dist/sweep.js"
   },
@@ -20,6 +29,9 @@
   ],
   "type": "module",
   "main": "./dist/sweep.js",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "bun run src/index.ts",
     "build": "bun run scripts/build.ts",
