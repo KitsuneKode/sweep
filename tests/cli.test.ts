@@ -118,6 +118,34 @@ describe("CLI scan/apply", () => {
     expect(plan.candidates[0]?.reasons).toContain("custom-pattern");
   });
 
+  test("scan can opt dangerous candidates back in with --include-dangerous", () => {
+    mkdirSync(dir("custom-cache"));
+
+    const result = runCli([
+      "scan",
+      tmpDir,
+      "--json",
+      "--pattern",
+      "custom-cache",
+      "--include-dangerous",
+      "--select",
+      "all",
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const plan = JSON.parse(result.stdout) as ScanPlan & {
+      selectionPolicy: { mode: string; includeDangerous: boolean };
+      summary: { selectedCount: number };
+    };
+
+    expect(plan.selectedCandidateIds).toHaveLength(1);
+    expect(plan.summary.selectedCount).toBe(1);
+    expect(plan.selectionPolicy).toEqual({
+      mode: "all",
+      includeDangerous: true,
+    });
+  });
+
   test("apply reports a revalidation failure when a candidate changes type", () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("dist"));
@@ -151,5 +179,15 @@ describe("CLI scan/apply", () => {
     expect(report.failedPaths.some((failure) => failure.path === nodeModulesCandidate?.path)).toBe(
       true,
     );
+  });
+
+  test("legacy clean does not delete dangerous custom matches without explicit opt-in", () => {
+    mkdirSync(dir("custom-cache"));
+
+    const result = runCli([tmpDir, "--pattern", "custom-cache", "--yes"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(dir("custom-cache"))).toBe(true);
+    expect(result.stdout).toContain("Nothing selected");
   });
 });

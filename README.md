@@ -58,16 +58,18 @@ sweep apply --plan <path> [options]
 
 ### Options
 
-| Flag              | Short | Description                                        |
-| ----------------- | ----- | -------------------------------------------------- |
-| `--dry-run`       | `-n`  | Preview what would be deleted — no changes made    |
-| `--yes`           | `-y`  | Skip confirmation prompt (CI / scripts)            |
-| `--force-large`   |       | Allow deletion over `maxSizeGB` (requires `--yes`) |
-| `--pattern <p>`   | `-p`  | Add extra pattern, repeatable                      |
-| `--ignore <p>`    | `-i`  | Ignore paths matching this substring, repeatable   |
-| `--depth <n>`     |       | Max recursion depth (`-1` = unlimited, default)    |
-| `--config <path>` |       | Explicit config file path                          |
-| `--no-color`      |       | Disable color output                               |
+| Flag                  | Short | Description                                          |
+| --------------------- | ----- | ---------------------------------------------------- |
+| `--dry-run`           | `-n`  | Preview what would be deleted — no changes made      |
+| `--yes`               | `-y`  | Skip confirmation prompt (CI / scripts)              |
+| `--force-large`       |       | Allow deletion over `maxSizeGB` (requires `--yes`)   |
+| `--pattern <p>`       | `-p`  | Add extra pattern, repeatable                        |
+| `--ignore <p>`        | `-i`  | Ignore paths matching this substring, repeatable     |
+| `--select <mode>`     |       | Selection policy: `default`, `safe`, `all`, `none`   |
+| `--include-dangerous` |       | Explicitly include dangerous candidates in selection |
+| `--depth <n>`         |       | Max recursion depth (`-1` = unlimited, default)      |
+| `--config <path>`     |       | Explicit config file path                            |
+| `--no-color`          |       | Disable color output                                 |
 
 ### `scan` options
 
@@ -125,11 +127,15 @@ sweep apply --plan sweep-plan.json --yes
 
 # Scan a custom artifact pattern without auto-selecting it by default
 sweep scan . --json --pattern .custom-cache
+
+# Explicitly opt dangerous custom matches back into the plan
+sweep scan . --json --pattern .custom-cache --select all --include-dangerous
 ```
 
 `scan --json` currently emits a plan-shaped document. Safe candidates are
 selected by default; more dangerous custom-pattern matches are included in the
-candidate list but excluded from `selectedCandidateIds` until explicitly chosen.
+candidate list but excluded from `selectedCandidateIds` until explicitly chosen
+with flags such as `--select all --include-dangerous`.
 
 ---
 

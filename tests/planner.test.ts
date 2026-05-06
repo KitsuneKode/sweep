@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ScanEntry, ScanResult } from "../packages/protocol/src/index.js";
-import { buildPlan, revalidateCandidates, toCandidate } from "../packages/core/src/planner.js";
+import {
+  buildPlan,
+  compileSelectedCandidateIds,
+  revalidateCandidates,
+  toCandidate,
+} from "../packages/core/src/planner.js";
 
 let tmpDir: string;
 
@@ -70,5 +75,41 @@ describe("planner", () => {
     expect(ready).toHaveLength(0);
     expect(failedPaths).toHaveLength(1);
     expect(failedPaths[0]?.error).toContain("entry type changed");
+  });
+
+  test("compileSelectedCandidateIds respects selection mode and dangerous opt-in", () => {
+    const safeCandidate = toCandidate({
+      path: dir("node_modules"),
+      name: "node_modules",
+      estimatedBytes: 10,
+      isSymlink: false,
+      entryType: "directory",
+    });
+    const cautionCandidate = toCandidate({
+      path: dir("linked-dist"),
+      name: "dist",
+      estimatedBytes: 5,
+      isSymlink: true,
+      entryType: "symlink",
+    });
+    const dangerousCandidate = toCandidate({
+      path: dir("custom-cache"),
+      name: "custom-cache",
+      estimatedBytes: 3,
+      isSymlink: false,
+      entryType: "directory",
+    });
+
+    const candidates = [safeCandidate, cautionCandidate, dangerousCandidate];
+
+    expect(
+      compileSelectedCandidateIds(candidates, { mode: "safe", includeDangerous: false }),
+    ).toEqual([safeCandidate.id]);
+    expect(
+      compileSelectedCandidateIds(candidates, { mode: "all", includeDangerous: false }),
+    ).toEqual([safeCandidate.id, cautionCandidate.id]);
+    expect(
+      compileSelectedCandidateIds(candidates, { mode: "all", includeDangerous: true }),
+    ).toEqual([safeCandidate.id, cautionCandidate.id, dangerousCandidate.id]);
   });
 });

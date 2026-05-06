@@ -1,6 +1,7 @@
 export const PROTOCOL_VERSION = "1" as const;
 
 export type RiskTier = "safe" | "caution" | "dangerous" | "blocked";
+export type SelectionMode = "default" | "safe" | "all" | "none";
 
 export type CandidateKind =
   | "node_modules"
@@ -54,6 +55,8 @@ export interface CliOptions {
   forceLarge: boolean;
   pattern: string[];
   ignore: string[];
+  includeDangerous: boolean;
+  select: SelectionMode;
   depth: number;
   config?: string;
   color: boolean;
@@ -66,6 +69,16 @@ export interface ScanCandidate extends ScanEntry {
   reasons: string[];
   selectedByDefault: boolean;
 }
+
+export interface SelectionPolicy {
+  mode: SelectionMode;
+  includeDangerous: boolean;
+}
+
+export const DEFAULT_SELECTION_POLICY: SelectionPolicy = {
+  mode: "default",
+  includeDangerous: false,
+};
 
 export const SCAN_EVENT_TYPES = [
   "scan_started",
@@ -117,6 +130,7 @@ export type ScanEvent =
 export interface ScanPlan {
   protocolVersion: typeof PROTOCOL_VERSION;
   targetDir: string;
+  selectionPolicy: SelectionPolicy;
   candidates: ScanCandidate[];
   summary: {
     candidateCount: number;

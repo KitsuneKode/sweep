@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEFAULT_SELECTION_POLICY,
   PROTOCOL_VERSION,
   SCAN_EVENT_TYPES,
   type ScanEvent,
@@ -25,6 +26,7 @@ describe("protocol package", () => {
     const plan: ScanPlan = {
       protocolVersion: PROTOCOL_VERSION,
       targetDir: "/tmp/project",
+      selectionPolicy: DEFAULT_SELECTION_POLICY,
       candidates: [
         {
           id: "cand_1",
@@ -59,6 +61,13 @@ describe("protocol package", () => {
     expect(plan.selectedCandidateIds).toHaveLength(2);
     expect(plan.candidates).toHaveLength(1);
     expect(plan.summary.selectedCount).toBe(1);
+  });
+
+  test("exports a default selection policy for plan compilation", () => {
+    expect(DEFAULT_SELECTION_POLICY).toEqual({
+      mode: "default",
+      includeDangerous: false,
+    });
   });
 
   test("supports a candidate_found event shape", () => {

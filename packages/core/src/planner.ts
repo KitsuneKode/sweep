@@ -6,19 +6,23 @@ import type {
   ScanEntry,
   ScanPlan,
   ScanResult,
+  SelectionPolicy,
 } from "../../protocol/src/index.js";
-import { PROTOCOL_VERSION } from "../../protocol/src/index.js";
+import { DEFAULT_SELECTION_POLICY, PROTOCOL_VERSION } from "../../protocol/src/index.js";
 
-export function buildPlan(targetDir: string, result: ScanResult): ScanPlan {
+export function buildPlan(
+  targetDir: string,
+  result: ScanResult,
+  selectionPolicy: SelectionPolicy = DEFAULT_SELECTION_POLICY,
+): ScanPlan {
   const candidates = result.entries.map((entry) => toCandidate(entry));
-  const selectedCandidateIds = candidates
-    .filter((candidate) => candidate.selectedByDefault)
-    .map((candidate) => candidate.id);
+  const selectedCandidateIds = compileSelectedCandidateIds(candidates, selectionPolicy);
   const riskCounts = countRiskTiers(candidates);
 
   return {
     protocolVersion: PROTOCOL_VERSION,
     targetDir,
+    selectionPolicy,
     candidates,
     summary: {
       candidateCount: candidates.length,
@@ -31,6 +35,15 @@ export function buildPlan(targetDir: string, result: ScanResult): ScanPlan {
     selectedCandidateIds,
     createdAt: new Date().toISOString(),
   };
+}
+
+export function compileSelectedCandidateIds(
+  candidates: ScanCandidate[],
+  selectionPolicy: SelectionPolicy,
+): string[] {
+  return candidates
+    .filter((candidate) => shouldSelectCandidate(candidate, selectionPolicy))
+    .map((candidate) => candidate.id);
 }
 
 export function toCandidate(entry: ScanEntry): ScanCandidate {
@@ -146,6 +159,28 @@ export function inferReasons(entry: ScanEntry, kind: CandidateKind): string[] {
     reasons.push("default-pattern");
   }
   return reasons;
+}
+
+function shouldSelectCandidate(
+  candidate: ScanCandidate,
+  selectionPolicy: SelectionPolicy,
+): boolean {
+  if (candidate.riskTier === "blocked") return false;
+  if (candidate.riskTier === "dangerous" && !selectionPolicy.includeDangerous) {
+    return false;
+  }
+
+  switch (selectionPolicy.mode) {
+    case "none":
+      return false;
+    case "safe":
+      return candidate.riskTier === "safe";
+    case "all":
+      return true;
+    case "default":
+    default:
+      return candidate.selectedByDefault;
+  }
 }
 
 function hashString(input: string): string {

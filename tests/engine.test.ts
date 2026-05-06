@@ -45,4 +45,26 @@ describe("core engine", () => {
     expect(applied.report.failedPaths[0]?.path).toBe(dir("node_modules"));
     expect(applied.cleanResult.deleted).toHaveLength(1);
   });
+
+  test("scanToPlan honors explicit selection policy", () => {
+    mkdirSync(dir("custom-cache"));
+
+    const { plan } = scanToPlan(
+      tmpDir,
+      {
+        ...DEFAULT_CONFIG,
+        patterns: [...DEFAULT_CONFIG.patterns, "custom-cache"],
+      },
+      {
+        selectionPolicy: { mode: "all", includeDangerous: true },
+      },
+    );
+
+    expect(plan.candidates).toHaveLength(1);
+    expect(plan.selectedCandidateIds).toHaveLength(1);
+    expect(plan.selectionPolicy).toEqual({
+      mode: "all",
+      includeDangerous: true,
+    });
+  });
 });

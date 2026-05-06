@@ -7,10 +7,11 @@ import type {
   CliOptions,
   ScanEvent,
   ScanPlan,
+  SelectionMode,
+  SelectionPolicy,
   SweepConfig,
 } from "../../protocol/src/index.js";
 import { PROTOCOL_VERSION } from "../../protocol/src/index.js";
-import { clean } from "../../core/src/cleaner.js";
 import { loadConfig } from "../../core/src/config.js";
 import { applyPlan as executePlan, scanToPlan } from "../../core/src/engine.js";
 import {
@@ -20,7 +21,6 @@ import {
   assertSizeLimit,
 } from "../../core/src/guardrails.js";
 import { toCandidate } from "../../core/src/planner.js";
-import { scan } from "../../core/src/scanner.js";
 import {
   createSpinner,
   formatBytes,
@@ -99,6 +99,8 @@ function addScanOptions<T extends Command>(command: T): T {
       (v) => Number.parseInt(v, 10),
       -1,
     )
+    .option("--select <mode>", "Default selection policy: default, safe, all, none", "default")
+    .option("--include-dangerous", "Include dangerous candidates in selection", false)
     .option("--config <path>", "Explicit config file path")
     .option("--no-color", "Disable color output");
 }
@@ -118,11 +120,15 @@ async function handleLegacyClean(pathArg: string, opts: CliOptions): Promise<voi
     }
 
     const config = resolveScanConfig(targetDir, opts);
+    const selectionPolicy = resolveSelectionPolicy(opts);
 
     printBanner();
 
     const spinner = createSpinner(opts.dryRun ? "Scanning (exact sizes)..." : "Scanning...");
-    const result = scan(targetDir, config, opts.dryRun);
+    const { result, plan } = scanToPlan(targetDir, config, {
+      exact: opts.dryRun,
+      selectionPolicy,
+    });
     spinner.stop();
 
     printScanSummary(result, targetDir);
@@ -131,16 +137,22 @@ async function handleLegacyClean(pathArg: string, opts: CliOptions): Promise<voi
       process.exit(0);
     }
 
-    assertSizeLimit(result.estimatedTotalBytes, config.maxSizeGB, opts.forceLarge);
+    const selectedBytes = getSelectedBytes(plan);
+    assertSizeLimit(selectedBytes, config.maxSizeGB, opts.forceLarge);
 
     if (opts.dryRun) {
       printDryRunNotice();
       process.exit(0);
     }
 
+    if (plan.selectedCandidateIds.length === 0) {
+      console.log("Nothing selected by the current policy. Use --select or --include-dangerous.");
+      process.exit(0);
+    }
+
     if (!opts.yes) {
       const confirmed = await promptConfirm(
-        `Delete ${result.entries.length} items (~${formatBytes(result.estimatedTotalBytes)})?`,
+        `Delete ${plan.selectedCandidateIds.length} selected items (~${formatBytes(selectedBytes)})?`,
       );
       if (!confirmed) {
         printAborted();
@@ -148,10 +160,13 @@ async function handleLegacyClean(pathArg: string, opts: CliOptions): Promise<voi
       }
     }
 
-    const cleanResult = await clean(result.entries);
-    printCleanResult(cleanResult);
+    const { report, cleanResult } = await executePlan(plan);
+    printCleanResult({
+      ...cleanResult,
+      failedPaths: report.failedPaths,
+    });
 
-    process.exit(cleanResult.failedPaths.length > 0 ? 4 : 0);
+    process.exit(report.failedCount > 0 ? 4 : 0);
   } catch (err) {
     handleFatalError(err);
   }
@@ -168,6 +183,7 @@ async function handleScan(
   try {
     assertSafeCwd(targetDir);
     const config = resolveScanConfig(targetDir, opts);
+    const selectionPolicy = resolveSelectionPolicy(opts);
 
     if (opts.jsonStream) {
       const startedEvent: ScanEvent = { type: "scan_started", targetDir };
@@ -175,6 +191,7 @@ async function handleScan(
 
       const { result } = scanToPlan(targetDir, config, {
         exact: false,
+        selectionPolicy,
         onEntry: (entry) => {
           const candidate = toCandidate(entry);
           writeJsonLine({ type: "candidate_found", candidate } satisfies ScanEvent);
@@ -198,7 +215,7 @@ async function handleScan(
     }
 
     const spinner = opts.json ? null : createSpinner("Scanning...");
-    const { result, plan } = scanToPlan(targetDir, config);
+    const { result, plan } = scanToPlan(targetDir, config, { selectionPolicy });
     spinner?.stop();
 
     if (opts.json) {
@@ -289,6 +306,42 @@ function resolveScanConfig(targetDir: string, opts: CliOptions): SweepConfig {
   };
 
   return loadConfig(targetDir, opts.config, cliOverrides);
+}
+
+function resolveSelectionPolicy(
+  opts: Pick<CliOptions, "includeDangerous" | "select">,
+): SelectionPolicy {
+  const includeDangerous = opts.includeDangerous || process.argv.includes("--include-dangerous");
+  const rawMode = resolveSingleOption(opts.select, ["--select"]);
+  const mode = rawMode && isSelectionMode(rawMode) ? rawMode : "default";
+  return {
+    mode,
+    includeDangerous,
+  };
+}
+
+function isSelectionMode(value: string): value is SelectionMode {
+  return value === "default" || value === "safe" || value === "all" || value === "none";
+}
+
+function getSelectedBytes(plan: ScanPlan): number {
+  const selectedIds = new Set(plan.selectedCandidateIds);
+  return plan.candidates
+    .filter((candidate) => selectedIds.has(candidate.id))
+    .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
+}
+
+function resolveSingleOption(current: string | undefined, flags: string[]): string | undefined {
+  for (let i = 0; i < process.argv.length; i++) {
+    const token = process.argv[i];
+    if (!token || !flags.includes(token)) continue;
+    const next = process.argv[i + 1];
+    if (next && !next.startsWith("-")) {
+      return next;
+    }
+  }
+
+  return current;
 }
 
 function writeJson(value: unknown): void {

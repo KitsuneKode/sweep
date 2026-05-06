@@ -5,6 +5,7 @@ import type {
   ScanEntry,
   ScanPlan,
   ScanResult,
+  SelectionPolicy,
   SweepConfig,
 } from "../../protocol/src/index.js";
 import { PROTOCOL_VERSION } from "../../protocol/src/index.js";
@@ -15,6 +16,7 @@ import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./pl
 
 export interface ScanToPlanOptions extends ScanHooks {
   exact?: boolean;
+  selectionPolicy?: SelectionPolicy;
 }
 
 export interface ScanToPlanResult {
@@ -38,7 +40,7 @@ export function scanToPlan(
   const result = scan(targetDir, config, options.exact ?? false, options);
   return {
     result,
-    plan: buildPlan(targetDir, result),
+    plan: buildPlan(targetDir, result, options.selectionPolicy),
   };
 }
 

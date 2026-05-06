@@ -112,18 +112,20 @@ sweep [path] [options]
 
 ### Options
 
-| Flag            | Short | Type     | Default | Description                          |
-| --------------- | ----- | -------- | ------- | ------------------------------------ |
-| `--dry-run`     | `-n`  | bool     | false   | Preview only, no deletion            |
-| `--yes`         | `-y`  | bool     | false   | Skip confirmation prompt             |
-| `--force-large` | —     | bool     | false   | Allow exceeding `maxSizeGB`          |
-| `--pattern`     | `-p`  | string[] | []      | Additional patterns (repeatable)     |
-| `--ignore`      | `-i`  | string[] | []      | Ignore patterns (repeatable)         |
-| `--depth`       | —     | number   | -1      | Max recursion depth (-1 = unlimited) |
-| `--config`      | —     | string   | —       | Explicit config file path            |
-| `--no-color`    | —     | bool     | false   | Disable color output                 |
-| `--version`     | `-V`  | —        | —       | Print version                        |
-| `--help`        | `-h`  | —        | —       | Print help                           |
+| Flag                  | Short | Type     | Default | Description                          |
+| --------------------- | ----- | -------- | ------- | ------------------------------------ |
+| `--dry-run`           | `-n`  | bool     | false   | Preview only, no deletion            |
+| `--yes`               | `-y`  | bool     | false   | Skip confirmation prompt             |
+| `--force-large`       | —     | bool     | false   | Allow exceeding `maxSizeGB`          |
+| `--pattern`           | `-p`  | string[] | []      | Additional patterns (repeatable)     |
+| `--ignore`            | `-i`  | string[] | []      | Ignore patterns (repeatable)         |
+| `--select`            | —     | string   | default | Selection policy for plan generation |
+| `--include-dangerous` | —     | bool     | false   | Explicitly include dangerous matches |
+| `--depth`             | —     | number   | -1      | Max recursion depth (-1 = unlimited) |
+| `--config`            | —     | string   | —       | Explicit config file path            |
+| `--no-color`          | —     | bool     | false   | Disable color output                 |
+| `--version`           | `-V`  | —        | —       | Print version                        |
+| `--help`              | `-h`  | —        | —       | Print help                           |
 
 ### Behavior Flow
 
@@ -139,12 +141,15 @@ sweep [path] [options]
 7. Print scan summary (colored, aligned)
 8. If entries.length === 0: exit 0 ("Nothing to clean")
 9. Assert size guardrail (< maxSizeGB or --force-large)
-10. If --dry-run: print notice, exit 0
-11. If !--yes: show confirmation prompt [y/N]
+10. Compile selection policy into explicit candidate ids
+11. If --dry-run: print notice, exit 0
+12. If selected set is empty: exit 0 with guidance for broader selection
+13. If !--yes: show confirmation prompt [y/N]
     - 'n' or empty → "Aborted." → exit 1
-12. Delete each entry with progress output
-13. Print final summary (items deleted, bytes freed, duration)
-14. Exit 0 (or 4 if any deletions failed)
+14. Revalidate selected candidates against the saved plan shape
+15. Delete each ready entry with progress output
+16. Print final summary (items deleted, bytes freed, duration)
+17. Exit 0 (or 4 if any deletions failed)
 ```
 
 ---
