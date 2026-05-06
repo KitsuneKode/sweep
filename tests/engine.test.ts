@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyPlan, scanToPlan } from "../packages/core/src/engine.js";
 import { DEFAULT_CONFIG } from "../packages/core/src/config.js";
+import { cleanupSeededFixtures, seedScenario } from "./support/fixtures.js";
 
 let tmpDir: string;
 
@@ -12,6 +13,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(tmpDir, { recursive: true, force: true });
+  cleanupSeededFixtures();
 });
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
@@ -104,5 +106,24 @@ describe("core engine", () => {
     expect(plan.summary.selectedCount).toBe(3);
     expect(plan.summary.riskCounts.safe).toBe(3);
     expect(plan.summary.riskCounts.dangerous).toBe(1);
+  });
+
+  test("scanToPlan handles the seeded large-plan scenario predictably", () => {
+    const fixture = seedScenario("large-plan");
+
+    const { plan } = scanToPlan(
+      fixture.root,
+      {
+        ...DEFAULT_CONFIG,
+        patterns: [...DEFAULT_CONFIG.patterns, "custom-cache"],
+      },
+      {
+        selectionPolicy: { mode: "default", includeDangerous: false },
+      },
+    );
+
+    expect(plan.summary.candidateCount).toBeGreaterThan(12);
+    expect(plan.summary.riskCounts.dangerous).toBeGreaterThan(0);
+    expect(plan.summary.selectedCount).toBeGreaterThan(0);
   });
 });

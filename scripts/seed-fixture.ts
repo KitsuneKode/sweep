@@ -3,9 +3,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 type Scenario = "basic" | "monorepo" | "drift" | "risk-mix" | "workspace-matrix";
+type ExtendedScenario = Scenario | "large-plan" | "blocked-target";
 
-function parseArgs(argv: string[]): { scenario: Scenario; root: string | undefined } {
-  let scenario: Scenario = "basic";
+function parseArgs(argv: string[]): { scenario: ExtendedScenario; root: string | undefined } {
+  let scenario: ExtendedScenario = "basic";
   let root: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
@@ -17,7 +18,9 @@ function parseArgs(argv: string[]): { scenario: Scenario; root: string | undefin
         value === "monorepo" ||
         value === "drift" ||
         value === "risk-mix" ||
-        value === "workspace-matrix"
+        value === "workspace-matrix" ||
+        value === "large-plan" ||
+        value === "blocked-target"
       ) {
         scenario = value;
         i++;
@@ -72,9 +75,30 @@ function seedWorkspaceMatrix(root: string, created: string[]): void {
   created.push(join(root, "apps", "docs", "tsconfig.tsbuildinfo"));
 }
 
+function seedLargePlan(root: string, created: string[]): void {
+  for (let i = 0; i < 8; i++) {
+    ensureDir(join(root, "packages", `pkg-${i}`, "node_modules"), created);
+    ensureDir(join(root, "packages", `pkg-${i}`, "dist"), created);
+  }
+
+  for (let i = 0; i < 4; i++) {
+    ensureDir(join(root, "apps", `app-${i}`, ".next"), created);
+  }
+
+  ensureDir(join(root, "tools", "custom-cache"), created);
+  writeFileSync(join(root, "tools", "custom.tsbuildinfo"), "");
+  created.push(join(root, "tools", "custom.tsbuildinfo"));
+}
+
+function seedBlockedTarget(root: string, created: string[]): { guardrailTarget: string } {
+  ensureDir(join(root, "placeholder-project", "node_modules"), created);
+  return { guardrailTarget: "/tmp" };
+}
+
 const { scenario, root: requestedRoot } = parseArgs(process.argv.slice(2));
 const root = requestedRoot ?? mkdtempSync(join(tmpdir(), `sweep-fixture-${scenario}-`));
 const created: string[] = [];
+let guardrailTarget: string | undefined;
 
 switch (scenario) {
   case "basic":
@@ -92,6 +116,12 @@ switch (scenario) {
   case "workspace-matrix":
     seedWorkspaceMatrix(root, created);
     break;
+  case "large-plan":
+    seedLargePlan(root, created);
+    break;
+  case "blocked-target":
+    guardrailTarget = seedBlockedTarget(root, created).guardrailTarget;
+    break;
 }
 
 process.stdout.write(
@@ -100,6 +130,7 @@ process.stdout.write(
       scenario,
       root,
       created,
+      ...(guardrailTarget ? { guardrailTarget } : {}),
     },
     null,
     2,
