@@ -4,6 +4,8 @@ import {
   FAILURE_REASON_CODES,
   DEFAULT_SELECTION_POLICY,
   PROTOCOL_VERSION,
+  PROTOCOL_SHARED_SCHEMA,
+  SCAN_EVENT_SCHEMA,
   SCAN_PLAN_SCHEMA,
   SCAN_EVENT_TYPES,
   type ScanEvent,
@@ -116,5 +118,14 @@ describe("protocol package", () => {
     expect(APPLY_REPORT_SCHEMA.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
     expect(APPLY_REPORT_SCHEMA.title).toBe("ApplyReport");
     expect(APPLY_REPORT_SCHEMA.properties.failedPaths).toBeDefined();
+  });
+
+  test("exports shared protocol defs and a scan event schema", () => {
+    expect(PROTOCOL_SHARED_SCHEMA.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(PROTOCOL_SHARED_SCHEMA.$defs.selectionPolicy).toBeDefined();
+    expect(PROTOCOL_SHARED_SCHEMA.$defs.pathFailure).toBeDefined();
+    expect(PROTOCOL_SHARED_SCHEMA.$defs.scanCandidate).toBeDefined();
+    expect(SCAN_EVENT_SCHEMA.title).toBe("ScanEvent");
+    expect(SCAN_EVENT_SCHEMA.oneOf).toBeDefined();
   });
 });

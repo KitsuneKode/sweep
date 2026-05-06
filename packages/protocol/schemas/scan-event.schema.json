@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kitsunekode.dev/sweep/schemas/scan-event.schema.json",
+  "title": "ScanEvent",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "targetDir"],
+      "properties": {
+        "type": {
+          "const": "scan_started"
+        },
+        "targetDir": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "candidate"],
+      "properties": {
+        "type": {
+          "const": "candidate_found"
+        },
+        "candidate": {
+          "$ref": "https://kitsunekode.dev/sweep/schemas/shared.schema.json#/$defs/scanCandidate"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "candidate"],
+      "properties": {
+        "type": {
+          "const": "candidate_updated"
+        },
+        "candidate": {
+          "$ref": "https://kitsunekode.dev/sweep/schemas/shared.schema.json#/$defs/scanCandidate"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "message"],
+      "properties": {
+        "type": {
+          "const": "warning"
+        },
+        "message": {
+          "type": "string"
+        },
+        "candidateId": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "summary"],
+      "properties": {
+        "type": {
+          "const": "scan_completed"
+        },
+        "summary": {
+          "$ref": "https://kitsunekode.dev/sweep/schemas/shared.schema.json#/$defs/scanCompletedSummary"
+        }
+      }
+    }
+  ]
+}

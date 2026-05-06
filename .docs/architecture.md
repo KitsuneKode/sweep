@@ -13,6 +13,8 @@ the published npm surface:
   output for publish.
 - `scripts/seed-fixture.ts` seeds tmp scenarios for monorepo-style integration
   tests and future cross-engine parity checks.
+- `tests/support/fixtures.ts` gives tests a shared way to seed and clean up
+  protocol/engine parity scenarios.
 - `crates/engine-rs/` is a placeholder Rust workspace member for future engine
   experimentation.
 - The CLI now exposes an explicit `scan` path and a first `apply --plan` path
@@ -53,6 +55,8 @@ boundaries:
   JS and Rust engines can be compared by behavior, not just free-form text.
 - `ScanPlan` and `ApplyReport` should have first-class JSON Schema artifacts so
   engines in different languages can target the same machine-readable contract.
+- Shared protocol defs and streaming scan events should also have schema
+  artifacts so the full non-interactive contract is explicit.
 - Seeded fixture scenarios should cover both small targeted failures and larger
   mixed workspace trees so engine parity can be checked at multiple scales.
 - Artifact matching should evolve from flat patterns toward artifact definitions

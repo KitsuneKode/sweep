@@ -1,4 +1,6 @@
 import APPLY_REPORT_SCHEMA_JSON from "../schemas/apply-report.schema.json";
+import PROTOCOL_SHARED_SCHEMA_JSON from "../schemas/shared.schema.json";
+import SCAN_EVENT_SCHEMA_JSON from "../schemas/scan-event.schema.json";
 import SCAN_PLAN_SCHEMA_JSON from "../schemas/scan-plan.schema.json";
 
 export const PROTOCOL_VERSION = "1" as const;
@@ -107,6 +109,8 @@ export const FAILURE_REASON_CODES = [
 
 export const SCAN_PLAN_SCHEMA = SCAN_PLAN_SCHEMA_JSON;
 export const APPLY_REPORT_SCHEMA = APPLY_REPORT_SCHEMA_JSON;
+export const PROTOCOL_SHARED_SCHEMA = PROTOCOL_SHARED_SCHEMA_JSON;
+export const SCAN_EVENT_SCHEMA = SCAN_EVENT_SCHEMA_JSON;
 
 export const SCAN_EVENT_TYPES = [
   "scan_started",

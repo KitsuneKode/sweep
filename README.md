@@ -141,9 +141,9 @@ with flags such as `--select all --include-dangerous`.
 codes so scripted consumers and future alternate engines can agree on the same
 outcomes.
 
-The protocol package now also carries JSON Schema artifacts for `ScanPlan` and
-`ApplyReport`, which gives future alternate engines a versionable contract to
-match.
+The protocol package now also carries JSON Schema artifacts for `ScanPlan`,
+`ApplyReport`, shared nested defs, and `ScanEvent`, which gives future
+alternate engines a versionable contract to match.
 
 ---
 

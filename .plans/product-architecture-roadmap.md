@@ -93,6 +93,9 @@ Progress:
   more realistic tree.
 - First JSON Schema artifacts now exist for `ScanPlan` and `ApplyReport`, so
   alternate engines have a versionable machine-readable contract to target.
+- Shared protocol defs and `ScanEvent` now also have schema artifacts, and the
+  test suite uses a shared fixture helper plus blocked-target and large-plan
+  scenarios to exercise parity cases more realistically.
 
 ### Phase 3: Policy and Selection Model
 

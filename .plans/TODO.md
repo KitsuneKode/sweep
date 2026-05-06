@@ -13,7 +13,7 @@
 
 ## Next
 
-- [ ] Deepen the first protocol schema surface for candidates, risks, plans,
+- [x] Deepen the first protocol schema surface for candidates, risks, plans,
       apply reports, and streamed events beyond the initial package scaffold
 - [x] Add first JSON Schema artifacts for `ScanPlan` and `ApplyReport`
 - [x] Introduce shared seeded fixture scenarios for larger end-to-end tests and
@@ -22,17 +22,17 @@
       contract tests
 - [x] Add a larger workspace-matrix seeded fixture for mixed monorepo parity
       checks
-- [ ] Expand the fixture seed script with symlink, blocked-path, and large-plan
+- [x] Expand the fixture seed script with symlink, blocked-path, and large-plan
       scenarios so future engine ports can be compared against the JS reference
-- [ ] Add JSON Schema artifacts for streaming scan events and shared nested
+- [x] Add JSON Schema artifacts for streaming scan events and shared nested
       protocol defs once the current plan/apply shapes settle a bit more
-- [ ] Reconcile the future config direction with the current `.sweeprc`
+- [x] Reconcile the future config direction with the current `.sweeprc`
       implementation without documenting unimplemented behavior as current truth
 
 ## Later
 
-- [ ] Add a `packages/test-fixtures` workspace once the seeded scenarios start
-      being reused across more suites
+- [ ] Add a `packages/test-fixtures` workspace once the seeded scenarios and
+      helpers start being reused across more suites
 - [ ] Add a lightweight doc hygiene check if drift becomes a recurring problem
 - [ ] Capture release/process notes once the package surface stabilizes
 - [ ] Split product, protocol, engine, and UI plans into more focused files once
