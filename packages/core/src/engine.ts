@@ -1,6 +1,7 @@
 import type {
   ApplyReport,
   CleanResult,
+  PathFailure,
   ScanCandidate,
   ScanEntry,
   ScanPlan,
@@ -29,7 +30,7 @@ export interface ApplyPlanResult {
   cleanResult: CleanResult;
   selected: ScanCandidate[];
   ready: ScanEntry[];
-  revalidationFailures: Array<{ path: string; error: string }>;
+  revalidationFailures: PathFailure[];
 }
 
 export function scanToPlan(

@@ -17,6 +17,8 @@
       apply reports, and streamed events beyond the initial package scaffold
 - [ ] Introduce shared seeded fixture scenarios for larger end-to-end tests and
       future JS-vs-Rust parity checks
+- [x] Introduce a first mixed-risk seeded fixture scenario for JS-engine
+      contract tests
 - [ ] Expand the fixture seed script with symlink, blocked-path, and large-plan
       scenarios so future engine ports can be compared against the JS reference
 - [ ] Reconcile the future config direction with the current `.sweeprc`

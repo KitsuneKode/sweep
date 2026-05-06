@@ -2,6 +2,13 @@ export const PROTOCOL_VERSION = "1" as const;
 
 export type RiskTier = "safe" | "caution" | "dangerous" | "blocked";
 export type SelectionMode = "default" | "safe" | "all" | "none";
+export type FailureReasonCode =
+  | "missing"
+  | "changed_symlink_state"
+  | "changed_entry_type"
+  | "permission_denied"
+  | "busy"
+  | "filesystem_error";
 
 export type CandidateKind =
   | "node_modules"
@@ -42,9 +49,15 @@ export interface ScanResult {
   exact: boolean;
 }
 
+export interface PathFailure {
+  path: string;
+  code: FailureReasonCode;
+  error: string;
+}
+
 export interface CleanResult {
   deleted: ScanEntry[];
-  failedPaths: Array<{ path: string; error: string }>;
+  failedPaths: PathFailure[];
   totalBytesFreed: number;
   durationMs: number;
 }
@@ -79,6 +92,15 @@ export const DEFAULT_SELECTION_POLICY: SelectionPolicy = {
   mode: "default",
   includeDangerous: false,
 };
+
+export const FAILURE_REASON_CODES = [
+  "missing",
+  "changed_symlink_state",
+  "changed_entry_type",
+  "permission_denied",
+  "busy",
+  "filesystem_error",
+] as const;
 
 export const SCAN_EVENT_TYPES = [
   "scan_started",
@@ -151,5 +173,5 @@ export interface ApplyReport {
   deletedCount: number;
   failedCount: number;
   totalBytesFreed: number;
-  failedPaths: Array<{ path: string; error: string }>;
+  failedPaths: PathFailure[];
 }

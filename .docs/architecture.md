@@ -49,6 +49,8 @@ boundaries:
   streamed NDJSON events.
 - Candidate identity should be stable enough for saved plans and strict
   revalidation.
+- Revalidation and apply failures should use stable structured failure codes so
+  JS and Rust engines can be compared by behavior, not just free-form text.
 - Artifact matching should evolve from flat patterns toward artifact definitions
   with richer semantics.
 - Saved plans should carry candidate lists, default selections, and aggregate

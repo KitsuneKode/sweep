@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-type Scenario = "basic" | "monorepo" | "drift";
+type Scenario = "basic" | "monorepo" | "drift" | "risk-mix";
 
 function parseArgs(argv: string[]): { scenario: Scenario; root: string | undefined } {
   let scenario: Scenario = "basic";
@@ -12,7 +12,7 @@ function parseArgs(argv: string[]): { scenario: Scenario; root: string | undefin
     const token = argv[i];
     if (token === "--scenario") {
       const value = argv[i + 1];
-      if (value === "basic" || value === "monorepo" || value === "drift") {
+      if (value === "basic" || value === "monorepo" || value === "drift" || value === "risk-mix") {
         scenario = value;
         i++;
       }
@@ -48,6 +48,15 @@ function seedDrift(root: string, created: string[]): void {
   ensureDir(join(root, "dist"), created);
 }
 
+function seedRiskMix(root: string, created: string[]): void {
+  ensureDir(join(root, "node_modules"), created);
+  ensureDir(join(root, "dist-target"), created);
+  ensureDir(join(root, "custom-cache"), created);
+  const linkedDist = join(root, "linked-dist");
+  symlinkSync(join(root, "dist-target"), linkedDist);
+  created.push(linkedDist);
+}
+
 const { scenario, root: requestedRoot } = parseArgs(process.argv.slice(2));
 const root = requestedRoot ?? mkdtempSync(join(tmpdir(), `sweep-fixture-${scenario}-`));
 const created: string[] = [];
@@ -61,6 +70,9 @@ switch (scenario) {
     break;
   case "drift":
     seedDrift(root, created);
+    break;
+  case "risk-mix":
+    seedRiskMix(root, created);
     break;
 }
 

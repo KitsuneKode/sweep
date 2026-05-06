@@ -1,6 +1,7 @@
 import { lstatSync } from "node:fs";
 import type {
   CandidateKind,
+  PathFailure,
   RiskTier,
   ScanCandidate,
   ScanEntry,
@@ -69,10 +70,10 @@ export function resolveSelectedCandidates(plan: ScanPlan): ScanCandidate[] {
 
 export function revalidateCandidates(candidates: ScanCandidate[]): {
   ready: ScanEntry[];
-  failedPaths: Array<{ path: string; error: string }>;
+  failedPaths: PathFailure[];
 } {
   const ready: ScanEntry[] = [];
-  const failedPaths: Array<{ path: string; error: string }> = [];
+  const failedPaths: PathFailure[] = [];
 
   for (const candidate of candidates) {
     try {
@@ -83,6 +84,7 @@ export function revalidateCandidates(candidates: ScanCandidate[]): {
       if (isSymlink !== candidate.isSymlink) {
         failedPaths.push({
           path: candidate.path,
+          code: "changed_symlink_state",
           error: "candidate type changed since plan creation",
         });
         continue;
@@ -91,6 +93,7 @@ export function revalidateCandidates(candidates: ScanCandidate[]): {
       if (entryType !== candidate.entryType) {
         failedPaths.push({
           path: candidate.path,
+          code: "changed_entry_type",
           error: "candidate entry type changed since plan creation",
         });
         continue;
@@ -98,9 +101,11 @@ export function revalidateCandidates(candidates: ScanCandidate[]): {
 
       ready.push(candidate);
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
       failedPaths.push({
         path: candidate.path,
-        error: err instanceof Error ? err.message : String(err),
+        code: error.includes("ENOENT") ? "missing" : "filesystem_error",
+        error,
       });
     }
   }

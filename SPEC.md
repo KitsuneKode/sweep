@@ -152,6 +152,13 @@ sweep [path] [options]
 17. Exit 0 (or 4 if any deletions failed)
 ```
 
+Plans and apply reports should carry enough structure for cross-engine parity:
+
+- explicit selection policy
+- explicit selected candidate ids
+- stable risk tiers and reasons
+- structured failure records with stable failure codes
+
 ---
 
 ## Output Format

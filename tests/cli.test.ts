@@ -171,11 +171,12 @@ describe("CLI scan/apply", () => {
     const report = JSON.parse(applyResult.stdout) as {
       deletedCount: number;
       failedCount: number;
-      failedPaths: Array<{ path: string; error: string }>;
+      failedPaths: Array<{ path: string; error: string; code: string }>;
     };
 
     expect(report.deletedCount).toBe(1);
     expect(report.failedCount).toBe(1);
+    expect(report.failedPaths[0]?.code).toBe("changed_entry_type");
     expect(report.failedPaths.some((failure) => failure.path === nodeModulesCandidate?.path)).toBe(
       true,
     );

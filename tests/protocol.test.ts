@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  FAILURE_REASON_CODES,
   DEFAULT_SELECTION_POLICY,
   PROTOCOL_VERSION,
   SCAN_EVENT_TYPES,
@@ -68,6 +69,17 @@ describe("protocol package", () => {
       mode: "default",
       includeDangerous: false,
     });
+  });
+
+  test("exports stable failure reason codes for engine parity", () => {
+    expect(FAILURE_REASON_CODES).toEqual([
+      "missing",
+      "changed_symlink_state",
+      "changed_entry_type",
+      "permission_denied",
+      "busy",
+      "filesystem_error",
+    ]);
   });
 
   test("supports a candidate_found event shape", () => {

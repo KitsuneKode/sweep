@@ -1,5 +1,5 @@
 import { rmSync, unlinkSync } from "node:fs";
-import type { CleanResult, ScanEntry } from "../../protocol/src/index.js";
+import type { CleanResult, PathFailure, ScanEntry } from "../../protocol/src/index.js";
 
 /**
  * Delete all entries in the list.
@@ -15,7 +15,7 @@ export async function clean(
 ): Promise<CleanResult> {
   const startTime = Date.now();
   const deleted: ScanEntry[] = [];
-  const failedPaths: Array<{ path: string; error: string }> = [];
+  const failedPaths: PathFailure[] = [];
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
@@ -31,9 +31,11 @@ export async function clean(
       }
       deleted.push(entry);
     } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
       failedPaths.push({
         path: entry.path,
-        error: err instanceof Error ? err.message : String(err),
+        code: classifyFilesystemFailure(error),
+        error,
       });
     }
 
@@ -47,4 +49,11 @@ export async function clean(
     totalBytesFreed: deleted.reduce((sum, e) => sum + e.estimatedBytes, 0),
     durationMs: Date.now() - startTime,
   };
+}
+
+function classifyFilesystemFailure(error: string): PathFailure["code"] {
+  if (error.includes("ENOENT")) return "missing";
+  if (error.includes("EACCES") || error.includes("EPERM")) return "permission_denied";
+  if (error.includes("EBUSY")) return "busy";
+  return "filesystem_error";
 }

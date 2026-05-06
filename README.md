@@ -137,6 +137,10 @@ selected by default; more dangerous custom-pattern matches are included in the
 candidate list but excluded from `selectedCandidateIds` until explicitly chosen
 with flags such as `--select all --include-dangerous`.
 
+`apply --json` reports structured `failedPaths` entries with stable failure
+codes so scripted consumers and future alternate engines can agree on the same
+outcomes.
+
 ---
 
 ## Default patterns

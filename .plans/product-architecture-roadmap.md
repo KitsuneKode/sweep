@@ -86,6 +86,8 @@ Progress:
   future engine parity checks.
 - Selection policy is now explicit in the plan contract, and the CLI can opt
   dangerous candidates in via `--select` and `--include-dangerous`.
+- Apply and revalidation failures now have stable structured failure codes, and
+  the fixture tooling includes a first mixed-risk scenario for parity tests.
 
 ### Phase 3: Policy and Selection Model
 

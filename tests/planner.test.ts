@@ -74,6 +74,7 @@ describe("planner", () => {
 
     expect(ready).toHaveLength(0);
     expect(failedPaths).toHaveLength(1);
+    expect(failedPaths[0]?.code).toBe("changed_entry_type");
     expect(failedPaths[0]?.error).toContain("entry type changed");
   });
 
