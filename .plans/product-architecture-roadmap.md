@@ -88,6 +88,9 @@ Progress:
   dangerous candidates in via `--select` and `--include-dangerous`.
 - Apply and revalidation failures now have stable structured failure codes, and
   the fixture tooling includes a first mixed-risk scenario for parity tests.
+- The seeded fixture tooling now also includes a larger workspace-matrix
+  scenario so plan shape and risk counts can be compared across engines on a
+  more realistic tree.
 
 ### Phase 3: Policy and Selection Model
 

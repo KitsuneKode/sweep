@@ -67,4 +67,42 @@ describe("core engine", () => {
       includeDangerous: true,
     });
   });
+
+  test("applyPlan reports missing candidates with a stable failure code", async () => {
+    mkdirSync(dir("node_modules"));
+    mkdirSync(dir("dist"));
+
+    const { plan } = scanToPlan(tmpDir, DEFAULT_CONFIG);
+
+    rmSync(dir("dist"), { recursive: true, force: true });
+
+    const applied = await applyPlan(plan);
+
+    expect(applied.report.failedCount).toBe(1);
+    expect(applied.report.failedPaths[0]?.code).toBe("missing");
+    expect(applied.report.failedPaths[0]?.path).toBe(dir("dist"));
+  });
+
+  test("scanToPlan preserves a mixed workspace scenario as a stable plan shape", () => {
+    mkdirSync(dir("packages", "web", "node_modules"), { recursive: true });
+    mkdirSync(dir("packages", "api", "target"), { recursive: true });
+    mkdirSync(dir("apps", "docs", ".next"), { recursive: true });
+    mkdirSync(dir("apps", "docs", "custom-cache"), { recursive: true });
+
+    const { plan } = scanToPlan(
+      tmpDir,
+      {
+        ...DEFAULT_CONFIG,
+        patterns: [...DEFAULT_CONFIG.patterns, "custom-cache"],
+      },
+      {
+        selectionPolicy: { mode: "default", includeDangerous: false },
+      },
+    );
+
+    expect(plan.summary.candidateCount).toBe(4);
+    expect(plan.summary.selectedCount).toBe(3);
+    expect(plan.summary.riskCounts.safe).toBe(3);
+    expect(plan.summary.riskCounts.dangerous).toBe(1);
+  });
 });

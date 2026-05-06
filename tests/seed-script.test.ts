@@ -73,4 +73,35 @@ describe("seed fixture script", () => {
     expect(existsSync(join(report.root, "custom-cache"))).toBe(true);
     expect(lstatSync(join(report.root, "linked-dist")).isSymbolicLink()).toBe(true);
   });
+
+  test("creates a workspace-matrix scenario with multiple project artifact types", () => {
+    const proc = Bun.spawnSync({
+      cmd: [
+        Bun.which("bun") ?? "bun",
+        "run",
+        "scripts/seed-fixture.ts",
+        "--",
+        "--scenario",
+        "workspace-matrix",
+      ],
+      cwd: REPO_ROOT,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(proc.exitCode).toBe(0);
+    const report = JSON.parse(Buffer.from(proc.stdout).toString("utf8")) as {
+      root: string;
+      created: string[];
+      scenario: string;
+    };
+
+    cleanupRoots.push(report.root);
+
+    expect(report.scenario).toBe("workspace-matrix");
+    expect(existsSync(join(report.root, "packages", "web", "node_modules"))).toBe(true);
+    expect(existsSync(join(report.root, "packages", "api", "target"))).toBe(true);
+    expect(existsSync(join(report.root, "apps", "docs", ".next"))).toBe(true);
+    expect(existsSync(join(report.root, "apps", "docs", "custom-cache"))).toBe(true);
+  });
 });

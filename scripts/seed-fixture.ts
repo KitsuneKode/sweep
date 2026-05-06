@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-type Scenario = "basic" | "monorepo" | "drift" | "risk-mix";
+type Scenario = "basic" | "monorepo" | "drift" | "risk-mix" | "workspace-matrix";
 
 function parseArgs(argv: string[]): { scenario: Scenario; root: string | undefined } {
   let scenario: Scenario = "basic";
@@ -12,7 +12,13 @@ function parseArgs(argv: string[]): { scenario: Scenario; root: string | undefin
     const token = argv[i];
     if (token === "--scenario") {
       const value = argv[i + 1];
-      if (value === "basic" || value === "monorepo" || value === "drift" || value === "risk-mix") {
+      if (
+        value === "basic" ||
+        value === "monorepo" ||
+        value === "drift" ||
+        value === "risk-mix" ||
+        value === "workspace-matrix"
+      ) {
         scenario = value;
         i++;
       }
@@ -57,6 +63,15 @@ function seedRiskMix(root: string, created: string[]): void {
   created.push(linkedDist);
 }
 
+function seedWorkspaceMatrix(root: string, created: string[]): void {
+  ensureDir(join(root, "packages", "web", "node_modules"), created);
+  ensureDir(join(root, "packages", "api", "target"), created);
+  ensureDir(join(root, "apps", "docs", ".next"), created);
+  ensureDir(join(root, "apps", "docs", "custom-cache"), created);
+  writeFileSync(join(root, "apps", "docs", "tsconfig.tsbuildinfo"), "");
+  created.push(join(root, "apps", "docs", "tsconfig.tsbuildinfo"));
+}
+
 const { scenario, root: requestedRoot } = parseArgs(process.argv.slice(2));
 const root = requestedRoot ?? mkdtempSync(join(tmpdir(), `sweep-fixture-${scenario}-`));
 const created: string[] = [];
@@ -73,6 +88,9 @@ switch (scenario) {
     break;
   case "risk-mix":
     seedRiskMix(root, created);
+    break;
+  case "workspace-matrix":
+    seedWorkspaceMatrix(root, created);
     break;
 }
 
