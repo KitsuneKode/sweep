@@ -51,6 +51,8 @@ boundaries:
   revalidation.
 - Revalidation and apply failures should use stable structured failure codes so
   JS and Rust engines can be compared by behavior, not just free-form text.
+- `ScanPlan` and `ApplyReport` should have first-class JSON Schema artifacts so
+  engines in different languages can target the same machine-readable contract.
 - Seeded fixture scenarios should cover both small targeted failures and larger
   mixed workspace trees so engine parity can be checked at multiple scales.
 - Artifact matching should evolve from flat patterns toward artifact definitions

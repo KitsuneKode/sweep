@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kitsunekode.dev/sweep/schemas/scan-plan.schema.json",
+  "title": "ScanPlan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "targetDir",
+    "selectionPolicy",
+    "candidates",
+    "summary",
+    "selectedCandidateIds",
+    "createdAt"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "const": "1"
+    },
+    "targetDir": {
+      "type": "string"
+    },
+    "selectionPolicy": {
+      "$ref": "#/$defs/selectionPolicy"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scanCandidate"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateCount",
+        "estimatedTotalBytes",
+        "scannedDirs",
+        "exact",
+        "selectedCount",
+        "riskCounts"
+      ],
+      "properties": {
+        "candidateCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "estimatedTotalBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scannedDirs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exact": {
+          "type": "boolean"
+        },
+        "selectedCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "riskCounts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["safe", "caution", "dangerous", "blocked"],
+          "properties": {
+            "safe": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "caution": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "dangerous": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "blocked": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "selectedCandidateIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "selectionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "includeDangerous"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["default", "safe", "all", "none"]
+        },
+        "includeDangerous": {
+          "type": "boolean"
+        }
+      }
+    },
+    "scanCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "name",
+        "estimatedBytes",
+        "isSymlink",
+        "entryType",
+        "kind",
+        "riskTier",
+        "reasons",
+        "selectedByDefault"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "estimatedBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "isSymlink": {
+          "type": "boolean"
+        },
+        "entryType": {
+          "type": "string",
+          "enum": ["file", "directory", "symlink"]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "node_modules",
+            "dist",
+            "build",
+            "out",
+            ".next",
+            ".nuxt",
+            ".svelte-kit",
+            ".turbo",
+            ".vite",
+            ".parcel-cache",
+            "target",
+            "coverage",
+            ".nyc_output",
+            "tsbuildinfo",
+            "custom"
+          ]
+        },
+        "riskTier": {
+          "type": "string",
+          "enum": ["safe", "caution", "dangerous", "blocked"]
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "selectedByDefault": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

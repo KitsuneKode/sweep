@@ -91,6 +91,8 @@ Progress:
 - The seeded fixture tooling now also includes a larger workspace-matrix
   scenario so plan shape and risk counts can be compared across engines on a
   more realistic tree.
+- First JSON Schema artifacts now exist for `ScanPlan` and `ApplyReport`, so
+  alternate engines have a versionable machine-readable contract to target.
 
 ### Phase 3: Policy and Selection Model
 

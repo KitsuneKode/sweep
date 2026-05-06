@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  APPLY_REPORT_SCHEMA,
   FAILURE_REASON_CODES,
   DEFAULT_SELECTION_POLICY,
   PROTOCOL_VERSION,
+  SCAN_PLAN_SCHEMA,
   SCAN_EVENT_TYPES,
   type ScanEvent,
   type ScanPlan,
@@ -104,5 +106,15 @@ describe("protocol package", () => {
       expect(event.candidate.id).toBe("cand_1");
       expect(event.candidate.riskTier).toBe("safe");
     }
+  });
+
+  test("exports JSON Schemas for scan plans and apply reports", () => {
+    expect(SCAN_PLAN_SCHEMA.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(SCAN_PLAN_SCHEMA.title).toBe("ScanPlan");
+    expect(SCAN_PLAN_SCHEMA.properties.selectionPolicy).toBeDefined();
+    expect(SCAN_PLAN_SCHEMA.properties.summary).toBeDefined();
+    expect(APPLY_REPORT_SCHEMA.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect(APPLY_REPORT_SCHEMA.title).toBe("ApplyReport");
+    expect(APPLY_REPORT_SCHEMA.properties.failedPaths).toBeDefined();
   });
 });

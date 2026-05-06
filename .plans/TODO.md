@@ -15,7 +15,8 @@
 
 - [ ] Deepen the first protocol schema surface for candidates, risks, plans,
       apply reports, and streamed events beyond the initial package scaffold
-- [ ] Introduce shared seeded fixture scenarios for larger end-to-end tests and
+- [x] Add first JSON Schema artifacts for `ScanPlan` and `ApplyReport`
+- [x] Introduce shared seeded fixture scenarios for larger end-to-end tests and
       future JS-vs-Rust parity checks
 - [x] Introduce a first mixed-risk seeded fixture scenario for JS-engine
       contract tests
@@ -23,6 +24,8 @@
       checks
 - [ ] Expand the fixture seed script with symlink, blocked-path, and large-plan
       scenarios so future engine ports can be compared against the JS reference
+- [ ] Add JSON Schema artifacts for streaming scan events and shared nested
+      protocol defs once the current plan/apply shapes settle a bit more
 - [ ] Reconcile the future config direction with the current `.sweeprc`
       implementation without documenting unimplemented behavior as current truth
 

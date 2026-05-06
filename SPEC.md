@@ -158,6 +158,7 @@ Plans and apply reports should carry enough structure for cross-engine parity:
 - explicit selected candidate ids
 - stable risk tiers and reasons
 - structured failure records with stable failure codes
+- JSON Schema artifacts for `ScanPlan` and `ApplyReport`
 
 ---
 

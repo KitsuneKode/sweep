@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kitsunekode.dev/sweep/schemas/apply-report.schema.json",
+  "title": "ApplyReport",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "targetDir",
+    "selectedCandidateIds",
+    "deletedCount",
+    "failedCount",
+    "totalBytesFreed",
+    "failedPaths"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "const": "1"
+    },
+    "targetDir": {
+      "type": "string"
+    },
+    "selectedCandidateIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deletedCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failedCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "totalBytesFreed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failedPaths": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pathFailure"
+      }
+    }
+  },
+  "$defs": {
+    "pathFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "code", "error"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "missing",
+            "changed_symlink_state",
+            "changed_entry_type",
+            "permission_denied",
+            "busy",
+            "filesystem_error"
+          ]
+        },
+        "error": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

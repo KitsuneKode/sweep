@@ -1,3 +1,6 @@
+import APPLY_REPORT_SCHEMA_JSON from "../schemas/apply-report.schema.json";
+import SCAN_PLAN_SCHEMA_JSON from "../schemas/scan-plan.schema.json";
+
 export const PROTOCOL_VERSION = "1" as const;
 
 export type RiskTier = "safe" | "caution" | "dangerous" | "blocked";
@@ -101,6 +104,9 @@ export const FAILURE_REASON_CODES = [
   "busy",
   "filesystem_error",
 ] as const;
+
+export const SCAN_PLAN_SCHEMA = SCAN_PLAN_SCHEMA_JSON;
+export const APPLY_REPORT_SCHEMA = APPLY_REPORT_SCHEMA_JSON;
 
 export const SCAN_EVENT_TYPES = [
   "scan_started",
