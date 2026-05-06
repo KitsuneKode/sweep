@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { ScanEntry, ScanResult, SweepConfig } from "./types.js";
+import type { ScanEntry, ScanResult, SweepConfig } from "../../protocol/src/index.js";
+
+export interface ScanHooks {
+  onEntry?: (entry: ScanEntry) => void;
+}
 
 // ─── Pattern matching ─────────────────────────────────────────────────────────
 
@@ -158,7 +162,12 @@ export function exactSize(entryPath: string): number {
  * - Fast path: sizes estimated via a single batched `du` call after the walk
  * - Exact path (--dry-run): recursive stat walk per entry
  */
-export function scan(targetDir: string, config: SweepConfig, exact = false): ScanResult {
+export function scan(
+  targetDir: string,
+  config: SweepConfig,
+  exact = false,
+  hooks: ScanHooks = {},
+): ScanResult {
   const entries: ScanEntry[] = [];
   let scannedDirs = 0;
 
@@ -201,12 +210,15 @@ export function scan(targetDir: string, config: SweepConfig, exact = false): Sca
       }
 
       if (matches(item.name)) {
-        entries.push({
+        const entry: ScanEntry = {
           path: fullPath,
           name: item.name,
           estimatedBytes: 0, // filled below
           isSymlink: isLink,
-        });
+          entryType: isLink ? "symlink" : item.isDirectory() ? "directory" : "file",
+        };
+        entries.push(entry);
+        hooks.onEntry?.(entry);
         // Critical: do NOT recurse into matched directories.
         // This prevents double-counting and infinite loops.
         continue;

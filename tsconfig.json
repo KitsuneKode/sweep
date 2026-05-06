@@ -13,6 +13,6 @@
     "declaration": false,
     "isolatedModules": true
   },
-  "include": ["src/**/*", "scripts/**/*", "tests/**/*"],
+  "include": ["packages/**/*", "scripts/**/*", "tests/**/*"],
   "exclude": ["dist", "node_modules"]
 }

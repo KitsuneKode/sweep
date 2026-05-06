@@ -16,7 +16,7 @@ if (existsSync(DIST)) {
 console.log("Building sweep...");
 
 const result = await Bun.build({
-  entrypoints: [join(ROOT, "src/index.ts")],
+  entrypoints: [join(ROOT, "packages/cli/src/index.ts")],
   outdir: DIST,
   target: "node",
   minify: {

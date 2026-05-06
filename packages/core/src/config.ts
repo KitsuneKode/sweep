@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
+import type { SweepConfig } from "../../protocol/src/index.js";
 import { assertSafePattern } from "./guardrails.js";
-import type { SweepConfig } from "./types.js";
 
 export const DEFAULT_PATTERNS: string[] = [
   "node_modules",
@@ -79,7 +79,7 @@ function mergeStringArrays(...sources: Array<string[] | undefined>): string[] {
 /**
  * Load and merge config from all layers.
  *
- * Priority (highest → lowest): cliOverrides > project .sweeprc.json > global config > defaults
+ * Priority (highest → lowest): cliOverrides > project .sweeprc > global config > defaults
  *
  * Arrays (patterns, ignore) are MERGED + deduplicated, not replaced.
  * Scalars (maxSizeGB, depth) use the highest-priority source that defines them.

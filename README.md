@@ -44,9 +44,17 @@ bunx @kitsunekode/sweep .
 
 ```
 sweep [path] [options]
+sweep scan [path] [options]
+sweep apply --plan <path> [options]
 ```
 
 `path` defaults to `.` (current directory).
+
+### Commands
+
+- `sweep` — current default cleanup flow with prompt/guardrails
+- `sweep scan` — scan only, no deletion
+- `sweep apply --plan <path>` — apply a saved JSON plan
 
 ### Options
 
@@ -60,6 +68,24 @@ sweep [path] [options]
 | `--depth <n>`     |       | Max recursion depth (`-1` = unlimited, default)    |
 | `--config <path>` |       | Explicit config file path                          |
 | `--no-color`      |       | Disable color output                               |
+
+### `scan` options
+
+`scan` supports the shared scan options above and adds:
+
+| Flag            | Description                       |
+| --------------- | --------------------------------- |
+| `--json`        | Emit a saved-plan JSON document   |
+| `--json-stream` | Emit NDJSON scan lifecycle events |
+
+### `apply` options
+
+| Flag            | Short | Description               |
+| --------------- | ----- | ------------------------- |
+| `--plan <path>` |       | Path to a saved scan plan |
+| `--yes`         | `-y`  | Skip confirmation prompt  |
+| `--json`        |       | Emit JSON apply results   |
+| `--no-color`    |       | Disable color output      |
 
 ### Examples
 
@@ -87,7 +113,23 @@ sweep -i packages/vendor
 
 # Only scan 2 levels deep
 sweep --depth 2
+
+# Create a machine-readable cleanup plan
+sweep scan . --json > sweep-plan.json
+
+# Stream scan events as NDJSON
+sweep scan . --json-stream
+
+# Apply a saved plan
+sweep apply --plan sweep-plan.json --yes
+
+# Scan a custom artifact pattern without auto-selecting it by default
+sweep scan . --json --pattern .custom-cache
 ```
+
+`scan --json` currently emits a plan-shaped document. Safe candidates are
+selected by default; more dangerous custom-pattern matches are included in the
+candidate list but excluded from `selectedCandidateIds` until explicitly chosen.
 
 ---
 

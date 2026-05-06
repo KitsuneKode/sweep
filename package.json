@@ -24,6 +24,9 @@
   "bin": {
     "sweep": "dist/sweep.js"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "files": [
     "dist"
   ],
@@ -33,13 +36,13 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "bun run src/index.ts",
+    "dev": "bun run packages/cli/src/index.ts",
     "clean": "rm -rf dist",
     "build": "bun run scripts/build.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src tests",
-    "lint:fix": "oxlint --fix src tests",
-    "fmt": "oxfmt src tests scripts",
+    "lint": "oxlint packages tests scripts",
+    "lint:fix": "oxlint --fix packages tests scripts",
+    "fmt": "oxfmt packages tests scripts",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "preflight": "bun run scripts/preflight.ts",

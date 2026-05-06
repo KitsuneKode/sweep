@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_CONFIG, DEFAULT_PATTERNS, loadConfig } from "../src/config.js";
+import { DEFAULT_CONFIG, DEFAULT_PATTERNS, loadConfig } from "../packages/core/src/config.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -101,7 +101,7 @@ describe("loadConfig — explicit --config path", () => {
     mkdirSync(dir("project"), { recursive: true });
     const configPath = dir("configs", "my-sweep.json");
     writeFileSync(configPath, JSON.stringify({ maxSizeGB: 7 }));
-    // Even if a .sweeprc.json exists in project, explicit path takes precedence
+    // Even if a .sweeprc exists in project, explicit path takes precedence
     writeConfig(dir("project"), { maxSizeGB: 99 });
     const config = loadConfig(dir("project"), configPath);
     expect(config.maxSizeGB).toBe(7);

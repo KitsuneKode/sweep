@@ -1,5 +1,5 @@
 import { rmSync, unlinkSync } from "node:fs";
-import type { CleanResult, ScanEntry } from "./types.js";
+import type { CleanResult, ScanEntry } from "../../protocol/src/index.js";
 
 /**
  * Delete all entries in the list.

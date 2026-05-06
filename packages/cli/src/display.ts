@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import type { CleanResult, ScanResult } from "./types.js";
+import type { CleanResult, ScanResult } from "../../protocol/src/index.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

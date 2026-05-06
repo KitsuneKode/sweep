@@ -80,7 +80,7 @@ sweep --dry-run
 ### US5: Project-specific ignores
 
 ```json
-// .sweeprc.json in repo root
+// .sweeprc in repo root
 {
   "ignore": ["packages/vendor-patched"],
   "patterns": [".custom-output"]
@@ -88,7 +88,7 @@ sweep --dry-run
 ```
 
 ```bash
-sweep  # respects .sweeprc.json automatically
+sweep  # respects .sweeprc automatically
 ```
 
 ### US6: Global install, used everywhere
@@ -201,7 +201,7 @@ sweep: done — 846.4 MB freed in 2.3s
 ### Locations (in priority order)
 
 1. Path from `--config` flag
-2. `.sweeprc.json` — found by walking up from CWD (stops at FS root)
+2. `.sweeprc` — found by walking up from CWD (stops at FS root)
 3. `~/.config/sweep/config.json` — global user defaults
 
 ### Schema

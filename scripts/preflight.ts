@@ -177,12 +177,12 @@ check(".env is not tracked by git", () => {
   }
 });
 
-check("no uncommitted changes to src/", () => {
-  const out = execFileSync("git", ["-C", ROOT, "status", "--porcelain", "src/"], {
+check("no uncommitted changes to packages/", () => {
+  const out = execFileSync("git", ["-C", ROOT, "status", "--porcelain", "packages/"], {
     encoding: "utf8",
     timeout: 5000,
   });
-  assert(out.trim() === "", `uncommitted changes in src/:\n${out}`);
+  assert(out.trim() === "", `uncommitted changes in packages/:\n${out}`);
 });
 
 // ── Result ────────────────────────────────────────────────────────────────────

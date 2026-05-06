@@ -5,7 +5,7 @@ import {
   assertSafeCwd,
   assertSafePattern,
   assertSizeLimit,
-} from "../src/guardrails.js";
+} from "../packages/core/src/guardrails.js";
 
 describe("assertSafeCwd", () => {
   // ── Blocked paths ──────────────────────────────────────────────────────────
