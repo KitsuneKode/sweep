@@ -37,6 +37,8 @@ boundaries:
   contract rather than redefining product behavior.
 - The execution model should move toward `scan`, `apply`, and `ui`, with
   plan-backed apply and strict default revalidation.
+- Selection policy should stay explicit in the plan contract so alternate
+  engines can produce the same selected candidate sets from the same scan.
 - The scan engine should stream candidates progressively, prefer time-to-first
   result over end-of-run theatrics, and keep memory bounded.
 - The planner should compile user or UI selection rules into explicit candidate

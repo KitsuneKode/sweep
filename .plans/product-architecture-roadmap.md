@@ -84,6 +84,8 @@ Progress:
   the CLI is no longer the only place where those semantics live.
 - Seeded tmp-fixture tooling now exists for monorepo-style scenario tests and
   future engine parity checks.
+- Selection policy is now explicit in the plan contract, and the CLI can opt
+  dangerous candidates in via `--select` and `--include-dangerous`.
 
 ### Phase 3: Policy and Selection Model
 
