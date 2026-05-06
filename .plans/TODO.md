@@ -13,6 +13,10 @@
 
 ## Next
 
+- [x] Add a first `sweep ui` flow on top of the shared scan/plan/apply engine
+      using a well-supported TUI library instead of ad hoc terminal painting
+- [x] Add a testable UI state layer so selection/filter behavior is validated
+      outside the renderer itself
 - [x] Deepen the first protocol schema surface for candidates, risks, plans,
       apply reports, and streamed events beyond the initial package scaffold
 - [x] Add first JSON Schema artifacts for `ScanPlan` and `ApplyReport`

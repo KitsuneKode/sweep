@@ -45,6 +45,7 @@ bunx @kitsunekode/sweep .
 ```
 sweep [path] [options]
 sweep scan [path] [options]
+sweep ui [path] [options]
 sweep apply --plan <path> [options]
 ```
 
@@ -54,6 +55,7 @@ sweep apply --plan <path> [options]
 
 - `sweep` — current default cleanup flow with prompt/guardrails
 - `sweep scan` — scan only, no deletion
+- `sweep ui` — OpenTUI-powered interactive selection flow for TTY terminals
 - `sweep apply --plan <path>` — apply a saved JSON plan
 
 ### Options
@@ -122,6 +124,9 @@ sweep scan . --json > sweep-plan.json
 # Stream scan events as NDJSON
 sweep scan . --json-stream
 
+# Review selections in the interactive UI
+sweep ui .
+
 # Apply a saved plan
 sweep apply --plan sweep-plan.json --yes
 
@@ -136,6 +141,11 @@ sweep scan . --json --pattern .custom-cache --select all --include-dangerous
 selected by default; more dangerous custom-pattern matches are included in the
 candidate list but excluded from `selectedCandidateIds` until explicitly chosen
 with flags such as `--select all --include-dangerous`.
+
+`sweep ui` uses OpenTUI for a keyboard-first terminal picker. It requires a
+TTY, lets you filter by name/path/kind/risk, toggle selections with space, bulk
+select safe items with `s`, bulk select all visible items with `a`, clear with
+`u`, and apply the edited plan with Enter.
 
 `apply --json` reports structured `failedPaths` entries with stable failure
 codes so scripted consumers and future alternate engines can agree on the same

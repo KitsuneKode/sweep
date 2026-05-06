@@ -21,6 +21,7 @@ import {
   assertSizeLimit,
 } from "../../core/src/guardrails.js";
 import { toCandidate } from "../../core/src/planner.js";
+import { runSweepUi } from "../../ui/src/app.js";
 import {
   createSpinner,
   formatBytes,
@@ -63,6 +64,12 @@ addScanOptions(program.command("scan").argument("[path]", "Directory to scan", "
   .action(async (pathArg: string, opts: CliOptions & { json?: boolean; jsonStream?: boolean }) => {
     await handleScan(pathArg, opts);
   });
+
+addScanOptions(
+  program.command("ui").argument("[path]", "Directory to scan interactively", "."),
+).action(async (pathArg: string, opts: CliOptions) => {
+  await handleUi(pathArg, opts);
+});
 
 program
   .command("apply")
@@ -285,6 +292,63 @@ async function handleApply(opts: {
         failedPaths: report.failedPaths,
       });
     }
+
+    process.exit(report.failedCount > 0 ? 4 : 0);
+  } catch (err) {
+    handleFatalError(err);
+  }
+}
+
+async function handleUi(pathArg: string, opts: CliOptions): Promise<void> {
+  if (!opts.color) process.env.NO_COLOR = "1";
+
+  const targetDir = resolve(pathArg);
+
+  try {
+    assertSafeCwd(targetDir);
+
+    if (!process.stdout.isTTY) {
+      throw new GuardrailError("sweep ui requires a TTY terminal.", 4);
+    }
+
+    const config = resolveScanConfig(targetDir, opts);
+    const selectionPolicy = resolveSelectionPolicy(opts);
+    const { plan } = scanToPlan(targetDir, config, { selectionPolicy });
+
+    if (plan.candidates.length === 0) {
+      console.log("Nothing to clean.");
+      process.exit(0);
+    }
+
+    const selectedPlan = await runSweepUi(plan);
+    if (!selectedPlan) {
+      printAborted();
+      process.exit(1);
+    }
+
+    const selectedBytes = getSelectedBytes(selectedPlan);
+    assertSizeLimit(selectedBytes, config.maxSizeGB, opts.forceLarge);
+
+    if (selectedPlan.selectedCandidateIds.length === 0) {
+      console.log("Nothing selected.");
+      process.exit(0);
+    }
+
+    if (!opts.yes) {
+      const confirmed = await promptConfirm(
+        `Delete ${selectedPlan.selectedCandidateIds.length} selected items (${formatBytes(selectedBytes)})?`,
+      );
+      if (!confirmed) {
+        printAborted();
+        process.exit(1);
+      }
+    }
+
+    const { report, cleanResult } = await executePlan(selectedPlan);
+    printCleanResult({
+      ...cleanResult,
+      failedPaths: report.failedPaths,
+    });
 
     process.exit(report.failedCount > 0 ? 4 : 0);
   } catch (err) {

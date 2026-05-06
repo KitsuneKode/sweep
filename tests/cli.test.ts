@@ -191,4 +191,13 @@ describe("CLI scan/apply", () => {
     expect(existsSync(dir("custom-cache"))).toBe(true);
     expect(result.stdout).toContain("Nothing selected");
   });
+
+  test("ui command refuses to run without a TTY", () => {
+    mkdirSync(dir("node_modules"));
+
+    const result = runCli(["ui", tmpDir]);
+
+    expect(result.exitCode).toBe(4);
+    expect(result.stderr).toContain("requires a TTY");
+  });
 });

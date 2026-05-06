@@ -9,6 +9,8 @@ the published npm surface:
 - `packages/core/src/` owns config loading, guardrails, scanning, cleanup, and
   the first shared engine operations for `scan -> plan` and `apply plan`.
 - `packages/cli/src/` owns terminal output and the current CLI entrypoint.
+- `packages/ui/src/` owns the OpenTUI interactive selection flow and keeps its
+  state transitions thin enough to share semantics with the planner contract.
 - `scripts/build.ts` bundles the CLI package entrypoint into the root `dist/`
   output for publish.
 - `scripts/seed-fixture.ts` seeds tmp scenarios for monorepo-style integration
@@ -19,6 +21,9 @@ the published npm surface:
   experimentation.
 - The CLI now exposes an explicit `scan` path and a first `apply --plan` path
   on top of the shared core and protocol packages.
+- The CLI now also exposes `sweep ui`, which scans via the shared engine and
+  then hands plan editing to an OpenTUI front end rather than inventing a
+  second selection model.
 
 ## Intended direction
 
@@ -39,6 +44,9 @@ boundaries:
   contract rather than redefining product behavior.
 - The execution model should move toward `scan`, `apply`, and `ui`, with
   plan-backed apply and strict default revalidation.
+- The interactive UI should stay a thin shell over the shared plan contract:
+  local cursor/filter state is okay, but final selection must compile back into
+  explicit candidate IDs.
 - Selection policy should stay explicit in the plan contract so alternate
   engines can produce the same selected candidate sets from the same scan.
 - The scan engine should stream candidates progressively, prefer time-to-first

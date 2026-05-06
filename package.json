@@ -55,6 +55,7 @@
     "prepublishOnly": "bun run typecheck && bun run lint && bun run test && bun run build && bun run preflight"
   },
   "dependencies": {
+    "@opentui/core": "^0.2.3",
     "commander": "^12.1.0",
     "picocolors": "^1.1.1"
   },
