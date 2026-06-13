@@ -1,0 +1,23 @@
+{
+  "name": "@kitsunekode/sweep-display",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src",
+    "fmt": "oxfmt src"
+  },
+  "dependencies": {
+    "@kitsunekode/sweep-protocol": "workspace:*",
+    "picocolors": "catalog:"
+  },
+  "devDependencies": {
+    "@kitsunekode/sweep-typescript-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
+  }
+}
