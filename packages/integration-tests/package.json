@@ -1,0 +1,23 @@
+{
+  "name": "@kitsunekode/sweep-integration-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun run ./scripts/run-at-repo-root.ts bun test tests",
+    "lint": "bun run ./scripts/run-at-repo-root.ts oxlint tests",
+    "fmt": "bun run ./scripts/run-at-repo-root.ts oxfmt tests",
+    "typecheck": "bun run ./scripts/run-at-repo-root.ts tsc --noEmit"
+  },
+  "devDependencies": {
+    "@kitsunekode/sweep-cli": "workspace:*",
+    "@kitsunekode/sweep-core": "workspace:*",
+    "@kitsunekode/sweep-display": "workspace:*",
+    "@kitsunekode/sweep-protocol": "workspace:*",
+    "@kitsunekode/sweep-typescript-config": "workspace:*",
+    "@kitsunekode/sweep-ui": "workspace:*",
+    "bun-types": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
+  }
+}
