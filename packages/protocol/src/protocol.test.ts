@@ -10,7 +10,7 @@ import {
   SCAN_EVENT_TYPES,
   type ScanEvent,
   type ScanPlan,
-} from "../packages/protocol/src/index.js";
+} from "./index.js";
 
 describe("protocol package", () => {
   test("exports the current protocol version", () => {

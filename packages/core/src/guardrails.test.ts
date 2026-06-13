@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
-import {
-  GuardrailError,
-  assertSafeCwd,
-  assertSafePattern,
-  assertSizeLimit,
-} from "../packages/core/src/guardrails.js";
+import { GuardrailError, assertSafeCwd, assertSafePattern, assertSizeLimit } from "./guardrails.js";
 
 describe("assertSafeCwd", () => {
   // ── Blocked paths ──────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@
     "./rust-engine": "./src/rust-engine.ts"
   },
   "scripts": {
+    "test": "bun test src test-support",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "fmt": "oxfmt src"

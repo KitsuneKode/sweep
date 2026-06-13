@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_CONFIG } from "../packages/core/src/config.js";
-import { scan } from "../packages/core/src/scanner.js";
-import type { SweepConfig } from "../packages/protocol/src/index.js";
+import { DEFAULT_CONFIG } from "./config.js";
+import { scan } from "./scanner.js";
+import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 

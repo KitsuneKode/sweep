@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { applyPlan, scanToPlan } from "../packages/core/src/engine.js";
-import { DEFAULT_CONFIG } from "../packages/core/src/config.js";
-import { cleanupSeededFixtures, seedScenario } from "./support/fixtures.js";
+import { applyPlan, scanToPlan } from "./engine.js";
+import { DEFAULT_CONFIG } from "./config.js";
+import { cleanupSeededFixtures, seedScenario } from "../test-support/fixtures.js";
 
 let tmpDir: string;
 

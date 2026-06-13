@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ScanPlan } from "../packages/protocol/src/index.js";
+import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   applyUiSelection,
   clearSelection,
@@ -11,7 +11,7 @@ import {
   selectVisible,
   setFilter,
   toggleCurrentSelection,
-} from "../packages/ui/src/state.js";
+} from "./state.js";
 
 function createPlan(): ScanPlan {
   return {

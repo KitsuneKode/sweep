@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ScanEntry, ScanResult } from "../packages/protocol/src/index.js";
+import type { ScanEntry, ScanResult } from "@kitsunekode/sweep-protocol";
 import {
   buildPlan,
   compileSelectedCandidateIds,
   revalidateCandidates,
   toCandidate,
-} from "../packages/core/src/planner.js";
+} from "./planner.js";
 
 let tmpDir: string;
 

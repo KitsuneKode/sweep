@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const REPO_ROOT = new URL("..", import.meta.url).pathname;
+const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const DIST = join(REPO_ROOT, "dist");
 const SWEEP = join(DIST, "sweep.js");
 

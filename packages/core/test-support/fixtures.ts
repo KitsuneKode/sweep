@@ -17,7 +17,7 @@ export interface SeededFixtureReport {
 }
 
 const cleanupRoots: string[] = [];
-const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+const REPO_ROOT = new URL("../../..", import.meta.url).pathname;
 
 export function seedScenario(scenario: FixtureScenario): SeededFixtureReport {
   const proc = Bun.spawnSync({

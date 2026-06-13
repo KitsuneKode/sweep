@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun run ./scripts/run-at-repo-root.ts bun test tests",
-    "lint": "bun run ./scripts/run-at-repo-root.ts oxlint tests",
-    "fmt": "bun run ./scripts/run-at-repo-root.ts oxfmt tests",
+    "test": "bun run ./scripts/run-at-repo-root.ts bun test tests/integration",
+    "lint": "bun run ./scripts/run-at-repo-root.ts oxlint tests/integration tests/support",
+    "fmt": "bun run ./scripts/run-at-repo-root.ts oxfmt tests/integration tests/support",
     "typecheck": "bun run ./scripts/run-at-repo-root.ts tsc --noEmit"
   },
   "devDependencies": {
