@@ -1,27 +1,28 @@
 import type { RiskTier } from "@kitsunekode/sweep-protocol";
 
-/** Industrial terminal palette — warm amber accent on cool charcoal. */
+/** Quiet terminal palette — structure in gray, meaning in restrained color. */
 export const theme = {
-  bg: "#0a0d14",
-  surface: "#121824",
-  surfaceInset: "#0e1219",
-  border: "#2d3a52",
-  borderMuted: "#1f2937",
-  borderFocus: "#f59e0b",
-  text: "#e8edf5",
-  textMuted: "#8b9bb8",
-  textDim: "#5c6b85",
-  accent: "#f59e0b",
-  accentBright: "#fbbf24",
-  info: "#38bdf8",
-  positive: "#4ade80",
+  bg: "#090b10",
+  surface: "#10141c",
+  surfaceInset: "#0c1018",
+  border: "#243044",
+  borderSoft: "rgba(148, 163, 184, 0.14)",
+  borderFocus: "#d97706",
+  text: "#e2e8f0",
+  textSecondary: "#94a3b8",
+  textMuted: "#64748b",
+  textDim: "#475569",
+  accent: "#d97706",
+  positive: "#34d399",
   warning: "#fbbf24",
   danger: "#f87171",
-  blocked: "#c084fc",
-  selectionBg: "#1a2f4a",
-  selectionText: "#f0f9ff",
-  checkboxOn: "#4ade80",
-  checkboxOff: "#5c6b85",
+  blocked: "#a78bfa",
+  info: "#7dd3fc",
+  selectionBg: "#172033",
+  selectionText: "#f8fafc",
+  headerText: "#cbd5e1",
+  checkboxOn: "#34d399",
+  checkboxOff: "#64748b",
 } as const;
 
 export const riskColor: Record<RiskTier, string> = {
@@ -31,16 +32,10 @@ export const riskColor: Record<RiskTier, string> = {
   blocked: theme.blocked,
 };
 
-export const riskGlyph: Record<RiskTier, string> = {
-  safe: "●",
-  caution: "◆",
-  dangerous: "▲",
-  blocked: "⊘",
-};
-
-export const riskTag: Record<RiskTier, string> = {
-  safe: "SAFE",
-  caution: "CAUTION",
-  dangerous: "DANGER",
-  blocked: "BLOCKED",
+/** One-character risk markers for dense rows. */
+export const riskMark: Record<RiskTier, string> = {
+  safe: "·",
+  caution: "?",
+  dangerous: "!",
+  blocked: "×",
 };

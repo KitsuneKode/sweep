@@ -9,23 +9,22 @@ import {
 } from "@opentui/core";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
-  buildDetailLine,
+  buildContextLine,
   buildFooterLine,
-  buildStatsLine,
-  buildTargetLine,
-  buildTitleLine,
-  formatListOptionDescription,
-  formatListOptionName,
+  buildHeaderLine,
+  formatArtifactRow,
+  formatGroupHeaderRow,
 } from "./presentation.js";
+import { buildDisplayRows } from "./rows.js";
 import {
   applyUiSelection,
   clearSelection,
   createUiState,
   getUiSummary,
-  getVisibleCandidates,
   moveCursor,
   selectVisible,
   setFilter,
+  setRowIndex,
   toggleCurrentSelection,
 } from "./state.js";
 import { theme } from "./theme.js";
@@ -34,6 +33,8 @@ export interface SweepUiOptions {
   yes?: boolean;
   dryRun?: boolean;
 }
+
+const HEADER_ROW_VALUE = "__sweep_header__";
 
 export async function runSweepUi(
   plan: ScanPlan,
@@ -63,50 +64,14 @@ export async function runSweepUi(
       backgroundColor: theme.bg,
     });
 
-    const headerBlock = new BoxRenderable(renderer, {
-      width: "100%",
-      flexDirection: "column",
-      gap: 0,
-      backgroundColor: theme.surface,
-      border: true,
-      borderColor: theme.borderMuted,
-      paddingX: 1,
-      paddingY: 0,
-    });
-
-    const title = new TextRenderable(renderer, {
-      content: buildTitleLine(options.dryRun),
-    });
-
-    const stats = new TextRenderable(renderer, {
-      content: buildStatsLine(getUiSummary(state), state),
-    });
-
-    const target = new TextRenderable(renderer, {
-      content: buildTargetLine(plan),
-    });
-
-    headerBlock.add(title);
-    headerBlock.add(stats);
-    headerBlock.add(target);
-
-    const searchFrame = new BoxRenderable(renderer, {
-      width: "100%",
-      border: true,
-      borderColor: theme.border,
-      focusedBorderColor: theme.borderFocus,
-      backgroundColor: theme.surfaceInset,
-      title: "Filter",
-      titleAlignment: "left",
-      paddingX: 1,
-      paddingY: 0,
-      height: 3,
+    const header = new TextRenderable(renderer, {
+      content: buildHeaderLine(plan, getUiSummary(state), options.dryRun),
     });
 
     const search = new InputRenderable(renderer, {
       width: "100%",
       value: "",
-      placeholder: "name, path, kind, or risk…",
+      placeholder: "filter artifacts…",
       textColor: theme.text,
       backgroundColor: theme.surfaceInset,
       focusedTextColor: theme.selectionText,
@@ -119,11 +84,9 @@ export async function runSweepUi(
       width: "100%",
       flexGrow: 1,
       border: true,
-      borderColor: theme.border,
+      borderColor: theme.borderSoft,
       focusedBorderColor: theme.borderFocus,
       backgroundColor: theme.surface,
-      title: "Artifacts",
-      titleAlignment: "left",
       paddingX: 1,
       paddingY: 0,
     });
@@ -131,62 +94,61 @@ export async function runSweepUi(
     const list = new SelectRenderable(renderer, {
       width: "100%",
       height: "100%",
-      showDescription: true,
+      showDescription: false,
       wrapSelection: false,
-      itemSpacing: 1,
+      itemSpacing: 0,
       textColor: theme.text,
       focusedTextColor: theme.selectionText,
       selectedTextColor: theme.selectionText,
       selectedBackgroundColor: theme.selectionBg,
-      descriptionColor: theme.textMuted,
-      selectedDescriptionColor: theme.info,
       options: [],
     });
     list.focusable = true;
 
-    const detailFrame = new BoxRenderable(renderer, {
-      width: "100%",
-      border: true,
-      borderColor: theme.borderMuted,
-      backgroundColor: theme.surfaceInset,
-      title: "Selection",
-      titleAlignment: "left",
-      paddingX: 1,
-      paddingY: 0,
-      height: 3,
+    const context = new TextRenderable(renderer, {
+      content: buildContextLine(state),
     });
-
-    const detail = new TextRenderable(renderer, {
-      content: buildDetailLine(state),
-    });
-
-    detailFrame.add(detail);
 
     const footer = new TextRenderable(renderer, {
       content: buildFooterLine(options.dryRun),
     });
 
-    root.add(headerBlock);
-    searchFrame.add(search);
+    root.add(header);
     listFrame.add(list);
-    root.add(searchFrame);
+    root.add(search);
     root.add(listFrame);
-    root.add(detailFrame);
+    root.add(context);
     root.add(footer);
     renderer.root.add(root);
 
     const refresh = () => {
-      list.options = getVisibleCandidates(state).map((candidate) => ({
-        name: formatListOptionName(candidate, state.selectedIds.has(candidate.id)),
-        description: formatListOptionDescription(candidate),
-        value: candidate.id,
-      }));
+      const rows = buildDisplayRows(state);
+      const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
 
-      list.selectedIndex = state.cursorIndex;
+      list.options = rows.map((row) => {
+        if (row.kind === "header") {
+          return {
+            name: formatGroupHeaderRow(row),
+            description: "",
+            value: `${HEADER_ROW_VALUE}:${row.groupKey}`,
+          };
+        }
 
-      const summary = getUiSummary(state);
-      stats.content = buildStatsLine(summary, state);
-      detail.content = buildDetailLine(state);
+        const candidate = byId.get(row.candidateId);
+        if (!candidate) {
+          return { name: "", description: "", value: row.candidateId };
+        }
+
+        return {
+          name: formatArtifactRow(candidate, state.selectedIds.has(candidate.id)),
+          description: "",
+          value: row.candidateId,
+        };
+      });
+
+      list.selectedIndex = state.rowIndex;
+      header.content = buildHeaderLine(plan, getUiSummary(state), options.dryRun);
+      context.content = buildContextLine(state);
       renderer.requestRender();
     };
 
@@ -203,14 +165,14 @@ export async function runSweepUi(
     });
 
     list.on(SelectRenderableEvents.SELECTION_CHANGED, () => {
-      state = {
-        ...state,
-        cursorIndex: list.getSelectedIndex(),
-      };
+      state = setRowIndex(state, list.getSelectedIndex());
       refresh();
     });
 
     list.on(SelectRenderableEvents.ITEM_SELECTED, () => {
+      const rows = buildDisplayRows(state);
+      const row = rows[state.rowIndex];
+      if (row?.kind === "header") return;
       finalize(applyUiSelection(plan, state));
     });
 

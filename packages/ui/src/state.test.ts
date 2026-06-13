@@ -88,17 +88,20 @@ describe("sweep ui state", () => {
     ]);
   });
 
-  test("cursor movement clamps to valid bounds", () => {
+  test("cursor movement skips group headers and clamps to items", () => {
     let state = createUiState(createPlan());
+    expect(state.rowIndex).toBe(1);
+
     state = moveCursor(state, 50);
-    expect(state.cursorIndex).toBe(2);
+    expect(state.rowIndex).toBe(3);
 
     state = moveCursor(state, -50);
-    expect(state.cursorIndex).toBe(0);
+    expect(state.rowIndex).toBe(1);
   });
 
   test("toggleCurrentSelection adds and removes the focused candidate", () => {
-    let state = createUiState(createPlan());
+    let state = setFilter(createUiState(createPlan()), "node_modules");
+    expect(getCurrentCandidate(state)?.id).toBe("cand_safe");
     expect(state.selectedIds.has("cand_safe")).toBe(true);
 
     state = toggleCurrentSelection(state);

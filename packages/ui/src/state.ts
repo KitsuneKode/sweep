@@ -1,10 +1,18 @@
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import {
+  buildDisplayRows,
+  firstItemRowIndex,
+  moveItemRowIndex,
+  rowCandidateId,
+  snapRowIndexToItem,
+} from "./rows.js";
 
 export interface SweepUiState {
+  targetDir: string;
   candidates: ScanCandidate[];
   filter: string;
   filteredIds: string[];
-  cursorIndex: number;
+  rowIndex: number;
   selectedIds: Set<string>;
 }
 
@@ -18,33 +26,54 @@ export interface SweepUiSummary {
 export function createUiState(plan: ScanPlan): SweepUiState {
   const selectedIds = new Set(plan.selectedCandidateIds);
   const candidates = plan.candidates.slice();
-  return {
+  const state: SweepUiState = {
+    targetDir: plan.targetDir,
     candidates,
     filter: "",
     filteredIds: filterCandidateIds(candidates, ""),
-    cursorIndex: 0,
+    rowIndex: 0,
     selectedIds,
+  };
+
+  const rows = buildDisplayRows(state);
+  return {
+    ...state,
+    rowIndex: snapRowIndexToItem(rows, firstItemRowIndex(rows)),
   };
 }
 
 export function setFilter(state: SweepUiState, filter: string): SweepUiState {
   const filteredIds = filterCandidateIds(state.candidates, filter);
-  const nextCursorIndex = Math.min(state.cursorIndex, Math.max(filteredIds.length - 1, 0));
-  return {
+  const nextState: SweepUiState = {
     ...state,
     filter,
     filteredIds,
-    cursorIndex: nextCursorIndex,
+  };
+  const rows = buildDisplayRows(nextState);
+
+  return {
+    ...nextState,
+    rowIndex: snapRowIndexToItem(rows, firstItemRowIndex(rows)),
   };
 }
 
 export function moveCursor(state: SweepUiState, delta: number): SweepUiState {
-  if (state.filteredIds.length === 0) return state;
+  const rows = buildDisplayRows(state);
+  if (rows.length === 0) return state;
 
-  const nextIndex = clamp(state.cursorIndex + delta, 0, state.filteredIds.length - 1);
   return {
     ...state,
-    cursorIndex: nextIndex,
+    rowIndex: moveItemRowIndex(rows, state.rowIndex, delta),
+  };
+}
+
+export function setRowIndex(state: SweepUiState, rowIndex: number): SweepUiState {
+  const rows = buildDisplayRows(state);
+  if (rows.length === 0) return state;
+
+  return {
+    ...state,
+    rowIndex: snapRowIndexToItem(rows, rowIndex),
   };
 }
 
@@ -87,8 +116,11 @@ export function clearSelection(state: SweepUiState): SweepUiState {
 }
 
 export function getCurrentCandidate(state: SweepUiState): ScanCandidate | undefined {
-  const currentId = state.filteredIds[state.cursorIndex];
-  return currentId ? state.candidates.find((candidate) => candidate.id === currentId) : undefined;
+  const rows = buildDisplayRows(state);
+  const candidateId = rowCandidateId(rows, state.rowIndex);
+  return candidateId
+    ? state.candidates.find((candidate) => candidate.id === candidateId)
+    : undefined;
 }
 
 export function getVisibleCandidates(state: SweepUiState): ScanCandidate[] {
@@ -143,8 +175,4 @@ function filterCandidateIds(candidates: ScanCandidate[], filter: string): string
       return haystack.includes(query);
     })
     .map((candidate) => candidate.id);
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
