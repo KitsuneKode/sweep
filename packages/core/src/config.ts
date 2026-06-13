@@ -4,6 +4,15 @@ import { dirname, join, parse, resolve } from "node:path";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { assertSafePattern } from "./guardrails.js";
 
+export class ConfigParseError extends Error {
+  readonly code = 3;
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ConfigParseError";
+  }
+}
+
 export const DEFAULT_PATTERNS: string[] = [
   "node_modules",
   ".next",
@@ -37,7 +46,7 @@ function readJsonConfig(filePath: string): Partial<SweepConfig> | null {
     return JSON.parse(raw) as Partial<SweepConfig>;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to parse config at ${filePath}: ${msg}`, { cause: err });
+    throw new ConfigParseError(`Failed to parse config at ${filePath}: ${msg}`, { cause: err });
   }
 }
 

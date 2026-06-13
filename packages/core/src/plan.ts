@@ -3,7 +3,6 @@ import type { ErrorObject, ValidateFunction } from "ajv";
 import { existsSync, readFileSync } from "node:fs";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import { SCAN_PLAN_SCHEMA } from "@kitsunekode/sweep-protocol";
-import { GuardrailError } from "./guardrails.js";
 
 export class PlanValidationError extends Error {
   readonly code = 3;
@@ -46,7 +45,7 @@ export function validatePlan(value: unknown): ScanPlan {
 
 export function loadPlan(planPath: string): ScanPlan {
   if (!existsSync(planPath)) {
-    throw new GuardrailError(`Plan file not found: ${planPath}`, 4);
+    throw new PlanValidationError(`Plan file not found: ${planPath}`);
   }
 
   const raw = readFileSync(planPath, "utf8");
