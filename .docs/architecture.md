@@ -2,39 +2,59 @@
 
 ## Current state
 
-The repo is now split into internal workspaces while keeping the root package as
-the published npm surface:
+The repo is a Bun workspace monorepo. The root package `@kitsunekode/sweep` is
+the published npm surface; internal workspaces compile into `dist/` via
+`scripts/build.ts`.
 
-- `packages/protocol/src/index.ts` owns the shared protocol and type surface.
-- `packages/core/src/` owns config loading, guardrails, scanning, cleanup, and
-  the first shared engine operations for `scan -> plan` and `apply plan`.
-- `packages/cli/src/` owns terminal output and the current CLI entrypoint.
-- `packages/ui/src/` owns the OpenTUI interactive selection flow and keeps its
-  state transitions thin enough to share semantics with the planner contract.
-- `scripts/build.ts` bundles the CLI package entrypoint into the root `dist/`
-  output for publish.
-- `scripts/seed-fixture.ts` seeds tmp scenarios for monorepo-style integration
-  tests and future cross-engine parity checks.
-- `tests/support/fixtures.ts` gives tests a shared way to seed and clean up
-  protocol/engine parity scenarios.
-- `crates/engine-rs/` is a placeholder Rust workspace member for future engine
-  experimentation.
-- The CLI now exposes an explicit `scan` path and a first `apply --plan` path
-  on top of the shared core and protocol packages.
-- The CLI now also exposes `sweep ui`, which scans via the shared engine and
-  then hands plan editing to an OpenTUI front end rather than inventing a
-  second selection model.
+### Layering
+
+| Layer           | Location             | Responsibility                             |
+| --------------- | -------------------- | ------------------------------------------ |
+| Protocol        | `packages/protocol/` | Shared types, JSON Schema artifacts        |
+| Core engine     | `packages/core/`     | Config, guardrails, scan, plan, apply      |
+| Display         | `packages/display/`  | Terminal formatting and progressive output |
+| UI              | `packages/ui/`       | OpenTUI selection flow and state           |
+| CLI             | `apps/cli/`          | Commander program, handlers, entrypoint    |
+| Rust experiment | `crates/sweep-*/`    | Alternate engine behind the same contract  |
+
+### Data flow
+
+```
+CLI flags / config
+       ↓
+  packages/core (scan → plan → apply)
+       ↓
+  packages/protocol (ScanPlan, ApplyReport, ScanEvent)
+       ↓
+  packages/display (stdout)  or  packages/ui (interactive)
+```
+
+- `apps/cli/src/handlers/` maps subcommands (`scan`, `apply`, `ui`, default
+  clean) to core engine calls.
+- `sweep ui` scans via core, then hands plan editing to `packages/ui`; final
+  selection compiles back to explicit candidate IDs.
+- `scripts/seed-fixture.ts` and `tests/support/fixtures.ts` seed parity scenarios
+  for integration tests and future JS-vs-Rust checks.
+
+### Commands (implemented)
+
+- `sweep` — default cleanup flow with prompt and guardrails
+- `sweep scan` — scan only; `--json` and `--json-stream` for automation
+- `sweep apply --plan` — apply a saved plan with revalidation
+- `sweep ui` — OpenTUI interactive selection (TTY required)
 
 ## Intended direction
 
-The accepted direction is to evolve toward clearer package and engine
-boundaries:
+The accepted direction is clearer package and engine boundaries with a
+schema-first contract:
 
-- public package: `sweep`
-- future internal boundaries: protocol, core/reference engine, CLI surface, UI
-  surface, and optional Rust engine
-- likely future workspace split: protocol, core JS engine, CLI, UI, shared test
-  fixtures, and Rust engine experiment
+- public package: `@kitsunekode/sweep` (root)
+- internal boundaries: protocol, core engine, display, CLI app, UI, Rust engine
+- execution model: `scan`, `apply`, and `ui`, with plan-backed apply and strict
+  default revalidation
+
+See [.docs/workspace-layout.md](workspace-layout.md) for the directory map and
+[.docs/product-direction.md](product-direction.md) for product intent.
 
 ## Long-term architecture decisions
 
@@ -42,8 +62,6 @@ boundaries:
 - A JS implementation should remain the reference behavior initially.
 - Alternative engines, including Rust, should implement the same external
   contract rather than redefining product behavior.
-- The execution model should move toward `scan`, `apply`, and `ui`, with
-  plan-backed apply and strict default revalidation.
 - The interactive UI should stay a thin shell over the shared plan contract:
   local cursor/filter state is okay, but final selection must compile back into
   explicit candidate IDs.

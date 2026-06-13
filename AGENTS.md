@@ -5,16 +5,17 @@ docs only when they are relevant to the task.
 
 ## Task Completion Requirements
 
-- Run `bun run fmt`, `bun run lint`, `bun run typecheck`, and `bun run test`
-  before treating work as complete.
+- Run `bun run check` (or `bun run quality`) before treating work as complete.
+  This runs format, lint, typecheck, and tests via Turborepo.
+- For Rust changes under `crates/`, also run `cargo test --workspace` and
+  `cargo clippy --workspace -- -D warnings`.
 - Never use stale command names from older docs. The repo is on `oxfmt`,
-  `oxlint`, TypeScript, and `bun run test`.
+  `oxlint`, TypeScript, Turborepo, and `bun test tests`.
 
 ## Project Snapshot
 
-`sweep` is an artifact cleanup CLI for project trees. It is currently a single
-package repo, but the intended direction is a trust-first cleanup tool with a
-strong automation surface and an optional richer UI layer later.
+`sweep` is an artifact cleanup CLI for project trees. It is a Bun workspace
+monorepo with a single published npm package at the repo root.
 
 Core priorities:
 
@@ -26,12 +27,15 @@ If a tradeoff is required, choose correctness and guardrails over convenience.
 
 ## Repo Map
 
-- `packages/protocol/` — shared protocol and type surface.
-- `packages/core/` — config, guardrails, scanning, and cleanup runtime logic.
-- `packages/cli/` — command surface and terminal presentation.
-- `crates/engine-rs/` — future Rust engine experiment scaffold.
-- `tests/` — Bun tests for config, guardrails, and scanning behavior.
-- `scripts/` — build and publish/preflight scripts.
+- `apps/cli/` — Commander program, command handlers, and CLI entrypoint.
+- `packages/protocol/` — shared protocol types and JSON Schema artifacts.
+- `packages/core/` — config, guardrails, scanning, planning, and cleanup engine.
+- `packages/display/` — terminal formatting, spinners, and progressive output.
+- `packages/ui/` — OpenTUI interactive selection flow.
+- `packages/typescript-config/` — shared TypeScript config for workspaces.
+- `crates/sweep-*/` — Rust workspace (`types`, `errors`, `fs`, `engine`, `engine-cli`).
+- `tests/` — Bun integration and contract tests.
+- `scripts/` — build, preflight, and fixture tooling.
 - `.plans/` — active plans, backlog, and archived plan history.
 - `.docs/` — durable internal project truth.
 - `.reference/` — external or supporting reference material.
@@ -39,11 +43,14 @@ If a tradeoff is required, choose correctness and guardrails over convenience.
 
 ## Read Next
 
+- Workspace layout: [.docs/workspace-layout.md](.docs/workspace-layout.md)
+- Engineering principles and doc ownership: [.docs/engineering-principles.md](.docs/engineering-principles.md)
 - For active work and backlog: [.plans/README.md](.plans/README.md)
 - For project architecture: [.docs/architecture.md](.docs/architecture.md)
 - For current product direction: [.docs/product-direction.md](.docs/product-direction.md)
 - For config behavior: [.docs/config.md](.docs/config.md)
 - For tooling commands and policy: [.docs/tooling.md](.docs/tooling.md)
+- For local dev and `npm link`: [.docs/getting-started.md](.docs/getting-started.md)
 
 ## Documentation Ownership
 
@@ -62,6 +69,5 @@ If a tradeoff is required, choose correctness and guardrails over convenience.
 - The current implemented config file is `.sweeprc` (JSON, no extension). The
   future direction discussed in planning is documented separately; do not assume
   it is implemented until the code changes.
-- The published package is still the repo root package; the internal workspace
-  split is there to separate responsibilities without changing the public npm
-  surface yet.
+- The published package is the repo root (`@kitsunekode/sweep`). Internal
+  workspaces are private; `scripts/build.ts` bundles `apps/cli` into `dist/`.
