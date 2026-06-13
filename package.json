@@ -49,7 +49,7 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "bun --cwd apps/cli src/bin.ts",
+    "dev": "bun run scripts/dev.ts",
     "clean": "turbo run clean",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",

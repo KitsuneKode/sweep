@@ -11,7 +11,7 @@
 ```bash
 git clone https://github.com/KitsuneKode/sweep.git
 cd sweep
-bun install --frozen-lockfile
+bun install --frozen-lockfile   # required — links apps/cli and package workspaces
 ```
 
 ## Daily development
@@ -53,12 +53,13 @@ npm unlink -g @kitsunekode/sweep
 
 ### Link troubleshooting
 
-| Symptom                               | Fix                                                      |
-| ------------------------------------- | -------------------------------------------------------- |
-| `sweep: command not found` after link | Ensure npm global bin is on your `PATH`                  |
-| Stale behavior after edits            | Re-run `bun run build` — linked CLI runs `dist/sweep.js` |
-| OpenTUI errors in `sweep ui`          | Build first; UI ships as `dist/sweep-ui.js`              |
-| `bun run dev` ignores your args       | Use `bun run dev -- <args>` from repo root               |
+| Symptom                                  | Fix                                                                          |
+| ---------------------------------------- | ---------------------------------------------------------------------------- |
+| `sweep: command not found` after link    | Ensure npm global bin is on your `PATH`                                      |
+| Stale behavior after edits               | Re-run `bun run build` — linked CLI runs `dist/sweep.js`                     |
+| OpenTUI errors in `sweep ui`             | Build first; UI ships as `dist/sweep-ui.js`                                  |
+| `Cannot find package 'commander'` on dev | Run `bun install` at repo root (`scripts/dev.ts` retries this automatically) |
+| `bun run dev` ignores your args          | Use `bun run dev -- <args>` from repo root                                   |
 
 ## Rust engine (optional)
 
