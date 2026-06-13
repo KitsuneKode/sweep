@@ -15,14 +15,14 @@ bun run preflight      # turbo: publish smoke tests (after build)
 
 ### Day-to-day
 
-| Command                 | What it does                                              |
-| ----------------------- | --------------------------------------------------------- |
-| `bun run dev -- <args>` | Run CLI from source (`apps/cli/src/bin.ts`)               |
-| `bun run fmt`           | `turbo run fmt` (per-package `oxfmt`)                     |
-| `bun run lint`          | `turbo run lint` (per-package `oxlint`)                   |
-| `bun run typecheck`     | `turbo run typecheck`                                     |
-| `bun run test`          | `turbo run test` (`@kitsunekode/sweep-integration-tests`) |
-| `bun run clean`         | `turbo run clean`                                         |
+| Command                 | What it does                                            |
+| ----------------------- | ------------------------------------------------------- |
+| `bun run dev -- <args>` | Run CLI from source (`apps/cli/src/bin.ts`)             |
+| `bun run fmt`           | `turbo run fmt` (per-package `oxfmt`)                   |
+| `bun run lint`          | `turbo run lint` (per-package `oxlint`)                 |
+| `bun run typecheck`     | `turbo run typecheck`                                   |
+| `bun run test`          | `turbo run test` (unit tests per package + integration) |
+| `bun run clean`         | `turbo run clean`                                       |
 
 ### Rust (when editing `crates/`)
 
@@ -51,6 +51,8 @@ bunx turbo run preflight
 ```
 
 See `.github/workflows/ci.yml` and `.github/workflows/rust.yml`.
+
+Test layout, prompts, and engine parity: [.docs/testing.md](testing.md).
 
 ## Notes
 

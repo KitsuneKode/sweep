@@ -76,7 +76,8 @@ turbo. Root `bun run test` runs the integration test package against `tests/`.
 
 ## Tests
 
-- `tests/` — primary Bun test tree (config, guardrails, scan/plan/apply, UI state).
+- `tests/integration/` — cross-package CLI, build, engine contract, and seed-script tests.
+- `packages/*/src/*.test.ts` and `apps/cli/src/*.test.ts` — colocated unit tests per package.
 - `crates/sweep-engine-cli/tests/` — Rust CLI integration tests.
 - `tests/fixtures/` and `scripts/seed-fixture.ts` — seeded parity scenarios.
 

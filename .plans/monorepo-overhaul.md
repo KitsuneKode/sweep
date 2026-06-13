@@ -34,7 +34,7 @@ engine subprocess with parity harness, publish fix, trust/UX hardening.
 - [x] **Land on git** — `898f14d` on `feat/monorepo-overhaul` (13 scoped commits)
 - [ ] Forward `SweepConfig` to Rust engine (`--pattern`, `--ignore`, `--depth`)
 - [ ] Rust `apply_plan` implementation
-- [ ] Parity fixtures `basic` and `monorepo` (currently `#[ignore]`)
+- [x] Parity fixtures `basic` and `monorepo` (committed under `tests/fixtures/`, Rust parity tests enabled)
 - [ ] Mark plan `done` + set `Commit:` SHA after merge to `main`
 
 ## Verification (last run)

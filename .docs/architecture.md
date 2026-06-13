@@ -33,7 +33,7 @@ CLI flags / config
   clean) to core engine calls.
 - `sweep ui` scans via core, then hands plan editing to `packages/ui`; final
   selection compiles back to explicit candidate IDs.
-- `scripts/seed-fixture.ts` and `tests/support/fixtures.ts` seed parity scenarios
+- `scripts/seed-fixture.ts` and `packages/core/test-support/fixtures.ts` seed parity scenarios
   for integration tests and future JS-vs-Rust checks.
 
 ### Commands (implemented)

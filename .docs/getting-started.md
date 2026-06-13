@@ -63,17 +63,16 @@ npm unlink -g @kitsunekode/sweep
 
 ## Rust engine (optional)
 
-Build the subprocess binary, then use `--engine rust` or `--engine auto`:
+Build the subprocess binary when working on `crates/`, then opt in explicitly:
 
 ```bash
 cargo build -p sweep-engine-cli
 bun run dev -- scan . --engine rust --json
-# or after build:
-node dist/sweep.js scan . --engine auto --json
 ```
 
-`--engine auto` picks Rust when `target/debug/sweep-engine` exists (or
-`SWEEP_ENGINE_PATH` / `PATH`), otherwise JS.
+The CLI defaults to `--engine js` for deterministic behavior. Use `--engine auto`
+only when you want Rust when a local debug binary exists (or `SWEEP_ENGINE_PATH`
+is set).
 
 ## Before opening a PR
 

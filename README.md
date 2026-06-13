@@ -45,8 +45,10 @@ bunx @kitsunekode/sweep .
 ```
 sweep [path] [options]
 sweep scan [path] [options]
+sweep plan [path] [options]
 sweep ui [path] [options]
 sweep apply --plan <path> [options]
+sweep doctor [path] [options]
 ```
 
 `path` defaults to `.` (current directory).
@@ -55,8 +57,10 @@ sweep apply --plan <path> [options]
 
 - `sweep` — current default cleanup flow with prompt/guardrails
 - `sweep scan` — scan only, no deletion
+- `sweep plan` — emit a saved-plan JSON document (alias of `scan --json`)
 - `sweep ui` — OpenTUI-powered interactive selection flow for TTY terminals
 - `sweep apply --plan <path>` — apply a saved JSON plan
+- `sweep doctor` — quick config/protocol sanity checks (exits non-zero on warnings)
 
 ### Options
 
@@ -71,6 +75,7 @@ sweep apply --plan <path> [options]
 | `--include-dangerous` |       | Explicitly include dangerous candidates in selection |
 | `--depth <n>`         |       | Max recursion depth (`-1` = unlimited, default)      |
 | `--config <path>`     |       | Explicit config file path                            |
+| `--engine <backend>`  |       | Scan engine: `js` (default), `rust`, or `auto`       |
 | `--no-color`          |       | Disable color output                                 |
 
 ### `scan` options

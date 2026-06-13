@@ -50,6 +50,7 @@ If a tradeoff is required, choose correctness and guardrails over convenience.
 - For current product direction: [.docs/product-direction.md](.docs/product-direction.md)
 - For config behavior: [.docs/config.md](.docs/config.md)
 - For tooling commands and policy: [.docs/tooling.md](.docs/tooling.md)
+- For how to run and test (prompts, engines, fixtures): [.docs/testing.md](.docs/testing.md)
 - For local dev and `npm link`: [.docs/getting-started.md](.docs/getting-started.md)
 
 ## Documentation Ownership
