@@ -147,10 +147,11 @@ selected by default; more dangerous custom-pattern matches are included in the
 candidate list but excluded from `selectedCandidateIds` until explicitly chosen
 with flags such as `--select all --include-dangerous`.
 
-`sweep ui` uses OpenTUI for a keyboard-first terminal picker. It requires a
-TTY, lets you filter by name/path/kind/risk, toggle selections with space, bulk
-select safe items with `s`, bulk select all visible items with `a`, clear with
-`u`, and apply the edited plan with Enter.
+`sweep ui` uses OpenTUI for a keyboard-first terminal picker. Artifacts are
+grouped by directory scope (`project root`, `apps/cli/`, `packages/web/`, …) so
+monorepo scans stay readable. It requires a TTY, supports filter/toggle/bulk
+select (`s` safe, `a` all, `u` clear), and applies the edited plan with Enter.
+Risk markers in the list: `·` safe, `?` caution, `!` dangerous, `×` blocked.
 
 `apply --json` reports structured `failedPaths` entries with stable failure
 codes so scripted consumers and future alternate engines can agree on the same
