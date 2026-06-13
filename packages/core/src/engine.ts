@@ -8,8 +8,8 @@ import type {
   ScanResult,
   SelectionPolicy,
   SweepConfig,
-} from "../../protocol/src/index.js";
-import { PROTOCOL_VERSION } from "../../protocol/src/index.js";
+} from "@kitsunekode/sweep-protocol";
+import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
 import { clean } from "./cleaner.js";
 import type { ScanHooks } from "./scanner.js";
 import { scan } from "./scanner.js";
@@ -45,7 +45,14 @@ export function scanToPlan(
   };
 }
 
-export async function applyPlan(plan: ScanPlan): Promise<ApplyPlanResult> {
+export interface ApplyPlanOptions {
+  onDeleted?: (entry: ScanEntry) => void;
+}
+
+export async function applyPlan(
+  plan: ScanPlan,
+  options: ApplyPlanOptions = {},
+): Promise<ApplyPlanResult> {
   const selected = resolveSelectedCandidates(plan);
 
   if (selected.length === 0) {
@@ -72,7 +79,9 @@ export async function applyPlan(plan: ScanPlan): Promise<ApplyPlanResult> {
   }
 
   const { ready, failedPaths: revalidationFailures } = revalidateCandidates(selected);
-  const cleanResult = await clean(ready);
+  const cleanResult = await clean(ready, (entry) => {
+    options.onDeleted?.(entry);
+  });
   const allFailures = [...revalidationFailures, ...cleanResult.failedPaths];
 
   return {

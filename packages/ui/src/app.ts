@@ -7,7 +7,7 @@ import {
   SelectRenderableEvents,
   TextRenderable,
 } from "@opentui/core";
-import type { ScanPlan } from "../../protocol/src/index.js";
+import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   applyUiSelection,
   clearSelection,

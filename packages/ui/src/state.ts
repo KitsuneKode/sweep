@@ -1,4 +1,4 @@
-import type { ScanCandidate, ScanPlan } from "../../protocol/src/index.js";
+import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 
 export interface SweepUiState {
   candidates: ScanCandidate[];

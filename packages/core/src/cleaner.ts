@@ -1,5 +1,5 @@
 import { rmSync, unlinkSync } from "node:fs";
-import type { CleanResult, PathFailure, ScanEntry } from "../../protocol/src/index.js";
+import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
 
 /**
  * Delete all entries in the list.

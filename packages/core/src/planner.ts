@@ -8,8 +8,8 @@ import type {
   ScanPlan,
   ScanResult,
   SelectionPolicy,
-} from "../../protocol/src/index.js";
-import { DEFAULT_SELECTION_POLICY, PROTOCOL_VERSION } from "../../protocol/src/index.js";
+} from "@kitsunekode/sweep-protocol";
+import { DEFAULT_SELECTION_POLICY, PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
 
 export function buildPlan(
   targetDir: string,

@@ -1,11 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { ScanEntry, ScanResult, SweepConfig } from "../../protocol/src/index.js";
+import type { ScanEntry, ScanResult, SweepConfig } from "@kitsunekode/sweep-protocol";
 
 export interface ScanHooks {
   onEntry?: (entry: ScanEntry) => void;
 }
+
+/** VCS/metadata dirs — never descend (major win on large trees). */
+const SKIP_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr"]);
 
 // ─── Pattern matching ─────────────────────────────────────────────────────────
 
@@ -174,17 +177,18 @@ export function scan(
   // Compile patterns once — O(1) Set lookup for exact names, pre-built regexes for globs.
   const matches = compileMatcher(config.patterns);
 
-  // ── Walk ────────────────────────────────────────────────────────────────────
+  type Frame = { dir: string; depth: number };
+  const frontier: Frame[] = [{ dir: targetDir, depth: 0 }];
 
-  function walk(dir: string, depth: number): void {
-    if (config.depth !== -1 && depth > config.depth) return;
+  while (frontier.length > 0) {
+    const { dir, depth } = frontier.pop()!;
+    if (config.depth !== -1 && depth > config.depth) continue;
 
     let items: import("node:fs").Dirent<string>[];
     try {
       items = readdirSync(dir, { withFileTypes: true, encoding: "utf8" });
     } catch {
-      // Permission denied or other FS error — skip silently
-      return;
+      continue;
     }
 
     scannedDirs++;
@@ -194,18 +198,12 @@ export function scan(
 
       if (shouldIgnore(fullPath, config.ignore)) continue;
 
-      // item.isSymbolicLink() from readdirSync is accurate on modern Linux/macOS
-      // (getdents64 d_type includes link info). On exotic filesystems (DT_UNKNOWN),
-      // all type methods return false — fall back to lstatSync only then.
-      // Safety: a symlink deleted via rmSync({recursive}) follows the link and
-      // destroys the real directory, so we must never misclassify a symlink.
       let isLink = item.isSymbolicLink();
       if (!isLink && !item.isFile() && !item.isDirectory()) {
-        // DT_UNKNOWN — fall back to lstat
         try {
           isLink = lstatSync(fullPath).isSymbolicLink();
         } catch {
-          continue; // can't stat — skip
+          continue;
         }
       }
 
@@ -213,25 +211,20 @@ export function scan(
         const entry: ScanEntry = {
           path: fullPath,
           name: item.name,
-          estimatedBytes: 0, // filled below
+          estimatedBytes: 0,
           isSymlink: isLink,
           entryType: isLink ? "symlink" : item.isDirectory() ? "directory" : "file",
         };
         entries.push(entry);
         hooks.onEntry?.(entry);
-        // Critical: do NOT recurse into matched directories.
-        // This prevents double-counting and infinite loops.
         continue;
       }
 
-      // Recurse into non-matched, non-symlink directories
-      if (item.isDirectory() && !isLink) {
-        walk(fullPath, depth + 1);
+      if (item.isDirectory() && !isLink && !SKIP_DIR_NAMES.has(item.name)) {
+        frontier.push({ dir: fullPath, depth: depth + 1 });
       }
     }
   }
-
-  walk(targetDir, 0);
 
   // ── Size estimation ─────────────────────────────────────────────────────────
 

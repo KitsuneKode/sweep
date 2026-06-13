@@ -67,6 +67,8 @@ export interface CleanResult {
   durationMs: number;
 }
 
+export type EngineBackend = "auto" | "js" | "rust";
+
 export interface CliOptions {
   dryRun: boolean;
   yes: boolean;
@@ -78,6 +80,7 @@ export interface CliOptions {
   depth: number;
   config?: string;
   color: boolean;
+  engine: EngineBackend;
 }
 
 export interface ScanCandidate extends ScanEntry {

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
-import type { SweepConfig } from "../../protocol/src/index.js";
+import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { assertSafePattern } from "./guardrails.js";
 
 export const DEFAULT_PATTERNS: string[] = [
