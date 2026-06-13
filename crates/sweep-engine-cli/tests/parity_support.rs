@@ -107,7 +107,9 @@ fn sort_plan_value(value: &mut Value) {
         });
 
     if let (Some(ids), Some(ordered)) = (
-        value.get_mut("selectedCandidateIds").and_then(Value::as_array_mut),
+        value
+            .get_mut("selectedCandidateIds")
+            .and_then(Value::as_array_mut),
         ordered_ids,
     ) {
         *ids = ordered;

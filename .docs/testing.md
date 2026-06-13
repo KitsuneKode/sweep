@@ -144,10 +144,10 @@ bun run dev -- ui /path/to/project   # in an interactive terminal only
 
 ## CI split
 
-| Workflow                     | When it runs                                              | What it does                                     |
-| ---------------------------- | --------------------------------------------------------- | ------------------------------------------------ |
-| `.github/workflows/ci.yml`   | Every push/PR to `main`                                   | `turbo check`, `build`, `preflight` (TypeScript) |
-| `.github/workflows/rust.yml` | Changes under `crates/**`, `Cargo.*`, `tests/fixtures/**` | `cargo test`, `cargo clippy`                     |
+| Workflow                     | When it runs                                              | What it does                                                     |
+| ---------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `.github/workflows/ci.yml`   | Every push/PR to `main`                                   | `turbo check`, `build`, `preflight` (TypeScript)                 |
+| `.github/workflows/rust.yml` | Changes under `crates/**`, `Cargo.*`, `tests/fixtures/**` | `cargo fmt --check`, `cargo test`, `cargo clippy`, release build |
 
 TypeScript quality is always gated on `main`. Rust jobs are path-filtered so
 crate-only work does not block the TS pipeline unnecessarily.

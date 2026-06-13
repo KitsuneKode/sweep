@@ -27,11 +27,37 @@ bun run preflight      # turbo: publish smoke tests (after build)
 ### Rust (when editing `crates/`)
 
 ```bash
+bun run rust:check     # fmt --check + clippy + test (run before merge)
+bun run rust:fmt       # cargo fmt --all
+bun run rust:lint      # cargo clippy --workspace -- -D warnings
+bun run rust:test      # cargo test --workspace
 cargo build -p sweep-engine-cli   # produces target/debug/sweep-engine
 cargo build --release -p sweep-engine-cli
-cargo test --workspace
-cargo clippy --workspace -- -D warnings
 ```
+
+Workspace lints in `Cargo.toml` deny `clippy::unwrap_used` and
+`clippy::expect_used`. Formatting uses `rustfmt.toml`; toolchain pins `rustfmt`
+and `clippy` in `rust-toolchain.toml`.
+
+#### Crate layout (not an antipattern)
+
+The Cargo workspace is five small crates (~900 lines total today):
+
+| Crate              | Role                                            |
+| ------------------ | ----------------------------------------------- |
+| `sweep-types`      | Protocol types aligned with `packages/protocol` |
+| `sweep-errors`     | Structured error codes                          |
+| `sweep-fs`         | Directory walk and sizing helpers               |
+| `sweep-engine`     | Scan/plan/apply library (no I/O framing)        |
+| `sweep-engine-cli` | Thin `sweep-engine` binary + parity tests       |
+
+This is a normal Rust split: library vs CLI, types/errors/fs at the edges. It is
+slightly more granular than a two-crate setup would require at current size, but
+it is not wrong — it keeps compile boundaries clear and matches how larger CLIs
+are structured. Only `sweep-engine-cli` ships to npm (via platform packages).
+
+The five **npm** `@kitsunekode/sweep-engine-*` packages are unrelated to this —
+they are per-OS binaries (Turbo-style optional deps), not extra Rust crates.
 
 ### Native engine npm packages (Turbo-style)
 

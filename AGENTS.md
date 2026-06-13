@@ -7,8 +7,8 @@ docs only when they are relevant to the task.
 
 - Run `bun run check` before treating work as complete.
   This runs format, lint, typecheck, and tests via Turborepo.
-- For Rust changes under `crates/`, also run `cargo test --workspace` and
-  `cargo clippy --workspace -- -D warnings`.
+- For Rust changes under `crates/`, also run `bun run rust:check` (fmt, clippy,
+  test). Individual steps: `rust:fmt`, `rust:lint`, `rust:test`.
 - Never use stale command names from older docs. The repo is on `oxfmt`,
   `oxlint`, TypeScript, Turborepo, and `bun run check` / `bun run test`.
 

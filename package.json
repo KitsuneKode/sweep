@@ -67,6 +67,10 @@
     "engine:build": "cargo build --release -p sweep-engine-cli",
     "engine:pack": "bun run packages/engine-native/scripts/pack.ts",
     "engine:verify": "bun run packages/engine-native/scripts/verify-binary.ts",
+    "rust:fmt": "cargo fmt --all",
+    "rust:lint": "cargo clippy --workspace -- -D warnings",
+    "rust:test": "cargo test --workspace",
+    "rust:check": "cargo fmt --all --check && cargo clippy --workspace -- -D warnings && cargo test --workspace",
     "release": "bun run prepublishOnly && bun run scripts/publish-release.ts",
     "prepare": "husky || true",
     "prepublishOnly": "turbo run check build preflight"

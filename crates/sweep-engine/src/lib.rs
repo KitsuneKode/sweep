@@ -4,13 +4,17 @@ use camino::Utf8Path;
 use sweep_errors::{EngineError, GuardrailError};
 use sweep_fs::{estimate_bytes, walk_matched_entries, WalkConfig, WalkEntryType};
 use sweep_types::{
-    EntryType, RiskTier, ScanCandidate, ScanPlan, ScanPlanSummary, SelectionPolicy,
-    SelectionMode, ApplyReport, PROTOCOL_VERSION,
+    ApplyReport, EntryType, RiskTier, ScanCandidate, ScanPlan, ScanPlanSummary, SelectionMode,
+    SelectionPolicy, PROTOCOL_VERSION,
 };
 
 /// Scan `target_dir` with default patterns and produce a protocol-aligned [`ScanPlan`].
 pub fn scan_to_plan(target_dir: &Utf8Path) -> Result<ScanPlan, EngineError> {
-    scan_to_plan_with_config(target_dir, &WalkConfig::default(), &SelectionPolicy::default())
+    scan_to_plan_with_config(
+        target_dir,
+        &WalkConfig::default(),
+        &SelectionPolicy::default(),
+    )
 }
 
 /// Scan with explicit walk and selection configuration.
@@ -26,11 +30,7 @@ pub fn scan_to_plan_with_config(
     }
 
     let walk = walk_matched_entries(target_dir, walk_config);
-    let candidates: Vec<ScanCandidate> = walk
-        .entries
-        .iter()
-        .map(to_candidate)
-        .collect();
+    let candidates: Vec<ScanCandidate> = walk.entries.iter().map(to_candidate).collect();
 
     Ok(build_plan(
         target_dir.as_str(),
@@ -43,10 +43,12 @@ pub fn scan_to_plan_with_config(
 /// Apply a previously produced [`ScanPlan`] and return a stub [`ApplyReport`].
 pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
     if plan.protocol_version != PROTOCOL_VERSION {
-        return Err(EngineError::Guardrail(GuardrailError::UnsupportedProtocolVersion {
-            found: plan.protocol_version.clone(),
-            expected: PROTOCOL_VERSION.to_owned(),
-        }));
+        return Err(EngineError::Guardrail(
+            GuardrailError::UnsupportedProtocolVersion {
+                found: plan.protocol_version.clone(),
+                expected: PROTOCOL_VERSION.to_owned(),
+            },
+        ));
     }
 
     Ok(ApplyReport::empty(plan))
@@ -86,8 +88,7 @@ fn to_candidate(entry: &sweep_fs::WalkEntry) -> ScanCandidate {
     let kind = candidate_kind_from_name(&entry.name);
     let risk_tier = infer_risk_tier(entry.is_symlink, &kind);
     let reasons = infer_reasons(entry.is_symlink, &kind);
-    let selected_by_default =
-        risk_tier != RiskTier::Dangerous && risk_tier != RiskTier::Blocked;
+    let selected_by_default = risk_tier != RiskTier::Dangerous && risk_tier != RiskTier::Blocked;
 
     ScanCandidate {
         entry: sweep_types::ScanEntry {

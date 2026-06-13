@@ -54,4 +54,4 @@ Before merge or publish:
 - `bun run check` — format, lint, typecheck, and tests (Turborepo).
 - `bun run build` — bundle to `dist/sweep.js` and `dist/sweep-ui.js`.
 - `bun run preflight` — publish guardrails (also runs on `prepublishOnly`).
-- Rust path changes: `cargo test --workspace` and `cargo clippy --workspace`.
+- Rust path changes: `bun run rust:check`.

@@ -22,11 +22,9 @@ const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 export function sweepPackageRoot(fromModuleDir: string = MODULE_DIR): string {
   const normalized = fromModuleDir.replace(/\\/g, "/");
 
-  if (normalized.includes("/dist/") || normalized.endsWith("/dist")) {
-    const distDir = normalized.endsWith("/dist")
-      ? normalized
-      : normalized.slice(0, normalized.lastIndexOf("/dist"));
-    return resolve(distDir);
+  if (normalized.includes("/dist")) {
+    const distIndex = normalized.lastIndexOf("/dist");
+    return resolve(normalized.slice(0, distIndex));
   }
 
   let dir = fromModuleDir;

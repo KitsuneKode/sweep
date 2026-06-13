@@ -25,12 +25,11 @@ fn run() -> Result<(), String> {
 }
 
 fn run_scan() -> Result<(), String> {
-    let target_dir = std::env::args().nth(2).ok_or_else(|| {
-        "scan requires a target directory argument".to_owned()
-    })?;
+    let target_dir = std::env::args()
+        .nth(2)
+        .ok_or_else(|| "scan requires a target directory argument".to_owned())?;
 
-    let plan = scan_to_plan(Utf8Path::new(&target_dir))
-        .map_err(|err| err.to_string())?;
+    let plan = scan_to_plan(Utf8Path::new(&target_dir)).map_err(|err| err.to_string())?;
     write_json_stdout(&plan)
 }
 

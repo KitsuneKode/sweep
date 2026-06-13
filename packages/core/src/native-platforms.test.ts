@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
   currentNativePlatformId,
   NATIVE_PLATFORM_NPM_NAMES,
@@ -39,8 +39,9 @@ describe("sweepPackageRoot", () => {
   });
 
   test("resolves package root from dist layout", () => {
+    const fakeDistDir = resolve("/tmp/sweep-pkg/dist");
+    expect(sweepPackageRoot(fakeDistDir)).toBe(resolve("/tmp/sweep-pkg"));
     const fakeDistFile = resolve("/tmp/sweep-pkg/dist/sweep.js");
-    const root = sweepPackageRoot(fakeDistFile);
-    expect(root).toBe(resolve("/tmp/sweep-pkg"));
+    expect(sweepPackageRoot(dirname(fakeDistFile))).toBe(resolve("/tmp/sweep-pkg"));
   });
 });

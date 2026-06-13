@@ -23,7 +23,7 @@ insta = { version = "1", features = ["json"] }
 assert_cmd = "2"
 rayon = "1"
 
-[workspace.lints.rust]
+[workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
 
