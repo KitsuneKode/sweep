@@ -57,11 +57,11 @@ CI runs Rust checks only when `crates/` or related paths change (see
 
 ## Build and publish path
 
-1. `apps/cli` `build` script runs `scripts/build.ts`.
+1. `apps/cli` `build` script runs `apps/cli/scripts/build.ts`.
 2. Bun bundles `apps/cli/src/bin.ts` → `dist/sweep.js`.
 3. UI entry bundles separately → `dist/sweep-ui.js` (lazy-loaded by CLI).
 4. Root `package.json` `files: ["dist"]` — only `dist/` ships to npm.
-5. `prepublishOnly` runs quality, build, and `scripts/preflight.ts`.
+5. `prepublishOnly` runs `turbo run check build preflight`.
 
 ## Turborepo tasks
 
@@ -69,10 +69,10 @@ Root scripts delegate to Turborepo where caching helps:
 
 - `bun run build` → `turbo run build`
 - `bun run typecheck` → `turbo run typecheck`
-- `bun run check` → `turbo run //#quality` (fmt, lint, test, workspace typechecks)
+- `bun run check` → `turbo run check` (fmt, lint, test, typecheck)
 
-Per-package `lint` and `typecheck` run inside their workspaces. Root `fmt` and
-`lint` still target `apps`, `packages`, `tests`, and `scripts` directly.
+Per-package `lint`, `fmt`, and `typecheck` run inside their workspaces via
+turbo. Root `bun run test` runs the integration test package against `tests/`.
 
 ## Tests
 

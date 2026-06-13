@@ -4,7 +4,7 @@
 
 The repo is a Bun workspace monorepo. The root package `@kitsunekode/sweep` is
 the published npm surface; internal workspaces compile into `dist/` via
-`scripts/build.ts`.
+`apps/cli/scripts/build.ts`.
 
 ### Layering
 

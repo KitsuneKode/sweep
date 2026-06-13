@@ -2,59 +2,62 @@
 
 ## Source-of-truth commands
 
-### Quality gate (preferred before merge)
+Root `package.json` delegates to Turborepo. Task logic lives in workspace
+packages (`apps/cli`, `packages/*`).
 
-- `bun run check` — alias for `bun run quality`; runs Turborepo `//#quality`
-  (format, lint, tests, and workspace typechecks)
+### Quality gate (run before merge)
 
-### Format and lint
+```bash
+bun run check          # turbo: fmt + lint + test + typecheck (all packages)
+bun run build          # turbo: bundle CLI → dist/
+bun run preflight      # turbo: publish smoke tests (after build)
+```
 
-- `bun run fmt` — format `apps`, `packages`, `tests`, `scripts` with `oxfmt`
-- `bun run lint` — lint the same tree with `oxlint`
-- `bun run lint:fix` — auto-fix where supported
+### Day-to-day
 
-### Typecheck and test
-
-- `bun run typecheck` — `turbo run typecheck` across workspaces
-- `bun run test` — `bun test tests` (root integration suite)
-- `bun run test:watch` — watch mode for tests
-
-### Build and publish
-
-- `bun run dev` — run CLI from source (`apps/cli/src/bin.ts`)
-- `bun run build` — `turbo run build`; bundles to `dist/sweep.js` and `dist/sweep-ui.js`
-- `bun run preflight` — publish guardrails (dist smoke tests, package.json checks)
-- `bun run pack:preview` — `npm pack --dry-run`
+| Command                 | What it does                                              |
+| ----------------------- | --------------------------------------------------------- |
+| `bun run dev -- <args>` | Run CLI from source (`apps/cli/src/bin.ts`)               |
+| `bun run fmt`           | `turbo run fmt` (per-package `oxfmt`)                     |
+| `bun run lint`          | `turbo run lint` (per-package `oxlint`)                   |
+| `bun run typecheck`     | `turbo run typecheck`                                     |
+| `bun run test`          | `turbo run test` (`@kitsunekode/sweep-integration-tests`) |
+| `bun run clean`         | `turbo run clean`                                         |
 
 ### Rust (when editing `crates/`)
 
-- `cargo test --workspace`
-- `cargo clippy --workspace -- -D warnings`
+```bash
+cargo build -p sweep-engine-cli   # produces target/debug/sweep-engine
+cargo test --workspace
+cargo clippy --workspace -- -D warnings
+```
 
 ## Turborepo
 
 `turbo.json` defines the task graph:
 
-- `build` — depends on `^build`; outputs `dist/**`
-- `typecheck`, `lint`, `test` — depend on `topo`
-- `//#quality` — root fmt, lint, test, plus all workspace typechecks
+- `transit` — dependency-order cache invalidation without blocking on `^build`
+- `build` — depends on `^build`; outputs root `dist/**`
+- `typecheck`, `lint`, `fmt` — depend on `transit`
+- `test` — depends on `transit` and `^build` (CLI bundle for integration tests)
+- `check` — aggregates `fmt`, `lint`, `test`, `typecheck`
 
-CI runs affected quality checks:
+CI runs:
 
 ```bash
-bunx turbo run //#quality --affected
+bunx turbo run check --affected
 bunx turbo run build
+bunx turbo run preflight
 ```
 
 See `.github/workflows/ci.yml` and `.github/workflows/rust.yml`.
 
 ## Notes
 
-- Agent-facing docs should use `bun run test`, not bare `bun test` without the
-  `tests` path, when documenting the canonical command.
+- Agent-facing completion gate: `bun run check` (see `AGENTS.md`).
 - The repo uses Bun workspaces (`apps/*`, `packages/*`) and Turborepo for
   orchestration and caching.
-- `oxfmt` and `oxlint` are the formatters and linters; Biome is not in use.
+- `oxfmt` and `oxlint` are the formatters and linters.
 - README remains user-facing; internal tooling policy lives here and in
   `AGENTS.md`.
-- Local dev and `npm link` workflow: [.docs/getting-started.md](getting-started.md)
+- Local dev and `npm link`: [.docs/getting-started.md](getting-started.md)

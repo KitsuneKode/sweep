@@ -5,12 +5,12 @@ docs only when they are relevant to the task.
 
 ## Task Completion Requirements
 
-- Run `bun run check` (or `bun run quality`) before treating work as complete.
+- Run `bun run check` before treating work as complete.
   This runs format, lint, typecheck, and tests via Turborepo.
 - For Rust changes under `crates/`, also run `cargo test --workspace` and
   `cargo clippy --workspace -- -D warnings`.
 - Never use stale command names from older docs. The repo is on `oxfmt`,
-  `oxlint`, TypeScript, Turborepo, and `bun test tests`.
+  `oxlint`, TypeScript, Turborepo, and `bun run check` / `bun run test`.
 
 ## Project Snapshot
 
@@ -70,4 +70,4 @@ If a tradeoff is required, choose correctness and guardrails over convenience.
   future direction discussed in planning is documented separately; do not assume
   it is implemented until the code changes.
 - The published package is the repo root (`@kitsunekode/sweep`). Internal
-  workspaces are private; `scripts/build.ts` bundles `apps/cli` into `dist/`.
+  workspaces are private; `apps/cli/scripts/build.ts` bundles into `dist/`.

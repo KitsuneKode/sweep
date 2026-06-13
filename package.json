@@ -49,7 +49,7 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "turbo run dev --filter=@kitsunekode/sweep-cli",
+    "dev": "bun --cwd apps/cli src/bin.ts",
     "clean": "turbo run clean",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",

@@ -4,7 +4,7 @@
 
 - [Bun](https://bun.sh) 1.3+ (matches `packageManager` in root `package.json`)
 - Node.js ≥ 18 (for preflight smoke tests and `npm link` consumers)
-- Rust toolchain (only if editing `crates/`)
+- Rust toolchain (only if editing `crates/` or using `--engine rust`)
 
 ## Install
 
@@ -17,7 +17,7 @@ bun install --frozen-lockfile
 ## Daily development
 
 ```bash
-# Run CLI from source (no build)
+# Run CLI from source (no build) — note the `--` when using flags
 bun run dev -- --help
 bun run dev -- scan . --dry-run
 
@@ -29,26 +29,26 @@ bun run build
 node dist/sweep.js --version
 ```
 
+Alternatively, from `apps/cli/`:
+
+```bash
+cd apps/cli
+bun run dev -- scan . --dry-run
+```
+
 See [.docs/tooling.md](tooling.md) for the full command reference.
 
 ## Link and try globally
 
-Use this when you want the real `sweep` binary on your PATH while hacking on
-the repo.
-
 ```bash
-# From the repo root, after install
 bun run build          # ensures dist/sweep.js exists
 npm link               # registers @kitsunekode/sweep globally
 
-# In any project directory
 sweep --version
 sweep scan . --dry-run
 sweep ui .             # requires a TTY
 
-# When finished
 npm unlink -g @kitsunekode/sweep
-# or from the repo root: npm unlink
 ```
 
 ### Link troubleshooting
@@ -58,24 +58,21 @@ npm unlink -g @kitsunekode/sweep
 | `sweep: command not found` after link | Ensure npm global bin is on your `PATH`                  |
 | Stale behavior after edits            | Re-run `bun run build` — linked CLI runs `dist/sweep.js` |
 | OpenTUI errors in `sweep ui`          | Build first; UI ships as `dist/sweep-ui.js`              |
-| Want source without linking           | Use `bun run dev -- <args>` instead                      |
+| `bun run dev` ignores your args       | Use `bun run dev -- <args>` from repo root               |
 
-### Unlink
+## Rust engine (optional)
 
-```bash
-# Remove global link to this checkout
-npm unlink -g @kitsunekode/sweep
-
-# Reinstall the published package if needed
-npm install -g @kitsunekode/sweep
-```
-
-## Rust workspace (optional)
+Build the subprocess binary, then use `--engine rust` or `--engine auto`:
 
 ```bash
-cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo build -p sweep-engine-cli
+bun run dev -- scan . --engine rust --json
+# or after build:
+node dist/sweep.js scan . --engine auto --json
 ```
+
+`--engine auto` picks Rust when `target/debug/sweep-engine` exists (or
+`SWEEP_ENGINE_PATH` / `PATH`), otherwise JS.
 
 ## Before opening a PR
 
@@ -83,7 +80,5 @@ cargo clippy --workspace -- -D warnings
 bun run check
 bun run build
 bun run preflight
+cargo test --workspace    # if you touched crates/
 ```
-
-CI runs `turbo run //#quality --affected`, `turbo run build`, and preflight on
-every push (see `.github/workflows/ci.yml`).
