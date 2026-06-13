@@ -1,0 +1,73 @@
+{
+  "protocolVersion": "1",
+  "targetDir": "__FIXTURE_ROOT__",
+  "selectionPolicy": {
+    "mode": "default",
+    "includeDangerous": false
+  },
+  "candidates": [
+    {
+      "path": "__FIXTURE_ROOT__/apps/docs/.next",
+      "name": ".next",
+      "estimatedBytes": 0,
+      "isSymlink": false,
+      "entryType": "directory",
+      "id": "cand_48062baa",
+      "kind": ".next",
+      "riskTier": "safe",
+      "reasons": ["default-pattern"],
+      "selectedByDefault": true
+    },
+    {
+      "path": "__FIXTURE_ROOT__/apps/docs/tsconfig.tsbuildinfo",
+      "name": "tsconfig.tsbuildinfo",
+      "estimatedBytes": 0,
+      "isSymlink": false,
+      "entryType": "file",
+      "id": "cand_3de0e322",
+      "kind": "tsbuildinfo",
+      "riskTier": "safe",
+      "reasons": ["default-pattern"],
+      "selectedByDefault": true
+    },
+    {
+      "path": "__FIXTURE_ROOT__/packages/api/target",
+      "name": "target",
+      "estimatedBytes": 0,
+      "isSymlink": false,
+      "entryType": "directory",
+      "id": "cand_87cb572e",
+      "kind": "target",
+      "riskTier": "safe",
+      "reasons": ["default-pattern"],
+      "selectedByDefault": true
+    },
+    {
+      "path": "__FIXTURE_ROOT__/packages/web/node_modules",
+      "name": "node_modules",
+      "estimatedBytes": 0,
+      "isSymlink": false,
+      "entryType": "directory",
+      "id": "cand_37b9ecbe",
+      "kind": "node_modules",
+      "riskTier": "safe",
+      "reasons": ["default-pattern"],
+      "selectedByDefault": true
+    }
+  ],
+  "summary": {
+    "candidateCount": 4,
+    "estimatedTotalBytes": 0,
+    "scannedDirs": 7,
+    "exact": false,
+    "selectedCount": 4,
+    "riskCounts": {
+      "safe": 4,
+      "caution": 0,
+      "dangerous": 0,
+      "blocked": 0
+    }
+  },
+  "selectedCandidateIds": ["cand_48062baa", "cand_3de0e322", "cand_87cb572e", "cand_37b9ecbe"],
+  "createdAt": "1970-01-01T00:00:00.000Z"
+}

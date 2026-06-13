@@ -1,0 +1,76 @@
+---
+source: crates/sweep-engine-cli/tests/parity.rs
+expression: "&actual"
+---
+{
+  "candidates": [
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_206b617a",
+      "isSymlink": false,
+      "kind": "dist",
+      "name": "dist",
+      "path": "__FIXTURE_ROOT__/dist",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_5d91d8ba",
+      "isSymlink": false,
+      "kind": "node_modules",
+      "name": "node_modules",
+      "path": "__FIXTURE_ROOT__/node_modules",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "entryType": "symlink",
+      "estimatedBytes": 0,
+      "id": "cand_70d21834",
+      "isSymlink": true,
+      "kind": "target",
+      "name": "target",
+      "path": "__FIXTURE_ROOT__/target",
+      "reasons": [
+        "symlink",
+        "default-pattern"
+      ],
+      "riskTier": "caution",
+      "selectedByDefault": true
+    }
+  ],
+  "createdAt": "1970-01-01T00:00:00.000Z",
+  "protocolVersion": "1",
+  "selectedCandidateIds": [
+    "cand_206b617a",
+    "cand_5d91d8ba",
+    "cand_70d21834"
+  ],
+  "selectionPolicy": {
+    "includeDangerous": false,
+    "mode": "default"
+  },
+  "summary": {
+    "candidateCount": 3,
+    "estimatedTotalBytes": 0,
+    "exact": false,
+    "riskCounts": {
+      "blocked": 0,
+      "caution": 1,
+      "dangerous": 0,
+      "safe": 2
+    },
+    "scannedDirs": 2,
+    "selectedCount": 3
+  },
+  "targetDir": "__FIXTURE_ROOT__"
+}

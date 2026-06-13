@@ -1,0 +1,75 @@
+---
+source: crates/sweep-engine-cli/tests/parity.rs
+expression: "&actual"
+---
+{
+  "candidates": [
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_c7a9ef8a",
+      "isSymlink": false,
+      "kind": "dist",
+      "name": "dist",
+      "path": "__FIXTURE_ROOT__/dist",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_ed0a920a",
+      "isSymlink": false,
+      "kind": "node_modules",
+      "name": "node_modules",
+      "path": "__FIXTURE_ROOT__/node_modules",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "entryType": "file",
+      "estimatedBytes": 0,
+      "id": "cand_c05e33a2",
+      "isSymlink": false,
+      "kind": "tsbuildinfo",
+      "name": "tsconfig.tsbuildinfo",
+      "path": "__FIXTURE_ROOT__/tsconfig.tsbuildinfo",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    }
+  ],
+  "createdAt": "1970-01-01T00:00:00.000Z",
+  "protocolVersion": "1",
+  "selectedCandidateIds": [
+    "cand_c7a9ef8a",
+    "cand_ed0a920a",
+    "cand_c05e33a2"
+  ],
+  "selectionPolicy": {
+    "includeDangerous": false,
+    "mode": "default"
+  },
+  "summary": {
+    "candidateCount": 3,
+    "estimatedTotalBytes": 0,
+    "exact": false,
+    "riskCounts": {
+      "blocked": 0,
+      "caution": 0,
+      "dangerous": 0,
+      "safe": 3
+    },
+    "scannedDirs": 1,
+    "selectedCount": 3
+  },
+  "targetDir": "__FIXTURE_ROOT__"
+}

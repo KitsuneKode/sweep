@@ -15,16 +15,52 @@ fn parity_node_modules_only_matches_golden() {
 
 /// `basic` — multiple default-pattern artifacts (seed-fixture basic scenario shape).
 #[test]
-#[ignore = "TODO: implement full default-pattern parity for basic fixture"]
-fn parity_basic_fixture() {
-    let _golden = parity_support::load_golden_plan("basic");
-    let _actual = parity_support::run_rust_scan_normalized("basic");
+fn parity_basic_matches_golden() {
+    let golden = parity_support::load_golden_plan("basic");
+    let actual = parity_support::run_rust_scan_normalized("basic");
+
+    assert_eq!(
+        actual, golden,
+        "rust scan plan should match committed JS golden fixture"
+    );
+    insta::assert_json_snapshot!("basic", &actual);
 }
 
 /// `monorepo` — nested packages with mixed artifacts.
 #[test]
-#[ignore = "TODO: implement monorepo fixture walk parity"]
-fn parity_monorepo_fixture() {
-    let _golden = parity_support::load_golden_plan("monorepo");
-    let _actual = parity_support::run_rust_scan_normalized("monorepo");
+fn parity_monorepo_matches_golden() {
+    let golden = parity_support::load_golden_plan("monorepo");
+    let actual = parity_support::run_rust_scan_normalized("monorepo");
+
+    assert_eq!(
+        actual, golden,
+        "rust scan plan should match committed JS golden fixture"
+    );
+    insta::assert_json_snapshot!("monorepo", &actual);
+}
+
+/// `workspace-matrix` — multi-package workspace with several artifact kinds.
+#[test]
+fn parity_workspace_matrix_matches_golden() {
+    let golden = parity_support::load_golden_plan("workspace-matrix");
+    let actual = parity_support::run_rust_scan_normalized("workspace-matrix");
+
+    assert_eq!(
+        actual, golden,
+        "rust scan plan should match committed JS golden fixture"
+    );
+    insta::assert_json_snapshot!("workspace_matrix", &actual);
+}
+
+/// `risk-mix` — safe directories plus a symlink matching a default pattern.
+#[test]
+fn parity_risk_mix_matches_golden() {
+    let golden = parity_support::load_golden_plan("risk-mix");
+    let actual = parity_support::run_rust_scan_normalized("risk-mix");
+
+    assert_eq!(
+        actual, golden,
+        "rust scan plan should match committed JS golden fixture"
+    );
+    insta::assert_json_snapshot!("risk_mix", &actual);
 }

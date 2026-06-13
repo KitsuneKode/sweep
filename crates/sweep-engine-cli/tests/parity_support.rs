@@ -24,8 +24,10 @@ pub fn load_golden_plan(name: &str) -> Value {
     let path = fixture_dir(name).join("expected.plan.json");
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|err| panic!("failed to read golden plan at {}: {err}", path.display()));
-    serde_json::from_str(&raw)
-        .unwrap_or_else(|err| panic!("golden plan at {} is invalid JSON: {err}", path.display()))
+    let mut value = serde_json::from_str(&raw)
+        .unwrap_or_else(|err| panic!("golden plan at {} is invalid JSON: {err}", path.display()));
+    sort_plan_value(&mut value);
+    value
 }
 
 pub fn run_rust_scan_normalized(name: &str) -> Value {
@@ -62,7 +64,7 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
     value["summary"]["estimatedTotalBytes"] = Value::Number(0.into());
 
     if let Some(candidates) = value.get_mut("candidates").and_then(Value::as_array_mut) {
-        for candidate in candidates {
+        for candidate in candidates.iter_mut() {
             if let Some(path) = candidate.get("path").and_then(Value::as_str) {
                 candidate["path"] = Value::String(replace_root(path.to_owned()));
             }
@@ -70,5 +72,44 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
         }
     }
 
+    sort_plan_value(&mut value);
+
     value
+}
+
+fn sort_plan_value(value: &mut Value) {
+    if let Some(candidates) = value.get_mut("candidates").and_then(Value::as_array_mut) {
+        candidates.sort_by(|left, right| {
+            left.get("path")
+                .and_then(Value::as_str)
+                .cmp(&right.get("path").and_then(Value::as_str))
+        });
+    }
+
+    let ordered_ids = value
+        .get("candidates")
+        .and_then(Value::as_array)
+        .map(|candidates| {
+            let selected: std::collections::HashSet<&str> = value
+                .get("selectedCandidateIds")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+
+            candidates
+                .iter()
+                .filter_map(|candidate| candidate.get("id").and_then(Value::as_str))
+                .filter(|id| selected.contains(id))
+                .map(|id| Value::String(id.to_owned()))
+                .collect::<Vec<_>>()
+        });
+
+    if let (Some(ids), Some(ordered)) = (
+        value.get_mut("selectedCandidateIds").and_then(Value::as_array_mut),
+        ordered_ids,
+    ) {
+        *ids = ordered;
+    }
 }

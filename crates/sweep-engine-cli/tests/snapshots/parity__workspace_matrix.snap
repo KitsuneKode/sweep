@@ -1,0 +1,90 @@
+---
+source: crates/sweep-engine-cli/tests/parity.rs
+expression: "&actual"
+---
+{
+  "candidates": [
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_48062baa",
+      "isSymlink": false,
+      "kind": ".next",
+      "name": ".next",
+      "path": "__FIXTURE_ROOT__/apps/docs/.next",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "entryType": "file",
+      "estimatedBytes": 0,
+      "id": "cand_3de0e322",
+      "isSymlink": false,
+      "kind": "tsbuildinfo",
+      "name": "tsconfig.tsbuildinfo",
+      "path": "__FIXTURE_ROOT__/apps/docs/tsconfig.tsbuildinfo",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_87cb572e",
+      "isSymlink": false,
+      "kind": "target",
+      "name": "target",
+      "path": "__FIXTURE_ROOT__/packages/api/target",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_37b9ecbe",
+      "isSymlink": false,
+      "kind": "node_modules",
+      "name": "node_modules",
+      "path": "__FIXTURE_ROOT__/packages/web/node_modules",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    }
+  ],
+  "createdAt": "1970-01-01T00:00:00.000Z",
+  "protocolVersion": "1",
+  "selectedCandidateIds": [
+    "cand_48062baa",
+    "cand_3de0e322",
+    "cand_87cb572e",
+    "cand_37b9ecbe"
+  ],
+  "selectionPolicy": {
+    "includeDangerous": false,
+    "mode": "default"
+  },
+  "summary": {
+    "candidateCount": 4,
+    "estimatedTotalBytes": 0,
+    "exact": false,
+    "riskCounts": {
+      "blocked": 0,
+      "caution": 0,
+      "dangerous": 0,
+      "safe": 4
+    },
+    "scannedDirs": 7,
+    "selectedCount": 4
+  },
+  "targetDir": "__FIXTURE_ROOT__"
+}
