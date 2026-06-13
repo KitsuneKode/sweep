@@ -4,36 +4,108 @@
   "workspaces": {
     "": {
       "name": "sweep-clean",
-      "dependencies": {
-        "@opentui/core": "^0.2.3",
-        "commander": "^12.1.0",
-        "picocolors": "^1.1.1",
-      },
       "devDependencies": {
         "@changesets/cli": "^2.30.0",
         "@commitlint/cli": "^19.6.0",
         "@commitlint/config-conventional": "^19.6.0",
-        "@types/node": "^22.0.0",
-        "bun-types": "latest",
         "husky": "^9.1.7",
         "lint-staged": "^15.2.10",
-        "oxfmt": "^0.45.0",
-        "oxlint": "^0.13.0",
-        "typescript": "^5.7.2",
+        "turbo": "^2.6.1",
       },
     },
-    "packages/cli": {
+    "apps/cli": {
       "name": "@kitsunekode/sweep-cli",
+      "dependencies": {
+        "@kitsunekode/sweep-core": "workspace:*",
+        "@kitsunekode/sweep-display": "workspace:*",
+        "@kitsunekode/sweep-protocol": "workspace:*",
+        "@kitsunekode/sweep-ui": "workspace:*",
+        "commander": "catalog:",
+      },
+      "devDependencies": {
+        "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "oxfmt": "catalog:",
+        "oxlint": "catalog:",
+        "typescript": "catalog:",
+      },
     },
     "packages/core": {
       "name": "@kitsunekode/sweep-core",
+      "dependencies": {
+        "@kitsunekode/sweep-protocol": "workspace:*",
+        "ajv": "catalog:",
+      },
+      "devDependencies": {
+        "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "oxfmt": "catalog:",
+        "oxlint": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/display": {
+      "name": "@kitsunekode/sweep-display",
+      "dependencies": {
+        "@kitsunekode/sweep-protocol": "workspace:*",
+        "picocolors": "catalog:",
+      },
+      "devDependencies": {
+        "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "oxfmt": "catalog:",
+        "oxlint": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/integration-tests": {
+      "name": "@kitsunekode/sweep-integration-tests",
+      "devDependencies": {
+        "@kitsunekode/sweep-cli": "workspace:*",
+        "@kitsunekode/sweep-core": "workspace:*",
+        "@kitsunekode/sweep-display": "workspace:*",
+        "@kitsunekode/sweep-protocol": "workspace:*",
+        "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "@kitsunekode/sweep-ui": "workspace:*",
+        "bun-types": "catalog:",
+        "oxfmt": "catalog:",
+        "oxlint": "catalog:",
+        "typescript": "catalog:",
+      },
     },
     "packages/protocol": {
       "name": "@kitsunekode/sweep-protocol",
+      "devDependencies": {
+        "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "oxfmt": "catalog:",
+        "oxlint": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/typescript-config": {
+      "name": "@kitsunekode/sweep-typescript-config",
     },
     "packages/ui": {
       "name": "@kitsunekode/sweep-ui",
+      "dependencies": {
+        "@kitsunekode/sweep-display": "workspace:*",
+        "@kitsunekode/sweep-protocol": "workspace:*",
+        "@opentui/core": "catalog:",
+      },
+      "devDependencies": {
+        "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "oxfmt": "catalog:",
+        "oxlint": "catalog:",
+        "typescript": "catalog:",
+      },
     },
+  },
+  "catalog": {
+    "@opentui/core": "^0.2.3",
+    "ajv": "^8.18.0",
+    "bun-types": "latest",
+    "commander": "^12.1.0",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^0.13.0",
+    "picocolors": "^1.1.1",
+    "typescript": "^5.7.2",
   },
   "packages": {
     "@babel/code-frame": ["@babel/code-frame@7.29.0", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.28.5", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw=="],
@@ -112,11 +184,17 @@
 
     "@inquirer/external-editor": ["@inquirer/external-editor@1.0.3", "", { "dependencies": { "chardet": "^2.1.1", "iconv-lite": "^0.7.0" }, "peerDependencies": { "@types/node": ">=18" }, "optionalPeers": ["@types/node"] }, "sha512-RWbSrDiYmO4LbejWY7ttpxczuwQyZLBUyygsA9Nsv95hpzUWwnNTVQmAq3xuh7vNwCp07UTmE5i11XAEExx4RA=="],
 
-    "@kitsunekode/sweep-cli": ["@kitsunekode/sweep-cli@workspace:packages/cli"],
+    "@kitsunekode/sweep-cli": ["@kitsunekode/sweep-cli@workspace:apps/cli"],
 
     "@kitsunekode/sweep-core": ["@kitsunekode/sweep-core@workspace:packages/core"],
 
+    "@kitsunekode/sweep-display": ["@kitsunekode/sweep-display@workspace:packages/display"],
+
+    "@kitsunekode/sweep-integration-tests": ["@kitsunekode/sweep-integration-tests@workspace:packages/integration-tests"],
+
     "@kitsunekode/sweep-protocol": ["@kitsunekode/sweep-protocol@workspace:packages/protocol"],
+
+    "@kitsunekode/sweep-typescript-config": ["@kitsunekode/sweep-typescript-config@workspace:packages/typescript-config"],
 
     "@kitsunekode/sweep-ui": ["@kitsunekode/sweep-ui@workspace:packages/ui"],
 
@@ -198,6 +276,18 @@
 
     "@oxlint/win32-x64": ["@oxlint/win32-x64@0.13.2", "", { "os": "win32", "cpu": "x64" }, "sha512-G8FM8RTJRMt2dPRJ/TXhqIEu9k00vRAoh3DSV2r3o+jD8FZDBZXOgoDn2D0F9HqgFLEOVTxpfalmWntyk2hmyw=="],
 
+    "@turbo/darwin-64": ["@turbo/darwin-64@2.9.18", "", { "os": "darwin", "cpu": "x64" }, "sha512-9f27peFu16ur8c0v9nUFUEyBnbKuuFsUTjHFWfmwGfzySBXbHwzU44QhZon6Mznz0cHsIr3984NQj/bVrnGSRw=="],
+
+    "@turbo/darwin-arm64": ["@turbo/darwin-arm64@2.9.18", "", { "os": "darwin", "cpu": "arm64" }, "sha512-9A6TMRq/Ib+QnbhLlgkhOm+624wO4pzSQ/yQviQfWHOlFvaYxdnIAYmu2H6TS6y7kSVL0DvzNe04NbESTOzFVQ=="],
+
+    "@turbo/linux-64": ["@turbo/linux-64@2.9.18", "", { "os": "linux", "cpu": "x64" }, "sha512-zCdIDtz69AnbYh913elJRRoF3QY5aa2HNnf+4rAkc7bQ+tWujiDkCNV7stazOUPggaDvhKIf2Z87qHftTeXSkw=="],
+
+    "@turbo/linux-arm64": ["@turbo/linux-arm64@2.9.18", "", { "os": "linux", "cpu": "arm64" }, "sha512-Va1kXI04naMgYwqv/5Dfa36dTDx8015U7oaQAjrXa45ua9OoFjSV4OmvkML4EmXvUclQHCiBRbY8bvd0jV7eAg=="],
+
+    "@turbo/windows-64": ["@turbo/windows-64@2.9.18", "", { "os": "win32", "cpu": "x64" }, "sha512-m0kDhZANxSNz9ck1ybogFscHabriAsp4eDFNrN/1H5WrgTF7b3VlcPZnhuO3v2+E2KnCbeAc+UUT10BZZHdDKw=="],
+
+    "@turbo/windows-arm64": ["@turbo/windows-arm64@2.9.18", "", { "os": "win32", "cpu": "arm64" }, "sha512-nUdR8WqoomUys9iIQmG45TMiizJ+5BV8egSeLLZba/AWblyp3fVBcIH1kSE58OtK4g2YzbMJEth6Ttv9w5rqMA=="],
+
     "@types/conventional-commits-parser": ["@types/conventional-commits-parser@5.0.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-BgT2szDXnVypgpNxOK8aL5SGjUdaQbC++WZNjF1Qge3Og2+zhHj+RWhmehLhYyvQwqAmvezruVfOf8+3m74W+g=="],
 
     "@types/node": ["@types/node@22.19.17", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-wGdMcf+vPYM6jikpS/qhg6WiqSV/OhG+jeeHT/KlVqxYfD40iYJf9/AE1uQxVWFvU7MipKRkRv8NSHiCGgPr8Q=="],
@@ -226,7 +316,7 @@
 
     "bun-ffi-structs": ["bun-ffi-structs@0.2.2", "", { "peerDependencies": { "typescript": "^5" } }, "sha512-N/ZWtyN0piZlrXQT7TO0V+q952orYqkfhXRXM1Hcbb+R3QSiBH4vLnib187Mrs1H7pWIYECAmPeapGYDOMCl+w=="],
 
-    "bun-types": ["bun-types@1.3.12", "", { "dependencies": { "@types/node": "*" } }, "sha512-HqOLj5PoFajAQciOMRiIZGNoKxDJSr6qigAttOX40vJuSp6DN/CxWp9s3C1Xwm4oH7ybueITwiaOcWXoYVoRkA=="],
+    "bun-types": ["bun-types@1.3.14", "", { "dependencies": { "@types/node": "*" } }, "sha512-4N0ig0fEomHt5R0KCFWjovxow98rIoRwKolrYdCcknNwMekCXRnWEUvgu5soYV8QXtVsrUD8B95MBOZGPvr6KQ=="],
 
     "callsites": ["callsites@3.1.0", "", {}, "sha512-P8BjAsXvZS+VIDUI11hHCQEv74YT67YUi5JJFNWIqL235sBmjX4+qx9Muvls5ivyNENctx46xQLQ3aTuE7ssaQ=="],
 
@@ -529,6 +619,8 @@
     "tinypool": ["tinypool@2.1.0", "", {}, "sha512-Pugqs6M0m7Lv1I7FtxN4aoyToKg1C4tu+/381vH35y8oENM/Ai7f7C4StcoK4/+BSw9ebcS8jRiVrORFKCALLw=="],
 
     "to-regex-range": ["to-regex-range@5.0.1", "", { "dependencies": { "is-number": "^7.0.0" } }, "sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ=="],
+
+    "turbo": ["turbo@2.9.18", "", { "optionalDependencies": { "@turbo/darwin-64": "2.9.18", "@turbo/darwin-arm64": "2.9.18", "@turbo/linux-64": "2.9.18", "@turbo/linux-arm64": "2.9.18", "@turbo/windows-64": "2.9.18", "@turbo/windows-arm64": "2.9.18" }, "bin": { "turbo": "bin/turbo" } }, "sha512-bwabv6PupzeavybzEoArBAkwq5fnzwf8OFnRtpHwnviFWuwJPFxtyH+aVp36TmIqK3aYYgtTJ3J0m2ysxxSzQg=="],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

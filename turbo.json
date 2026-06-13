@@ -1,17 +1,43 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "globalEnv": ["CI", "OS", "RUNNER_OS"],
+  "globalPassThroughEnv": ["HOME", "PATH", "TMPDIR", "SWEEP_ENGINE_PATH", "NO_COLOR"],
   "tasks": {
-    "build": {
-      "outputs": ["dist/**"]
+    "transit": {
+      "dependsOn": ["^transit"]
     },
-    "lint": {
-      "outputs": []
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["$TURBO_ROOT$/dist/**"]
     },
     "typecheck": {
-      "outputs": []
+      "dependsOn": ["transit"]
+    },
+    "lint": {
+      "dependsOn": ["transit"]
+    },
+    "fmt": {
+      "dependsOn": ["transit"],
+      "cache": true
     },
     "test": {
-      "outputs": []
+      "dependsOn": ["transit", "^build"]
+    },
+    "check": {
+      "dependsOn": ["fmt", "lint", "test", "typecheck"],
+      "cache": false
+    },
+    "preflight": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "clean": {
+      "cache": false
     }
   }
 }
