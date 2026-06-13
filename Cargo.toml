@@ -26,3 +26,8 @@ rayon = "1"
 [workspace.lints.rust]
 unwrap_used = "deny"
 expect_used = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

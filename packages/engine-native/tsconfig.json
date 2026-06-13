@@ -1,0 +1,8 @@
+{
+  "extends": "@kitsunekode/sweep-typescript-config/base.json",
+  "compilerOptions": {
+    "rootDir": "scripts",
+    "noEmit": true
+  },
+  "include": ["scripts/**/*.ts"]
+}

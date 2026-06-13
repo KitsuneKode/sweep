@@ -28,9 +28,37 @@ bun run preflight      # turbo: publish smoke tests (after build)
 
 ```bash
 cargo build -p sweep-engine-cli   # produces target/debug/sweep-engine
+cargo build --release -p sweep-engine-cli
 cargo test --workspace
 cargo clippy --workspace -- -D warnings
 ```
+
+### Native engine npm packages (Turbo-style)
+
+The Rust binary ships as optional platform packages (`@kitsunekode/sweep-engine-*`).
+Root `optionalDependencies` versions are synced via `bun run sync-engine-versions`
+(after `changeset version`).
+
+| Command                                      | Purpose                                         |
+| -------------------------------------------- | ----------------------------------------------- |
+| `bun run engine:build`                       | Release build of `sweep-engine`                 |
+| `bun run engine:pack -- --platform linux-64` | Pack binary into `native-packages/linux-64/`    |
+| `bun run engine:verify`                      | Smoke-test local binary                         |
+| `bun run sync-engine-versions`               | Align optionalDep + template versions with root |
+
+**Runtime resolution** (`packages/core/src/rust-engine.ts`):
+
+1. `SWEEP_ENGINE_PATH`
+2. Installed optional `@kitsunekode/sweep-engine-{platform}-{arch}`
+3. `target/debug` or `target/release` under repo root (dev)
+4. `sweep-engine` on `PATH`
+
+**Release CI:** `.github/workflows/release.yml` builds all five platforms, packs
+artifacts, then `scripts/publish-release.ts` publishes native packages before
+`@kitsunekode/sweep`. Reusable workflow: `native-engine-release.yml`.
+
+**Do not** add `native-packages/*` to Bun workspaces — they are publish-time
+artifacts only.
 
 ## Turborepo
 

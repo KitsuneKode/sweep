@@ -66,6 +66,10 @@ describe("engine contract fixtures", () => {
     });
 
     test(`rust engine: ${fixture.name}`, () => {
+      if (process.env.SWEEP_ENGINE_FROM_NPM === "1") {
+        return;
+      }
+
       if (!existsSync(LOCAL_BINARY)) {
         return;
       }

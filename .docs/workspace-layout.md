@@ -11,10 +11,12 @@ sweep/
 ├── apps/cli/              # Published CLI surface (bundled to dist/)
 ├── packages/
 │   ├── core/              # Engine: config, scan, plan, apply
+│   ├── engine-native/     # Native engine pack scripts (private)
 │   ├── protocol/          # Shared types + JSON Schema
 │   ├── display/           # Terminal presentation helpers
 │   ├── ui/                # OpenTUI interactive mode
 │   └── typescript-config/ # Shared tsconfig
+├── native-packages/       # Platform npm package templates (not a workspace)
 ├── crates/sweep-*/        # Rust engine experiment (Cargo workspace)
 ├── tests/                 # Bun test suite
 ├── scripts/               # build, preflight, fixtures
@@ -38,6 +40,7 @@ sweep/
 | -------------------------------------- | -------------------------------------------------------- |
 | `@kitsunekode/sweep-protocol`          | `ScanPlan`, `ApplyReport`, `ScanEvent`, schemas          |
 | `@kitsunekode/sweep-core`              | Config resolution, guardrails, scanner, planner, cleaner |
+| `@kitsunekode/sweep-engine-native`     | Pack scripts for platform npm packages (private)         |
 | `@kitsunekode/sweep-display`           | Bytes formatting, spinners, progressive scan output      |
 | `@kitsunekode/sweep-ui`                | OpenTUI app and selection state                          |
 | `@kitsunekode/sweep-typescript-config` | Base `tsconfig` for workspaces                           |
@@ -61,7 +64,8 @@ CI runs Rust checks only when `crates/` or related paths change (see
 2. Bun bundles `apps/cli/src/bin.ts` → `dist/sweep.js`.
 3. UI entry bundles separately → `dist/sweep-ui.js` (lazy-loaded by CLI).
 4. Root `package.json` `files: ["dist"]` — only `dist/` ships to npm.
-5. `prepublishOnly` runs `turbo run check build preflight`.
+5. Optional `@kitsunekode/sweep-engine-*` platform packages ship the Rust binary.
+6. `prepublishOnly` runs `turbo run check build preflight`.
 
 ## Turborepo tasks
 
@@ -84,4 +88,5 @@ turbo. Root `bun run test` runs the integration test package against `tests/`.
 ## What is not published
 
 All `apps/*` and `packages/*` workspaces are `"private": true`. Consumers install
-`@kitsunekode/sweep` from npm and receive only the bundled `dist/` artifacts.
+`@kitsunekode/sweep` from npm and receive the bundled `dist/` artifacts plus an
+optional native engine package for their OS/arch when supported.

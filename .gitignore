@@ -8,3 +8,4 @@ coverage/
 .codex
 .turbo/
 target/
+native-packages/*/bin/

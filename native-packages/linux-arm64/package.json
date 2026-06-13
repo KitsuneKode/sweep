@@ -1,0 +1,22 @@
+{
+  "name": "@kitsunekode/sweep-engine-linux-arm64",
+  "version": "0.2.0",
+  "description": "Native sweep-engine binary for linux arm64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KitsuneKode/sweep.git"
+  },
+  "files": [
+    "bin"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

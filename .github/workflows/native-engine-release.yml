@@ -1,0 +1,120 @@
+name: Native engine release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Semver to pack into native packages
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semver to pack (defaults to package.json)
+        required: false
+        type: string
+
+concurrency:
+  group: native-engine-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build ${{ matrix.id }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-64
+            runs-on: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: sweep-engine
+          - id: linux-arm64
+            runs-on: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: sweep-engine
+          - id: darwin-64
+            runs-on: macos-13
+            target: x86_64-apple-darwin
+            binary: sweep-engine
+          - id: darwin-arm64
+            runs-on: macos-latest
+            target: aarch64-apple-darwin
+            binary: sweep-engine
+          - id: windows-64
+            runs-on: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: sweep-engine.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install cross linker (linux-arm64)
+        if: matrix.id == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: cargo build --release
+        run: cargo build --release -p sweep-engine-cli --target ${{ matrix.target }}
+
+      - name: Pack native package
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          BINARY="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          bun run packages/engine-native/scripts/pack.ts --platform ${{ matrix.id }} --binary "$BINARY" --version "$VERSION"
+
+      - name: Verify binary
+        if: runner.os != 'Windows'
+        run: bun run packages/engine-native/scripts/verify-binary.ts --binary "native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-package-${{ matrix.id }}
+          path: native-packages/${{ matrix.id }}
+          retention-days: 7
+
+  merge:
+    name: merge native packages
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-package-*
+          path: artifacts
+
+      - name: Normalize native-packages layout
+        run: |
+          mkdir -p native-packages
+          for dir in artifacts/native-package-*; do
+            id=$(basename "$dir" | sed 's/native-package-//')
+            rm -rf "native-packages/$id"
+            mv "$dir" "native-packages/$id"
+          done
+          find native-packages -maxdepth 3 -type f | sort
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-packages-all
+          path: native-packages
+          retention-days: 7

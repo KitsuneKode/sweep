@@ -10,7 +10,8 @@
     "./plan": "./src/plan.ts",
     "./scanner": "./src/scanner.ts",
     "./cleaner": "./src/cleaner.ts",
-    "./rust-engine": "./src/rust-engine.ts"
+    "./rust-engine": "./src/rust-engine.ts",
+    "./native-platforms": "./src/native-platforms.ts"
   },
   "scripts": {
     "test": "bun test src test-support",

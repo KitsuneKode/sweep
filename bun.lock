@@ -20,6 +20,13 @@
         "oxlint": "catalog:",
         "turbo": "^2.6.1",
       },
+      "optionalDependencies": {
+        "@kitsunekode/sweep-engine-darwin-64": "0.2.0",
+        "@kitsunekode/sweep-engine-darwin-arm64": "0.2.0",
+        "@kitsunekode/sweep-engine-linux-64": "0.2.0",
+        "@kitsunekode/sweep-engine-linux-arm64": "0.2.0",
+        "@kitsunekode/sweep-engine-windows-64": "0.2.0",
+      },
     },
     "apps/cli": {
       "name": "@kitsunekode/sweep-cli",
@@ -58,6 +65,19 @@
       },
       "devDependencies": {
         "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "oxfmt": "catalog:",
+        "oxlint": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/engine-native": {
+      "name": "@kitsunekode/sweep-engine-native",
+      "dependencies": {
+        "@kitsunekode/sweep-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "bun-types": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
         "typescript": "catalog:",
@@ -197,6 +217,8 @@
     "@kitsunekode/sweep-core": ["@kitsunekode/sweep-core@workspace:packages/core"],
 
     "@kitsunekode/sweep-display": ["@kitsunekode/sweep-display@workspace:packages/display"],
+
+    "@kitsunekode/sweep-engine-native": ["@kitsunekode/sweep-engine-native@workspace:packages/engine-native"],
 
     "@kitsunekode/sweep-integration-tests": ["@kitsunekode/sweep-integration-tests@workspace:packages/integration-tests"],
 

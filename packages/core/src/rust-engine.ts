@@ -1,23 +1,79 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ApplyReport, ScanPlan, SweepConfig } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_CONFIG } from "./config.js";
 import type { ScanToPlanOptions } from "./engine.js";
+import { nativePlatformForCurrentProcess } from "./native-platforms.js";
 
 export type EngineBackend = "js" | "rust";
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Root of the published `@kitsunekode/sweep` npm package, or the repo root in dev.
+ *
+ * - Bundled CLI (`dist/sweep.js`): parent of `dist/`
+ * - Dev (`packages/core/src/...`): walk up to `package.json` named `@kitsunekode/sweep`
+ */
+export function sweepPackageRoot(fromModuleDir: string = MODULE_DIR): string {
+  const normalized = fromModuleDir.replace(/\\/g, "/");
+
+  if (normalized.includes("/dist/") || normalized.endsWith("/dist")) {
+    const distDir = normalized.endsWith("/dist")
+      ? normalized
+      : normalized.slice(0, normalized.lastIndexOf("/dist"));
+    return resolve(distDir);
+  }
+
+  let dir = fromModuleDir;
+  for (let depth = 0; depth < 8; depth++) {
+    const pkgPath = join(dir, "package.json");
+    if (existsSync(pkgPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(pkgPath, "utf8")) as { name?: string };
+        if (parsed.name === "@kitsunekode/sweep") {
+          return resolve(dir);
+        }
+      } catch {
+        // keep walking
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+
+  return resolve(fromModuleDir, "../../..");
+}
+
+function resolveOptionalNativeBinary(packageRoot: string): string | null {
+  const platform = nativePlatformForCurrentProcess();
+  if (!platform) {
+    return null;
+  }
+
+  try {
+    const require = createRequire(join(packageRoot, "package.json"));
+    return require.resolve(`${platform.npmName}/bin/${platform.binaryName}`);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Resolve the `sweep-engine` binary used for Rust backend subprocess calls.
  *
  * Resolution order:
  * 1. `SWEEP_ENGINE_PATH` environment variable
- * 2. `target/debug/sweep-engine` in the repo root (local dev build)
- * 3. `sweep-engine` on `PATH`
+ * 2. Installed optional `@kitsunekode/sweep-engine-*` platform package
+ * 3. `target/debug/sweep-engine` or `target/release/sweep-engine` under package root (dev)
+ * 4. `sweep-engine` on `PATH`
  */
 export function resolveRustEngineBinary(): string {
   const fromEnv = process.env.SWEEP_ENGINE_PATH;
@@ -25,18 +81,36 @@ export function resolveRustEngineBinary(): string {
     return fromEnv;
   }
 
-  const localDebug = join(REPO_ROOT, "target", "debug", "sweep-engine");
-  if (existsSync(localDebug)) {
-    return localDebug;
+  const packageRoot = sweepPackageRoot();
+
+  const fromOptional = resolveOptionalNativeBinary(packageRoot);
+  if (fromOptional) {
+    return fromOptional;
+  }
+
+  for (const profile of ["debug", "release"] as const) {
+    const local = join(packageRoot, "target", profile, "sweep-engine");
+    if (existsSync(local)) {
+      return local;
+    }
+  }
+
+  const localWindows = join(packageRoot, "target", "debug", "sweep-engine.exe");
+  if (existsSync(localWindows)) {
+    return localWindows;
   }
 
   return "sweep-engine";
 }
 
-function runEngine(args: string[], stdin?: string): string {
+interface RunEngineOptions {
+  cwd?: string;
+}
+
+function runEngine(args: string[], stdin?: string, options: RunEngineOptions = {}): string {
   const binary = resolveRustEngineBinary();
   const proc = spawnSync(binary, args, {
-    cwd: REPO_ROOT,
+    cwd: options.cwd ?? process.cwd(),
     input: stdin,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,

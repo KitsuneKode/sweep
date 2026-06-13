@@ -78,6 +78,20 @@ sweep doctor [path] [options]
 | `--engine <backend>`  |       | Scan engine: `js` (default), `rust`, or `auto`       |
 | `--no-color`          |       | Disable color output                                 |
 
+### Rust scan engine
+
+`--engine rust` uses the native `sweep-engine` binary when available. After
+`npm install`, matching platform packages (`@kitsunekode/sweep-engine-*`) are
+installed automatically as optional dependencies. On unsupported platforms or
+when Rust cannot honor your scan options (custom `.sweeprc`, exact sizing, etc.),
+sweep falls back to the JS engine.
+
+Override the binary path in dev:
+
+```bash
+export SWEEP_ENGINE_PATH=/path/to/sweep-engine
+```
+
 ### `scan` options
 
 `scan` supports the shared scan options above and adds:

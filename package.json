@@ -62,8 +62,12 @@
     "pack": "npm pack",
     "changeset": "changeset",
     "commitlint": "commitlint",
-    "version": "changeset version",
-    "release": "bun run prepublishOnly && changeset publish",
+    "version": "changeset version && bun run sync-engine-versions",
+    "sync-engine-versions": "bun run scripts/sync-engine-versions.ts",
+    "engine:build": "cargo build --release -p sweep-engine-cli",
+    "engine:pack": "bun run packages/engine-native/scripts/pack.ts",
+    "engine:verify": "bun run packages/engine-native/scripts/verify-binary.ts",
+    "release": "bun run prepublishOnly && bun run scripts/publish-release.ts",
     "prepare": "husky || true",
     "prepublishOnly": "turbo run check build preflight"
   },
@@ -82,6 +86,13 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "turbo": "^2.6.1"
+  },
+  "optionalDependencies": {
+    "@kitsunekode/sweep-engine-darwin-64": "0.2.0",
+    "@kitsunekode/sweep-engine-darwin-arm64": "0.2.0",
+    "@kitsunekode/sweep-engine-linux-64": "0.2.0",
+    "@kitsunekode/sweep-engine-linux-arm64": "0.2.0",
+    "@kitsunekode/sweep-engine-windows-64": "0.2.0"
   },
   "engines": {
     "node": ">=18.0.0"

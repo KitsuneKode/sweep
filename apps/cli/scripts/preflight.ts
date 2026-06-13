@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { NATIVE_PLATFORM_NPM_NAMES } from "@kitsunekode/sweep-core/native-platforms";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const DIST = join(REPO_ROOT, "dist/sweep.js");
@@ -160,6 +161,29 @@ check("bin points to dist/sweep.js", () => {
 check("files array includes 'dist'", () => {
   const { files } = pkg() as { files?: string[] };
   assert(Array.isArray(files) && files.includes("dist"), `got: ${JSON.stringify(files)}`);
+});
+
+check("optionalDependencies include all native engine packages", () => {
+  const { optionalDependencies, version } = pkg() as {
+    optionalDependencies?: Record<string, string>;
+    version: string;
+  };
+  assert(optionalDependencies, "missing optionalDependencies");
+  for (const name of NATIVE_PLATFORM_NPM_NAMES) {
+    assert(name in optionalDependencies, `missing optionalDependency: ${name}`);
+    assert(
+      optionalDependencies[name] === version,
+      `${name} version ${optionalDependencies[name]} !== root ${version}`,
+    );
+  }
+});
+
+check("native-packages templates exist for each platform", () => {
+  for (const name of NATIVE_PLATFORM_NPM_NAMES) {
+    const id = name.replace("@kitsunekode/sweep-engine-", "");
+    const templatePath = join(REPO_ROOT, "native-packages", id, "package.json");
+    assert(existsSync(templatePath), `missing template: ${templatePath}`);
+  }
 });
 
 check(".env is not tracked by git", () => {
