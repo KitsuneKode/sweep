@@ -37,7 +37,8 @@ export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
       console.log(`${status}\t${check.name}\t${check.detail}`);
     }
 
-    exitWith(EXIT.OK);
+    const hasWarnings = checks.some((check) => !check.ok);
+    exitWith(hasWarnings ? EXIT.ABORTED : EXIT.OK);
   } catch (err) {
     handleFatalError(err);
   }

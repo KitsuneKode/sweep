@@ -5,6 +5,7 @@ import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
   resolveEngineBackend,
+  resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
   runScanToPlan,
@@ -19,9 +20,14 @@ export async function handlePlan(pathArg: string, opts: CliOptions): Promise<voi
   try {
     assertSafeCwd(targetDir);
     const config = resolveScanConfig(targetDir, opts);
+    const projectConfig = resolveProjectScanConfig(targetDir, opts);
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
-    const { plan } = runScanToPlan(targetDir, config, { selectionPolicy, engine });
+    const { plan } = runScanToPlan(targetDir, config, {
+      selectionPolicy,
+      engine,
+      projectConfig,
+    });
 
     writeJson(plan);
     exitWith(EXIT.OK);

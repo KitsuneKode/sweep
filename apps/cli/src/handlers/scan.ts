@@ -6,6 +6,7 @@ import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
   resolveEngineBackend,
+  resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
   runScanToPlan,
@@ -24,6 +25,7 @@ export async function handleScan(
   try {
     assertSafeCwd(targetDir);
     const config = resolveScanConfig(targetDir, opts);
+    const projectConfig = resolveProjectScanConfig(targetDir, opts);
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
 
@@ -35,6 +37,7 @@ export async function handleScan(
         exact: false,
         selectionPolicy,
         engine,
+        projectConfig,
         onEntry: (entry) => {
           const candidate = toCandidate(entry);
           writeJsonLine({ type: "candidate_found", candidate } satisfies ScanEvent);
@@ -58,19 +61,24 @@ export async function handleScan(
     }
 
     if (opts.json) {
-      const { plan } = runScanToPlan(targetDir, config, { selectionPolicy, engine });
+      const { plan } = runScanToPlan(targetDir, config, {
+        selectionPolicy,
+        engine,
+        projectConfig,
+      });
       writeJson(plan);
       exitWith(EXIT.OK);
     }
 
-    const { createProgressiveScanRenderer, printBanner } =
+    const { createProgressiveScanRenderer, printBanner, printGroupedScanPlan } =
       await import("@kitsunekode/sweep-display");
 
     printBanner();
     const progressive = createProgressiveScanRenderer("Scanning...");
-    const { result } = runScanToPlan(targetDir, config, {
+    const { result, plan } = runScanToPlan(targetDir, config, {
       selectionPolicy,
       engine,
+      projectConfig,
       onEntry: (entry) => {
         const candidate = toCandidate(entry);
         progressive.onCandidate(entry, candidate.riskTier);
@@ -82,6 +90,7 @@ export async function handleScan(
       totalBytes: result.estimatedTotalBytes,
       exact: result.exact,
     });
+    printGroupedScanPlan(plan, targetDir);
     exitWith(EXIT.OK);
   } catch (err) {
     handleFatalError(err);

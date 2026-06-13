@@ -7,12 +7,13 @@ import type {
   SelectionPolicy,
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
-import { loadConfig } from "@kitsunekode/sweep-core/config";
+import { DEFAULT_CONFIG, loadConfig } from "@kitsunekode/sweep-core/config";
 import { scanToPlan, type ScanToPlanOptions } from "@kitsunekode/sweep-core/engine";
 import { assertSafePattern } from "@kitsunekode/sweep-core/guardrails";
 import {
   scanToPlanViaRust,
   isRustEngineAvailable,
+  rustScanBlockedReason,
   type EngineBackend,
 } from "@kitsunekode/sweep-core/rust-engine";
 
@@ -38,6 +39,11 @@ export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepCon
   return loadConfig(targetDir, opts.config, cliOverrides);
 }
 
+/** Config from project files only (no CLI pattern/ignore/depth overrides). */
+export function resolveProjectScanConfig(targetDir: string, opts: CliOptions): SweepConfig {
+  return loadConfig(targetDir, opts.config, {});
+}
+
 export function resolveEngineBackend(opts: Pick<CliOptions, "engine">): EngineBackend {
   if (opts.engine === "js") return "js";
   if (opts.engine === "rust") return "rust";
@@ -47,9 +53,21 @@ export function resolveEngineBackend(opts: Pick<CliOptions, "engine">): EngineBa
 export function runScanToPlan(
   targetDir: string,
   config: SweepConfig,
-  options: ScanToPlanOptions & { engine?: EngineBackend } = {},
+  options: ScanToPlanOptions & {
+    engine?: EngineBackend;
+    projectConfig?: SweepConfig;
+  } = {},
 ): { result: ScanResult; plan: ScanPlan } {
+  const projectConfig = options.projectConfig ?? DEFAULT_CONFIG;
+
   if (options.engine === "rust") {
+    const blocked = rustScanBlockedReason(config, projectConfig, options);
+    if (blocked) {
+      console.error(`warning: ${blocked}; using JS engine`);
+      const { engine: _engine, projectConfig: _projectConfig, ...scanOptions } = options;
+      return scanToPlan(targetDir, config, scanOptions);
+    }
+
     const plan = scanToPlanViaRust(targetDir);
     return {
       plan,

@@ -1,4 +1,5 @@
 import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
+import { ConfigParseError } from "@kitsunekode/sweep-core/config";
 import { PlanValidationError } from "@kitsunekode/sweep-core/plan";
 import { printError } from "@kitsunekode/sweep-display";
 
@@ -16,7 +17,11 @@ export function resolveExitCode(err: unknown): ExitCode {
   if (err instanceof GuardrailError) {
     return err.code as ExitCode;
   }
-  if (err instanceof PlanValidationError || err instanceof SyntaxError) {
+  if (
+    err instanceof PlanValidationError ||
+    err instanceof ConfigParseError ||
+    err instanceof SyntaxError
+  ) {
     return EXIT.CONFIG_PARSE;
   }
   return EXIT.FAILURE;

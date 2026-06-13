@@ -35,7 +35,7 @@ function addScanOptions<T extends Command>(command: T): T {
     .option("--select <mode>", "Default selection policy: default, safe, all, none", "default")
     .option("--include-dangerous", "Include dangerous candidates in selection", false)
     .option("--config <path>", "Explicit config file path")
-    .option("--engine <backend>", "Scan engine: auto (default), js, or rust", "auto")
+    .option("--engine <backend>", "Scan engine: js (default), rust, or auto", "js")
     .option("--no-color", "Disable color output");
 }
 

@@ -8,6 +8,7 @@ import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
   resolveEngineBackend,
+  resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
   runScanToPlan,
@@ -22,7 +23,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     assertSafeCwd(targetDir);
 
     if (!process.stdout.isTTY) {
-      throw new GuardrailError("sweep ui requires a TTY terminal.", 4);
+      throw new GuardrailError("sweep ui requires a TTY terminal.");
     }
 
     if (opts.forceLarge && !opts.yes) {
@@ -32,9 +33,14 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     }
 
     const config = resolveScanConfig(targetDir, opts);
+    const projectConfig = resolveProjectScanConfig(targetDir, opts);
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
-    const { plan } = runScanToPlan(targetDir, config, { selectionPolicy, engine });
+    const { plan } = runScanToPlan(targetDir, config, {
+      selectionPolicy,
+      engine,
+      projectConfig,
+    });
 
     if (plan.candidates.length === 0) {
       console.log("Nothing to clean.");
@@ -42,18 +48,16 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     }
 
     const { runSweepUi } = await import(new URL("../sweep-ui.js", import.meta.url).href);
-    const uiResult = await runSweepUi(plan, {
+    const selectedPlan = await runSweepUi(plan, {
       yes: opts.yes,
       dryRun: opts.dryRun,
-      includeDangerous: opts.includeDangerous,
     });
 
-    if (!uiResult) {
+    if (!selectedPlan) {
       printAborted();
       exitWith(EXIT.ABORTED);
     }
 
-    const selectedPlan = uiResult.plan;
     const selectedBytes = getSelectedBytes(selectedPlan);
     assertSizeLimit(selectedBytes, config.maxSizeGB, opts.forceLarge);
 

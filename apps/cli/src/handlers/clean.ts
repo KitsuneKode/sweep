@@ -6,19 +6,24 @@ import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
 import {
   clearDeletionProgress,
   createProgressiveScanRenderer,
+  formatBytes,
+  printAborted,
   printBanner,
   printCleanResult,
   printDeletionProgress,
   printDryRunNotice,
+  printGroupedScanPlan,
 } from "@kitsunekode/sweep-display";
 import { toCandidate } from "@kitsunekode/sweep-core/planner";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
   resolveEngineBackend,
+  resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
   runScanToPlan,
+  promptConfirm,
 } from "./shared.js";
 
 export async function handleClean(pathArg: string, opts: CliOptions): Promise<void> {
@@ -36,6 +41,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     }
 
     const config = resolveScanConfig(targetDir, opts);
+    const projectConfig = resolveProjectScanConfig(targetDir, opts);
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
 
@@ -47,6 +53,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       exact: opts.dryRun,
       selectionPolicy,
       engine,
+      projectConfig,
       onEntry: (entry) => {
         const candidate = toCandidate(entry);
         spinner.onCandidate(entry, candidate.riskTier);
@@ -58,6 +65,8 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       totalBytes: result.estimatedTotalBytes,
       exact: result.exact,
     });
+
+    printGroupedScanPlan(plan, targetDir);
 
     if (result.entries.length === 0) {
       exitWith(EXIT.OK);
@@ -74,6 +83,16 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     if (plan.selectedCandidateIds.length === 0) {
       console.log("Nothing selected by the current policy. Use --select or --include-dangerous.");
       exitWith(EXIT.OK);
+    }
+
+    if (!opts.yes) {
+      const confirmed = await promptConfirm(
+        `Delete ${plan.selectedCandidateIds.length} selected items (~${formatBytes(selectedBytes)})?`,
+      );
+      if (!confirmed) {
+        printAborted();
+        exitWith(EXIT.ABORTED);
+      }
     }
 
     const selected = plan.candidates.filter((candidate) =>
