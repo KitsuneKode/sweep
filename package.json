@@ -70,8 +70,16 @@
     "@changesets/cli": "^2.30.0",
     "@commitlint/cli": "^19.6.0",
     "@commitlint/config-conventional": "^19.6.0",
+    "@kitsunekode/sweep-cli": "workspace:*",
+    "@kitsunekode/sweep-core": "workspace:*",
+    "@kitsunekode/sweep-display": "workspace:*",
+    "@kitsunekode/sweep-protocol": "workspace:*",
+    "@kitsunekode/sweep-ui": "workspace:*",
+    "bun-types": "catalog:",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.10",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
     "turbo": "^2.6.1"
   },
   "engines": {

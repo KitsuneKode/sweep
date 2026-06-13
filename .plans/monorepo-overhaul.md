@@ -4,7 +4,7 @@
 - **Scope:** `repo`
 - **Created:** 2026-06-13
 - **Updated:** 2026-06-13
-- **Commit:** `uncommitted` (branch `feat/monorepo-overhaul`)
+- **Commit:** `898f14d` (branch `feat/monorepo-overhaul`, 13 scoped commits)
 - **Cursor plan:** `sweep_monorepo_overhaul_11eee2d6.plan.md`
 
 ## Summary
@@ -31,7 +31,7 @@ engine subprocess with parity harness, publish fix, trust/UX hardening.
 
 ### Not done / follow-up
 
-- [ ] **Land on git** — all work is uncommitted on `feat/monorepo-overhaul` (blocks `Commit:` metadata and preflight git-clean check)
+- [x] **Land on git** — `898f14d` on `feat/monorepo-overhaul` (13 scoped commits)
 - [ ] Forward `SweepConfig` to Rust engine (`--pattern`, `--ignore`, `--depth`)
 - [ ] Rust `apply_plan` implementation
 - [ ] Parity fixtures `basic` and `monorepo` (currently `#[ignore]`)

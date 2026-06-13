@@ -20,7 +20,7 @@ const dir = (...parts: string[]) => join(tmpDir, ...parts);
 function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
   const withEngine = args.includes("--engine") ? args : ["--engine", "js", ...args];
   const proc = Bun.spawnSync({
-    cmd: [Bun.which("bun") ?? "bun", "run", "apps/cli/src/bin.ts", "--", ...withEngine],
+    cmd: ["node", join(REPO_ROOT, "dist/sweep.js"), ...withEngine],
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
