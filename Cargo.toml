@@ -1,3 +1,28 @@
 [workspace]
-members = ["crates/*"]
+members = [
+    "crates/sweep-types",
+    "crates/sweep-errors",
+    "crates/sweep-fs",
+    "crates/sweep-engine",
+    "crates/sweep-engine-cli",
+]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+camino = "1"
+tempfile = "3"
+insta = { version = "1", features = ["json"] }
+assert_cmd = "2"
+rayon = "1"
+
+[workspace.lints.rust]
+unwrap_used = "deny"
+expect_used = "deny"

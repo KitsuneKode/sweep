@@ -1,0 +1,17 @@
+[package]
+name = "sweep-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+camino.workspace = true
+sweep-errors = { path = "../sweep-errors" }
+sweep-fs = { path = "../sweep-fs" }
+sweep-types = { path = "../sweep-types" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
