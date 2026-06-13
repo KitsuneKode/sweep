@@ -18,8 +18,9 @@ afterEach(() => {
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
 function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
+  const withEngine = args.includes("--engine") ? args : ["--engine", "js", ...args];
   const proc = Bun.spawnSync({
-    cmd: [Bun.which("bun") ?? "bun", "run", "packages/cli/src/index.ts", "--", ...args],
+    cmd: [Bun.which("bun") ?? "bun", "run", "apps/cli/src/bin.ts", "--", ...withEngine],
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
