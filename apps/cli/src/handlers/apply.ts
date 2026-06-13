@@ -1,0 +1,72 @@
+import type { ApplyReport } from "@kitsunekode/sweep-protocol";
+import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
+import { applyPlan as executePlan } from "@kitsunekode/sweep-core/engine";
+import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
+import { loadPlan } from "@kitsunekode/sweep-core/plan";
+import { formatBytes, printAborted, printCleanResult } from "@kitsunekode/sweep-display";
+import { EXIT, exitWith, handleFatalError } from "../errors.js";
+import { applyNoColor, promptConfirm, writeJson } from "./shared.js";
+
+export type ApplyHandlerOptions = {
+  plan: string;
+  yes: boolean;
+  json?: boolean;
+  color: boolean;
+};
+
+export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
+  applyNoColor(opts.color);
+
+  try {
+    const plan = loadPlan(opts.plan);
+    assertSafeCwd(plan.targetDir);
+
+    const selectedCount = plan.selectedCandidateIds.length;
+
+    if (selectedCount === 0) {
+      const report: ApplyReport = {
+        protocolVersion: PROTOCOL_VERSION,
+        targetDir: plan.targetDir,
+        selectedCandidateIds: [],
+        deletedCount: 0,
+        failedCount: 0,
+        totalBytesFreed: 0,
+        failedPaths: [],
+      };
+      if (opts.json) {
+        writeJson(report);
+      } else {
+        console.log("Nothing selected to apply.");
+      }
+      exitWith(EXIT.OK);
+    }
+
+    if (!opts.yes) {
+      const totalBytes = plan.candidates
+        .filter((candidate) => plan.selectedCandidateIds.includes(candidate.id))
+        .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
+      const confirmed = await promptConfirm(
+        `Apply plan with ${selectedCount} items (${formatBytes(totalBytes)})?`,
+      );
+      if (!confirmed) {
+        printAborted();
+        exitWith(EXIT.ABORTED);
+      }
+    }
+
+    const { report, cleanResult } = await executePlan(plan);
+
+    if (opts.json) {
+      writeJson(report);
+    } else {
+      printCleanResult({
+        ...cleanResult,
+        failedPaths: report.failedPaths,
+      });
+    }
+
+    exitWith(report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
+  } catch (err) {
+    handleFatalError(err);
+  }
+}
