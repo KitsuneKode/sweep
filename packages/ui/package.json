@@ -1,5 +1,25 @@
 {
   "name": "@kitsunekode/sweep-ui",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": {
+    ".": "./src/app.ts",
+    "./state": "./src/state.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src",
+    "fmt": "oxfmt src"
+  },
+  "dependencies": {
+    "@kitsunekode/sweep-display": "workspace:*",
+    "@kitsunekode/sweep-protocol": "workspace:*",
+    "@opentui/core": "catalog:"
+  },
+  "devDependencies": {
+    "@kitsunekode/sweep-typescript-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
+  }
 }

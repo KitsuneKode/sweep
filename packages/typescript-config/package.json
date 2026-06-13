@@ -1,0 +1,7 @@
+{
+  "name": "@kitsunekode/sweep-typescript-config",
+  "private": true,
+  "exports": {
+    "./base.json": "./tsconfig.base.json"
+  }
+}
