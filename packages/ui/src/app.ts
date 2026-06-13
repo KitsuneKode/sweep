@@ -9,6 +9,15 @@ import {
 } from "@opentui/core";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
+  buildDetailLine,
+  buildFooterLine,
+  buildStatsLine,
+  buildTargetLine,
+  buildTitleLine,
+  formatListOptionDescription,
+  formatListOptionName,
+} from "./presentation.js";
+import {
   applyUiSelection,
   clearSelection,
   createUiState,
@@ -19,8 +28,21 @@ import {
   setFilter,
   toggleCurrentSelection,
 } from "./state.js";
+import { theme } from "./theme.js";
 
-export async function runSweepUi(plan: ScanPlan): Promise<ScanPlan | null> {
+export interface SweepUiOptions {
+  yes?: boolean;
+  dryRun?: boolean;
+}
+
+export async function runSweepUi(
+  plan: ScanPlan,
+  options: SweepUiOptions = {},
+): Promise<ScanPlan | null> {
+  if (options.yes) {
+    return plan;
+  }
+
   const renderer = await createCliRenderer({
     exitOnCtrlC: true,
     screenMode: "alternate-screen",
@@ -38,19 +60,44 @@ export async function runSweepUi(plan: ScanPlan): Promise<ScanPlan | null> {
       flexDirection: "column",
       padding: 1,
       gap: 1,
-      backgroundColor: "#101214",
+      backgroundColor: theme.bg,
     });
 
-    const header = new TextRenderable(renderer, {
-      content: "sweep ui",
-      fg: "#8bd5ff",
+    const headerBlock = new BoxRenderable(renderer, {
+      width: "100%",
+      flexDirection: "column",
+      gap: 0,
+      backgroundColor: theme.surface,
+      border: true,
+      borderColor: theme.borderMuted,
+      paddingX: 1,
+      paddingY: 0,
     });
+
+    const title = new TextRenderable(renderer, {
+      content: buildTitleLine(options.dryRun),
+    });
+
+    const stats = new TextRenderable(renderer, {
+      content: buildStatsLine(getUiSummary(state), state),
+    });
+
+    const target = new TextRenderable(renderer, {
+      content: buildTargetLine(plan),
+    });
+
+    headerBlock.add(title);
+    headerBlock.add(stats);
+    headerBlock.add(target);
 
     const searchFrame = new BoxRenderable(renderer, {
       width: "100%",
       border: true,
-      borderColor: "#3b4252",
-      focusedBorderColor: "#8bd5ff",
+      borderColor: theme.border,
+      focusedBorderColor: theme.borderFocus,
+      backgroundColor: theme.surfaceInset,
+      title: "Filter",
+      titleAlignment: "left",
       paddingX: 1,
       paddingY: 0,
       height: 3,
@@ -59,11 +106,12 @@ export async function runSweepUi(plan: ScanPlan): Promise<ScanPlan | null> {
     const search = new InputRenderable(renderer, {
       width: "100%",
       value: "",
-      placeholder: "Filter by name, path, kind, or risk",
-      textColor: "#e5e9f0",
-      backgroundColor: "#101214",
-      focusedTextColor: "#ffffff",
-      focusedBackgroundColor: "#101214",
+      placeholder: "name, path, kind, or risk…",
+      textColor: theme.text,
+      backgroundColor: theme.surfaceInset,
+      focusedTextColor: theme.selectionText,
+      focusedBackgroundColor: theme.surfaceInset,
+      placeholderColor: theme.textDim,
     });
     search.focusable = true;
 
@@ -71,8 +119,11 @@ export async function runSweepUi(plan: ScanPlan): Promise<ScanPlan | null> {
       width: "100%",
       flexGrow: 1,
       border: true,
-      borderColor: "#3b4252",
-      focusedBorderColor: "#8bd5ff",
+      borderColor: theme.border,
+      focusedBorderColor: theme.borderFocus,
+      backgroundColor: theme.surface,
+      title: "Artifacts",
+      titleAlignment: "left",
       paddingX: 1,
       paddingY: 0,
     });
@@ -82,40 +133,60 @@ export async function runSweepUi(plan: ScanPlan): Promise<ScanPlan | null> {
       height: "100%",
       showDescription: true,
       wrapSelection: false,
-      textColor: "#d8dee9",
-      focusedTextColor: "#ffffff",
-      selectedTextColor: "#ffffff",
-      selectedBackgroundColor: "#1f2937",
+      itemSpacing: 1,
+      textColor: theme.text,
+      focusedTextColor: theme.selectionText,
+      selectedTextColor: theme.selectionText,
+      selectedBackgroundColor: theme.selectionBg,
+      descriptionColor: theme.textMuted,
+      selectedDescriptionColor: theme.info,
       options: [],
     });
     list.focusable = true;
 
-    const footer = new TextRenderable(renderer, {
-      content: "",
-      fg: "#9aa3b2",
+    const detailFrame = new BoxRenderable(renderer, {
+      width: "100%",
+      border: true,
+      borderColor: theme.borderMuted,
+      backgroundColor: theme.surfaceInset,
+      title: "Selection",
+      titleAlignment: "left",
+      paddingX: 1,
+      paddingY: 0,
+      height: 3,
     });
 
-    root.add(header);
+    const detail = new TextRenderable(renderer, {
+      content: buildDetailLine(state),
+    });
+
+    detailFrame.add(detail);
+
+    const footer = new TextRenderable(renderer, {
+      content: buildFooterLine(options.dryRun),
+    });
+
+    root.add(headerBlock);
     searchFrame.add(search);
     listFrame.add(list);
     root.add(searchFrame);
     root.add(listFrame);
+    root.add(detailFrame);
     root.add(footer);
     renderer.root.add(root);
 
     const refresh = () => {
       list.options = getVisibleCandidates(state).map((candidate) => ({
-        name: `${state.selectedIds.has(candidate.id) ? "[x]" : "[ ]"} ${candidate.name}`,
-        description: `${candidate.riskTier}  ${candidate.path}`,
+        name: formatListOptionName(candidate, state.selectedIds.has(candidate.id)),
+        description: formatListOptionDescription(candidate),
         value: candidate.id,
       }));
 
       list.selectedIndex = state.cursorIndex;
 
       const summary = getUiSummary(state);
-      header.content = `sweep ui  visible:${summary.visibleCount}  selected:${summary.selectedCount}  bytes:${formatBytes(summary.selectedBytes)}`;
-      footer.content =
-        "Tab switch focus  Space toggle  s select-safe  a select-all  u clear  Enter apply  Esc quit";
+      stats.content = buildStatsLine(summary, state);
+      detail.content = buildDetailLine(state);
       renderer.requestRender();
     };
 
@@ -209,12 +280,4 @@ export async function runSweepUi(plan: ScanPlan): Promise<ScanPlan | null> {
     search.focus();
     refresh();
   });
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"] as const;
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / Math.pow(1024, i);
-  return `${value.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
