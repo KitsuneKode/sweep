@@ -38,6 +38,13 @@ cargo clippy --workspace -- -D warnings
 
 - `transit` — dependency-order cache invalidation without blocking on `^build`
 - `build` — depends on `^build`; outputs root `dist/**`
+
+**Important:** The published npm package lives at the repo root (`@kitsunekode/sweep`),
+but it must **not** be listed in `workspaces.packages` (never add `"."`). Root
+`package.json` scripts are orchestrators (`turbo run build`, etc.). If turbo
+treats the root as a workspace package, each `build` spawns another `turbo run
+build` and forks until the machine runs out of processes.
+
 - `typecheck`, `lint`, `fmt` — depend on `transit`
 - `test` — depends on `transit` and `^build` (CLI bundle for integration tests)
 - `check` — aggregates `fmt`, `lint`, `test`, `typecheck`

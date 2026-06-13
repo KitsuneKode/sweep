@@ -133,6 +133,15 @@ check("package.json has all required publish fields", () => {
   }
 });
 
+check("root package is not a turbo workspace member (prevents build fork bomb)", () => {
+  const { workspaces } = pkg() as { workspaces?: { packages?: string[] } };
+  const packages = workspaces?.packages ?? [];
+  assert(
+    !packages.includes("."),
+    'workspaces.packages must not include "." — root scripts delegate to turbo and recurse infinitely',
+  );
+});
+
 check("version is valid semver (x.y.z)", () => {
   const { version } = pkg() as { version: string };
   assert(/^\d+\.\d+\.\d+$/.test(version), `invalid: "${version}"`);
