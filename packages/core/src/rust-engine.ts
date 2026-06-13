@@ -3,9 +3,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ApplyReport, ScanPlan, SweepConfig } from "@kitsunekode/sweep-protocol";
+import type {
+  ApplyReport,
+  ScanPlan,
+  SelectionPolicy,
+  SweepConfig,
+} from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
-import { DEFAULT_CONFIG } from "./config.js";
 import type { ScanToPlanOptions } from "./engine.js";
 import { nativePlatformForCurrentProcess } from "./native-platforms.js";
 
@@ -126,10 +130,19 @@ function runEngine(args: string[], stdin?: string, options: RunEngineOptions = {
   return proc.stdout;
 }
 
+export interface RustScanOptions {
+  config: SweepConfig;
+  selectionPolicy: SelectionPolicy;
+}
+
 /** Scan via the Rust `sweep-engine` subprocess and parse a [`ScanPlan`]. */
-export function scanToPlanViaRust(targetDir: string): ScanPlan {
+export function scanToPlanViaRust(targetDir: string, options: RustScanOptions): ScanPlan {
   const absoluteTarget = resolve(targetDir);
-  const stdout = runEngine(["scan", absoluteTarget]);
+  const stdin = JSON.stringify({
+    config: options.config,
+    selectionPolicy: options.selectionPolicy,
+  });
+  const stdout = runEngine(["scan", absoluteTarget], stdin);
   return JSON.parse(stdout) as ScanPlan;
 }
 
@@ -152,24 +165,13 @@ export function isRustEngineAvailable(): boolean {
   }
 }
 
-function scanConfigsEqual(a: SweepConfig, b: SweepConfig): boolean {
-  return (
-    a.depth === b.depth &&
-    a.maxSizeGB === b.maxSizeGB &&
-    a.patterns.length === b.patterns.length &&
-    a.ignore.length === b.ignore.length &&
-    a.patterns.every((pattern, index) => pattern === b.patterns[index]) &&
-    a.ignore.every((rule, index) => rule === b.ignore[index])
-  );
-}
-
 /**
  * When non-null, the Rust scan subprocess cannot honor the requested scan and
  * callers should fall back to the JS engine.
  */
 export function rustScanBlockedReason(
-  config: SweepConfig,
-  projectConfig: SweepConfig,
+  _config: SweepConfig,
+  _projectConfig: SweepConfig,
   options: ScanToPlanOptions,
 ): string | null {
   if (options.onEntry) {
@@ -178,22 +180,10 @@ export function rustScanBlockedReason(
   if (options.exact) {
     return "exact sizing requires the JS engine";
   }
-
-  const policy = options.selectionPolicy ?? DEFAULT_SELECTION_POLICY;
-  if (
-    policy.mode !== DEFAULT_SELECTION_POLICY.mode ||
-    policy.includeDangerous !== DEFAULT_SELECTION_POLICY.includeDangerous
-  ) {
-    return "custom selection policy requires the JS engine";
-  }
-
-  if (!scanConfigsEqual(config, projectConfig)) {
-    return "CLI scan flags require the JS engine";
-  }
-
-  if (!scanConfigsEqual(projectConfig, DEFAULT_CONFIG)) {
-    return "project config (.sweeprc) requires the JS engine";
-  }
-
   return null;
+}
+
+/** Default selection policy forwarded to Rust when callers omit one explicitly. */
+export function defaultRustSelectionPolicy(options: ScanToPlanOptions): SelectionPolicy {
+  return options.selectionPolicy ?? DEFAULT_SELECTION_POLICY;
 }

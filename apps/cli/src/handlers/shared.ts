@@ -14,6 +14,7 @@ import {
   scanToPlanViaRust,
   isRustEngineAvailable,
   rustScanBlockedReason,
+  defaultRustSelectionPolicy,
   type EngineBackend,
 } from "@kitsunekode/sweep-core/rust-engine";
 
@@ -68,7 +69,10 @@ export function runScanToPlan(
       return scanToPlan(targetDir, config, scanOptions);
     }
 
-    const plan = scanToPlanViaRust(targetDir);
+    const plan = scanToPlanViaRust(targetDir, {
+      config,
+      selectionPolicy: defaultRustSelectionPolicy(options),
+    });
     return {
       plan,
       result: scanResultFromPlan(plan),

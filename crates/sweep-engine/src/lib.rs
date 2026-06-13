@@ -1,11 +1,13 @@
 //! Sweep engine library for scan and apply flows.
 
+mod apply;
+
 use camino::Utf8Path;
-use sweep_errors::{EngineError, GuardrailError};
+use sweep_errors::EngineError;
 use sweep_fs::{estimate_bytes, walk_matched_entries, WalkConfig, WalkEntryType};
 use sweep_types::{
     ApplyReport, EntryType, RiskTier, ScanCandidate, ScanPlan, ScanPlanSummary, SelectionMode,
-    SelectionPolicy, PROTOCOL_VERSION,
+    SelectionPolicy, SweepConfig, PROTOCOL_VERSION,
 };
 
 /// Scan `target_dir` with default patterns and produce a protocol-aligned [`ScanPlan`].
@@ -40,18 +42,18 @@ pub fn scan_to_plan_with_config(
     ))
 }
 
-/// Apply a previously produced [`ScanPlan`] and return a stub [`ApplyReport`].
-pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
-    if plan.protocol_version != PROTOCOL_VERSION {
-        return Err(EngineError::Guardrail(
-            GuardrailError::UnsupportedProtocolVersion {
-                found: plan.protocol_version.clone(),
-                expected: PROTOCOL_VERSION.to_owned(),
-            },
-        ));
-    }
+/// Scan with protocol [`SweepConfig`] and selection policy from the JS bridge.
+pub fn scan_to_plan_with_sweep_config(
+    target_dir: &Utf8Path,
+    config: &SweepConfig,
+    selection_policy: &SelectionPolicy,
+) -> Result<ScanPlan, EngineError> {
+    scan_to_plan_with_config(target_dir, &WalkConfig::from(config), selection_policy)
+}
 
-    Ok(ApplyReport::empty(plan))
+/// Apply a previously produced [`ScanPlan`] and return an [`ApplyReport`].
+pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
+    apply::apply_plan(plan)
 }
 
 fn build_plan(
@@ -197,6 +199,7 @@ fn hash_string(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sweep_errors::GuardrailError;
     use tempfile::tempdir;
 
     #[test]

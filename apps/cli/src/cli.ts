@@ -91,6 +91,7 @@ export function makeProgram(): Command {
     .command("apply")
     .description("Apply a saved scan plan")
     .requiredOption("--plan <path>", "Path to a saved scan plan")
+    .option("--engine <backend>", "Apply engine: js (default), rust, or auto", "auto")
     .option("--json", "Emit JSON apply results", false)
     .action(function (this: Command) {
       const opts = this.optsWithGlobals<{
@@ -98,6 +99,7 @@ export function makeProgram(): Command {
         yes: boolean;
         json?: boolean;
         color: boolean;
+        engine?: import("@kitsunekode/sweep-protocol").EngineBackend;
       }>();
       void handleApply(opts);
     });

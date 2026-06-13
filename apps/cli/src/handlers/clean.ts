@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
-import { applyPlan as executePlan } from "@kitsunekode/sweep-core/engine";
+import { applyPlanWithBackend } from "@kitsunekode/sweep-core/engine";
 import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
 import {
@@ -110,7 +110,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     let current = 0;
     let freedBytes = 0;
 
-    const { report, cleanResult } = await executePlan(plan, {
+    const { report, cleanResult } = await applyPlanWithBackend(plan, engine, {
       onDeleted: (entry) => {
         current++;
         freedBytes += entry.estimatedBytes;

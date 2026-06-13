@@ -9,6 +9,7 @@ import {
   scanToPlanViaRust,
 } from "@kitsunekode/sweep-core/rust-engine";
 import type { ScanPlan, SelectionPolicy } from "@kitsunekode/sweep-protocol";
+import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { normalizePlan } from "../support/normalize-plan.js";
 
 const REPO_ROOT = resolve(import.meta.dir, "../..");
@@ -74,12 +75,14 @@ describe("engine contract fixtures", () => {
         return;
       }
 
-      // Rust subprocess scan does not yet honor request.json options; fixtures must
-      // use default scan settings until parity improves.
+      // Rust subprocess scan honors config and selection policy via stdin JSON.
       expect(isRustEngineAvailable()).toBe(true);
       expect(resolveRustEngineBinary()).toBe(LOCAL_BINARY);
 
-      const plan = scanToPlanViaRust(fixture.root);
+      const plan = scanToPlanViaRust(fixture.root, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: fixture.request.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
+      });
       assertMatchesGolden(plan, fixture.root);
     });
   }

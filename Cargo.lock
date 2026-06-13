@@ -429,6 +429,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sweep-engine",
+ "sweep-fs",
  "sweep-types",
  "tempfile",
 ]
@@ -449,6 +450,7 @@ dependencies = [
  "camino",
  "rayon",
  "regex-lite",
+ "sweep-types",
  "tempfile",
 ]
 

@@ -7,6 +7,14 @@ describe("rustScanBlockedReason", () => {
     expect(rustScanBlockedReason(DEFAULT_CONFIG, DEFAULT_CONFIG, {})).toBeNull();
   });
 
+  test("allows custom patterns and project config", () => {
+    const withPattern = { ...DEFAULT_CONFIG, patterns: [...DEFAULT_CONFIG.patterns, "custom"] };
+    expect(rustScanBlockedReason(withPattern, DEFAULT_CONFIG, {})).toBeNull();
+
+    const project = { ...DEFAULT_CONFIG, depth: 2 };
+    expect(rustScanBlockedReason(project, project, {})).toBeNull();
+  });
+
   test("blocks progressive scan callbacks", () => {
     expect(
       rustScanBlockedReason(DEFAULT_CONFIG, DEFAULT_CONFIG, {
@@ -15,13 +23,11 @@ describe("rustScanBlockedReason", () => {
     ).toContain("JS engine");
   });
 
-  test("blocks CLI pattern overrides", () => {
-    const withPattern = { ...DEFAULT_CONFIG, patterns: [...DEFAULT_CONFIG.patterns, "custom"] };
-    expect(rustScanBlockedReason(withPattern, DEFAULT_CONFIG, {})).toContain("CLI scan flags");
-  });
-
-  test("blocks project config overrides", () => {
-    const project = { ...DEFAULT_CONFIG, depth: 2 };
-    expect(rustScanBlockedReason(project, project, {})).toContain(".sweeprc");
+  test("blocks exact sizing", () => {
+    expect(
+      rustScanBlockedReason(DEFAULT_CONFIG, DEFAULT_CONFIG, {
+        exact: true,
+      }),
+    ).toContain("exact sizing");
   });
 });

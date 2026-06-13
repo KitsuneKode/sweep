@@ -7,6 +7,16 @@ pub fn protocol_version() -> &'static str {
     PROTOCOL_VERSION
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SweepConfig {
+    pub patterns: Vec<String>,
+    pub ignore: Vec<String>,
+    #[serde(rename = "maxSizeGB")]
+    pub max_size_gb: f64,
+    pub depth: i32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RiskTier {

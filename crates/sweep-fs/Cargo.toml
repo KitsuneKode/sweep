@@ -8,6 +8,7 @@ license.workspace = true
 camino.workspace = true
 regex-lite = "0.1"
 rayon.workspace = true
+sweep-types = { path = "../sweep-types" }
 
 [dev-dependencies]
 tempfile.workspace = true

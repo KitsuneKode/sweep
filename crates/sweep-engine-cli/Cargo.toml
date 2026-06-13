@@ -13,6 +13,7 @@ camino.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sweep-engine = { path = "../sweep-engine" }
+sweep-fs = { path = "../sweep-fs" }
 sweep-types = { path = "../sweep-types" }
 
 [dev-dependencies]

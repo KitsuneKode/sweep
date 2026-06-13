@@ -39,6 +39,16 @@ impl Default for WalkConfig {
     }
 }
 
+impl From<&sweep_types::SweepConfig> for WalkConfig {
+    fn from(config: &sweep_types::SweepConfig) -> Self {
+        Self {
+            patterns: config.patterns.clone(),
+            ignore: config.ignore.clone(),
+            depth: config.depth,
+        }
+    }
+}
+
 /// Default artifact patterns aligned with the JS reference engine.
 pub fn default_patterns() -> Vec<String> {
     vec![

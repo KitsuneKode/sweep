@@ -14,6 +14,7 @@ import { clean } from "./cleaner.js";
 import type { ScanHooks } from "./scanner.js";
 import { scan } from "./scanner.js";
 import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./planner.js";
+import { applyPlanViaRust, type EngineBackend } from "./rust-engine.js";
 
 export interface ScanToPlanOptions extends ScanHooks {
   exact?: boolean;
@@ -98,5 +99,66 @@ export async function applyPlan(
     selected,
     ready,
     revalidationFailures,
+  };
+}
+
+function emptyApplyPlanResult(plan: ScanPlan): ApplyPlanResult {
+  return {
+    report: {
+      protocolVersion: PROTOCOL_VERSION,
+      targetDir: plan.targetDir,
+      selectedCandidateIds: [],
+      deletedCount: 0,
+      failedCount: 0,
+      totalBytesFreed: 0,
+      failedPaths: [],
+    },
+    cleanResult: {
+      deleted: [],
+      failedPaths: [],
+      totalBytesFreed: 0,
+      durationMs: 0,
+    },
+    selected: [],
+    ready: [],
+    revalidationFailures: [],
+  };
+}
+
+export async function applyPlanWithBackend(
+  plan: ScanPlan,
+  engine: EngineBackend,
+  options: ApplyPlanOptions = {},
+): Promise<ApplyPlanResult> {
+  if (engine !== "rust") {
+    return applyPlan(plan, options);
+  }
+
+  const selected = resolveSelectedCandidates(plan);
+  if (selected.length === 0) {
+    return emptyApplyPlanResult(plan);
+  }
+
+  const report = applyPlanViaRust(plan);
+  const failedPaths = new Set(report.failedPaths.map((failure) => failure.path));
+  const deleted = selected.filter((candidate) => !failedPaths.has(candidate.path));
+
+  for (const candidate of deleted) {
+    options.onDeleted?.(candidate);
+  }
+
+  const cleanResult: CleanResult = {
+    deleted,
+    failedPaths: report.failedPaths,
+    totalBytesFreed: report.totalBytesFreed,
+    durationMs: 0,
+  };
+
+  return {
+    report,
+    cleanResult,
+    selected,
+    ready: deleted,
+    revalidationFailures: [],
   };
 }
