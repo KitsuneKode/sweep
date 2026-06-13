@@ -65,8 +65,9 @@ describe("CLI scan/apply", () => {
       .map((line) => JSON.parse(line) as ScanEvent);
 
     expect(events[0]?.type).toBe("scan_started");
-    expect(events.some((event) => event.type === "candidate_found")).toBe(true);
-    expect(events.some((event) => event.type === "candidate_updated")).toBe(true);
+    const found = events.filter((event) => event.type === "candidate_found");
+    expect(found.length).toBeGreaterThan(0);
+    expect(events.some((event) => event.type === "candidate_updated")).toBe(false);
     expect(events.at(-1)?.type).toBe("scan_completed");
   });
 

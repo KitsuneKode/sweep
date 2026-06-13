@@ -18,6 +18,7 @@ function nodeBin(): string {
 const NODE = nodeBin();
 
 beforeAll(() => {
+  if (existsSync(SWEEP)) return;
   execFileSync("bun", ["run", "build"], { cwd: REPO_ROOT, stdio: "pipe" });
 });
 

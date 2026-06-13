@@ -61,6 +61,7 @@
     "pack:preview": "npm pack --dry-run",
     "pack": "npm pack",
     "changeset": "changeset",
+    "commitlint": "commitlint",
     "version": "changeset version",
     "release": "bun run prepublishOnly && changeset publish",
     "prepare": "husky || true",

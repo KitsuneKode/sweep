@@ -44,11 +44,6 @@ export async function handleScan(
         },
       });
 
-      for (const entry of result.entries) {
-        const candidate = toCandidate(entry);
-        writeJsonLine({ type: "candidate_updated", candidate } satisfies ScanEvent);
-      }
-
       writeJsonLine({
         type: "scan_completed",
         summary: {
@@ -75,15 +70,21 @@ export async function handleScan(
 
     printBanner();
     const progressive = createProgressiveScanRenderer("Scanning...");
-    const { result, plan } = runScanToPlan(targetDir, config, {
-      selectionPolicy,
-      engine,
-      projectConfig,
-      onEntry: (entry) => {
-        const candidate = toCandidate(entry);
-        progressive.onCandidate(entry, candidate.riskTier);
-      },
-    });
+    let result;
+    let plan;
+    try {
+      ({ result, plan } = runScanToPlan(targetDir, config, {
+        selectionPolicy,
+        engine,
+        projectConfig,
+        onEntry: (entry) => {
+          const candidate = toCandidate(entry);
+          progressive.onCandidate(entry, candidate.riskTier);
+        },
+      }));
+    } finally {
+      progressive.stopSpinner();
+    }
     progressive.finish({
       scannedDirs: result.scannedDirs,
       count: result.entries.length,

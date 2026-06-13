@@ -25,6 +25,7 @@ export function createSpinner(initialText: string): Spinner {
     process.stdout.write(`\r${pc.cyan(frame)} ${current}`);
     frameIdx++;
   }, 80);
+  id.unref();
 
   return {
     update: (text: string) => {

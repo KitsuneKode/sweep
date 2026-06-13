@@ -163,7 +163,7 @@ export function exactSize(entryPath: string): number {
  * - Skips entries in config.ignore
  * - Respects config.depth (-1 = unlimited)
  * - Fast path: sizes estimated via a single batched `du` call after the walk
- * - Exact path (--dry-run): recursive stat walk per entry
+ * - Exact path: recursive stat walk per entry (opt-in only — very slow on large trees)
  */
 export function scan(
   targetDir: string,
@@ -216,7 +216,6 @@ export function scan(
           entryType: isLink ? "symlink" : item.isDirectory() ? "directory" : "file",
         };
         entries.push(entry);
-        hooks.onEntry?.(entry);
         continue;
       }
 
@@ -239,6 +238,10 @@ export function scan(
     for (const entry of entries) {
       entry.estimatedBytes = sizeMap.get(entry.path) ?? statFallback(entry.path);
     }
+  }
+
+  for (const entry of entries) {
+    hooks.onEntry?.(entry);
   }
 
   return {

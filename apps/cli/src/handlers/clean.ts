@@ -47,18 +47,26 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
 
     printBanner();
     const spinner = createProgressiveScanRenderer(
-      opts.dryRun ? "Scanning (exact sizes)..." : "Scanning...",
+      opts.dryRun ? "Scanning (dry-run)..." : "Scanning...",
     );
-    const { result, plan } = runScanToPlan(targetDir, config, {
-      exact: opts.dryRun,
-      selectionPolicy,
-      engine,
-      projectConfig,
-      onEntry: (entry) => {
-        const candidate = toCandidate(entry);
-        spinner.onCandidate(entry, candidate.riskTier);
-      },
-    });
+    let result;
+    let plan;
+    try {
+      ({ result, plan } = runScanToPlan(targetDir, config, {
+        // Batched du estimates are fast enough for dry-run preview; exactSize walks
+        // entire trees per match and can fork-bomb memory on large monorepos.
+        exact: false,
+        selectionPolicy,
+        engine,
+        projectConfig,
+        onEntry: (entry) => {
+          const candidate = toCandidate(entry);
+          spinner.onCandidate(entry, candidate.riskTier);
+        },
+      }));
+    } finally {
+      spinner.stopSpinner();
+    }
     spinner.finish({
       scannedDirs: result.scannedDirs,
       count: result.entries.length,

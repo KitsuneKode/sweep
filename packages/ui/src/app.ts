@@ -53,6 +53,7 @@ export async function runSweepUi(
 
   let state = createUiState(plan);
   let resolved = false;
+  const candidateById = new Map(plan.candidates.map((candidate) => [candidate.id, candidate]));
 
   return await new Promise<ScanPlan | null>((resolvePromise) => {
     const root = new BoxRenderable(renderer, {
@@ -123,7 +124,6 @@ export async function runSweepUi(
 
     const refresh = () => {
       const rows = buildDisplayRows(state);
-      const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
 
       list.options = rows.map((row) => {
         if (row.kind === "header") {
@@ -134,7 +134,7 @@ export async function runSweepUi(
           };
         }
 
-        const candidate = byId.get(row.candidateId);
+        const candidate = candidateById.get(row.candidateId);
         if (!candidate) {
           return { name: "", description: "", value: row.candidateId };
         }
@@ -148,6 +148,12 @@ export async function runSweepUi(
 
       list.selectedIndex = state.rowIndex;
       header.content = buildHeaderLine(plan, getUiSummary(state), options.dryRun);
+      context.content = buildContextLine(state);
+      renderer.requestRender();
+    };
+
+    const refreshFocus = () => {
+      list.selectedIndex = state.rowIndex;
       context.content = buildContextLine(state);
       renderer.requestRender();
     };
@@ -166,7 +172,7 @@ export async function runSweepUi(
 
     list.on(SelectRenderableEvents.SELECTION_CHANGED, () => {
       state = setRowIndex(state, list.getSelectedIndex());
-      refresh();
+      refreshFocus();
     });
 
     list.on(SelectRenderableEvents.ITEM_SELECTED, () => {
@@ -228,14 +234,14 @@ export async function runSweepUi(
       if (event.name === "up" || event.name === "k") {
         event.preventDefault();
         state = moveCursor(state, -1);
-        refresh();
+        refreshFocus();
         return;
       }
 
       if (event.name === "down" || event.name === "j") {
         event.preventDefault();
         state = moveCursor(state, 1);
-        refresh();
+        refreshFocus();
       }
     });
 

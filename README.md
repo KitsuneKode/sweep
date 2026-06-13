@@ -105,7 +105,7 @@ sweep
 # Clean a specific project
 sweep ~/projects/myapp
 
-# Preview what would be deleted (exact sizes, no changes)
+# Preview what would be deleted (estimated sizes, no changes)
 sweep --dry-run
 
 # Monorepo — finds all node_modules recursively
