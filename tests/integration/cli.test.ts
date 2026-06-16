@@ -20,7 +20,7 @@ const dir = (...parts: string[]) => join(tmpDir, ...parts);
 function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
   const withEngine = args.includes("--engine") ? args : ["--engine", "js", ...args];
   const proc = Bun.spawnSync({
-    cmd: ["node", join(REPO_ROOT, "dist/sweep.js"), ...withEngine],
+    cmd: ["bun", join(REPO_ROOT, "dist/sweep.js"), ...withEngine],
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
@@ -198,7 +198,7 @@ describe("CLI scan/apply", () => {
     mkdirSync(dir("node_modules"));
 
     const proc = Bun.spawnSync({
-      cmd: ["node", join(REPO_ROOT, "dist/sweep.js"), tmpDir],
+      cmd: ["bun", join(REPO_ROOT, "dist/sweep.js"), tmpDir],
       cwd: REPO_ROOT,
       stdin: Buffer.from("n\n"),
       stdout: "pipe",

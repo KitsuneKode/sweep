@@ -13,13 +13,13 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const DIST = join(REPO_ROOT, "dist/sweep.js");
 const ALLOWED_DIST_FILES = new Set(["sweep.js", "sweep-ui.js"]);
 
-const NODE =
+const BUN =
   process.env.npm_node_execpath ??
   (() => {
     try {
-      return execFileSync("command", ["-v", "node"], { encoding: "utf8" }).trim();
+      return execFileSync("command", ["-v", "bun"], { encoding: "utf8" }).trim();
     } catch {
-      return "node";
+      return "bun";
     }
   })();
 
@@ -75,20 +75,20 @@ check("dist/ contains only expected bundle files", () => {
 
 check("sweep --version prints a version string", () => {
   if (!existsSync(DIST)) return;
-  const out = execFileSync(NODE, [DIST, "--version"], { encoding: "utf8", timeout: 5000 });
+  const out = execFileSync(BUN, [DIST, "--version"], { encoding: "utf8", timeout: 5000 });
   assert(out.trim().length > 0, "version output was empty");
   assert(/\d+\.\d+\.\d+/.test(out), `version output doesn't look like semver: ${out.trim()}`);
 });
 
 check("sweep --help exits 0", () => {
   if (!existsSync(DIST)) return;
-  execFileSync(NODE, [DIST, "--help"], { encoding: "utf8", timeout: 5000 });
+  execFileSync(BUN, [DIST, "--help"], { encoding: "utf8", timeout: 5000 });
 });
 
 check("sweep rejects /tmp with exit code 2 (path-too-shallow guardrail)", () => {
   if (!existsSync(DIST)) return;
   try {
-    execFileSync(NODE, [DIST, "--dry-run", "--yes", "/tmp"], {
+    execFileSync(BUN, [DIST, "--dry-run", "--yes", "/tmp"], {
       encoding: "utf8",
       timeout: 5000,
       stdio: "pipe",
@@ -104,7 +104,7 @@ check("sweep rejects /tmp with exit code 2 (path-too-shallow guardrail)", () => 
 check("sweep rejects / with exit code 2 (blocked root guardrail)", () => {
   if (!existsSync(DIST)) return;
   try {
-    execFileSync(NODE, [DIST, "--dry-run", "--yes", "/"], {
+    execFileSync(BUN, [DIST, "--dry-run", "--yes", "/"], {
       encoding: "utf8",
       timeout: 5000,
       stdio: "pipe",

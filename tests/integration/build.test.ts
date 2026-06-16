@@ -7,15 +7,15 @@ const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const DIST = join(REPO_ROOT, "dist");
 const SWEEP = join(DIST, "sweep.js");
 
-function nodeBin(): string {
+function bunBin(): string {
   try {
-    return execFileSync("command", ["-v", "node"], { encoding: "utf8" }).trim();
+    return execFileSync("command", ["-v", "bun"], { encoding: "utf8" }).trim();
   } catch {
-    return "node";
+    return "bun";
   }
 }
 
-const NODE = nodeBin();
+const BUN = bunBin();
 
 beforeAll(() => {
   if (existsSync(SWEEP)) return;
@@ -35,14 +35,14 @@ describe("published CLI bundle", () => {
     expect(source.includes("@opentui")).toBe(false);
   });
 
-  test("node dist/sweep.js --version exits 0 with semver output", () => {
+  test("bun dist/sweep.js --version exits 0 with semver output", () => {
     expect(existsSync(SWEEP)).toBe(true);
-    const out = execFileSync(NODE, [SWEEP, "--version"], { encoding: "utf8" });
+    const out = execFileSync(BUN, [SWEEP, "--version"], { encoding: "utf8" });
     expect(/\d+\.\d+\.\d+/.test(out.trim())).toBe(true);
   });
 
-  test("node dist/sweep.js --help exits 0", () => {
-    execFileSync(NODE, [SWEEP, "--help"], { encoding: "utf8" });
+  test("bun dist/sweep.js --help exits 0", () => {
+    execFileSync(BUN, [SWEEP, "--help"], { encoding: "utf8" });
   });
 });
 

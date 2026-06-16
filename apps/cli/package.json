@@ -7,7 +7,10 @@
     "./bin": "./src/bin.ts"
   },
   "scripts": {
-    "build": "bun run ./scripts/build.ts",
+    "build:main": "V=$(node -p \"JSON.stringify(require('../../package.json').version)\") && bun build ../../apps/cli/src/bin.ts --outdir ../../dist --entry-naming 'sweep.[ext]' --target bun --external '@opentui/core' --external './sweep-ui.js' --define \"__SWEEP_VERSION__:$V\" --minify-syntax --minify-whitespace --sourcemap=none",
+    "build:ui": "bun build ../../packages/ui/src/app.ts --outdir ../../dist --entry-naming 'sweep-ui.[ext]' --target bun --external '@opentui/core' --minify-syntax --minify-whitespace --sourcemap=none",
+    "fixup": "printf '#!/usr/bin/env bun\\nif(process.argv.includes(\"--no-color\"))process.env[\"NO_COLOR\"]=\"1\";\\n' | cat - ../../dist/sweep.js > ../../dist/sweep.js.tmp && mv ../../dist/sweep.js.tmp ../../dist/sweep.js && chmod +x ../../dist/sweep.js",
+    "build": "bun run build:main && bun run build:ui && bun run fixup",
     "preflight": "bun run ./scripts/preflight.ts",
     "dev": "bun run ./src/bin.ts",
     "test": "bun test src",
