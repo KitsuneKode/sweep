@@ -12,7 +12,7 @@
       "estimatedBytes": 0,
       "isSymlink": false,
       "entryType": "directory",
-      "id": "cand_a81adff0",
+      "id": "cand_452da1e216d14e92",
       "kind": ".next",
       "riskTier": "safe",
       "reasons": ["default-pattern"],
@@ -24,7 +24,7 @@
       "estimatedBytes": 0,
       "isSymlink": false,
       "entryType": "directory",
-      "id": "cand_74eb595e",
+      "id": "cand_7e2cfb976b6f0c6b",
       "kind": "dist",
       "riskTier": "safe",
       "reasons": ["default-pattern"],
@@ -36,7 +36,7 @@
       "estimatedBytes": 0,
       "isSymlink": false,
       "entryType": "directory",
-      "id": "cand_31b3a3f8",
+      "id": "cand_72045b2be0563891",
       "kind": "node_modules",
       "riskTier": "safe",
       "reasons": ["default-pattern"],
@@ -56,6 +56,10 @@
       "blocked": 0
     }
   },
-  "selectedCandidateIds": ["cand_a81adff0", "cand_74eb595e", "cand_31b3a3f8"],
+  "selectedCandidateIds": [
+    "cand_452da1e216d14e92",
+    "cand_7e2cfb976b6f0c6b",
+    "cand_72045b2be0563891"
+  ],
   "createdAt": "1970-01-01T00:00:00.000Z"
 }

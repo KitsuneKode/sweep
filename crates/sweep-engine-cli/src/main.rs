@@ -17,6 +17,10 @@ fn run() -> Result<(), String> {
     match std::env::args().nth(1).as_deref() {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
+        Some("--version" | "-V") => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         _ => {
             eprintln!(
                 "usage: sweep-engine scan <target-dir>  # optional ScanOptions JSON on stdin"

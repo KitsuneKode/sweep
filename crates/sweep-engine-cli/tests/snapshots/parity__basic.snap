@@ -1,5 +1,6 @@
 ---
 source: crates/sweep-engine-cli/tests/parity.rs
+assertion_line: 26
 expression: "&actual"
 ---
 {
@@ -7,7 +8,7 @@ expression: "&actual"
     {
       "entryType": "directory",
       "estimatedBytes": 0,
-      "id": "cand_c7a9ef8a",
+      "id": "cand_0da23184f4fbdfd5",
       "isSymlink": false,
       "kind": "dist",
       "name": "dist",
@@ -21,7 +22,7 @@ expression: "&actual"
     {
       "entryType": "directory",
       "estimatedBytes": 0,
-      "id": "cand_ed0a920a",
+      "id": "cand_23f4943d0d752575",
       "isSymlink": false,
       "kind": "node_modules",
       "name": "node_modules",
@@ -35,7 +36,7 @@ expression: "&actual"
     {
       "entryType": "file",
       "estimatedBytes": 0,
-      "id": "cand_c05e33a2",
+      "id": "cand_9a050ced956d9795",
       "isSymlink": false,
       "kind": "tsbuildinfo",
       "name": "tsconfig.tsbuildinfo",
@@ -50,9 +51,9 @@ expression: "&actual"
   "createdAt": "1970-01-01T00:00:00.000Z",
   "protocolVersion": "1",
   "selectedCandidateIds": [
-    "cand_c7a9ef8a",
-    "cand_ed0a920a",
-    "cand_c05e33a2"
+    "cand_0da23184f4fbdfd5",
+    "cand_23f4943d0d752575",
+    "cand_9a050ced956d9795"
   ],
   "selectionPolicy": {
     "includeDangerous": false,

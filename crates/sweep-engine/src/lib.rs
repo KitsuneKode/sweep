@@ -3,6 +3,7 @@
 mod apply;
 
 use camino::Utf8Path;
+use sha2::{Digest, Sha256};
 use sweep_errors::EngineError;
 use sweep_fs::{estimate_bytes, walk_matched_entries, WalkConfig, WalkEntryType};
 use sweep_types::{
@@ -186,14 +187,11 @@ fn infer_reasons(is_symlink: bool, kind: &str) -> Vec<String> {
     reasons
 }
 
-/// FNV-1a hash aligned with the JS reference (`planner.ts` `hashString`).
+/// SHA-256 hash aligned with the JS reference (`planner.ts` `hashString`).
 fn hash_string(input: &str) -> String {
-    let mut hash: u32 = 0x811c9dc5;
-    for unit in input.encode_utf16() {
-        hash ^= u32::from(unit);
-        hash = hash.wrapping_mul(0x0100_0193);
-    }
-    format!("{:x}", hash)
+    let result = Sha256::digest(input.as_bytes());
+    let hex = format!("{:x}", result);
+    hex[..16].to_string()
 }
 
 #[cfg(test)]
@@ -205,7 +203,7 @@ mod tests {
     #[test]
     fn hash_string_matches_js_reference_for_ascii_path() {
         let sample = "/tmp/project/node_modules:node_modules";
-        assert_eq!(hash_string(sample), "78fdd314");
+        assert_eq!(hash_string(sample), "6b664301bddbfa84");
     }
 
     #[test]

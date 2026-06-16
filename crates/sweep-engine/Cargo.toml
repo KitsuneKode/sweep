@@ -9,6 +9,8 @@ camino.workspace = true
 sweep-errors = { path = "../sweep-errors" }
 sweep-fs = { path = "../sweep-fs" }
 sweep-types = { path = "../sweep-types" }
+sha2.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

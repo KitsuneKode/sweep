@@ -1,5 +1,6 @@
 ---
 source: crates/sweep-engine-cli/tests/parity.rs
+assertion_line: 65
 expression: "&actual"
 ---
 {
@@ -7,7 +8,7 @@ expression: "&actual"
     {
       "entryType": "directory",
       "estimatedBytes": 0,
-      "id": "cand_206b617a",
+      "id": "cand_00634678a3777636",
       "isSymlink": false,
       "kind": "dist",
       "name": "dist",
@@ -21,7 +22,7 @@ expression: "&actual"
     {
       "entryType": "directory",
       "estimatedBytes": 0,
-      "id": "cand_5d91d8ba",
+      "id": "cand_5a5fb400668a9fd1",
       "isSymlink": false,
       "kind": "node_modules",
       "name": "node_modules",
@@ -35,7 +36,7 @@ expression: "&actual"
     {
       "entryType": "symlink",
       "estimatedBytes": 0,
-      "id": "cand_70d21834",
+      "id": "cand_edaed5f47b66105a",
       "isSymlink": true,
       "kind": "target",
       "name": "target",
@@ -51,9 +52,9 @@ expression: "&actual"
   "createdAt": "1970-01-01T00:00:00.000Z",
   "protocolVersion": "1",
   "selectedCandidateIds": [
-    "cand_206b617a",
-    "cand_5d91d8ba",
-    "cand_70d21834"
+    "cand_00634678a3777636",
+    "cand_5a5fb400668a9fd1",
+    "cand_edaed5f47b66105a"
   ],
   "selectionPolicy": {
     "includeDangerous": false,
