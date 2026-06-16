@@ -127,6 +127,8 @@ export function promptConfirm(question: string): Promise<boolean> {
       output: process.stdout,
     });
 
+    rl.on("close", () => resolvePromise(false));
+
     rl.question(`${question} [y/N] `, (answer) => {
       rl.close();
       const normalized = answer.trim().toLowerCase();

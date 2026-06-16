@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
-import { applyPlan as executePlan } from "@kitsunekode/sweep-core/engine";
+import { applyPlanWithBackend } from "@kitsunekode/sweep-core/engine";
 import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
 import { printAborted, printCleanResult, printDryRunNotice } from "@kitsunekode/sweep-display";
@@ -47,7 +47,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       exitWith(EXIT.OK);
     }
 
-    const { runSweepUi } = await import(new URL("../sweep-ui.js", import.meta.url).href);
+    const { runSweepUi } = await import(new URL("./sweep-ui.js", import.meta.url).href);
     const selectedPlan = await runSweepUi(plan, {
       yes: opts.yes,
       dryRun: opts.dryRun,
@@ -71,7 +71,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       exitWith(EXIT.OK);
     }
 
-    const { report, cleanResult } = await executePlan(selectedPlan);
+    const { report, cleanResult } = await applyPlanWithBackend(selectedPlan, engine);
     printCleanResult({
       ...cleanResult,
       failedPaths: report.failedPaths,
