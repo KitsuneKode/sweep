@@ -4,16 +4,14 @@
   "workspaces": {
     "": {
       "name": "sweep-clean",
+      "dependencies": {
+        "@opentui/core": "catalog:",
+      },
       "devDependencies": {
         "@changesets/cli": "^2.30.0",
         "@commitlint/cli": "^19.6.0",
         "@commitlint/config-conventional": "^19.6.0",
-        "@kitsunekode/sweep-cli": "workspace:*",
-        "@kitsunekode/sweep-core": "workspace:*",
-        "@kitsunekode/sweep-display": "workspace:*",
-        "@kitsunekode/sweep-protocol": "workspace:*",
-        "@kitsunekode/sweep-ui": "workspace:*",
-        "bun-types": "catalog:",
+        "bun-types": "^1.3.0",
         "husky": "^9.1.7",
         "lint-staged": "^15.2.10",
         "oxfmt": "catalog:",
@@ -60,6 +58,7 @@
     "packages/display": {
       "name": "@kitsunekode/sweep-display",
       "dependencies": {
+        "@kitsunekode/sweep-core": "workspace:*",
         "@kitsunekode/sweep-protocol": "workspace:*",
         "picocolors": "catalog:",
       },
@@ -88,10 +87,7 @@
       "devDependencies": {
         "@kitsunekode/sweep-cli": "workspace:*",
         "@kitsunekode/sweep-core": "workspace:*",
-        "@kitsunekode/sweep-display": "workspace:*",
         "@kitsunekode/sweep-protocol": "workspace:*",
-        "@kitsunekode/sweep-typescript-config": "workspace:*",
-        "@kitsunekode/sweep-ui": "workspace:*",
         "bun-types": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
@@ -128,7 +124,7 @@
   "catalog": {
     "@opentui/core": "^0.2.3",
     "ajv": "^8.18.0",
-    "bun-types": "latest",
+    "bun-types": "^1.3.0",
     "commander": "^12.1.0",
     "oxfmt": "^0.45.0",
     "oxlint": "^0.13.0",

@@ -33,7 +33,7 @@
       "typescript": "^5.7.2",
       "oxlint": "^0.13.0",
       "oxfmt": "^0.45.0",
-      "bun-types": "latest",
+      "bun-types": "^1.3.0",
       "commander": "^12.1.0",
       "picocolors": "^1.1.1",
       "ajv": "^8.18.0",
@@ -49,7 +49,7 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "bun run scripts/dev.ts",
+    "dev": "turbo run dev",
     "clean": "turbo run clean",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
@@ -57,6 +57,7 @@
     "fmt": "turbo run fmt",
     "test": "turbo run test",
     "check": "turbo run check",
+    "check:affected": "turbo run check --affected",
     "preflight": "turbo run preflight",
     "pack:preview": "npm pack --dry-run",
     "pack": "npm pack",
@@ -71,20 +72,21 @@
     "rust:lint": "cargo clippy --workspace -- -D warnings",
     "rust:test": "cargo test --workspace",
     "rust:check": "cargo fmt --all --check && cargo clippy --workspace -- -D warnings && cargo test --workspace",
+    "link:global": "bun run build && bun link",
+    "unlink:global": "bun unlink",
+    "relink:global": "bun unlink && bun run link:global",
     "release": "bun run prepublishOnly && bun run scripts/publish-release.ts",
     "prepare": "husky || true",
     "prepublishOnly": "turbo run check build preflight"
+  },
+  "dependencies": {
+    "@opentui/core": "catalog:"
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
     "@commitlint/cli": "^19.6.0",
     "@commitlint/config-conventional": "^19.6.0",
-    "@kitsunekode/sweep-cli": "workspace:*",
-    "@kitsunekode/sweep-core": "workspace:*",
-    "@kitsunekode/sweep-display": "workspace:*",
-    "@kitsunekode/sweep-protocol": "workspace:*",
-    "@kitsunekode/sweep-ui": "workspace:*",
-    "bun-types": "catalog:",
+    "bun-types": "^1.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.10",
     "oxfmt": "catalog:",

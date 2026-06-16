@@ -11,10 +11,7 @@
   "devDependencies": {
     "@kitsunekode/sweep-cli": "workspace:*",
     "@kitsunekode/sweep-core": "workspace:*",
-    "@kitsunekode/sweep-display": "workspace:*",
     "@kitsunekode/sweep-protocol": "workspace:*",
-    "@kitsunekode/sweep-typescript-config": "workspace:*",
-    "@kitsunekode/sweep-ui": "workspace:*",
     "bun-types": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
