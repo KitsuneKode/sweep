@@ -1,25 +1,5 @@
 import type { CandidateKind, ScanCandidate, ScanEntry } from "@kitsunekode/sweep-protocol";
-
-function kindFromName(name: string): CandidateKind {
-  switch (name) {
-    case "node_modules":
-    case "dist":
-    case "build":
-    case "out":
-    case ".next":
-    case ".nuxt":
-    case ".svelte-kit":
-    case ".turbo":
-    case ".vite":
-    case ".parcel-cache":
-    case "target":
-    case "coverage":
-    case ".nyc_output":
-      return name;
-    default:
-      return name.endsWith(".tsbuildinfo") ? "tsbuildinfo" : "custom";
-  }
-}
+import { candidateKindFromName as kindFromName } from "@kitsunekode/sweep-core/planner";
 
 export interface ScanResultGroup {
   kind: CandidateKind;

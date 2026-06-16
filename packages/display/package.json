@@ -12,6 +12,7 @@
     "fmt": "oxfmt src"
   },
   "dependencies": {
+    "@kitsunekode/sweep-core": "workspace:*",
     "@kitsunekode/sweep-protocol": "workspace:*",
     "picocolors": "catalog:"
   },
