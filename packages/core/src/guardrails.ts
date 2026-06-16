@@ -84,6 +84,9 @@ export function assertSafePattern(pattern: string): void {
   if (!pattern || pattern.trim().length === 0) {
     throw new GuardrailError("Pattern must not be empty.");
   }
+  if (pattern !== pattern.trim()) {
+    throw new GuardrailError(`Pattern must not have leading or trailing whitespace: "${pattern}"`);
+  }
   if (pattern.includes("\x00")) {
     throw new GuardrailError(`Pattern contains null byte: ${JSON.stringify(pattern)}`);
   }

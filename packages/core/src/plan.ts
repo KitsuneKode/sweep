@@ -53,7 +53,6 @@ export function loadPlan(planPath: string): ScanPlan {
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    if (err instanceof SyntaxError) throw err;
     throw new PlanValidationError(
       `Invalid scan plan JSON: ${err instanceof Error ? err.message : String(err)}`,
     );
