@@ -1,3 +1,4 @@
+import "@opentui/core/runtime-plugin-support";
 import {
   BoxRenderable,
   createCliRenderer,

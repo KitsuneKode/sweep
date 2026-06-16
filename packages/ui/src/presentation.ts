@@ -1,3 +1,4 @@
+import { relative } from "node:path";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { bold, dim, fg, StyledText, t } from "@opentui/core";
@@ -13,16 +14,11 @@ function padCount(value: number, width = 2): string {
 
 function formatBytesUi(bytes: number): string {
   if (bytes <= 0) return "0 B";
-  const formatted = formatBytes(bytes);
-  return formatted === "~" ? "0 B" : formatted;
+  return formatBytes(bytes);
 }
 
 export function relativePath(root: string, path: string): string {
-  const normalizedRoot = root.endsWith("/") ? root.slice(0, -1) : root;
-  if (path === normalizedRoot) return ".";
-  const prefix = `${normalizedRoot}/`;
-  if (path.startsWith(prefix)) return path.slice(prefix.length);
-  return path;
+  return relative(root, path);
 }
 
 export function formatGroupHeaderRow(row: Extract<UiDisplayRow, { kind: "header" }>): string {
