@@ -158,8 +158,8 @@ export function isRustEngineAvailable(): boolean {
     if (binary !== "sweep-engine" && !existsSync(binary)) {
       return false;
     }
-    const proc = spawnSync(binary, [], { encoding: "utf8" });
-    return proc.status !== 0 && (proc.stderr?.includes("usage:") ?? false);
+    const proc = spawnSync(binary, ["--version"], { encoding: "utf8" });
+    return proc.status === 0;
   } catch {
     return false;
   }

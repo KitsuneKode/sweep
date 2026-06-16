@@ -57,26 +57,7 @@ export async function applyPlan(
   const selected = resolveSelectedCandidates(plan);
 
   if (selected.length === 0) {
-    return {
-      report: {
-        protocolVersion: PROTOCOL_VERSION,
-        targetDir: plan.targetDir,
-        selectedCandidateIds: [],
-        deletedCount: 0,
-        failedCount: 0,
-        totalBytesFreed: 0,
-        failedPaths: [],
-      },
-      cleanResult: {
-        deleted: [],
-        failedPaths: [],
-        totalBytesFreed: 0,
-        durationMs: 0,
-      },
-      selected: [],
-      ready: [],
-      revalidationFailures: [],
-    };
+    return emptyApplyPlanResult(plan);
   }
 
   const { ready, failedPaths: revalidationFailures } = revalidateCandidates(selected);
@@ -139,6 +120,11 @@ export async function applyPlanWithBackend(
     return emptyApplyPlanResult(plan);
   }
 
+  const { ready, failedPaths: revalidationFailures } = revalidateCandidates(selected);
+  if (revalidationFailures.length > 0 || ready.length === 0) {
+    return applyPlan(plan, options);
+  }
+
   const report = applyPlanViaRust(plan);
   const failedPaths = new Set(report.failedPaths.map((failure) => failure.path));
   const deleted = selected.filter((candidate) => !failedPaths.has(candidate.path));
@@ -159,6 +145,6 @@ export async function applyPlanWithBackend(
     cleanResult,
     selected,
     ready: deleted,
-    revalidationFailures: [],
+    revalidationFailures,
   };
 }
