@@ -1,5 +1,5 @@
 import type { CandidateKind, ScanCandidate, ScanEntry } from "@kitsunekode/sweep-protocol";
-import { candidateKindFromName as kindFromName } from "@kitsunekode/sweep-core/planner";
+import { candidateKindFromName as kindFromName } from "@kitsunekode/sweep-protocol";
 
 export interface ScanResultGroup {
   kind: CandidateKind;

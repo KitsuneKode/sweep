@@ -6,13 +6,13 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "transit": "exit 0",
     "test": "bun test src",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "fmt": "oxfmt src"
   },
   "dependencies": {
-    "@kitsunekode/sweep-core": "workspace:*",
     "@kitsunekode/sweep-protocol": "workspace:*",
     "picocolors": "catalog:"
   },

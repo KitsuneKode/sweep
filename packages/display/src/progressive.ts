@@ -75,17 +75,23 @@ export function createProgressiveScanRenderer(
       }
 
       const sizePrefix = summary.exact ? "" : "~";
+      const totalLabel = summary.exact ? "total" : "estimated";
+
       if (process.stdout.isTTY) {
         console.log();
         console.log(
           `  ${pc.bold(summary.count.toString())} items, ` +
-            `${pc.yellow(`${sizePrefix}${formatBytes(summary.totalBytes)}`)} ` +
-            `${summary.exact ? "total" : "estimated"}`,
+            `${pc.yellow(`${sizePrefix}${formatBytes(summary.totalBytes)}`)} ${totalLabel}`,
         );
         console.log(
           pc.dim(`Scanned ${pc.bold(summary.scannedDirs.toString())} dirs`) + pc.dim("."),
         );
         console.log();
+      } else {
+        console.log(
+          `sweep: found ${summary.count} items (${sizePrefix}${formatBytes(summary.totalBytes)} ${totalLabel})`,
+        );
+        console.log(`sweep: scanned ${summary.scannedDirs} dirs`);
       }
     },
     stopSpinner() {

@@ -1,7 +1,7 @@
 import pc from "picocolors";
-import type { ScanPlan, ScanResult } from "@kitsunekode/sweep-protocol";
+import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "./bytes.js";
-import { groupCandidatesByKind, groupScanEntries } from "./grouping.js";
+import { groupCandidatesByKind } from "./grouping.js";
 import { formatRiskBadge } from "./risk.js";
 import { createSpinner } from "./spinner.js";
 
@@ -38,22 +38,6 @@ export function printBanner(): void {
   console.log(`\n ${pc.bold(pc.cyan("sweep"))} ${pc.dim("—")} ${pc.dim("artifact cleanup")}\n`);
 }
 
-export function printScanSummary(result: ScanResult, targetDir: string): void {
-  if (process.stdout.isTTY) {
-    console.log(
-      pc.dim(`Scanned ${pc.bold(result.scannedDirs.toString())} dirs in `) + pc.bold(targetDir),
-    );
-    console.log();
-  }
-
-  if (result.entries.length === 0) {
-    console.log(pc.green("✓") + " Nothing to clean.");
-    return;
-  }
-
-  printGroupedEntries(groupScanEntries(result.entries), result.exact);
-}
-
 export function printGroupedScanPlan(plan: ScanPlan, targetDir: string): void {
   if (process.stdout.isTTY) {
     console.log(
@@ -61,6 +45,8 @@ export function printGroupedScanPlan(plan: ScanPlan, targetDir: string): void {
         pc.bold(targetDir),
     );
     console.log();
+  } else {
+    console.log(`sweep: scanned ${plan.summary.scannedDirs} dirs in ${targetDir}`);
   }
 
   if (plan.candidates.length === 0) {
@@ -85,7 +71,9 @@ function printGroupedCandidates(
           pc.yellow(`${sizePrefix}${formatBytes(group.totalBytes)}`),
       );
     } else {
-      console.log(`sweep: group ${group.label} (${group.entries.length})`);
+      console.log(
+        `sweep: group ${group.label} (${group.entries.length}) ${sizePrefix}${formatBytes(group.totalBytes)}`,
+      );
     }
 
     const maxNameLen = Math.max(...group.entries.map((entry) => entry.name.length), 12);
@@ -123,54 +111,10 @@ function printGroupedCandidates(
         `${pc.yellow(`${sizePrefix}${formatBytes(totalBytes)}`)} ${totalLabel}`,
     );
     console.log();
-  }
-}
-
-function printGroupedEntries(groups: ReturnType<typeof groupScanEntries>, exact: boolean): void {
-  const sizePrefix = exact ? "" : "~";
-
-  for (const group of groups) {
-    if (process.stdout.isTTY) {
-      console.log(
-        pc.bold(pc.cyan(group.label)) +
-          pc.dim(`  (${group.entries.length})  `) +
-          pc.yellow(`${sizePrefix}${formatBytes(group.totalBytes)}`),
-      );
-    }
-
-    const maxNameLen = Math.max(...group.entries.map((entry) => entry.name.length), 12);
-
-    for (const entry of group.entries) {
-      const size = formatBytes(entry.estimatedBytes);
-      const symlinkBadge = entry.isSymlink ? pc.dim(" [symlink]") : "";
-
-      if (process.stdout.isTTY) {
-        console.log(
-          `  ${pc.red("✗")} ${pc.bold(padEnd(entry.name, maxNameLen))}` +
-            `  ${pc.dim(entry.path)}` +
-            `  ${pc.yellow(`${sizePrefix}${size}`)}` +
-            symlinkBadge,
-        );
-      } else {
-        console.log(
-          `sweep: found ${entry.name} (${entry.path}) ${sizePrefix}${size}${symlinkBadge}`,
-        );
-      }
-    }
-
-    console.log();
-  }
-
-  const totalCount = groups.reduce((sum, group) => sum + group.entries.length, 0);
-  const totalBytes = groups.reduce((sum, group) => sum + group.totalBytes, 0);
-  const totalLabel = exact ? "total" : "estimated";
-
-  if (process.stdout.isTTY) {
+  } else {
     console.log(
-      `  ${pc.bold(totalCount.toString())} items, ` +
-        `${pc.yellow(`${sizePrefix}${formatBytes(totalBytes)}`)} ${totalLabel}`,
+      `sweep: found ${totalCount} items (${sizePrefix}${formatBytes(totalBytes)} ${totalLabel})`,
     );
-    console.log();
   }
 }
 
