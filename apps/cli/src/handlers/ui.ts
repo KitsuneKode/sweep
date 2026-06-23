@@ -2,20 +2,22 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { DEFAULT_PATTERNS, buildRescanConfig } from "@kitsunekode/sweep-core/config";
-import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
-import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
-import { printAborted, printCleanResult, printDryRunNotice } from "@kitsunekode/sweep-display";
+import { GuardrailError, assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
+import {
+  printAborted,
+  printCleanResult,
+  printDryRunNotice,
+  type Spinner,
+} from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
+import { runInteractiveCleanup } from "../orchestration/interactive-cleanup.js";
 import {
   applyNoColor,
   assertOpenTuiAvailable,
-  executePlanDeletion,
   resolveEngineBackend,
   resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
-  runScanToPlan,
 } from "./shared.js";
 
 function isModuleNotFound(error: unknown): boolean {
@@ -126,90 +128,67 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
 
-    let scanConfig = resolveScanConfig(targetDir, opts);
-    let disabledPatterns = scanConfig.disabledPatterns ?? [];
-    let extraPatterns = scanConfig.patterns.filter(
-      (pattern) => !new Set<string>(DEFAULT_PATTERNS).has(pattern),
-    );
-    let selectedPlan;
+    const scanConfig = resolveScanConfig(targetDir, opts);
 
     await assertOpenTuiAvailable();
 
     const { runSweepUi } = await loadSweepUi();
     const { createSpinner } = await import("@kitsunekode/sweep-display");
 
-    while (true) {
-      const spinner = createSpinner("Scanning for artifacts…");
-      let found = 0;
-      let plan;
-      try {
-        ({ plan } = await runScanToPlan(targetDir, scanConfig, {
-          selectionPolicy,
-          engine,
-          projectConfig,
-          onEntrySized: () => {
-            found++;
-            spinner.update(`Scanning for artifacts… (${found} found)`);
-          },
-        }));
-      } finally {
-        spinner.stop();
-      }
+    const scanSpinner: { current: Spinner | null } = { current: null };
+    try {
+      const outcome = await runInteractiveCleanup({
+        targetDir,
+        scanConfig,
+        projectConfig,
+        selectionPolicy,
+        engine,
+        dryRun: opts.dryRun,
+        yes: opts.yes,
+        forceLarge: opts.forceLarge,
+        onScanStart: () => {
+          scanSpinner.current?.stop();
+          scanSpinner.current = createSpinner("Scanning for artifacts…");
+        },
+        onScanComplete: () => {
+          scanSpinner.current?.stop();
+          scanSpinner.current = null;
+        },
+        onScanProgress: (found) => {
+          scanSpinner.current?.update(`Scanning for artifacts… (${found} found)`);
+        },
+        review: async (plan, ctx) =>
+          runSweepUi(plan, {
+            ...(ctx.yes ? { yes: true } : {}),
+            ...(ctx.dryRun ? { dryRun: true } : {}),
+            init: ctx.init,
+          }),
+      });
 
-      if (plan.candidates.length === 0) {
-        console.log("Nothing to clean.");
+      if (outcome.type === "nothing") {
+        console.log(outcome.reason === "no_candidates" ? "Nothing to clean." : "Nothing selected.");
         exitWith(EXIT.OK);
       }
 
-      const outcome = await runSweepUi(plan, {
-        yes: opts.yes,
-        dryRun: opts.dryRun,
-        init: {
-          catalogPatterns: [...DEFAULT_PATTERNS],
-          disabledPatterns,
-          extraPatterns,
-        },
-      });
-
-      if (outcome.type === "abort") {
+      if (outcome.type === "aborted") {
         printAborted();
         exitWith(EXIT.ABORTED);
       }
 
-      if (outcome.type === "rescan") {
-        disabledPatterns = outcome.disabledPatterns;
-        extraPatterns = outcome.extraPatterns;
-        scanConfig = buildRescanConfig(scanConfig, {
-          disabledPatterns,
-          extraPatterns,
-        });
-        continue;
+      if (outcome.type === "dry_run") {
+        printDryRunNotice();
+        exitWith(EXIT.OK);
       }
 
-      selectedPlan = outcome.plan;
-      break;
+      printCleanResult({
+        ...outcome.cleanResult,
+        failedPaths: outcome.report.failedPaths,
+      });
+
+      exitWith(outcome.report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
+    } finally {
+      scanSpinner.current?.stop();
     }
-
-    const selectedBytes = getSelectedBytes(selectedPlan);
-    assertSizeLimit(selectedBytes, scanConfig.maxSizeGB, opts.forceLarge);
-
-    if (selectedPlan.selectedCandidateIds.length === 0) {
-      console.log("Nothing selected.");
-      exitWith(EXIT.OK);
-    }
-
-    if (opts.dryRun) {
-      printDryRunNotice();
-      exitWith(EXIT.OK);
-    }
-
-    const { report, cleanResult } = await executePlanDeletion(selectedPlan, engine);
-    printCleanResult({
-      ...cleanResult,
-      failedPaths: report.failedPaths,
-    });
-
-    exitWith(report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
     handleFatalError(err);
   }

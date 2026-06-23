@@ -233,7 +233,7 @@ export async function runScanWithDisplay(
 
     if (!quiet) {
       const { printGroupedScanPlan } = await import("@kitsunekode/sweep-display");
-      printGroupedScanPlan(plan, targetDir);
+      printGroupedScanPlan(plan, targetDir, output?.verbose ? { verbose: true } : {});
     }
 
     return { result, plan };

@@ -4,10 +4,10 @@ import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/swe
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
 import { printAborted, printCleanResult, printDryRunNotice } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
+import { applyReviewedPlan } from "./apply-plan.js";
 import {
   applyNoColor,
   confirmPlanDeletion,
-  executePlanDeletion,
   resolveEngineBackend,
   resolveProjectScanConfig,
   resolveScanConfig,
@@ -78,11 +78,18 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       exitWith(EXIT.ABORTED);
     }
 
-    const { report, cleanResult } = await executePlanDeletion(
-      plan,
+    const applyResult = await applyReviewedPlan(plan, {
+      maxSizeGB: config.maxSizeGB,
+      forceLarge: opts.forceLarge,
       engine,
-      opts.json || opts.quiet ? { quiet: true } : {},
-    );
+      ...(opts.json || opts.quiet ? { quiet: true } : {}),
+    });
+
+    if (applyResult.status !== "completed") {
+      exitWith(EXIT.OK);
+    }
+
+    const { report, cleanResult } = applyResult;
 
     if (opts.json) {
       writeJson(report);
