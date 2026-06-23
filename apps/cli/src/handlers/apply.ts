@@ -1,11 +1,16 @@
 import type { ApplyReport } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
-import { applyPlanWithBackend } from "@kitsunekode/sweep-core/engine";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import { loadPlan } from "@kitsunekode/sweep-core/plan";
 import { formatBytes, printAborted, printCleanResult } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { applyNoColor, promptConfirm, resolveEngineBackend, writeJson } from "./shared.js";
+import {
+  applyNoColor,
+  executePlanDeletion,
+  promptConfirm,
+  resolveEngineBackend,
+  writeJson,
+} from "./shared.js";
 
 export type ApplyHandlerOptions = {
   plan: string;
@@ -55,9 +60,13 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       }
     }
 
-    const engine = resolveEngineBackend({ engine: opts.engine ?? "auto" });
+    const engine = resolveEngineBackend({ engine: opts.engine ?? "js" });
 
-    const { report, cleanResult } = await applyPlanWithBackend(plan, engine);
+    const { report, cleanResult } = await executePlanDeletion(
+      plan,
+      engine,
+      opts.json ? { quiet: true } : {},
+    );
 
     if (opts.json) {
       writeJson(report);

@@ -1,29 +1,19 @@
 import { resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
-import { applyPlanWithBackend } from "@kitsunekode/sweep-core/engine";
 import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
-import {
-  clearDeletionProgress,
-  createProgressiveScanRenderer,
-  formatBytes,
-  printAborted,
-  printBanner,
-  printCleanResult,
-  printDeletionProgress,
-  printDryRunNotice,
-  printGroupedScanPlan,
-} from "@kitsunekode/sweep-display";
-import { toCandidate } from "@kitsunekode/sweep-core/planner";
+import { printAborted, printCleanResult, printDryRunNotice } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
+  confirmPlanDeletion,
+  executePlanDeletion,
   resolveEngineBackend,
   resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
-  runScanToPlan,
-  promptConfirm,
+  runScanWithDisplay,
+  writeJson,
 } from "./shared.js";
 
 export async function handleClean(pathArg: string, opts: CliOptions): Promise<void> {
@@ -45,38 +35,20 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
 
-    printBanner();
-    const spinner = createProgressiveScanRenderer(
-      opts.dryRun ? "Scanning (dry-run)..." : "Scanning...",
-    );
-    let result;
-    let plan;
-    try {
-      ({ result, plan } = runScanToPlan(targetDir, config, {
-        // Batched du estimates are fast enough for dry-run preview; exactSize walks
-        // entire trees per match and can fork-bomb memory on large monorepos.
-        exact: false,
-        selectionPolicy,
-        engine,
-        projectConfig,
-        onEntry: (entry) => {
-          const candidate = toCandidate(entry);
-          spinner.onCandidate(entry, candidate.riskTier);
-        },
-      }));
-    } finally {
-      spinner.stopSpinner();
-    }
-    spinner.finish({
-      scannedDirs: result.scannedDirs,
-      count: result.entries.length,
-      totalBytes: result.estimatedTotalBytes,
-      exact: result.exact,
+    const { result, plan } = await runScanWithDisplay(targetDir, config, {
+      exact: false,
+      selectionPolicy,
+      engine,
+      projectConfig,
+      spinnerLabel: opts.dryRun ? "Scanning (dry-run)..." : "Scanning...",
+      output: {
+        ...(opts.quiet ? { quiet: true } : {}),
+        ...(opts.verbose ? { verbose: true } : {}),
+      },
     });
 
-    printGroupedScanPlan(plan, targetDir);
-
     if (result.entries.length === 0) {
+      if (opts.json) writeJson(plan);
       exitWith(EXIT.OK);
     }
 
@@ -84,45 +56,42 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     assertSizeLimit(selectedBytes, config.maxSizeGB, opts.forceLarge);
 
     if (opts.dryRun) {
-      printDryRunNotice();
+      if (opts.json) {
+        writeJson(plan);
+      } else {
+        printDryRunNotice();
+      }
       exitWith(EXIT.OK);
     }
 
     if (plan.selectedCandidateIds.length === 0) {
-      console.log("Nothing selected by the current policy. Use --select or --include-dangerous.");
+      if (opts.json) {
+        writeJson(plan);
+      } else {
+        console.log("Nothing selected by the current policy. Use --select or --include-dangerous.");
+      }
       exitWith(EXIT.OK);
     }
 
-    if (!opts.yes) {
-      const confirmed = await promptConfirm(
-        `Delete ${plan.selectedCandidateIds.length} selected items (~${formatBytes(selectedBytes)})?`,
-      );
-      if (!confirmed) {
-        printAborted();
-        exitWith(EXIT.ABORTED);
-      }
+    if (!(await confirmPlanDeletion(plan, { yes: opts.yes }))) {
+      printAborted();
+      exitWith(EXIT.ABORTED);
     }
 
-    const selected = plan.candidates.filter((candidate) =>
-      plan.selectedCandidateIds.includes(candidate.id),
+    const { report, cleanResult } = await executePlanDeletion(
+      plan,
+      engine,
+      opts.json || opts.quiet ? { quiet: true } : {},
     );
-    const total = selected.length;
-    let current = 0;
-    let freedBytes = 0;
 
-    const { report, cleanResult } = await applyPlanWithBackend(plan, engine, {
-      onDeleted: (entry) => {
-        current++;
-        freedBytes += entry.estimatedBytes;
-        printDeletionProgress(current, total, entry.path, freedBytes);
-      },
-    });
-    clearDeletionProgress();
-
-    printCleanResult({
-      ...cleanResult,
-      failedPaths: report.failedPaths,
-    });
+    if (opts.json) {
+      writeJson(report);
+    } else {
+      printCleanResult({
+        ...cleanResult,
+        failedPaths: report.failedPaths,
+      });
+    }
 
     exitWith(report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {

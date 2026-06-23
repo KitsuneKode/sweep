@@ -23,7 +23,7 @@ export async function handlePlan(pathArg: string, opts: CliOptions): Promise<voi
     const projectConfig = resolveProjectScanConfig(targetDir, opts);
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
-    const { plan } = runScanToPlan(targetDir, config, {
+    const { plan } = await runScanToPlan(targetDir, config, {
       selectionPolicy,
       engine,
       projectConfig,

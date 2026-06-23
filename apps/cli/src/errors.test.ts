@@ -23,4 +23,11 @@ describe("exit code mapping", () => {
     expect(resolveExitCode(new Error("boom"))).toBe(EXIT.FAILURE);
     expect(resolveExitCode("nope")).toBe(EXIT.FAILURE);
   });
+
+  test("defines distinct exit codes", () => {
+    expect(EXIT.ABORTED).toBe(1);
+    expect(EXIT.CONFIG_PARSE).toBe(3);
+    expect(EXIT.WARN).toBe(5);
+    expect(EXIT.ABORTED).not.toBe(EXIT.WARN);
+  });
 });

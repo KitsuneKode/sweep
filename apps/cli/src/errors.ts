@@ -9,6 +9,7 @@ export const EXIT = {
   GUARDRAIL: 2,
   CONFIG_PARSE: 3,
   FAILURE: 4,
+  WARN: 5,
 } as const;
 
 export type ExitCode = (typeof EXIT)[keyof typeof EXIT];

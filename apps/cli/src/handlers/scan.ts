@@ -10,6 +10,7 @@ import {
   resolveScanConfig,
   resolveSelectionPolicy,
   runScanToPlan,
+  runScanWithDisplay,
   writeJson,
   writeJsonLine,
 } from "./shared.js";
@@ -33,7 +34,7 @@ export async function handleScan(
       const startedEvent: ScanEvent = { type: "scan_started", targetDir };
       writeJsonLine(startedEvent);
 
-      const { result } = runScanToPlan(targetDir, config, {
+      const { result } = await runScanToPlan(targetDir, config, {
         exact: false,
         selectionPolicy,
         engine,
@@ -41,6 +42,10 @@ export async function handleScan(
         onEntry: (entry) => {
           const candidate = toCandidate(entry);
           writeJsonLine({ type: "candidate_found", candidate } satisfies ScanEvent);
+        },
+        onEntrySized: (entry) => {
+          const candidate = toCandidate(entry);
+          writeJsonLine({ type: "candidate_updated", candidate } satisfies ScanEvent);
         },
       });
 
@@ -56,7 +61,7 @@ export async function handleScan(
     }
 
     if (opts.json) {
-      const { plan } = runScanToPlan(targetDir, config, {
+      const { plan } = await runScanToPlan(targetDir, config, {
         selectionPolicy,
         engine,
         projectConfig,
@@ -65,33 +70,15 @@ export async function handleScan(
       exitWith(EXIT.OK);
     }
 
-    const { createProgressiveScanRenderer, printBanner, printGroupedScanPlan } =
-      await import("@kitsunekode/sweep-display");
-
-    printBanner();
-    const progressive = createProgressiveScanRenderer("Scanning...");
-    let result;
-    let plan;
-    try {
-      ({ result, plan } = runScanToPlan(targetDir, config, {
-        selectionPolicy,
-        engine,
-        projectConfig,
-        onEntry: (entry) => {
-          const candidate = toCandidate(entry);
-          progressive.onCandidate(entry, candidate.riskTier);
-        },
-      }));
-    } finally {
-      progressive.stopSpinner();
-    }
-    progressive.finish({
-      scannedDirs: result.scannedDirs,
-      count: result.entries.length,
-      totalBytes: result.estimatedTotalBytes,
-      exact: result.exact,
+    await runScanWithDisplay(targetDir, config, {
+      selectionPolicy,
+      engine,
+      projectConfig,
+      output: {
+        ...(opts.quiet ? { quiet: true } : {}),
+        ...(opts.verbose ? { verbose: true } : {}),
+      },
     });
-    printGroupedScanPlan(plan, targetDir);
     exitWith(EXIT.OK);
   } catch (err) {
     handleFatalError(err);

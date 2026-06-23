@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { makeProgram } from "@kitsunekode/sweep-cli";
+import { makeProgram } from "@kitsunekode/sweep";
 
 describe("CLI factory", () => {
   test("makeProgram() parses --help without side effects", () => {
