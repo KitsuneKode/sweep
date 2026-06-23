@@ -11,6 +11,7 @@ export type FailureReasonCode =
   | "missing"
   | "changed_symlink_state"
   | "changed_entry_type"
+  | "outside_target"
   | "permission_denied"
   | "busy"
   | "filesystem_error";
@@ -34,10 +35,14 @@ export type CandidateKind =
 
 export interface SweepConfig {
   patterns: string[];
+  /** Patterns removed from the merged default + custom set (project/global/CLI). */
+  disabledPatterns?: string[];
   ignore: string[];
   maxSizeGB: number;
   depth: number;
 }
+
+export { candidateKindFromName, KNOWN_ARTIFACT_NAMES } from "./candidate.js";
 
 export interface ScanEntry {
   path: string;
@@ -74,6 +79,7 @@ export interface CliOptions {
   yes: boolean;
   forceLarge: boolean;
   pattern: string[];
+  disabledPattern: string[];
   ignore: string[];
   includeDangerous: boolean;
   select: SelectionMode;
@@ -81,6 +87,9 @@ export interface CliOptions {
   config?: string;
   color: boolean;
   engine: EngineBackend;
+  quiet?: boolean;
+  verbose?: boolean;
+  json?: boolean;
 }
 
 export interface ScanCandidate extends ScanEntry {

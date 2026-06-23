@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "transit": "exit 0",
     "test": "bun test src",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
