@@ -1,6 +1,5 @@
 {
-  "patterns": [],
-  "ignore": [],
+  "ignore": ["tests/fixtures", "apps/cli/dist"],
   "maxSizeGB": 10,
   "depth": -1
 }
