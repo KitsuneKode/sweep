@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { applyPlan, scanToPlan } from "./engine.js";
+import { GuardrailError } from "./guardrails.js";
+import { applyPlan, applyPlanWithBackend, scanToPlan } from "./engine.js";
+import { isRustEngineAvailable, resolveRustEngineBinary } from "./rust-engine.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import { cleanupSeededFixtures, seedScenario } from "@kitsunekode/sweep-test-fixtures";
 
@@ -106,6 +108,56 @@ describe("core engine", () => {
     expect(plan.summary.selectedCount).toBe(3);
     expect(plan.summary.riskCounts.safe).toBe(3);
     expect(plan.summary.riskCounts.dangerous).toBe(1);
+  });
+
+  test("applyPlan rejects outside-target paths before deletion", async () => {
+    mkdirSync(dir("node_modules"));
+
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const outsidePath = join("/tmp", "sweep-outside-target");
+    const malicious = {
+      ...plan,
+      candidates: [
+        ...plan.candidates,
+        {
+          ...plan.candidates[0]!,
+          id: "cand_outside",
+          path: outsidePath,
+        },
+      ],
+      selectedCandidateIds: [...plan.selectedCandidateIds, "cand_outside"],
+    };
+
+    await expect(applyPlan(malicious)).rejects.toBeInstanceOf(GuardrailError);
+    expect(existsSync(dir("node_modules"))).toBe(true);
+  });
+
+  test("applyPlanWithBackend rust rejects outside-target paths before subprocess", async () => {
+    if (process.env.SWEEP_ENGINE_FROM_NPM === "1") {
+      return;
+    }
+    if (!isRustEngineAvailable() || !existsSync(resolveRustEngineBinary())) {
+      return;
+    }
+
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const outsidePath = join("/tmp", "sweep-rust-outside-target");
+    const malicious = {
+      ...plan,
+      candidates: [
+        ...plan.candidates,
+        {
+          ...plan.candidates[0]!,
+          id: "cand_outside",
+          path: outsidePath,
+        },
+      ],
+      selectedCandidateIds: [...plan.selectedCandidateIds, "cand_outside"],
+    };
+
+    await expect(applyPlanWithBackend(malicious, "rust")).rejects.toBeInstanceOf(GuardrailError);
+    expect(existsSync(dir("node_modules"))).toBe(true);
   });
 
   test("scanToPlan handles the seeded large-plan scenario predictably", async () => {

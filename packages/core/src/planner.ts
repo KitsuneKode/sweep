@@ -15,6 +15,11 @@ import {
   DEFAULT_SELECTION_POLICY,
   PROTOCOL_VERSION,
 } from "@kitsunekode/sweep-protocol";
+import {
+  enrichCandidates,
+  SYMLINK_ALIAS_REASON,
+  WORKSPACE_STUB_REASON,
+} from "./candidate-insights.js";
 import { isPathWithinRoot, pathHasProtectedVcsSegment } from "./guardrails.js";
 
 export function buildPlan(
@@ -23,10 +28,8 @@ export function buildPlan(
   selectionPolicy: SelectionPolicy = DEFAULT_SELECTION_POLICY,
 ): ScanPlan {
   const candidates = result.entries.map((entry) => toCandidate(entry));
-  const selectedCandidateIds = compileSelectedCandidateIds(candidates, selectionPolicy);
-  const riskCounts = countRiskTiers(candidates);
 
-  return {
+  return applyPlanInsights({
     protocolVersion: PROTOCOL_VERSION,
     targetDir,
     selectionPolicy,
@@ -36,12 +39,41 @@ export function buildPlan(
       estimatedTotalBytes: result.estimatedTotalBytes,
       scannedDirs: result.scannedDirs,
       exact: result.exact,
+      selectedCount: 0,
+      riskCounts: countRiskTiers(candidates),
+    },
+    selectedCandidateIds: [],
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/** Recompute candidate insights and selection after scan (JS and Rust engines). */
+export function applyPlanInsights(plan: ScanPlan): ScanPlan {
+  const candidates = normalizeSelectionDefaults(enrichCandidates(plan.candidates));
+  const selectedCandidateIds = compileSelectedCandidateIds(candidates, plan.selectionPolicy);
+  const riskCounts = countRiskTiers(candidates);
+
+  return {
+    ...plan,
+    candidates,
+    selectedCandidateIds,
+    summary: {
+      ...plan.summary,
+      candidateCount: candidates.length,
       selectedCount: selectedCandidateIds.length,
       riskCounts,
     },
-    selectedCandidateIds,
-    createdAt: new Date().toISOString(),
   };
+}
+
+function normalizeSelectionDefaults(candidates: ScanCandidate[]): ScanCandidate[] {
+  return candidates.map((candidate) => ({
+    ...candidate,
+    selectedByDefault:
+      candidate.riskTier === "safe" &&
+      !candidate.reasons.includes(WORKSPACE_STUB_REASON) &&
+      !candidate.reasons.includes(SYMLINK_ALIAS_REASON),
+  }));
 }
 
 export function compileSelectedCandidateIds(
@@ -65,7 +97,7 @@ export function toCandidate(entry: ScanEntry): ScanCandidate {
     kind,
     riskTier,
     reasons,
-    selectedByDefault: riskTier !== "dangerous" && riskTier !== "blocked",
+    selectedByDefault: riskTier === "safe",
   };
 }
 

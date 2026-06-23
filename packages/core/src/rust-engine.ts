@@ -14,7 +14,7 @@ import type {
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
-import { buildPlan } from "./planner.js";
+import { buildPlan, applyPlanInsights } from "./planner.js";
 import type { ScanHooks } from "./scanner.js";
 import type { ScanToPlanOptions } from "./engine.js";
 import { nativePlatformForCurrentProcess } from "./native-platforms.js";
@@ -217,7 +217,7 @@ export function scanToPlanViaRust(targetDir: string, options: RustScanOptions): 
     jsonStream: false,
   });
   const stdout = runEngine(["scan", absoluteTarget], stdin);
-  return JSON.parse(stdout) as ScanPlan;
+  return applyPlanInsights(JSON.parse(stdout) as ScanPlan);
 }
 
 /** Apply via the Rust `sweep-engine` subprocess. */

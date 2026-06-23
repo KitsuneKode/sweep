@@ -104,7 +104,7 @@ describe("planner", () => {
     const candidates = [safeCandidate, cautionCandidate, dangerousCandidate];
 
     expect(
-      compileSelectedCandidateIds(candidates, { mode: "safe", includeDangerous: false }),
+      compileSelectedCandidateIds(candidates, { mode: "default", includeDangerous: false }),
     ).toEqual([safeCandidate.id]);
     expect(
       compileSelectedCandidateIds(candidates, { mode: "all", includeDangerous: false }),

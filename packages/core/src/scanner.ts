@@ -130,29 +130,53 @@ export function exactSize(entryPath: string): number {
   return total;
 }
 
-async function estimateEntryBytes(entry: ScanEntry, exact: boolean): Promise<number> {
-  if (exact) {
-    return exactSize(entry.path);
-  }
-
-  const sizeMap = await batchEstimateAsync([entry.path]);
-  const fromDu = sizeMap.get(entry.path);
-  if (fromDu !== undefined) {
-    return fromDu;
-  }
-  if (entry.entryType === "directory") {
-    return exactSize(entry.path);
-  }
-  return statFallback(entry.path);
-}
-
 async function applySizeEstimatesStreaming(
   entries: ScanEntry[],
   exact: boolean,
   hooks: ScanHooks,
 ): Promise<void> {
+  const signal = hooks.signal;
+
+  if (exact) {
+    await mapPool(entries, SIZE_CONCURRENCY, async (entry) => {
+      if (signal?.aborted) {
+        return entry;
+      }
+      entry.estimatedBytes = exactSize(entry.path);
+      hooks.onEntrySized?.(entry);
+      return entry;
+    });
+    return;
+  }
+
+  const sizeMap = new Map<string, number>();
+  const paths = entries.map((entry) => entry.path);
+
+  for (let index = 0; index < paths.length; index += DU_CHUNK_SIZE) {
+    if (signal?.aborted) {
+      break;
+    }
+    const chunk = paths.slice(index, index + DU_CHUNK_SIZE);
+    const chunkSizes = await batchEstimateAsync(chunk);
+    for (const [path, bytes] of chunkSizes) {
+      sizeMap.set(path, bytes);
+    }
+  }
+
   await mapPool(entries, SIZE_CONCURRENCY, async (entry) => {
-    entry.estimatedBytes = await estimateEntryBytes(entry, exact);
+    if (signal?.aborted) {
+      return entry;
+    }
+
+    const fromDu = sizeMap.get(entry.path);
+    if (fromDu !== undefined) {
+      entry.estimatedBytes = fromDu;
+    } else if (entry.entryType === "directory") {
+      entry.estimatedBytes = exactSize(entry.path);
+    } else {
+      entry.estimatedBytes = statFallback(entry.path);
+    }
+
     hooks.onEntrySized?.(entry);
     return entry;
   });
