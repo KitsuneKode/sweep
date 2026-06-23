@@ -40,7 +40,7 @@
       "kind": "target",
       "riskTier": "caution",
       "reasons": ["symlink", "default-pattern"],
-      "selectedByDefault": true
+      "selectedByDefault": false
     }
   ],
   "summary": {
@@ -48,7 +48,7 @@
     "estimatedTotalBytes": 0,
     "scannedDirs": 2,
     "exact": false,
-    "selectedCount": 3,
+    "selectedCount": 2,
     "riskCounts": {
       "safe": 2,
       "caution": 1,
@@ -56,10 +56,6 @@
       "blocked": 0
     }
   },
-  "selectedCandidateIds": [
-    "cand_00634678a3777636",
-    "cand_5a5fb400668a9fd1",
-    "cand_edaed5f47b66105a"
-  ],
+  "selectedCandidateIds": ["cand_00634678a3777636", "cand_5a5fb400668a9fd1"],
   "createdAt": "1970-01-01T00:00:00.000Z"
 }
