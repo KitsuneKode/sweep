@@ -52,6 +52,6 @@ When tradeoffs conflict, prefer in this order:
 Before merge or publish:
 
 - `bun run check` — format, lint, typecheck, and tests (Turborepo).
-- `bun run build` — bundle to `dist/sweep.js` and `dist/sweep-ui.js`.
+- `bun run build` — bundle to `apps/cli/dist/sweep.js` and `apps/cli/dist/sweep-ui.js`.
 - `bun run preflight` — publish guardrails (also runs on `prepublishOnly`).
 - Rust path changes: `bun run rust:check`.

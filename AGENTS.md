@@ -15,7 +15,7 @@ docs only when they are relevant to the task.
 ## Project Snapshot
 
 `sweep` is an artifact cleanup CLI for project trees. It is a Bun workspace
-monorepo with a single published npm package at the repo root.
+monorepo with a single published npm package in `apps/cli` (`@kitsunekode/sweep`).
 
 Core priorities:
 
@@ -27,7 +27,7 @@ If a tradeoff is required, choose correctness and guardrails over convenience.
 
 ## Repo Map
 
-- `apps/cli/` — Commander program, command handlers, and CLI entrypoint.
+- `apps/cli/` — Commander program, command handlers, CLI entrypoint, and the published `@kitsunekode/sweep` package.
 - `packages/protocol/` — shared protocol types and JSON Schema artifacts.
 - `packages/core/` — config, guardrails, scanning, planning, and cleanup engine.
 - `packages/display/` — terminal formatting, spinners, and progressive output.
@@ -70,5 +70,6 @@ If a tradeoff is required, choose correctness and guardrails over convenience.
 - The current implemented config file is `.sweeprc` (JSON, no extension). The
   future direction discussed in planning is documented separately; do not assume
   it is implemented until the code changes.
-- The published package is the repo root (`@kitsunekode/sweep`). Internal
-  workspaces are private; `apps/cli/scripts/build.ts` bundles into `dist/`.
+- The published package is `apps/cli` (`@kitsunekode/sweep`). The root is a private
+  orchestrator; internal workspaces are private. `apps/cli/scripts/build.ts` bundles
+  into `apps/cli/dist/`.

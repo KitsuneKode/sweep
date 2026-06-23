@@ -44,7 +44,7 @@ cargo test --workspace
 Integration tests that invoke the bundled CLI require a prior build:
 
 ```bash
-bun run build   # dist/sweep.js
+bun run build   # apps/cli/dist/sweep.js
 bun run test
 ```
 
@@ -78,9 +78,9 @@ bun run scripts/generate-parity-fixture.ts -- tests/fixtures/node_modules-only
 | `rust`         | Rust subprocess when compatible; otherwise falls back to JS with a warning   |
 | `auto`         | Rust when a local `sweep-engine` binary exists, with the same fallback rules |
 
-Rust scan only applies for default config with no `.sweeprc`, no CLI pattern/ignore/depth
-overrides, default selection policy, and no progressive/exact scan modes. Deletion always
-uses the JS engine.
+Rust scan uses the native engine for progressive hooks (`onEntry` / `onEntrySized`) and exact
+sizing when the `sweep-engine` binary is available. `apply` defaults to the JS engine; pass `--engine rust` to use the
+native binary when available.
 
 ```bash
 cargo build -p sweep-engine-cli
@@ -160,5 +160,5 @@ crate-only work does not block the TS pipeline unnecessarily.
 bun run scripts/seed-fixture.ts -- --scenario monorepo
 ```
 
-`packages/core/test-support/fixtures.ts` wraps this for Bun tests; integration
+[packages/test-fixtures/src/fixtures.ts](file:///home/kitsunekode/Projects/cli-tools/sweep/packages/test-fixtures/src/fixtures.ts) wraps this for Bun tests; integration
 `seed-script.test.ts` verifies the script end-to-end.

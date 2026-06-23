@@ -26,7 +26,7 @@ bun run check
 
 # Production bundle
 bun run build
-node dist/sweep.js --version
+node apps/cli/dist/sweep.js --version
 ```
 
 Alternatively, from `apps/cli/`:
@@ -41,14 +41,14 @@ See [.docs/tooling.md](tooling.md) for the full command reference.
 ## Link and try globally
 
 ```bash
-bun run build          # ensures dist/sweep.js exists
-npm link               # registers @kitsunekode/sweep globally
+bun run build          # ensures apps/cli/dist/sweep.js exists
+bun run link:global    # registers @kitsunekode/sweep globally (from apps/cli)
 
 sweep --version
 sweep scan . --dry-run
 sweep ui .             # requires a TTY
 
-npm unlink -g @kitsunekode/sweep
+bun run unlink:global
 ```
 
 ### Link troubleshooting
@@ -56,8 +56,8 @@ npm unlink -g @kitsunekode/sweep
 | Symptom                                  | Fix                                                                          |
 | ---------------------------------------- | ---------------------------------------------------------------------------- |
 | `sweep: command not found` after link    | Ensure npm global bin is on your `PATH`                                      |
-| Stale behavior after edits               | Re-run `bun run build` — linked CLI runs `dist/sweep.js`                     |
-| OpenTUI errors in `sweep ui`             | Build first; UI ships as `dist/sweep-ui.js`                                  |
+| Stale behavior after edits               | Re-run `bun run build` — linked CLI runs `apps/cli/dist/sweep.js`            |
+| OpenTUI errors in `sweep ui`             | Build first; UI ships as `apps/cli/dist/sweep-ui.js`                         |
 | `Cannot find package 'commander'` on dev | Run `bun install` at repo root (`scripts/dev.ts` retries this automatically) |
 | `bun run dev` ignores your args          | Use `bun run dev -- <args>` from repo root                                   |
 

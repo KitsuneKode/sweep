@@ -1,37 +1,38 @@
 # Workspace Layout
 
 The repo is a Bun workspace monorepo with Turborepo orchestration. The root
-package `@kitsunekode/sweep` is what gets published to npm; everything else is
-internal.
+package `sweep-monorepo` is **private** and only orchestrates workspaces. The
+published npm package is `@kitsunekode/sweep` in `apps/cli`.
 
 ## Top-level map
 
 ```
 sweep/
-├── apps/cli/              # Published CLI surface (bundled to dist/)
+├── apps/cli/              # Published @kitsunekode/sweep (bundled to apps/cli/dist/)
 ├── packages/
 │   ├── core/              # Engine: config, scan, plan, apply
 │   ├── engine-native/     # Native engine pack scripts (private)
 │   ├── protocol/          # Shared types + JSON Schema
 │   ├── display/           # Terminal presentation helpers
-│   ├── ui/                # OpenTUI interactive mode
+│   ├── ui/                # OpenTUI interactive mode (source only; bundled by CLI build)
 │   └── typescript-config/ # Shared tsconfig
 ├── native-packages/       # Platform npm package templates (not a workspace)
 ├── crates/sweep-*/        # Rust engine experiment (Cargo workspace)
 ├── tests/                 # Bun test suite
-├── scripts/               # build, preflight, fixtures
-├── dist/                  # Publish output (not committed)
+├── scripts/               # bundle, release, fixtures
 ├── turbo.json             # Task graph
-└── package.json           # Root workspace + npm publish manifest
+└── package.json           # Private root orchestrator
 ```
 
 ## Apps
 
-### `apps/cli` (`@kitsunekode/sweep-cli`)
+### `apps/cli` (`@kitsunekode/sweep`)
 
 - `src/cli.ts` — Commander `makeProgram()` and global options.
-- `src/bin.ts` — Node shebang entry (bundled to `dist/sweep.js`).
+- `src/bin.ts` — Node shebang entry (bundled to `apps/cli/dist/sweep.js`).
 - `src/handlers/` — `scan`, `apply`, `clean`, `plan`, `ui`, `doctor`.
+- `scripts/build.ts` — produces both `dist/sweep.js` and `dist/sweep-ui.js`.
+- `scripts/preflight.ts` — publish guardrails for this package.
 - Depends on `core`, `display`, `protocol`, and `ui`.
 
 ## Packages
@@ -42,7 +43,7 @@ sweep/
 | `@kitsunekode/sweep-core`              | Config resolution, guardrails, scanner, planner, cleaner |
 | `@kitsunekode/sweep-engine-native`     | Pack scripts for platform npm packages (private)         |
 | `@kitsunekode/sweep-display`           | Bytes formatting, spinners, progressive scan output      |
-| `@kitsunekode/sweep-ui`                | OpenTUI app and selection state                          |
+| `@kitsunekode/sweep-ui`                | OpenTUI app and selection state (bundled into CLI dist)  |
 | `@kitsunekode/sweep-typescript-config` | Base `tsconfig` for workspaces                           |
 
 ## Rust workspace
@@ -60,12 +61,20 @@ CI runs Rust checks only when `crates/` or related paths change (see
 
 ## Build and publish path
 
-1. `apps/cli` `build` script runs `apps/cli/scripts/build.ts`.
-2. Bun bundles `apps/cli/src/bin.ts` → `dist/sweep.js`.
-3. UI entry bundles separately → `dist/sweep-ui.js` (lazy-loaded by CLI).
-4. Root `package.json` `files: ["dist"]` — only `dist/` ships to npm.
-5. Optional `@kitsunekode/sweep-engine-*` platform packages ship the Rust binary.
-6. `prepublishOnly` runs `turbo run check build preflight`.
+Bundling is centralized in `scripts/bundle.ts` (Bun's `Bun.build()` API). The
+CLI package owns all publish artifacts:
+
+- `apps/cli/scripts/build.ts` → `apps/cli/dist/sweep.js` + `apps/cli/dist/sweep-ui.js`
+- UI source lives in `packages/ui/src/` and is bundled by the CLI build (React inlined into `sweep-ui.js`; `@opentui/core` external)
+
+`bun run build` goes through Turborepo (`apps/cli` `build` task). For a direct
+local rebuild without turbo: `bun run bundle` or `bun run bundle:watch`.
+
+1. UI bundle → `apps/cli/dist/sweep-ui.js` (lazy-loaded by CLI; `@opentui/core` external peer).
+2. CLI bundle → `apps/cli/dist/sweep.js` (Node ESM; `./sweep-ui.js` external).
+3. `apps/cli/package.json` `files: ["dist", "README.md", "LICENSE"]` — only those ship to npm (`prepack` copies README/LICENSE from repo root).
+4. Optional `@kitsunekode/sweep-engine-*` platform packages ship the Rust binary.
+5. `prepublishOnly` runs `turbo run check build preflight`.
 
 ## Turborepo tasks
 
@@ -87,6 +96,6 @@ turbo. Root `bun run test` runs the integration test package against `tests/`.
 
 ## What is not published
 
-All `apps/*` and `packages/*` workspaces are `"private": true`. Consumers install
-`@kitsunekode/sweep` from npm and receive the bundled `dist/` artifacts plus an
-optional native engine package for their OS/arch when supported.
+All workspaces except `apps/cli` are `"private": true`. Consumers install
+`@kitsunekode/sweep` from npm and receive the bundled `apps/cli/dist/` artifacts
+plus an optional native engine package for their OS/arch when supported.

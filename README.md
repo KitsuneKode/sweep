@@ -27,184 +27,92 @@ Delete 4 items (~846 MB)? [y/N] y
 ## Install
 
 ```bash
-# Global (recommended)
 npm install -g @kitsunekode/sweep
 bun add -g @kitsunekode/sweep
 
-# One-shot, no install
+# One-shot
 npx @kitsunekode/sweep .
 bunx @kitsunekode/sweep .
 ```
 
-**Requirements:** Node.js ≥ 18 or Bun (any recent version).
+**Requirements:** Node.js ≥ 18 or Bun.
 
 ---
 
-## Usage
-
-```
-sweep [path] [options]
-sweep scan [path] [options]
-sweep plan [path] [options]
-sweep ui [path] [options]
-sweep apply --plan <path> [options]
-sweep doctor [path] [options]
-```
-
-`path` defaults to `.` (current directory).
-
-### Commands
-
-- `sweep` — current default cleanup flow with prompt/guardrails
-- `sweep scan` — scan only, no deletion
-- `sweep plan` — emit a saved-plan JSON document (alias of `scan --json`)
-- `sweep ui` — OpenTUI-powered interactive selection flow for TTY terminals
-- `sweep apply --plan <path>` — apply a saved JSON plan
-- `sweep doctor` — quick config/protocol sanity checks (exits non-zero on warnings)
-
-### Options
-
-| Flag                  | Short | Description                                          |
-| --------------------- | ----- | ---------------------------------------------------- |
-| `--dry-run`           | `-n`  | Preview what would be deleted — no changes made      |
-| `--yes`               | `-y`  | Skip confirmation prompt (CI / scripts)              |
-| `--force-large`       |       | Allow deletion over `maxSizeGB` (requires `--yes`)   |
-| `--pattern <p>`       | `-p`  | Add extra pattern, repeatable                        |
-| `--ignore <p>`        | `-i`  | Ignore paths matching this substring, repeatable     |
-| `--select <mode>`     |       | Selection policy: `default`, `safe`, `all`, `none`   |
-| `--include-dangerous` |       | Explicitly include dangerous candidates in selection |
-| `--depth <n>`         |       | Max recursion depth (`-1` = unlimited, default)      |
-| `--config <path>`     |       | Explicit config file path                            |
-| `--engine <backend>`  |       | Scan engine: `js` (default), `rust`, or `auto`       |
-| `--no-color`          |       | Disable color output                                 |
-
-### Rust scan engine
-
-`--engine rust` uses the native `sweep-engine` binary when available. After
-`npm install`, matching platform packages (`@kitsunekode/sweep-engine-*`) are
-installed automatically as optional dependencies. On unsupported platforms or
-when Rust cannot honor your scan options (custom `.sweeprc`, exact sizing, etc.),
-sweep falls back to the JS engine.
-
-Override the binary path in dev:
+## Quick start
 
 ```bash
-export SWEEP_ENGINE_PATH=/path/to/sweep-engine
+sweep init              # scaffold .sweeprc (optional — defaults work out of the box)
+sweep --dry-run         # preview what would be deleted
+sweep                   # scan, confirm, delete
+sweep ui .              # interactive TUI for monorepos
+sweep doctor --json     # config + environment + dry-scan report
 ```
 
-### `scan` options
+---
 
-`scan` supports the shared scan options above and adds:
+## Commands
 
-| Flag            | Description                       |
-| --------------- | --------------------------------- |
-| `--json`        | Emit a saved-plan JSON document   |
-| `--json-stream` | Emit NDJSON scan lifecycle events |
+| Command                     | Description                                      |
+| --------------------------- | ------------------------------------------------ |
+| `sweep` / `sweep clean`     | Default cleanup flow with prompt and guardrails  |
+| `sweep scan`                | Scan only — list candidates, no deletion         |
+| `sweep plan`                | Emit a saved-plan JSON document                  |
+| `sweep ui`                  | OpenTUI interactive picker (TTY required)        |
+| `sweep apply --plan <path>` | Apply a saved JSON plan                          |
+| `sweep init`                | Create a starter `.sweeprc`                      |
+| `sweep doctor`              | Validate config, check tooling, dry-scan preview |
 
-### `apply` options
+`path` defaults to `.` on all path-taking commands.
 
-| Flag            | Short | Description               |
-| --------------- | ----- | ------------------------- |
-| `--plan <path>` |       | Path to a saved scan plan |
-| `--yes`         | `-y`  | Skip confirmation prompt  |
-| `--json`        |       | Emit JSON apply results   |
-| `--no-color`    |       | Disable color output      |
+### Common flags
+
+| Flag                     | Short | Description                                        |
+| ------------------------ | ----- | -------------------------------------------------- |
+| `--dry-run`              | `-n`  | Preview deletions — no changes                     |
+| `--yes`                  | `-y`  | Skip confirmation (CI / scripts)                   |
+| `--force-large`          |       | Allow deletion over `maxSizeGB` (requires `--yes`) |
+| `--pattern <p>`          | `-p`  | Add extra pattern (repeatable)                     |
+| `--ignore <p>`           | `-i`  | Ignore path/name match (repeatable)                |
+| `--disabled-pattern <p>` |       | Disable a default pattern for this run             |
+| `--select <mode>`        |       | `default`, `safe`, `all`, or `none`                |
+| `--include-dangerous`    |       | Include dangerous custom matches                   |
+| `--depth <n>`            |       | Max recursion depth (`-1` = unlimited)             |
+| `--config <path>`        |       | Explicit config file                               |
+| `--engine <backend>`     |       | `js` (default), `rust`, or `auto`                  |
+| `--no-color`             |       | Disable color output                               |
+
+`scan` adds `--json` and `--json-stream`. `apply` adds `--json`. `doctor` adds `--json`.
 
 ### Examples
 
 ```bash
-# Clean current directory
-sweep
-
-# Clean a specific project
-sweep ~/projects/myapp
-
-# Preview what would be deleted (estimated sizes, no changes)
-sweep --dry-run
-
-# Monorepo — finds all node_modules recursively
-sweep ~/projects/monorepo
-
-# CI: no prompt, no color
-sweep --yes
-
-# Add extra patterns on top of defaults
-sweep -p .output -p .cache
-
-# Ignore a vendor directory
-sweep -i packages/vendor
-
-# Only scan 2 levels deep
-sweep --depth 2
-
-# Create a machine-readable cleanup plan
+sweep clean ~/projects/myapp
+sweep --dry-run -p .cache -p .output
 sweep scan . --json > sweep-plan.json
-
-# Stream scan events as NDJSON
-sweep scan . --json-stream
-
-# Review selections in the interactive UI
-sweep ui .
-
-# Apply a saved plan
 sweep apply --plan sweep-plan.json --yes
-
-# Scan a custom artifact pattern without auto-selecting it by default
-sweep scan . --json --pattern .custom-cache
-
-# Explicitly opt dangerous custom matches back into the plan
-sweep scan . --json --pattern .custom-cache --select all --include-dangerous
+sweep init --force
+sweep doctor .
 ```
 
-`scan --json` currently emits a plan-shaped document. Safe candidates are
-selected by default; more dangerous custom-pattern matches are included in the
-candidate list but excluded from `selectedCandidateIds` until explicitly chosen
-with flags such as `--select all --include-dangerous`.
+---
 
-`sweep ui` uses OpenTUI for a keyboard-first terminal picker. Artifacts are
-grouped by directory scope (`project root`, `apps/cli/`, `packages/web/`, …) so
-monorepo scans stay readable. It requires a TTY, supports filter/toggle/bulk
-select (`s` safe, `a` all, `u` clear), and applies the edited plan with Enter.
-Risk markers in the list: `·` safe, `?` caution, `!` dangerous, `×` blocked.
+## Interactive UI (`sweep ui`)
 
-`apply --json` reports structured `failedPaths` entries with stable failure
-codes so scripted consumers and future alternate engines can agree on the same
-outcomes.
+OpenTUI-powered terminal picker for reviewing monorepo scans before delete.
 
-The protocol package now also carries JSON Schema artifacts for `ScanPlan`,
-`ApplyReport`, shared nested defs, and `ScanEvent`, which gives future
-alternate engines a versionable contract to match.
+- **Scope grouping** — artifacts grouped by directory (`project root`, `apps/cli/`, `packages/web/`, …)
+- **Risk markers** — `·` safe, `?` caution, `!` dangerous, `×` blocked
+- **Keyboard** — filter, toggle rows, bulk select (`s` safe, `a` all, `u` clear), Enter to apply
+- **Rescan** — toggle default patterns and add custom ones without leaving the UI
+
+Requires a TTY and `@opentui/core`.
 
 ---
 
-## Default patterns
+## Config (`.sweeprc`)
 
-These are deleted automatically:
-
-| Pattern         | What it is                        |
-| --------------- | --------------------------------- |
-| `node_modules`  | npm/yarn/pnpm/bun dependencies    |
-| `dist`          | compiled output                   |
-| `build`         | compiled output (alt name)        |
-| `out`           | Next.js / generic output          |
-| `.next`         | Next.js cache + build             |
-| `.nuxt`         | Nuxt build                        |
-| `.svelte-kit`   | SvelteKit build                   |
-| `.turbo`        | Turborepo cache                   |
-| `.vite`         | Vite cache                        |
-| `.parcel-cache` | Parcel cache                      |
-| `target`        | Rust / Java / Maven build output  |
-| `coverage`      | test coverage reports             |
-| `.nyc_output`   | nyc/Istanbul coverage data        |
-| `*.tsbuildinfo` | TypeScript incremental build info |
-
-`.cache` is **intentionally excluded** — it's too broad and dangerous in home directories.
-
----
-
-## Config file
-
-Create `.sweeprc` in your repo root (JSON format):
+Run `sweep init` to scaffold a starter file, or create `.sweeprc` manually (JSON):
 
 ```json
 {
@@ -215,41 +123,42 @@ Create `.sweeprc` in your repo root (JSON format):
 }
 ```
 
-All fields are optional. `patterns` and `ignore` are **merged** with defaults — not replaced. To suppress a default pattern, add it to `ignore`:
+All fields are optional. `patterns` and `ignore` merge with defaults — they do not replace them.
+
+Disable a default pattern:
 
 ```json
-{ "ignore": ["dist"] }
+{ "disabledPatterns": ["dist"] }
 ```
 
-### Config lookup order
-
-```
-CLI flags
-  └─ .sweeprc  (walks up from CWD to repo root)
-      └─ ~/.config/sweep/config.json  (global user defaults)
-          └─ built-in defaults
-```
-
-Arrays (`patterns`, `ignore`) are merged + deduplicated across all layers.  
-Scalars (`maxSizeGB`, `depth`) use the highest-priority source that defines them.
+**Lookup order:** CLI flags → `.sweeprc` (walks up from target) → `~/.config/sweep/config.json` → built-in defaults.
 
 ---
 
-## Safety guardrails
+## Default patterns
 
-sweep refuses to operate on system and home directories — hard-coded, not configurable:
+| Pattern                            | What it is                     |
+| ---------------------------------- | ------------------------------ |
+| `node_modules`                     | npm/yarn/pnpm/bun dependencies |
+| `dist`, `build`, `out`             | compiled output                |
+| `.next`, `.nuxt`, `.svelte-kit`    | framework build dirs           |
+| `.turbo`, `.vite`, `.parcel-cache` | tool caches                    |
+| `target`                           | Rust / Java / Maven output     |
+| `coverage`, `.nyc_output`          | test coverage                  |
+| `*.tsbuildinfo`                    | TypeScript incremental info    |
 
-- `/`, `/home`, `/usr`, `/usr/local`, `/etc`, `/opt`, `/var`
-- `/bin`, `/sbin`, `/lib`, `/lib64`, `/boot`, `/sys`, `/proc`, `/dev`
-- Your home directory (`os.homedir()`) — the root, not subdirectories
-- Any path fewer than 2 segments below the filesystem root (e.g. `/tmp`)
+`.cache` is intentionally excluded — too broad for home directories.
 
-Additional protections:
+---
 
-- **Path traversal**: paths containing `..` or null bytes are rejected immediately
-- **Symlinks**: detected with `lstatSync`, removed with `unlinkSync` (never followed, never recursed)
-- **Size limit**: if estimated total exceeds `maxSizeGB` (default 10 GB), sweep aborts and requires `--force-large --yes` to proceed
-- **Pattern safety**: patterns starting with `/`, containing `..`, or containing null bytes are rejected
+## Safety
+
+Hard-blocked targets (not configurable): `/`, `/home`, `/usr`, your home directory root, and other system paths. Also:
+
+- Path traversal (`..`, null bytes) rejected
+- Symlinks removed, never followed
+- `maxSizeGB` guardrail (default 10 GB) — use `--force-large --yes` to override
+- Unsafe patterns rejected at parse time
 
 ---
 
@@ -257,35 +166,23 @@ Additional protections:
 
 | Code | Meaning                          |
 | ---- | -------------------------------- |
-| `0`  | Success (or dry-run completed)   |
-| `1`  | User aborted at prompt           |
+| `0`  | Success                          |
+| `1`  | User aborted / doctor warnings   |
 | `2`  | Guardrail violation              |
-| `3`  | Config parse error               |
+| `3`  | Config parse or validation error |
 | `4`  | Filesystem error during deletion |
 
 ---
 
-## CI usage
+## CI
 
 ```bash
-# Preview in CI logs
-sweep --yes --dry-run
-
-# Actual cleanup
-sweep --yes
-
-# Clean entire projects folder non-interactively
-sweep --yes ~/Projects
+sweep --yes --dry-run    # preview in logs
+sweep --yes              # non-interactive cleanup
+sweep doctor --json      # machine-readable health check
 ```
 
-In non-TTY environments (pipes, CI), color and spinner are automatically disabled. Output switches to prefixed plain text:
-
-```
-sweep: scanning /home/runner/work/myapp
-sweep: found 4 items (~846 MB)
-sweep: deleted node_modules (/home/runner/work/myapp/node_modules)
-sweep: done — 846.4 MB freed in 2.3s
-```
+Non-TTY environments disable color and spinners automatically.
 
 ---
 

@@ -36,7 +36,7 @@ Existing solutions:
 ## Non-Goals
 
 - Not a general-purpose `rm` replacement
-- Not a disk analyzer (no interactive TUI, no treemap)
+- Not a full disk analyzer (no treemap explorer) — use `sweep ui` for interactive review
 - Not a file watcher / auto-cleaner
 - Not responsible for cleaning git history or Docker images
 

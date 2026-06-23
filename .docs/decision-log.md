@@ -26,8 +26,9 @@
 - Support final JSON output and streamed NDJSON output for automation.
 - Keep UI grouping and presentation out of the core contract where possible.
 - Treat Linux, macOS, and Windows as first-class behavior targets.
-- Keep the public npm package at the repo root while the internal implementation
-  lives under workspace packages.
+- The public npm package is `apps/cli` (`@kitsunekode/sweep`); the repo root is a
+  private orchestrator. Internal workspaces compile into `apps/cli/dist/` via
+  the centralized bundler.
 
 ## Documentation direction
 

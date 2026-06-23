@@ -2,9 +2,9 @@
 
 ## Current state
 
-The repo is a Bun workspace monorepo. The root package `@kitsunekode/sweep` is
-the published npm surface; internal workspaces compile into `dist/` via
-`apps/cli/scripts/build.ts`.
+The repo is a Bun workspace monorepo. The private root (`sweep-monorepo`) orchestrates
+workspaces; the published npm package is `@kitsunekode/sweep` in `apps/cli`. Internal
+workspaces compile into `apps/cli/dist/` via the centralized bundler.
 
 ### Layering
 
@@ -33,7 +33,7 @@ CLI flags / config
   clean) to core engine calls.
 - `sweep ui` scans via core, then hands plan editing to `packages/ui`; final
   selection compiles back to explicit candidate IDs.
-- `scripts/seed-fixture.ts` and `packages/core/test-support/fixtures.ts` seed parity scenarios
+- `scripts/seed-fixture.ts` and [packages/test-fixtures/src/fixtures.ts](file:///home/kitsunekode/Projects/cli-tools/sweep/packages/test-fixtures/src/fixtures.ts) seed parity scenarios
   for integration tests and future JS-vs-Rust checks.
 
 ### Commands (implemented)
@@ -48,7 +48,7 @@ CLI flags / config
 The accepted direction is clearer package and engine boundaries with a
 schema-first contract:
 
-- public package: `@kitsunekode/sweep` (root)
+- public package: `@kitsunekode/sweep` (`apps/cli`)
 - internal boundaries: protocol, core engine, display, CLI app, UI, Rust engine
 - execution model: `scan`, `apply`, and `ui`, with plan-backed apply and strict
   default revalidation
