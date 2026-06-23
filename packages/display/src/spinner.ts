@@ -33,7 +33,8 @@ export function createSpinner(initialText: string): Spinner {
     },
     stop: () => {
       clearInterval(id);
-      process.stdout.write("\r\x1b[K");
+      // Clear the spinner line so stdout writes do not bleed into an alternate-screen TUI.
+      process.stdout.write("\r\x1b[2K");
     },
   };
 }

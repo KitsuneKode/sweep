@@ -54,7 +54,7 @@ export function createProgressiveScanRenderer(
 
       if (process.stdout.isTTY) {
         console.log(
-          `  ${pc.red("✗")} ${pc.bold(candidateName(candidate))}` +
+          `  ${pc.dim("·")} ${pc.bold(candidateName(candidate))}` +
             `  ${pc.dim(candidatePath(candidate))}` +
             `  ${pc.yellow(size)}` +
             badge +
