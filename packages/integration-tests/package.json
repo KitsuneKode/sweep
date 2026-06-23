@@ -10,6 +10,7 @@
     "typecheck": "bun run ./scripts/run-at-repo-root.ts tsc --noEmit"
   },
   "devDependencies": {
+    "@kitsunekode/sweep": "workspace:*",
     "@kitsunekode/sweep-core": "workspace:*",
     "@kitsunekode/sweep-protocol": "workspace:*",
     "@kitsunekode/sweep-test-fixtures": "workspace:*",

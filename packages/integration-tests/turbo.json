@@ -2,7 +2,7 @@
   "extends": ["//"],
   "tasks": {
     "test": {
-      "dependsOn": ["transit", "^build", "//#engine:build:debug"],
+      "dependsOn": ["transit", "^build", "@kitsunekode/sweep#build", "//#engine:build:debug"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/tests/**",

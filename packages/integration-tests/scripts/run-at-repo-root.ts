@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -10,10 +10,20 @@ if (!command) {
   process.exit(1);
 }
 
+const nodePath = [
+  join(REPO_ROOT, "node_modules"),
+  join(REPO_ROOT, "packages/integration-tests/node_modules"),
+]
+  .concat(process.env.NODE_PATH?.split(delimiter).filter(Boolean) ?? [])
+  .join(delimiter);
+
 const result = spawnSync(command, args, {
   cwd: REPO_ROOT,
   stdio: "inherit",
-  env: process.env,
+  env: {
+    ...process.env,
+    NODE_PATH: nodePath,
+  },
 });
 
 if (result.error) {

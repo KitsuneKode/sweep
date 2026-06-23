@@ -70,6 +70,8 @@
     "@commitlint/cli": "catalog:",
     "@commitlint/config-conventional": "catalog:",
     "@kitsunekode/sweep-core": "workspace:*",
+    "@kitsunekode/sweep-protocol": "workspace:*",
+    "@kitsunekode/sweep-test-fixtures": "workspace:*",
     "@types/bun": "catalog:",
     "husky": "catalog:",
     "lint-staged": "catalog:",

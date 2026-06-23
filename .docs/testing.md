@@ -144,10 +144,10 @@ bun run dev -- ui /path/to/project   # in an interactive terminal only
 
 ## CI split
 
-| Workflow                        | When it runs                                    | What it does                                                                                        |
-| ------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`      | Every push/PR to `main`                         | `fixtures:sync`, `turbo check`, `build`, `preflight`, and Rust                                      |
-| `.github/workflows/release.yml` | Push to `main` (version PRs) or manual dispatch | Version PRs on normal pushes; native build + npm publish only when versioning merges or on dispatch |
+| Workflow                        | When it runs                      | What it does                                                          |
+| ------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`      | Every push/PR to `main`           | `fixtures:sync`, `turbo check`, `build`, `preflight`, and Rust        |
+| `.github/workflows/release.yml` | Push to `main` or manual dispatch | Native engine matrix build, then changesets version PR or npm publish |
 
 Parity fixture trees (`node_modules/`, `dist/`, etc.) are gitignored globally; CI
 materializes them with `bun run fixtures:sync` before engine tests run.
