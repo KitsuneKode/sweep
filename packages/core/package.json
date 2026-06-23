@@ -15,7 +15,7 @@
   },
   "scripts": {
     "transit": "exit 0",
-    "test": "bun test src test-support",
+    "test": "bun test src",
     "bench:large-stream": "bun run ./benchmarks/large-stream.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",

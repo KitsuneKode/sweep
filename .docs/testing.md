@@ -8,7 +8,7 @@ interactive behavior (prompts, TUI) without guessing.
 | Location                          | What runs there                                                         |
 | --------------------------------- | ----------------------------------------------------------------------- |
 | `packages/core/src/*.test.ts`     | Config, scanner, guardrails, planner, engine, plan validation           |
-| `packages/core/test-support/`     | Shared fixture seeding for core engine tests                            |
+| `packages/test-fixtures/src/`     | Shared fixture seeding for core and integration tests                   |
 | `packages/protocol/src/*.test.ts` | Protocol types and shapes                                               |
 | `packages/display/src/*.test.ts`  | Formatting and grouping helpers                                         |
 | `packages/ui/src/*.test.ts`       | TUI state machine                                                       |

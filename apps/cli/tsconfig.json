@@ -1,5 +1,4 @@
 {
   "extends": "../../packages/typescript-config/tsconfig.base.json",
-  "include": ["src/**/*"],
-  "exclude": ["src/sweep-ui.ts"]
+  "include": ["src/**/*"]
 }

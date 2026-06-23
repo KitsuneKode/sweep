@@ -1,6 +1,5 @@
 node_modules/
 dist/
-apps/cli/dist/
 apps/cli/README.md
 apps/cli/LICENSE
 *.tsbuildinfo

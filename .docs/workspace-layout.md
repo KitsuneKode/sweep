@@ -31,7 +31,7 @@ sweep/
 - `src/cli.ts` — Commander `makeProgram()` and global options.
 - `src/bin.ts` — Node shebang entry (bundled to `apps/cli/dist/sweep.js`).
 - `src/handlers/` — `scan`, `apply`, `clean`, `plan`, `ui`, `doctor`.
-- `scripts/build.ts` — produces both `dist/sweep.js` and `dist/sweep-ui.js`.
+- `scripts/build.ts` — produces `apps/cli/dist/sweep.js` and `apps/cli/dist/sweep-ui.js`.
 - `scripts/preflight.ts` — publish guardrails for this package.
 - Depends on `core`, `display`, `protocol`, and `ui`.
 

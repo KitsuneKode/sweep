@@ -286,9 +286,10 @@ Patterns must:
 ### Package
 
 - Name: `@kitsunekode/sweep`
+- Location: `apps/cli` (private monorepo root orchestrates workspaces)
 - Binary: `sweep`
-- Format: Single bundled ESM file (`dist/sweep.js`) with `#!/usr/bin/env node` shebang
-- Included in npm package: `dist/` only
+- Format: bundled ESM (`apps/cli/dist/sweep.js`) with `#!/usr/bin/env node` shebang; lazy UI bundle at `apps/cli/dist/sweep-ui.js`
+- Included in npm package: `dist/`, `README.md`, `LICENSE` (copied at prepack from repo root)
 
 ### Install Methods
 

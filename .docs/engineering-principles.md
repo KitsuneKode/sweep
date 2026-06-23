@@ -23,7 +23,7 @@ When tradeoffs conflict, prefer in this order:
 | Upstream references and notes      | `.reference/`                                        | Not durable repo truth                    |
 | User-facing usage                  | `README.md`                                          | Install, flags, examples                  |
 | Technical specification            | `SPEC.md`                                            | CLI contract and guardrails               |
-| Release history                    | `CHANGELOG.md`                                       | Changesets feed published notes           |
+| Release history                    | `apps/cli/CHANGELOG.md`                              | Changesets feed published notes           |
 | Protocol and plan shapes           | `packages/protocol/` + JSON Schema artifacts         | Machine-readable contract                 |
 | Runtime behavior                   | Code in `packages/core`, `apps/cli`, `packages/ui`   | Docs summarize; code decides edge cases   |
 

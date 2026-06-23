@@ -35,9 +35,10 @@
 
 ## Later
 
-- [ ] Add a `packages/test-fixtures` workspace once the seeded scenarios and
+- [x] Add a `packages/test-fixtures` workspace once the seeded scenarios and
       helpers start being reused across more suites
-- [ ] Add a lightweight doc hygiene check if drift becomes a recurring problem
+- [x] Add a lightweight doc hygiene check if drift becomes a recurring problem
+      (`scripts/check-doc-links.ts`)
 - [ ] Capture release/process notes once the package surface stabilizes
 - [ ] Split product, protocol, engine, and UI plans into more focused files once
       active execution begins

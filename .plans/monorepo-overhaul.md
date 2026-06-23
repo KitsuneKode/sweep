@@ -1,52 +1,44 @@
 # Monorepo overhaul
 
-- **Status:** `in_progress`
+- **Status:** `superseded`
 - **Scope:** `repo`
 - **Created:** 2026-06-13
-- **Updated:** 2026-06-13
-- **Commit:** `898f14d` (branch `feat/monorepo-overhaul`, 13 scoped commits)
-- **Cursor plan:** `sweep_monorepo_overhaul_11eee2d6.plan.md`
+- **Updated:** 2026-06-24
+- **Commit:** landed on `main` (see subsequent overhaul + packaging commits)
+- **Superseded by:** `.plans/packaging-restructure.md`, sweep Overhaul Roadmap (P0–P6)
 
 ## Summary
 
 Restructure sweep into `apps/cli` + real packages, Turborepo orchestration, Rust
 engine subprocess with parity harness, publish fix, trust/UX hardening.
 
-## Execution status
+This plan is **complete**. Packaging follow-up moved the published npm identity
+from the repo root into `apps/cli` — see `.plans/packaging-restructure.md`.
 
-### Done (implemented, verified locally)
+## Execution status (final)
 
-| Phase     | Item                                                               | Evidence                                           |
-| --------- | ------------------------------------------------------------------ | -------------------------------------------------- |
-| P0        | Publish path (lazy UI, dual bundle, CI build+preflight)            | `node dist/sweep.js --help`, `tests/build.test.ts` |
-| P1        | `apps/cli`, `packages/display`, workspace deps, catalogs           | `package.json` workspaces.catalog                  |
-| P1        | Turborepo package tasks (`check`, `transit`, no root `//#quality`) | `turbo.json`, `bun run check` → 131 tests          |
-| P1        | `makeProgram()` + handlers                                         | `apps/cli/src/cli.ts`                              |
-| P1        | Rust multi-crate workspace                                         | `crates/sweep-*`                                   |
-| P2        | Display UX, UI polish, Ajv plan validation, exit codes             | `tests/plan-validation.test.ts`                    |
-| P3        | Parity harness (`insta`), `--engine auto\|js\|rust`                | `crates/sweep-engine-cli/tests/parity.rs`          |
-| P4        | `.docs/` expansion, `AGENTS.md` rewrite                            | `.docs/workspace-layout.md`                        |
-| Follow-up | Scripts in `apps/cli/scripts/`, `integration-tests` pkg            | `apps/cli/scripts/build.ts`                        |
-| Follow-up | Scanner: skip `.git`, Rust rayon walk                              | `tests/scanner.test.ts`, `sweep-fs`                |
+| Phase     | Item                                                     | Status |
+| --------- | -------------------------------------------------------- | ------ |
+| P0        | Publish path (lazy UI, dual bundle, CI build+preflight)  | Done   |
+| P1        | `apps/cli`, `packages/display`, workspace deps, catalogs | Done   |
+| P1        | Turborepo package tasks (`check`, `transit`)             | Done   |
+| P1        | `makeProgram()` + handlers                               | Done   |
+| P1        | Rust multi-crate workspace                               | Done   |
+| P2        | Display UX, UI polish, Ajv plan validation, exit codes   | Done   |
+| P3        | Parity harness (`insta`), `--engine auto\|js\|rust`      | Done   |
+| P4        | `.docs/` expansion, `AGENTS.md` rewrite                  | Done   |
+| Follow-up | Scripts in `apps/cli/scripts/`, `integration-tests` pkg  | Done   |
+| Follow-up | Scanner: skip `.git`, Rust rayon walk                    | Done   |
+| Packaging | Published package in `apps/cli`, `apps/cli/dist/`        | Done   |
 
-### Not done / follow-up
+## Remaining follow-up (not part of this plan)
 
-- [x] **Land on git** — `898f14d` on `feat/monorepo-overhaul` (13 scoped commits)
 - [ ] Forward `SweepConfig` to Rust engine (`--pattern`, `--ignore`, `--depth`)
-- [ ] Rust `apply_plan` implementation
-- [x] Parity fixtures `basic` and `monorepo` (committed under `tests/fixtures/`, Rust parity tests enabled)
-- [ ] Mark plan `done` + set `Commit:` SHA after merge to `main`
 
 ## Verification (last run)
 
 ```bash
-bun run check    # 20 turbo tasks, 131 tests pass
-bun run build    # dist/sweep.js + sweep-ui.js
-cargo test --workspace && cargo clippy --workspace -- -D warnings
+bun run check
+bun run build    # apps/cli/dist/sweep.js + sweep-ui.js
+bun run rust:check
 ```
-
-## Why Cursor may still show “not built”
-
-1. **No commit** — implementation exists only as working tree changes.
-2. **Plan lived in `.cursor/plans/`** — repo `.plans/` had no execution record until this file.
-3. **Follow-up wave** (catalogs, script moves, perf) was not added to the original Cursor plan todos.
