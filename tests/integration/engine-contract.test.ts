@@ -1,6 +1,7 @@
-import { describe, expect, test } from "bun:test";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
 import {
@@ -184,5 +185,50 @@ describe("engine contract fixtures", () => {
     });
 
     expect(plan.summary.exact).toBe(true);
+  });
+});
+
+describe("rust SweepConfig forwarding", () => {
+  let tempRoot: string;
+
+  afterEach(() => {
+    if (tempRoot) {
+      rmSync(tempRoot, { recursive: true, force: true });
+      tempRoot = "";
+    }
+  });
+
+  test("rust honors --pattern, --ignore, and --depth parity with JS", async () => {
+    if (!rustAvailable()) {
+      return;
+    }
+
+    tempRoot = mkdtempSync(join(tmpdir(), "sweep-config-parity-"));
+    mkdirSync(join(tempRoot, "node_modules"));
+    mkdirSync(join(tempRoot, "custom-artifact"));
+    mkdirSync(join(tempRoot, "a", "nested-dist"), { recursive: true });
+    mkdirSync(join(tempRoot, "packages", "vendor", "dist"), { recursive: true });
+
+    const config = {
+      ...DEFAULT_CONFIG,
+      patterns: [...DEFAULT_CONFIG.patterns, "custom-artifact"],
+      ignore: ["packages/vendor"],
+      depth: 0,
+    };
+
+    const options = {
+      selectionPolicy: DEFAULT_SELECTION_POLICY,
+      exact: false,
+    };
+
+    const { plan: jsPlan } = await scanToPlan(tempRoot, config, options);
+    const rustPlan = scanToPlanViaRust(tempRoot, { config, ...options });
+
+    const jsNames = jsPlan.candidates.map((candidate) => candidate.name).sort();
+    const rustNames = rustPlan.candidates.map((candidate) => candidate.name).sort();
+    expect(rustNames).toEqual(jsNames);
+    expect(rustNames).toContain("custom-artifact");
+    expect(rustNames).toContain("node_modules");
+    expect(rustNames).not.toContain("dist");
   });
 });

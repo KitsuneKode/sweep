@@ -8,7 +8,7 @@
 
   **Trust & CLI**
   - Restore grouped scan summary and delete confirmation on `sweep` / `clean`
-  - Default scan engine to `js`; fall back when Rust cannot honor config or CLI overrides
+  - Default scan engine to `js`; Rust honors `.sweeprc` and CLI scan flags when `--engine rust` or `auto`
   - Fix `sweep ui` plan handoff, config parse exit codes, and `doctor` non-zero on warnings
 
   **Interactive UI**

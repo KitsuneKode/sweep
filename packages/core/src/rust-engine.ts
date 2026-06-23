@@ -241,7 +241,8 @@ export function isRustEngineAvailable(): boolean {
 
 /**
  * When non-null, the Rust scan subprocess cannot honor the requested scan and
- * callers should fall back to the JS engine.
+ * callers should fall back to the JS engine. Returns null when Rust can run
+ * (including custom patterns, ignore rules, depth, exact sizing, and hooks).
  */
 export function rustScanBlockedReason(
   _config: SweepConfig,

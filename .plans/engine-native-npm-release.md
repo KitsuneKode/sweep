@@ -26,18 +26,17 @@ Ship `sweep-engine` via Turbo-style optional platform npm packages so
 
 ## Phases
 
-| Phase              | Status  | Notes                                             |
-| ------------------ | ------- | ------------------------------------------------- |
-| Runtime resolution | done    | `sweepPackageRoot`, optional deps, `cwd` fix      |
-| Pack tooling       | done    | `engine:pack`, templates                          |
-| Version sync       | done    | `sync-engine-versions`, root optionalDependencies |
-| CI publish         | done    | Matrix workflow + `publish-release.ts`            |
-| Rust parity        | planned | Config forwarding, tree sizing, apply             |
+| Phase              | Status      | Notes                                              |
+| ------------------ | ----------- | -------------------------------------------------- |
+| Runtime resolution | done        | `sweepPackageRoot`, optional deps, `cwd` fix       |
+| Pack tooling       | done        | `engine:pack`, templates                           |
+| Version sync       | done        | `sync-engine-versions`, root optionalDependencies  |
+| CI publish         | done        | Matrix workflow + `publish-release.ts`             |
+| Rust parity        | in_progress | Config forwarding done; tree sizing + apply remain |
 
 ## Known Rust parity gaps (non-blocking for npm scaffold)
 
-- `.sweeprc` / CLI flag overrides → JS fallback via `rustScanBlockedReason`
-- Directory size estimates use metadata in Rust, not full tree `du`
+- Directory size estimates use metadata in Rust, not full tree `du` (byte estimates may differ)
 - `apply` parity incomplete per `monorepo-overhaul.md`
 
 Do not change default engine to `auto` until contract tests pass on published binaries.

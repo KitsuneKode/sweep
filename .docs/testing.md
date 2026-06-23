@@ -72,11 +72,11 @@ bun run scripts/generate-parity-fixture.ts -- tests/fixtures/node_modules-only
 
 ## Scan engines
 
-| `--engine`     | Behavior                                                                     |
-| -------------- | ---------------------------------------------------------------------------- |
-| `js` (default) | TypeScript scanner — deterministic, honors `.sweeprc` and CLI flags          |
-| `rust`         | Rust subprocess when compatible; otherwise falls back to JS with a warning   |
-| `auto`         | Rust when a local `sweep-engine` binary exists, with the same fallback rules |
+| `--engine`     | Behavior                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| `js` (default) | TypeScript scanner — deterministic, honors `.sweeprc` and CLI flags                        |
+| `rust`         | Rust subprocess; honors `.sweeprc` and CLI scan flags (`--pattern`, `--ignore`, `--depth`) |
+| `auto`         | Rust when a local `sweep-engine` binary exists, otherwise JS                               |
 
 Rust scan uses the native engine for progressive hooks (`onEntry` / `onEntrySized`) and exact
 sizing when the `sweep-engine` binary is available. `apply` defaults to the JS engine; pass `--engine rust` to use the

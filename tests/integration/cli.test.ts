@@ -5,6 +5,11 @@ import type { ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const SWEEP = join(REPO_ROOT, "apps/cli/dist/sweep.js");
+const LOCAL_RUST_ENGINE = join(REPO_ROOT, "target/debug/sweep-engine");
+
+function rustCliAvailable(): boolean {
+  return process.env.SWEEP_ENGINE_FROM_NPM !== "1" && existsSync(LOCAL_RUST_ENGINE);
+}
 
 let tmpDir: string;
 
@@ -18,13 +23,17 @@ afterEach(() => {
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
-function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
+function runCli(
+  args: string[],
+  env: Record<string, string> = {},
+): { stdout: string; stderr: string; exitCode: number } {
   const withEngine = args.includes("--engine") ? args : ["--engine", "js", ...args];
   const proc = Bun.spawnSync({
     cmd: ["bun", SWEEP, ...withEngine],
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
+    env: { ...process.env, ...env },
   });
 
   return {
@@ -218,5 +227,25 @@ describe("CLI scan/apply", () => {
 
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain("requires a TTY");
+  });
+
+  test("rust engine honors --pattern on scan --json", () => {
+    if (!rustCliAvailable()) {
+      return;
+    }
+
+    mkdirSync(dir("custom-cache"));
+    mkdirSync(dir("node_modules"));
+
+    const result = runCli(
+      ["scan", tmpDir, "--json", "--engine", "rust", "--pattern", "custom-cache"],
+      { SWEEP_ENGINE_PATH: LOCAL_RUST_ENGINE },
+    );
+
+    expect(result.exitCode).toBe(0);
+    const plan = JSON.parse(result.stdout) as ScanPlan;
+    const names = plan.candidates.map((candidate) => candidate.name).sort();
+    expect(names).toContain("custom-cache");
+    expect(names).toContain("node_modules");
   });
 });

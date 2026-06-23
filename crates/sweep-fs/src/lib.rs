@@ -564,6 +564,72 @@ mod tests {
     }
 
     #[test]
+    fn walk_respects_depth_zero() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        fs::create_dir_all(root.join("node_modules").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::create_dir_all(root.join("a/node_modules").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let config = WalkConfig {
+            depth: 0,
+            ..WalkConfig::default()
+        };
+        let result = walk_matched_entries(root, &config);
+        let names: Vec<&str> = result
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["node_modules"]);
+    }
+
+    #[test]
+    fn walk_honors_ignore_patterns() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        fs::create_dir_all(root.join("dist").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::create_dir_all(root.join("packages/vendor/dist").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let config = WalkConfig {
+            ignore: vec!["packages/vendor".to_owned()],
+            ..WalkConfig::default()
+        };
+        let result = walk_matched_entries(root, &config);
+        let names: Vec<&str> = result
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["dist"]);
+    }
+
+    #[test]
+    fn walk_honors_custom_patterns() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        fs::create_dir_all(root.join("custom-cache").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let config = WalkConfig {
+            patterns: vec!["custom-cache".to_owned()],
+            ..WalkConfig::default()
+        };
+        let result = walk_matched_entries(root, &config);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].name, "custom-cache");
+    }
+
+    #[test]
     fn walk_skips_git_directory() {
         let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
         let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {

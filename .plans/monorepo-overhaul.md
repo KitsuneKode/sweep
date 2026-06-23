@@ -33,7 +33,9 @@ from the repo root into `apps/cli` — see `.plans/packaging-restructure.md`.
 
 ## Remaining follow-up (not part of this plan)
 
-- [ ] Forward `SweepConfig` to Rust engine (`--pattern`, `--ignore`, `--depth`)
+- [x] Forward `SweepConfig` to Rust engine (`--pattern`, `--ignore`, `--depth`) — stdin
+      bridge + `WalkConfig::from(SweepConfig)`; parity covered in `engine-contract` and
+      `sweep-fs` tests
 
 ## Verification (last run)
 
