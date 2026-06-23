@@ -17,23 +17,22 @@ bun install --frozen-lockfile   # required — links apps/cli and package worksp
 ## Daily development
 
 ```bash
-# Run CLI from source (no build) — note the `--` when using flags
+# Run CLI from source (no build) — pass args after --
 bun run dev -- --help
 bun run dev -- scan . --dry-run
+
+# Interactive UI (requires a real TTY + Bun; loads packages/ui from source)
+bun run dev -- ui .
+
+# Production-like CLI (bundled output — needed for node-only smoke tests)
+bun run build
+node apps/cli/dist/sweep.js --version
 
 # Full quality gate
 bun run check
 
-# Production bundle
-bun run build
-node apps/cli/dist/sweep.js --version
-```
-
-Alternatively, from `apps/cli/`:
-
-```bash
-cd apps/cli
-bun run dev -- scan . --dry-run
+# Rebuild bundles on file changes (only when testing dist/ artifacts)
+cd apps/cli && bun run build:watch
 ```
 
 See [.docs/tooling.md](tooling.md) for the full command reference.

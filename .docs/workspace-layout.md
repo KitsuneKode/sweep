@@ -67,8 +67,8 @@ CLI package owns all publish artifacts:
 - `apps/cli/scripts/build.ts` → `apps/cli/dist/sweep.js` + `apps/cli/dist/sweep-ui.js`
 - UI source lives in `packages/ui/src/` and is bundled by the CLI build (React inlined into `sweep-ui.js`; `@opentui/core` external)
 
-`bun run build` goes through Turborepo (`apps/cli` `build` task). For a direct
-local rebuild without turbo: `bun run bundle` or `bun run bundle:watch`.
+`bun run build` goes through Turborepo (`apps/cli` `build` task). Implementation lives in
+`scripts/bundle.ts`; `apps/cli/scripts/build.ts` is the thin wrapper the turbo graph calls.
 
 1. UI bundle → `apps/cli/dist/sweep-ui.js` (lazy-loaded by CLI; `@opentui/core` external peer).
 2. CLI bundle → `apps/cli/dist/sweep.js` (Node ESM; `./sweep-ui.js` external).

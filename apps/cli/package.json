@@ -39,6 +39,7 @@
   },
   "scripts": {
     "build": "bun run ./scripts/build.ts",
+    "build:watch": "bun run ../../scripts/bundle.ts all --watch",
     "prepack": "bun run ./scripts/prepack.ts",
     "transit": "exit 0",
     "preflight": "bun run ./scripts/preflight.ts",

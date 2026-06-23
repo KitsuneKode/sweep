@@ -28,11 +28,9 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "bun run scripts/dev.ts",
     "clean": "turbo run clean",
     "build": "turbo run build",
-    "bundle": "bun run scripts/bundle.ts",
-    "bundle:watch": "bun run scripts/bundle.ts all --watch",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "fmt": "turbo run fmt",

@@ -15,16 +15,16 @@ bun run preflight      # turbo: publish smoke tests (after build)
 
 ### Day-to-day
 
-| Command                 | What it does                                                     |
-| ----------------------- | ---------------------------------------------------------------- |
-| `bun run dev -- <args>` | Run CLI from source (`apps/cli/src/bin.ts`)                      |
-| `bun run bundle`        | Build `apps/cli/dist/` via `scripts/bundle.ts` (`Bun.build` API) |
-| `bun run bundle:watch`  | Rebuild UI + CLI on source changes                               |
-| `bun run fmt`           | `turbo run fmt` (per-package `oxfmt`)                            |
-| `bun run lint`          | `turbo run lint` (per-package `oxlint`)                          |
-| `bun run typecheck`     | `turbo run typecheck`                                            |
-| `bun run test`          | `turbo run test` (unit tests per package + integration)          |
-| `bun run clean`         | `turbo run clean`                                                |
+| Command                              | What it does                                            |
+| ------------------------------------ | ------------------------------------------------------- |
+| `bun run dev -- <args>`              | Run CLI from source via `scripts/dev.ts` (no build)     |
+| `bun run build`                      | Turbo → bundle publish artifacts to `apps/cli/dist/`    |
+| `cd apps/cli && bun run build:watch` | Rebuild `dist/` on source changes (prod-like testing)   |
+| `bun run fmt`                        | `turbo run fmt` (per-package `oxfmt`)                   |
+| `bun run lint`                       | `turbo run lint` (per-package `oxlint`)                 |
+| `bun run typecheck`                  | `turbo run typecheck`                                   |
+| `bun run test`                       | `turbo run test` (unit tests per package + integration) |
+| `bun run clean`                      | `turbo run clean`                                       |
 
 ### Rust (when editing `crates/`)
 
