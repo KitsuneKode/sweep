@@ -1,5 +1,5 @@
 /**
- * Publish guardrails for the npm package at the repo root.
+ * Publish guardrails for @kitsunekode/sweep (apps/cli).
  * Run via: `bun run preflight` (turbo → apps/cli).
  */
 
@@ -9,17 +9,19 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORM_NPM_NAMES } from "@kitsunekode/sweep-core/native-platforms";
 
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const DIST = join(REPO_ROOT, "dist/sweep.js");
+const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const REPO_ROOT = resolve(CLI_ROOT, "../..");
+const DIST = join(CLI_ROOT, "dist/sweep.js");
+const PKG_PATH = join(CLI_ROOT, "package.json");
 const ALLOWED_DIST_FILES = new Set(["sweep.js", "sweep-ui.js"]);
 
-const BUN =
+const NODE =
   process.env.npm_node_execpath ??
   (() => {
     try {
-      return execFileSync("command", ["-v", "bun"], { encoding: "utf8" }).trim();
+      return execFileSync("command", ["-v", "node"], { encoding: "utf8" }).trim();
     } catch {
-      return "bun";
+      return "node";
     }
   })();
 
@@ -42,10 +44,7 @@ function assert(condition: boolean, message: string): void {
 }
 
 function pkg(): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as Record<
-    string,
-    unknown
-  >;
+  return JSON.parse(readFileSync(PKG_PATH, "utf8")) as Record<string, unknown>;
 }
 
 console.log("\npreflight checks\n");
@@ -67,28 +66,28 @@ check("dist/sweep.js bundle size > 10 KB", () => {
 });
 
 check("dist/ contains only expected bundle files", () => {
-  if (!existsSync(join(REPO_ROOT, "dist"))) return;
-  const files = readdirSync(join(REPO_ROOT, "dist"));
+  if (!existsSync(join(CLI_ROOT, "dist"))) return;
+  const files = readdirSync(join(CLI_ROOT, "dist"));
   const unexpected = files.filter((f) => !ALLOWED_DIST_FILES.has(f));
   assert(unexpected.length === 0, `unexpected files in dist/: ${unexpected.join(", ")}`);
 });
 
 check("sweep --version prints a version string", () => {
   if (!existsSync(DIST)) return;
-  const out = execFileSync(BUN, [DIST, "--version"], { encoding: "utf8", timeout: 5000 });
+  const out = execFileSync(NODE, [DIST, "--version"], { encoding: "utf8", timeout: 5000 });
   assert(out.trim().length > 0, "version output was empty");
   assert(/\d+\.\d+\.\d+/.test(out), `version output doesn't look like semver: ${out.trim()}`);
 });
 
 check("sweep --help exits 0", () => {
   if (!existsSync(DIST)) return;
-  execFileSync(BUN, [DIST, "--help"], { encoding: "utf8", timeout: 5000 });
+  execFileSync(NODE, [DIST, "--help"], { encoding: "utf8", timeout: 5000 });
 });
 
 check("sweep rejects /tmp with exit code 2 (path-too-shallow guardrail)", () => {
   if (!existsSync(DIST)) return;
   try {
-    execFileSync(BUN, [DIST, "--dry-run", "--yes", "/tmp"], {
+    execFileSync(NODE, [DIST, "--dry-run", "--yes", "/tmp"], {
       encoding: "utf8",
       timeout: 5000,
       stdio: "pipe",
@@ -104,7 +103,7 @@ check("sweep rejects /tmp with exit code 2 (path-too-shallow guardrail)", () => 
 check("sweep rejects / with exit code 2 (blocked root guardrail)", () => {
   if (!existsSync(DIST)) return;
   try {
-    execFileSync(BUN, [DIST, "--dry-run", "--yes", "/"], {
+    execFileSync(NODE, [DIST, "--dry-run", "--yes", "/"], {
       encoding: "utf8",
       timeout: 5000,
       stdio: "pipe",
@@ -134,13 +133,9 @@ check("package.json has all required publish fields", () => {
   }
 });
 
-check("root package is not a turbo workspace member (prevents build fork bomb)", () => {
-  const { workspaces } = pkg() as { workspaces?: { packages?: string[] } };
-  const packages = workspaces?.packages ?? [];
-  assert(
-    !packages.includes("."),
-    'workspaces.packages must not include "." — root scripts delegate to turbo and recurse infinitely',
-  );
+check("package name is @kitsunekode/sweep", () => {
+  const { name } = pkg() as { name: string };
+  assert(name === "@kitsunekode/sweep", `got: "${name}"`);
 });
 
 check("version is valid semver (x.y.z)", () => {
@@ -158,9 +153,12 @@ check("bin points to dist/sweep.js", () => {
   assert(bin?.["sweep"] === "dist/sweep.js", `got: ${JSON.stringify(bin)}`);
 });
 
-check("files array includes 'dist'", () => {
+check("files array includes dist, README.md, and LICENSE", () => {
   const { files } = pkg() as { files?: string[] };
-  assert(Array.isArray(files) && files.includes("dist"), `got: ${JSON.stringify(files)}`);
+  assert(Array.isArray(files), `got: ${JSON.stringify(files)}`);
+  for (const entry of ["dist", "README.md", "LICENSE"]) {
+    assert(files.includes(entry), `missing files entry: "${entry}"`);
+  }
 });
 
 check("optionalDependencies include all native engine packages", () => {
@@ -173,7 +171,7 @@ check("optionalDependencies include all native engine packages", () => {
     assert(name in optionalDependencies, `missing optionalDependency: ${name}`);
     assert(
       optionalDependencies[name] === version,
-      `${name} version ${optionalDependencies[name]} !== root ${version}`,
+      `${name} version ${optionalDependencies[name]} !== package ${version}`,
     );
   }
 });

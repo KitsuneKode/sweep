@@ -3,5 +3,8 @@
   "private": true,
   "exports": {
     "./base.json": "./tsconfig.base.json"
+  },
+  "scripts": {
+    "transit": "exit 0"
   }
 }

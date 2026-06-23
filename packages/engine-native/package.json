@@ -3,16 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "transit": "exit 0",
     "pack": "bun run ./scripts/pack.ts",
     "verify-binary": "bun run ./scripts/verify-binary.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint scripts",
     "fmt": "oxfmt scripts"
   },
-  "dependencies": {
-    "@kitsunekode/sweep-core": "workspace:*"
-  },
+  "dependencies": {},
   "devDependencies": {
+    "@kitsunekode/sweep-core": "workspace:*",
     "@kitsunekode/sweep-typescript-config": "workspace:*",
     "bun-types": "catalog:",
     "oxfmt": "catalog:",

@@ -2,18 +2,17 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "outputs": ["$TURBO_ROOT$/dist/**"]
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/ui/src/**",
+        "$TURBO_ROOT$/scripts/bundle.ts"
+      ],
+      "outputs": ["dist/**"]
     },
     "preflight": {
       "dependsOn": ["build"],
-      "cache": false
-    },
-    "dev": {
-      "cache": false,
-      "persistent": true
-    },
-    "clean": {
-      "cache": false
+      "inputs": ["$TURBO_DEFAULT$", "package.json", "dist/**"]
     }
   }
 }

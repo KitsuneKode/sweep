@@ -2,7 +2,22 @@
   "extends": ["//"],
   "tasks": {
     "test": {
-      "dependsOn": ["@kitsunekode/sweep-cli#build"]
+      "dependsOn": ["transit", "^build", "//#engine:build:debug"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/tests/fixtures/**",
+        "$TURBO_ROOT$/crates/**"
+      ]
+    },
+    "lint": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tests/**", "$TURBO_ROOT$/tests/support/**"]
+    },
+    "fmt": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tests/**", "$TURBO_ROOT$/tests/support/**"]
+    },
+    "typecheck": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tests/**", "$TURBO_ROOT$/tsconfig.json"]
     }
   }
 }

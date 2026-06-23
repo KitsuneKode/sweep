@@ -20,7 +20,7 @@ const DEFAULT_REQUEST = {
   },
 };
 
-function main(): void {
+async function main(): Promise<void> {
   const fixtureArg = process.argv[2];
   if (!fixtureArg) {
     console.error("usage: bun run scripts/generate-parity-fixture.ts -- <fixture-dir>");
@@ -28,7 +28,7 @@ function main(): void {
   }
 
   const fixtureRoot = resolve(fixtureArg);
-  const { plan } = scanToPlan(fixtureRoot, DEFAULT_CONFIG);
+  const { plan } = await scanToPlan(fixtureRoot, DEFAULT_CONFIG);
   const normalized = normalizePlan(plan, fixtureRoot);
   const outPath = join(fixtureRoot, "expected.plan.json");
   const requestPath = join(fixtureRoot, "request.json");
@@ -42,4 +42,7 @@ function main(): void {
   console.log(`wrote ${outPath}`);
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

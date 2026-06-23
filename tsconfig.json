@@ -15,5 +15,5 @@
     "resolveJsonModule": true
   },
   "include": ["packages/**/*", "scripts/**/*", "tests/**/*"],
-  "exclude": ["dist", "node_modules"]
+  "exclude": ["dist", "node_modules", "packages/ui/src/**/*.tsx"]
 }

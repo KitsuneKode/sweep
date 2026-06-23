@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const CLI_PKG_PATH = join(REPO_ROOT, "apps/cli/package.json");
+const CLI_DIST_DIR = join(REPO_ROOT, "apps/cli/dist");
 
 function run(command: string, args: string[], options: { cwd?: string } = {}): void {
   const result = spawnSync(command, args, {
@@ -26,15 +28,15 @@ function run(command: string, args: string[], options: { cwd?: string } = {}): v
   }
 }
 
-function rootVersion(): string {
+function cliVersion(): string {
   return execFileSync("node", ["-p", "require('./package.json').version"], {
-    cwd: REPO_ROOT,
+    cwd: join(REPO_ROOT, "apps/cli"),
     encoding: "utf8",
   }).trim();
 }
 
 const skipNative = process.argv.includes("--skip-native");
-const version = rootVersion();
+const version = cliVersion();
 
 if (!skipNative) {
   const packed: string[] = [];
@@ -87,5 +89,5 @@ run("bun", ["run", "prepublishOnly"]);
 console.log("\npublishing @kitsunekode/sweep...");
 run("bunx", ["changeset", "publish"]);
 
-const distFiles = existsSync(join(REPO_ROOT, "dist")) ? readdirSync(join(REPO_ROOT, "dist")) : [];
-console.log(`\nrelease complete (dist: ${distFiles.join(", ") || "empty"})`);
+const distFiles = existsSync(CLI_DIST_DIR) ? readdirSync(CLI_DIST_DIR) : [];
+console.log(`\nrelease complete (apps/cli/dist: ${distFiles.join(", ") || "empty"})`);

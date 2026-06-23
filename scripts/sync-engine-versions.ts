@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Sync root optionalDependencies and native-packages template versions to root package.json version.
+ * Sync CLI optionalDependencies and native-packages template versions to apps/cli version.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -9,14 +9,14 @@ import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const ROOT_PKG_PATH = join(REPO_ROOT, "package.json");
+const CLI_PKG_PATH = join(REPO_ROOT, "apps/cli/package.json");
 
-const rootPkg = JSON.parse(readFileSync(ROOT_PKG_PATH, "utf8")) as {
+const cliPkg = JSON.parse(readFileSync(CLI_PKG_PATH, "utf8")) as {
   version: string;
   optionalDependencies?: Record<string, string>;
 };
 
-const version = rootPkg.version;
+const version = cliPkg.version;
 const optionalDependencies: Record<string, string> = {};
 
 for (const platform of NATIVE_PLATFORMS) {
@@ -28,7 +28,7 @@ for (const platform of NATIVE_PLATFORMS) {
   writeFileSync(templatePath, `${JSON.stringify(template, null, 2)}\n`);
 }
 
-rootPkg.optionalDependencies = optionalDependencies;
-writeFileSync(ROOT_PKG_PATH, `${JSON.stringify(rootPkg, null, 2)}\n`);
+cliPkg.optionalDependencies = optionalDependencies;
+writeFileSync(CLI_PKG_PATH, `${JSON.stringify(cliPkg, null, 2)}\n`);
 
 console.log(`synced engine package versions to ${version}`);

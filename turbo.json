@@ -8,8 +8,7 @@
       "dependsOn": ["^transit"]
     },
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["$TURBO_ROOT$/dist/**"]
+      "dependsOn": ["^build"]
     },
     "typecheck": {
       "dependsOn": ["transit"]
@@ -38,6 +37,62 @@
     },
     "clean": {
       "cache": false
+    },
+    "//#engine:build:debug": {
+      "cache": true,
+      "inputs": [
+        "$TURBO_ROOT$/crates/**",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml"
+      ],
+      "outputs": [
+        "$TURBO_ROOT$/target/debug/sweep-engine",
+        "$TURBO_ROOT$/target/debug/sweep-engine.exe"
+      ]
+    },
+    "//#engine:build": {
+      "cache": true,
+      "inputs": [
+        "$TURBO_ROOT$/crates/**",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml"
+      ],
+      "outputs": [
+        "$TURBO_ROOT$/target/release/sweep-engine",
+        "$TURBO_ROOT$/target/release/sweep-engine.exe"
+      ]
+    },
+    "//#rust:fmt": {
+      "cache": false,
+      "inputs": [
+        "$TURBO_ROOT$/crates/**",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml"
+      ]
+    },
+    "//#rust:lint": {
+      "dependsOn": ["//#engine:build:debug"],
+      "cache": false,
+      "inputs": [
+        "$TURBO_ROOT$/crates/**",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml"
+      ]
+    },
+    "//#rust:test": {
+      "dependsOn": ["//#engine:build:debug"],
+      "cache": true,
+      "inputs": [
+        "$TURBO_ROOT$/crates/**",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/tests/fixtures/**"
+      ]
     }
   }
 }

@@ -1,20 +1,50 @@
 {
-  "name": "@kitsunekode/sweep-cli",
-  "private": true,
+  "name": "@kitsunekode/sweep",
+  "version": "0.2.0",
+  "description": "Safe, fast artifact cleanup CLI for any project tree",
+  "keywords": [
+    "artifacts",
+    "build",
+    "cleanup",
+    "cli",
+    "devtools",
+    "monorepo",
+    "node_modules"
+  ],
+  "homepage": "https://github.com/KitsuneKode/sweep#readme",
+  "bugs": {
+    "url": "https://github.com/KitsuneKode/sweep/issues"
+  },
+  "license": "MIT",
+  "author": "KitsuneKode",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KitsuneKode/sweep.git"
+  },
+  "bin": {
+    "sweep": "dist/sweep.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
     "./bin": "./src/bin.ts"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build:main": "V=$(node -p \"JSON.stringify(require('../../package.json').version)\") && bun build ../../apps/cli/src/bin.ts --outdir ../../dist --entry-naming 'sweep.[ext]' --target bun --external '@opentui/core' --external './sweep-ui.js' --define \"__SWEEP_VERSION__:$V\" --minify-syntax --minify-whitespace --sourcemap=none",
-    "build:ui": "bun build ../../packages/ui/src/app.ts --outdir ../../dist --entry-naming 'sweep-ui.[ext]' --target bun --external '@opentui/core' --minify-syntax --minify-whitespace --sourcemap=none",
-    "fixup": "printf '#!/usr/bin/env bun\\nif(process.argv.includes(\"--no-color\"))process.env[\"NO_COLOR\"]=\"1\";\\n' | cat - ../../dist/sweep.js > ../../dist/sweep.js.tmp && mv ../../dist/sweep.js.tmp ../../dist/sweep.js && chmod +x ../../dist/sweep.js",
-    "build": "bun run build:main && bun run build:ui && bun run fixup",
+    "build": "bun run ./scripts/build.ts",
+    "prepack": "bun run ./scripts/prepack.ts",
+    "transit": "exit 0",
     "preflight": "bun run ./scripts/preflight.ts",
     "dev": "bun run ./src/bin.ts",
     "test": "bun test src",
-    "clean": "rm -rf ../../dist",
+    "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "fmt": "oxfmt src"
@@ -31,5 +61,23 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "@opentui/core": "catalog:"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "@kitsunekode/sweep-engine-darwin-64": "0.2.0",
+    "@kitsunekode/sweep-engine-darwin-arm64": "0.2.0",
+    "@kitsunekode/sweep-engine-linux-64": "0.2.0",
+    "@kitsunekode/sweep-engine-linux-arm64": "0.2.0",
+    "@kitsunekode/sweep-engine-windows-64": "0.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

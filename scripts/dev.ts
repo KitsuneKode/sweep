@@ -29,7 +29,7 @@ function ensureWorkspaceDeps(): void {
     console.error(
       "sweep: apps/cli dependencies still missing after install.\n" +
         "Try: bun install --force\n" +
-        "Or use the built CLI: bun run build && node dist/sweep.js",
+        "Or use the built CLI: bun run build && node apps/cli/dist/sweep.js",
     );
     process.exit(1);
   }
