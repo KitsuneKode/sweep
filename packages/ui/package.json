@@ -3,22 +3,27 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/app.ts",
+    ".": "./src/app.tsx",
     "./state": "./src/state.ts"
   },
   "scripts": {
+    "transit": "exit 0",
     "test": "bun test src",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "fmt": "oxfmt src"
   },
   "dependencies": {
+    "@kitsunekode/sweep-core": "workspace:*",
     "@kitsunekode/sweep-display": "workspace:*",
     "@kitsunekode/sweep-protocol": "workspace:*",
-    "@opentui/core": "catalog:"
+    "@opentui/core": "catalog:",
+    "@opentui/react": "catalog:",
+    "react": "catalog:"
   },
   "devDependencies": {
     "@kitsunekode/sweep-typescript-config": "workspace:*",
+    "@types/react": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:"

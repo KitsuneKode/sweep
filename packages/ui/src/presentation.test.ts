@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { formatArtifactRow, relativePath } from "./presentation.js";
+import { darkTheme } from "./theme.js";
 
 function candidate(overrides: Partial<ScanCandidate> = {}): ScanCandidate {
   return {
@@ -25,11 +26,11 @@ describe("presentation formatters", () => {
   });
 
   test("formatArtifactRow is a single dense line", () => {
-    const line = formatArtifactRow(candidate(), true);
-    expect(line).toContain("◉");
+    const line = formatArtifactRow(candidate(), true, darkTheme);
+    expect(line).toContain("[x]");
     expect(line).toContain("node_modules");
     expect(line).toContain("512 B");
     expect(line).toContain("·");
-    expect(line.startsWith("  ")).toBe(true);
+    expect(line.startsWith(" ")).toBe(true);
   });
 });

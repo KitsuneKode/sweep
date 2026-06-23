@@ -10,7 +10,9 @@ import {
   moveCursor,
   selectVisible,
   setFilter,
+  setScopeFilter,
   toggleCurrentSelection,
+  togglePattern,
 } from "./state.js";
 
 function createPlan(): ScanPlan {
@@ -48,14 +50,14 @@ function createPlan(): ScanPlan {
       },
       {
         id: "cand_blocked",
-        path: "/tmp/sweep-ui/blocked",
-        name: "blocked",
+        path: "/tmp/sweep-ui/.git/objects",
+        name: "objects",
         kind: "custom",
         estimatedBytes: 512,
         isSymlink: false,
         entryType: "directory",
         riskTier: "blocked",
-        reasons: ["guardrail"],
+        reasons: ["protected-vcs"],
         selectedByDefault: false,
       },
     ],
@@ -81,7 +83,6 @@ describe("sweep ui state", () => {
   test("filter narrows visible candidates by structured fields", () => {
     const state = setFilter(createUiState(createPlan()), "custom");
 
-    expect(state.filteredIds).toEqual(["cand_dangerous", "cand_blocked"]);
     expect(getVisibleCandidates(state).map((candidate) => candidate.id)).toEqual([
       "cand_dangerous",
       "cand_blocked",
@@ -93,7 +94,7 @@ describe("sweep ui state", () => {
     expect(state.rowIndex).toBe(1);
 
     state = moveCursor(state, 50);
-    expect(state.rowIndex).toBe(3);
+    expect(state.rowIndex).toBe(4);
 
     state = moveCursor(state, -50);
     expect(state.rowIndex).toBe(1);
@@ -109,6 +110,13 @@ describe("sweep ui state", () => {
 
     state = toggleCurrentSelection(state);
     expect(state.selectedIds.has("cand_safe")).toBe(true);
+  });
+
+  test("toggleCurrentSelection ignores blocked candidates", () => {
+    let state = setFilter(createUiState(createPlan()), ".git");
+    expect(getCurrentCandidate(state)?.riskTier).toBe("blocked");
+    state = toggleCurrentSelection(state);
+    expect(state.selectedIds.has("cand_blocked")).toBe(false);
   });
 
   test("selectVisible excludes dangerous and blocked candidates by default", () => {
@@ -149,5 +157,30 @@ describe("sweep ui state", () => {
 
     expect(nextPlan.selectedCandidateIds).toEqual(["cand_safe", "cand_dangerous"]);
     expect(nextPlan.summary.selectedCount).toBe(2);
+  });
+
+  test("togglePattern marks patterns dirty and toggles disabled set", () => {
+    const state = togglePattern(createUiState(createPlan()), "dist");
+    expect(state.disabledPatterns.has("dist")).toBe(true);
+    expect(state.patternsDirty).toBe(true);
+  });
+
+  test("setScopeFilter limits visible candidates to a scope", () => {
+    const plan = createPlan();
+    plan.candidates.push({
+      id: "cand_nested",
+      path: "/tmp/sweep-ui/apps/web/node_modules",
+      name: "node_modules",
+      kind: "node_modules",
+      estimatedBytes: 100,
+      isSymlink: false,
+      entryType: "directory",
+      riskTier: "safe",
+      reasons: ["default-pattern"],
+      selectedByDefault: true,
+    });
+
+    const scoped = setScopeFilter(createUiState(plan), "apps/web");
+    expect(getVisibleCandidates(scoped).every((c) => c.path.includes("apps/web"))).toBe(true);
   });
 });
