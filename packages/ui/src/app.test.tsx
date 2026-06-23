@@ -79,6 +79,16 @@ describe("sweep TUI render", () => {
     expect(frame).toContain("apply");
   });
 
+  test("renders scope sidebar label and project groups", async () => {
+    const setup = await mount(() => {});
+    const frame = setup.captureCharFrame();
+
+    expect(frame).toContain("scopes");
+    expect(frame).toContain("▸");
+    expect(frame).toContain("project root");
+    expect(frame).not.toMatch(/▸ project root.*▸/);
+  });
+
   test("q aborts and reports the abort outcome", async () => {
     const outcomes: SweepUiOutcome[] = [];
     const setup = await mount((result) => {

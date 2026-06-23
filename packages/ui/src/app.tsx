@@ -3,38 +3,23 @@ import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { StyledText } from "@opentui/core";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { Component, type ReactNode, useCallback, useMemo, useReducer, useState } from "react";
-import { groupCandidatesByScope } from "./grouping.js";
-import {
-  buildContextLine,
-  buildFooterLine,
-  buildHeaderLine,
-  buildSidebarLine,
-  formatArtifactRow,
-  formatGroupHeaderRow,
-  formatPatternRow,
-} from "./presentation.js";
+import { ReviewPane } from "./ReviewPane.js";
+import { handleKeymap } from "./keymap.js";
+import type { SweepUiOutcome } from "./outcome.js";
+import { buildContextLine, buildFooterLine, buildHeaderLine } from "./presentation.js";
 import { buildDisplayRows } from "./rows.js";
 import {
   applyUiSelection,
-  clearSelection,
   countSelectedDangerous,
   createUiState,
   getUiSummary,
-  rescanConfigFromState,
-  selectVisible,
-  setFilter,
   setFocus,
-  setRiskFilter,
-  setRowIndex,
-  setScopeFilter,
-  setThemeMode,
-  toggleCurrentSelection,
-  togglePattern,
+  toggleSelectionById,
   type SweepUiInitOptions,
   type SweepUiState,
 } from "./state.js";
 import { getVisibleCandidates } from "./state/selectors.js";
-import { cycleThemeMode, resolveTheme, type ThemeTokens } from "./theme.js";
+import { resolveTheme, type ThemeTokens } from "./theme.js";
 
 export interface SweepUiOptions {
   yes?: boolean;
@@ -42,12 +27,7 @@ export interface SweepUiOptions {
   init?: SweepUiInitOptions;
 }
 
-export type SweepUiOutcome =
-  | { type: "apply"; plan: ScanPlan }
-  | { type: "rescan"; disabledPatterns: string[]; extraPatterns: string[] }
-  | { type: "abort" };
-
-const ALL_SCOPES_KEY = "__all__";
+export type { SweepUiOutcome } from "./outcome.js";
 
 type UiAction =
   | { type: "replace"; state: SweepUiState }
@@ -180,6 +160,10 @@ export function SweepApp({ plan, dryRun, onDone, init }: SweepAppProps) {
   const visibleItems = useMemo(() => getVisibleCandidates(state), [state]);
   const displayRows = useMemo(() => buildDisplayRows(state), [state]);
   const dangerousSelected = useMemo(() => countSelectedDangerous(state), [state]);
+  const candidatesById = useMemo(
+    () => new Map(state.candidates.map((candidate) => [candidate.id, candidate])),
+    [state.candidates],
+  );
 
   const listSelectIndex = useMemo(() => {
     if (state.focus === "patterns") return state.rowIndex;
@@ -212,192 +196,31 @@ export function SweepApp({ plan, dryRun, onDone, init }: SweepAppProps) {
     [mutate],
   );
 
+  const applyPlan = useCallback(() => {
+    finalize({ type: "apply", plan: applyUiSelection(plan, state) });
+  }, [finalize, plan, state]);
+
   useKeyboard((key) => {
-    if (pendingApply) {
-      if (key.name === "y") {
-        setPendingApply(false);
-        finalize({ type: "apply", plan: applyUiSelection(plan, state) });
-      } else if (key.name === "n" || key.name === "escape") {
-        setPendingApply(false);
-      }
-      return;
-    }
-
-    if (showHelp) {
-      if (key.name === "?" || key.name === "escape") {
-        setShowHelp(false);
-      }
-      return;
-    }
-
-    // While typing in the filter, only structural keys are intercepted; every
-    // other key must reach the focused <input> so it can be typed literally.
-    if (state.focus === "search") {
-      if (key.name === "escape" || key.name === "return") {
-        focusPanel("list");
-      } else if (key.name === "tab") {
-        focusPanel(showSidebar ? "sidebar" : "list");
-      }
-      return;
-    }
-
-    if (key.name === "escape" || key.name === "q") {
-      finalize({ type: "abort" });
-      return;
-    }
-
-    if (key.name === "?") {
-      setShowHelp(true);
-      return;
-    }
-
-    if (key.name === "tab") {
-      const order: SweepUiState["focus"][] = showSidebar
-        ? ["search", "sidebar", "list"]
-        : ["search", "list"];
-      const current = state.focus === "patterns" ? "list" : state.focus;
-      const idx = order.indexOf(current);
-      const next = order[(idx + 1) % order.length] ?? "list";
-      focusPanel(next);
-      return;
-    }
-
-    if (key.name === "t") {
-      mutate((s) => setThemeMode(s, cycleThemeMode(s.themeMode)));
-      return;
-    }
-
-    if (key.name === "p") {
-      focusPanel(state.focus === "patterns" ? "list" : "patterns");
-      return;
-    }
-
-    if (key.name === "r") {
-      const { disabledPatterns, extraPatterns } = rescanConfigFromState(state);
-      finalize({ type: "rescan", disabledPatterns, extraPatterns });
-      return;
-    }
-
-    if (key.name === "/") {
-      focusPanel("search");
-      return;
-    }
-
-    // Sidebar and the list/pattern <select> own their own navigation
-    // (↑/↓/j/k and Enter are native SelectRenderable bindings), so the global
-    // handler must not also move the cursor or it double-steps.
-    if (state.focus === "sidebar") {
-      return;
-    }
-
-    if (state.focus === "patterns") {
-      if (key.name === "space") {
-        const pattern = state.catalogPatterns[listSelectIndex];
-        if (pattern) mutate((s) => togglePattern(s, pattern));
-      }
-      return;
-    }
-
-    if (key.name === "space") {
-      mutate((s) => toggleCurrentSelection(s));
-      return;
-    }
-
-    if (key.name === "s") {
-      mutate((s) => selectVisible(s, false));
-      return;
-    }
-
-    if (key.name === "a") {
-      mutate((s) => selectVisible(s, true));
-      return;
-    }
-
-    if (key.name === "u") {
-      mutate((s) => clearSelection(s));
-      return;
-    }
-
-    if (key.name === "1") {
-      mutate((s) => setRiskFilter(s, "all"));
-      return;
-    }
-    if (key.name === "2") {
-      mutate((s) => setRiskFilter(s, "safe"));
-      return;
-    }
-    if (key.name === "3") {
-      mutate((s) => setRiskFilter(s, "caution"));
-      return;
-    }
-    if (key.name === "4") {
-      mutate((s) => setRiskFilter(s, "dangerous"));
-    }
-  });
-
-  const scopeGroups = useMemo(
-    () => groupCandidatesByScope(state.targetDir, state.candidates),
-    [state.targetDir, state.candidates],
-  );
-
-  const sidebarOptions = useMemo(
-    () => [
+    handleKeymap(
       {
-        name: buildSidebarLine(
-          "all scopes",
-          state.candidates.length,
-          state.scopeFilter === null,
-          tokens,
-        ),
-        value: ALL_SCOPES_KEY,
-        description: "",
+        key,
+        state,
+        showHelp,
+        pendingApply,
+        showSidebar,
+        listSelectIndex,
       },
-      ...scopeGroups.map((group: { key: string; label: string; candidateIds: string[] }) => ({
-        name: buildSidebarLine(
-          group.label,
-          group.candidateIds.length,
-          state.scopeFilter === group.key,
-          tokens,
-        ),
-        value: group.key,
-        description: "",
-      })),
-    ],
-    [state.candidates.length, state.scopeFilter, scopeGroups, tokens],
-  );
-
-  const patternOptions = useMemo(
-    () =>
-      state.catalogPatterns.map((pattern: string) => ({
-        name: formatPatternRow(pattern, !state.disabledPatterns.has(pattern)),
-        value: pattern,
-        description: "",
-      })),
-    [state.catalogPatterns, state.disabledPatterns],
-  );
-
-  const itemOptions = useMemo(
-    () =>
-      visibleItems.map((candidate: ScanCandidate) => ({
-        name: formatArtifactRow(candidate, state.selectedIds.has(candidate.id), tokens),
-        value: candidate.id,
-        description: "",
-      })),
-    [visibleItems, state.selectedIds, tokens],
-  );
-
-  const groupHeaders = useMemo(() => {
-    if (state.focus === "patterns") return [];
-    const headers: { key: string; label: string }[] = [];
-    let lastKey = "";
-    for (const row of displayRows) {
-      if (row.kind === "header" && row.groupKey !== lastKey) {
-        headers.push({ key: row.groupKey, label: formatGroupHeaderRow(row) });
-        lastKey = row.groupKey;
-      }
-    }
-    return headers;
-  }, [displayRows, state.focus]);
+      {
+        finalize,
+        mutate,
+        focusPanel,
+        setShowHelp,
+        setPendingApply,
+        requestApply,
+        applyPlan,
+      },
+    );
+  });
 
   const headerContent: StyledText = buildHeaderLine(plan, summary, tokens, dryRun);
   const contextContent: StyledText = buildContextLine(state, tokens);
@@ -407,7 +230,6 @@ export function SweepApp({ plan, dryRun, onDone, init }: SweepAppProps) {
     dryRun,
     state.patternsDirty,
   );
-  const riskLabel = state.riskFilter === "all" ? "all risks" : `${state.riskFilter} only`;
 
   return (
     <box
@@ -419,93 +241,22 @@ export function SweepApp({ plan, dryRun, onDone, init }: SweepAppProps) {
       backgroundColor={tokens.bg}
     >
       <text content={headerContent} />
-      <box width="100%" flexGrow={1} flexDirection="row" gap={1}>
-        {showSidebar ? (
-          <box
-            width={sidebarWidth}
-            height="100%"
-            border
-            borderColor={state.focus === "sidebar" ? tokens.borderFocus : tokens.borderSoft}
-            backgroundColor={tokens.surface}
-            paddingX={1}
-          >
-            <select
-              focused={state.focus === "sidebar"}
-              showDescription={false}
-              showScrollIndicator
-              wrapSelection={false}
-              options={sidebarOptions}
-              onSelect={(_, option) => {
-                const value = option?.value ?? ALL_SCOPES_KEY;
-                mutate((s) => setScopeFilter(s, value === ALL_SCOPES_KEY ? null : value));
-                focusPanel("list");
-              }}
-            />
-          </box>
-        ) : null}
-        <box flexGrow={1} height="100%" flexDirection="column" gap={1}>
-          <input
-            focused={state.focus === "search"}
-            value={filterDraft}
-            placeholder="filter artifacts… (/ to focus)"
-            onInput={(value) => {
-              setFilterDraft(value);
-              mutate((s) => setFilter(s, value));
-            }}
-          />
-          <box
-            flexGrow={1}
-            border
-            borderColor={
-              state.focus === "list" || state.focus === "patterns"
-                ? tokens.borderFocus
-                : tokens.borderSoft
-            }
-            backgroundColor={tokens.surface}
-            paddingX={1}
-            flexDirection="column"
-          >
-            {state.focus !== "patterns" && groupHeaders.length > 0 ? (
-              <text content={groupHeaders.map((h: { label: string }) => h.label).join("  ")} />
-            ) : null}
-            {state.focus === "patterns" ? (
-              <select
-                focused
-                showDescription={false}
-                showScrollIndicator
-                wrapSelection={false}
-                selectedIndex={listSelectIndex}
-                options={patternOptions}
-                onChange={(index) => mutate((s) => setRowIndex(s, index))}
-                onSelect={(_, option) => {
-                  if (option?.value) mutate((s) => togglePattern(s, option.value));
-                }}
-              />
-            ) : visibleItems.length === 0 ? (
-              <text content="No artifacts match the current filter." />
-            ) : (
-              <select
-                focused={state.focus === "list"}
-                showDescription={false}
-                showScrollIndicator
-                wrapSelection={false}
-                selectedIndex={listSelectIndex}
-                options={itemOptions}
-                onChange={(index) => {
-                  const candidate = visibleItems[index];
-                  if (!candidate) return;
-                  const rowIndex = displayRows.findIndex(
-                    (row) => row.kind === "item" && row.candidateId === candidate.id,
-                  );
-                  if (rowIndex >= 0) mutate((s) => setRowIndex(s, rowIndex));
-                }}
-                onSelect={() => requestApply()}
-              />
-            )}
-          </box>
-          <text content={`risk filter: ${riskLabel} (1-4)`} />
-        </box>
-      </box>
+      <ReviewPane
+        state={state}
+        plan={plan}
+        tokens={tokens}
+        showSidebar={showSidebar}
+        sidebarWidth={sidebarWidth}
+        filterDraft={filterDraft}
+        displayRows={displayRows}
+        visibleItems={visibleItems}
+        candidatesById={candidatesById}
+        listSelectIndex={listSelectIndex}
+        onFilterDraftChange={setFilterDraft}
+        onMutate={mutate}
+        onFocusPanel={focusPanel}
+        onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
+      />
       <text content={contextContent} />
       <text content={footerContent} />
       {showHelp ? <HelpOverlay tokens={tokens} /> : null}

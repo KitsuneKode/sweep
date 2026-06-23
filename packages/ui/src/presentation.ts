@@ -27,6 +27,23 @@ export function formatGroupHeaderRow(row: Extract<UiDisplayRow, { kind: "header"
   return `▸ ${row.label} · ${row.itemCount}${selected}`;
 }
 
+export function buildListColumnHeader(tokens: ThemeTokens): StyledText {
+  return t`${fg(tokens.textMuted)("     artifact")}  ${fg(tokens.textDim)("      size")}  ${fg(tokens.textDim)("risk")}`;
+}
+
+export function buildGroupHeaderContent(
+  row: Extract<UiDisplayRow, { kind: "header" }>,
+  tokens: ThemeTokens,
+): StyledText {
+  const base = t`${fg(tokens.accent)("▸")}  ${bold(fg(tokens.textSecondary)(row.label))}  ${dim("·")}  ${fg(tokens.textMuted)(String(row.itemCount))}`;
+  if (row.selectedCount <= 0) return base;
+
+  return joinStyled([
+    base,
+    t`  ${dim("·")}  ${fg(tokens.textMuted)(`${row.selectedCount} selected`)}`,
+  ]);
+}
+
 export function formatArtifactRow(
   candidate: ScanCandidate,
   selected: boolean,
@@ -38,6 +55,25 @@ export function formatArtifactRow(
     candidate.name.length > 22 ? `${candidate.name.slice(0, 21)}…` : candidate.name.padEnd(22);
   const tier = riskMark[candidate.riskTier];
   return ` ${mark} ${name} ${size}  ${tier}`;
+}
+
+export function buildArtifactRowContent(
+  candidate: ScanCandidate,
+  selected: boolean,
+  isCurrent: boolean,
+  tokens: ThemeTokens,
+): StyledText {
+  const mark = selected ? "[x]" : "[ ]";
+  const size = formatBytesUi(candidate.estimatedBytes);
+  const name =
+    candidate.name.length > 28 ? `${candidate.name.slice(0, 27)}…` : candidate.name.padEnd(28);
+  const colors = riskColor(tokens);
+  const tierColor = colors[candidate.riskTier];
+  const tier = fg(tierColor)(riskMark[candidate.riskTier]);
+  const nameColor = isCurrent ? tokens.selectionText : tokens.text;
+  const markColor = selected ? tokens.accent : tokens.textMuted;
+
+  return t` ${fg(markColor)(mark)} ${fg(nameColor)(name)} ${fg(tokens.textSecondary)(size)}  ${tier}`;
 }
 
 export function formatPatternRow(pattern: string, enabled: boolean): string {
@@ -90,12 +126,13 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
   const kind = fg(tokens.textMuted)(candidate.kind);
   const path = fg(tokens.textSecondary)(candidate.path);
   const symlink = candidate.isSymlink ? fg(tokens.warning)(" symlink") : "";
+  const stub = candidate.reasons.includes("workspace-stub") ? fg(tokens.textMuted)(" stub") : "";
   const reasons =
     candidate.reasons.length > 0
       ? fg(tokens.textMuted)(`  ·  ${candidate.reasons.slice(0, 2).join(", ")}`)
       : "";
 
-  return t`${tier}  ${kind}  ${path}${symlink}${reasons}`;
+  return t`${tier}  ${kind}  ${path}${symlink}${stub}${reasons}`;
 }
 
 export function buildFooterLine(
@@ -122,15 +159,26 @@ export function buildFooterLine(
     return t`${key("tab")} ${hint("panels")}  ${key("space")} ${hint("toggle")}  ${key("s")} ${hint("safe")}  ${key("a")} ${hint("all")}  ${key("u")} ${hint("clear")}  ${key("enter")} ${hint("done")}  ${key("t")} ${hint("theme")}`;
   }
 
-  return t`${key("tab")} ${hint("panels")}  ${key("space")} ${hint("toggle")}  ${key("s")} ${hint("safe")}  ${key("a")} ${hint("all")}  ${key("p")} ${hint("patterns")}  ${key("r")} ${hint("rescan")}  ${key("enter")} ${hint("apply")}  ${key("t")} ${hint("theme")}`;
+  return t`${key("tab")} ${hint("panels")}  ${key("space")} ${hint("toggle")}  ${key("s")} ${hint("safe")}  ${key("a")} ${hint("all")}  ${key("p")} ${hint("patterns")}  ${key("r")} ${hint("rescan")}  ${key("enter")} ${hint("apply")}  ${key("?")} ${hint("help")}  ${key("t")} ${hint("theme")}`;
 }
 
 export function buildSidebarLine(
   label: string,
   count: number,
-  selected: boolean,
-  _tokens: ThemeTokens,
-): string {
-  const mark = selected ? "›" : " ";
-  return `${mark} ${label} (${count})`;
+  active: boolean,
+  countWidth: number,
+  tokens: ThemeTokens,
+): StyledText {
+  const marker = active ? "›" : "·";
+  const markerColor = active ? tokens.accent : tokens.textMuted;
+  const countText = String(count).padStart(countWidth);
+  const labelText = label.length > 18 ? `${label.slice(0, 17)}…` : label;
+
+  return t`${fg(markerColor)(marker)}  ${fg(active ? tokens.text : tokens.textSecondary)(labelText)}  ${fg(tokens.textMuted)(countText)}`;
+}
+
+/** @deprecated Use buildSidebarLine with StyledText — plain string kept for tests. */
+export function formatSidebarLinePlain(label: string, count: number, active: boolean): string {
+  const mark = active ? "›" : "·";
+  return `${mark} ${label} ${count}`;
 }

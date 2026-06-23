@@ -19,6 +19,7 @@ export interface ThemeTokens {
   info: string;
   selectionBg: string;
   selectionText: string;
+  hoverBg: string;
   headerText: string;
 }
 
@@ -41,6 +42,7 @@ export const darkTheme: ThemeTokens = {
   info: "#7dd3fc",
   selectionBg: "#172033",
   selectionText: "#f8fafc",
+  hoverBg: "#151a24",
   headerText: "#cbd5e1",
 };
 
@@ -63,6 +65,7 @@ export const lightTheme: ThemeTokens = {
   info: "#1f6c9f",
   selectionBg: "#edf3ec",
   selectionText: "#111111",
+  hoverBg: "#f0f0ee",
   headerText: "#2f3437",
 };
 

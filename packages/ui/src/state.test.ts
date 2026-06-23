@@ -112,11 +112,16 @@ describe("sweep ui state", () => {
     expect(state.selectedIds.has("cand_safe")).toBe(true);
   });
 
-  test("toggleCurrentSelection ignores blocked candidates", () => {
+  test("toggleCurrentSelection ignores blocked and dangerous candidates", () => {
     let state = setFilter(createUiState(createPlan()), ".git");
     expect(getCurrentCandidate(state)?.riskTier).toBe("blocked");
     state = toggleCurrentSelection(state);
     expect(state.selectedIds.has("cand_blocked")).toBe(false);
+
+    state = setFilter(createUiState(createPlan()), "custom-cache");
+    expect(getCurrentCandidate(state)?.riskTier).toBe("dangerous");
+    state = toggleCurrentSelection(state);
+    expect(state.selectedIds.has("cand_dangerous")).toBe(false);
   });
 
   test("selectVisible excludes dangerous and blocked candidates by default", () => {
@@ -149,14 +154,24 @@ describe("sweep ui state", () => {
   });
 
   test("applyUiSelection syncs selected ids back into a plan", () => {
-    let state = setFilter(createUiState(createPlan()), "custom-cache");
-    expect(getCurrentCandidate(state)?.id).toBe("cand_dangerous");
-
-    state = toggleCurrentSelection(state);
+    let state = selectVisible(createUiState(createPlan()), true);
     const nextPlan = applyUiSelection(createPlan(), state);
 
     expect(nextPlan.selectedCandidateIds).toEqual(["cand_safe", "cand_dangerous"]);
     expect(nextPlan.summary.selectedCount).toBe(2);
+  });
+
+  test("applyUiSelection strips blocked candidates even if selected", () => {
+    const base = createUiState(createPlan());
+    const state = {
+      ...base,
+      selectedIds: new Set([...base.selectedIds, "cand_blocked"]),
+    };
+
+    const nextPlan = applyUiSelection(createPlan(), state);
+
+    expect(nextPlan.selectedCandidateIds).toEqual(["cand_safe"]);
+    expect(nextPlan.summary.selectedCount).toBe(1);
   });
 
   test("togglePattern marks patterns dirty and toggles disabled set", () => {

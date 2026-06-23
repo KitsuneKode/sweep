@@ -1,6 +1,11 @@
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_PATTERNS } from "@kitsunekode/sweep-core/config";
 import {
+  buildScopeSidebarRows,
+  scopeFilterToSidebarIndex,
+  sidebarIndexToScopeFilter,
+} from "../sidebar.js";
+import {
   buildDisplayRows,
   firstItemRowIndex,
   moveItemRowIndex,
@@ -22,6 +27,7 @@ export interface SweepUiState {
   scopeFilter: string | null;
   riskFilter: RiskTier | "all";
   rowIndex: number;
+  sidebarIndex: number;
   selectedIds: Set<string>;
   focus: UiFocus;
   themeMode: ThemeMode;
@@ -54,9 +60,10 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     scopeFilter: null,
     riskFilter: "all",
     rowIndex: 0,
+    sidebarIndex: 0,
     selectedIds,
     focus: "list",
-    themeMode: "dark",
+    themeMode: "auto",
     patternsDirty: false,
   };
 
@@ -84,7 +91,12 @@ export function setFilter(state: SweepUiState, filter: string): SweepUiState {
 
 export function setScopeFilter(state: SweepUiState, scopeFilter: string | null): SweepUiState {
   invalidateSelectorCache();
-  const next: SweepUiState = { ...state, scopeFilter };
+  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+  const next: SweepUiState = {
+    ...state,
+    scopeFilter,
+    sidebarIndex: scopeFilterToSidebarIndex(scopeFilter, sidebarRows),
+  };
   const rows = buildDisplayRows(next);
   return {
     ...next,
@@ -118,7 +130,34 @@ export function togglePattern(state: SweepUiState, pattern: string): SweepUiStat
 }
 
 export function setFocus(state: SweepUiState, focus: UiFocus): SweepUiState {
-  return { ...state, focus };
+  if (focus !== "sidebar") {
+    return { ...state, focus };
+  }
+
+  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+  return {
+    ...state,
+    focus,
+    sidebarIndex: scopeFilterToSidebarIndex(state.scopeFilter, sidebarRows),
+  };
+}
+
+export function moveSidebarCursor(state: SweepUiState, delta: number): SweepUiState {
+  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+  if (sidebarRows.length === 0) return state;
+
+  const nextIndex = clamp(state.sidebarIndex + delta, 0, sidebarRows.length - 1);
+  return { ...state, sidebarIndex: nextIndex };
+}
+
+export function applySidebarScope(state: SweepUiState): SweepUiState {
+  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+  const scopeFilter = sidebarIndexToScopeFilter(state.sidebarIndex, sidebarRows);
+  return setScopeFilter({ ...state, focus: "list" }, scopeFilter);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 export function setThemeMode(state: SweepUiState, themeMode: ThemeMode): SweepUiState {
@@ -148,7 +187,15 @@ export function setRowIndex(state: SweepUiState, rowIndex: number): SweepUiState
 export function toggleCurrentSelection(state: SweepUiState): SweepUiState {
   const candidate = getCurrentCandidate(state);
   if (!candidate) return state;
-  if (candidate.riskTier === "blocked") return state;
+  return toggleSelectionById(state, candidate.id);
+}
+
+export function toggleSelectionById(state: SweepUiState, candidateId: string): SweepUiState {
+  const candidate = state.candidates.find((entry) => entry.id === candidateId);
+  if (!candidate) return state;
+  if (candidate.riskTier === "blocked" || candidate.riskTier === "dangerous") {
+    return state;
+  }
 
   const selectedIds = new Set(state.selectedIds);
   if (selectedIds.has(candidate.id)) {
@@ -219,12 +266,17 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
 }
 
 export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan {
+  const selectedCandidateIds = [...state.selectedIds].filter((id) => {
+    const candidate = state.candidates.find((entry) => entry.id === id);
+    return candidate !== undefined && candidate.riskTier !== "blocked";
+  });
+
   return {
     ...plan,
-    selectedCandidateIds: [...state.selectedIds],
+    selectedCandidateIds,
     summary: {
       ...plan.summary,
-      selectedCount: state.selectedIds.size,
+      selectedCount: selectedCandidateIds.length,
     },
   };
 }

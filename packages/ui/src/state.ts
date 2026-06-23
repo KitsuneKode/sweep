@@ -7,6 +7,8 @@ export {
   getCurrentCandidate,
   getUiSummary,
   moveCursor,
+  moveSidebarCursor,
+  applySidebarScope,
   rescanConfigFromState,
   selectVisible,
   setFilter,
@@ -16,6 +18,7 @@ export {
   setScopeFilter,
   setThemeMode,
   toggleCurrentSelection,
+  toggleSelectionById,
   togglePattern,
   countSelectedDangerous,
 } from "./state/store.js";
