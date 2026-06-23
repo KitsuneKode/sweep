@@ -52,9 +52,9 @@ describe("assertSafeCwd", () => {
     expect(() => assertSafeCwd(projectPath)).not.toThrow();
   });
 
-  test("allows /tmp/some/project (3 levels)", () => {
-    // /tmp is 1 level — but /tmp/a/b is 3 levels and should be allowed
-    // TODO: verify this matches the guardrail rule (>= 2 segments)
+  test("allows /tmp/some/project (3 levels) and /tmp/project (2 levels)", () => {
+    // /tmp is 1 level (blocked) — but /tmp/project is 2 levels and /tmp/user/project is 3 levels, and should be allowed
+    expect(() => assertSafeCwd("/tmp/project")).not.toThrow();
     expect(() => assertSafeCwd("/tmp/user/project")).not.toThrow();
   });
 

@@ -14,7 +14,9 @@
     "./native-platforms": "./src/native-platforms.ts"
   },
   "scripts": {
+    "transit": "exit 0",
     "test": "bun test src test-support",
+    "bench:large-stream": "bun run ./benchmarks/large-stream.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "fmt": "oxfmt src"
@@ -24,6 +26,7 @@
     "ajv": "catalog:"
   },
   "devDependencies": {
+    "@kitsunekode/sweep-test-fixtures": "workspace:*",
     "@kitsunekode/sweep-typescript-config": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

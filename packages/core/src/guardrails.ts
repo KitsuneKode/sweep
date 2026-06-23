@@ -1,32 +1,53 @@
-import { lstatSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { normalize, parse, resolve } from "node:path";
+import { isAbsolute, normalize, parse, relative, resolve, sep } from "node:path";
 
 // ─── Blocked paths ────────────────────────────────────────────────────────────
+
+/** VCS dirs — never delete artifacts inside these path segments. */
+export const PROTECTED_VCS_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr"]);
 
 /**
  * Paths that must never be the target directory.
  * Evaluated AFTER resolve() — these are canonical absolute paths.
  * Built once at module load (not per-call) for performance.
  */
-const BLOCKED_ROOTS: Set<string> = new Set([
-  "/",
-  "/home",
-  "/usr",
-  "/usr/local",
-  "/etc",
-  "/opt",
-  "/var",
-  "/bin",
-  "/sbin",
-  "/lib",
-  "/lib64",
-  "/boot",
-  "/sys",
-  "/proc",
-  "/dev",
-  homedir(),
-]);
+function buildBlockedRoots(): Set<string> {
+  const roots = new Set<string>([
+    "/",
+    "/home",
+    "/usr",
+    "/usr/local",
+    "/etc",
+    "/opt",
+    "/var",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/lib64",
+    "/boot",
+    "/sys",
+    "/proc",
+    "/dev",
+    homedir(),
+  ]);
+
+  if (process.platform === "win32") {
+    for (const drive of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+      const letter = `${drive}:\\`;
+      roots.add(normalize(letter));
+      roots.add(normalize(`${letter}Windows`));
+      roots.add(normalize(`${letter}Program Files`));
+      roots.add(normalize(`${letter}Program Files (x86)`));
+      roots.add(normalize(`${letter}Users`));
+      roots.add(normalize(`${letter}ProgramData`));
+    }
+  }
+
+  return roots;
+}
+
+const BLOCKED_ROOTS = buildBlockedRoots();
 
 // ─── Error type ───────────────────────────────────────────────────────────────
 
@@ -68,7 +89,7 @@ export function assertSafeCwd(targetPath: string): void {
 
   // Must be at least 2 path segments deep (e.g., /home/user → ok, /tmp → blocked)
   const { root } = parse(resolved);
-  const relativeParts = resolved.slice(root.length).split("/").filter(Boolean);
+  const relativeParts = pathSegmentsBelowRoot(resolved, root);
   if (relativeParts.length < 2) {
     throw new GuardrailError(
       `Path is too shallow to be a project directory: ${resolved}\n` +
@@ -129,4 +150,74 @@ export function isSymlink(entryPath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * True for symlinks and Windows junctions/reparse points that must not be recursed.
+ */
+export function isReparsePointOrSymlink(entryPath: string): boolean {
+  try {
+    const stat = lstatSync(entryPath);
+    if (stat.isSymbolicLink()) {
+      return true;
+    }
+    if (process.platform === "win32" && stat.isDirectory()) {
+      try {
+        const real = realpathSync.native(entryPath);
+        return normalize(real) !== normalize(resolve(entryPath));
+      } catch {
+        return false;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/** Path segments below the filesystem root (platform-aware). */
+export function pathSegmentsBelowRoot(resolved: string, parsedRoot: string): string[] {
+  const tail = resolved.slice(parsedRoot.length);
+  return tail.split(sep).filter(Boolean);
+}
+
+/** Whether `candidatePath` is the target root or a path inside it. */
+export function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
+  const root = resolve(rootPath);
+  const candidate = resolve(candidatePath);
+  if (candidate === root) {
+    return true;
+  }
+  const rel = relative(root, candidate);
+  if (rel === "") {
+    return true;
+  }
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Assert a candidate deletion path stays inside the plan target directory.
+ * Throws GuardrailError (exit code 2) if not.
+ */
+export function assertPathWithinRoot(
+  candidatePath: string,
+  rootPath: string,
+  label = "Candidate path",
+): void {
+  if (!isPathWithinRoot(candidatePath, rootPath)) {
+    throw new GuardrailError(
+      `${label} is outside the scan target:\n` +
+        `  ${candidatePath}\n` +
+        `  target: ${resolve(rootPath)}`,
+    );
+  }
+}
+
+/** True when any path segment is a protected VCS metadata directory. */
+export function pathHasProtectedVcsSegment(entryPath: string): boolean {
+  const segments = normalize(entryPath).split(sep);
+  return segments.some((segment) => PROTECTED_VCS_DIR_NAMES.has(segment));
 }

@@ -1,25 +1,32 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { lstatSync, readdirSync, statSync } from "node:fs";
+import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import type { ScanEntry, ScanResult, SweepConfig } from "@kitsunekode/sweep-protocol";
+import { mapPool } from "./async-pool.js";
+import { isIgnoredEntry } from "./config.js";
+import { isReparsePointOrSymlink } from "./guardrails.js";
+
+const execFileAsync = promisify(execFile);
 
 export interface ScanHooks {
+  /** Fired as soon as a matching entry is discovered (bytes may be 0 until sized). */
   onEntry?: (entry: ScanEntry) => void;
+  /** Fired after size estimation completes for an entry. */
+  onEntrySized?: (entry: ScanEntry) => void;
+  /** Optional cancellation signal for long-running scans. */
+  signal?: AbortSignal;
 }
 
 /** VCS/metadata dirs — never descend (major win on large trees). */
 const SKIP_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr"]);
 
+const TRAVERSAL_CONCURRENCY = 16;
+const SIZE_CONCURRENCY = 8;
+
 // ─── Pattern matching ─────────────────────────────────────────────────────────
 
-/**
- * Pre-compile a pattern list into a fast matcher function.
- *
- * Exact patterns use a Set for O(1) lookup.
- * Glob patterns ("*.tsbuildinfo") are compiled to RegExp once, not per entry.
- *
- * Called once per scan, not per directory entry.
- */
 function compileMatcher(patterns: string[]): (name: string) => boolean {
   const exact = new Set<string>();
   const regexes: RegExp[] = [];
@@ -28,7 +35,6 @@ function compileMatcher(patterns: string[]): (name: string) => boolean {
     if (!p.includes("*")) {
       exact.add(p);
     } else {
-      // Simple glob → regex: only *.ext style is supported (covers all default patterns)
       const escaped = p.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
       regexes.push(new RegExp(`^${escaped}$`));
     }
@@ -38,34 +44,12 @@ function compileMatcher(patterns: string[]): (name: string) => boolean {
   return (name) => exact.has(name) || regexes.some((re) => re.test(name));
 }
 
-/**
- * Test if an absolute path should be skipped due to ignore rules.
- * Ignore entries are matched as substrings of the full path.
- */
-function shouldIgnore(fullPath: string, ignore: string[]): boolean {
-  return ignore.some((pattern) => fullPath.includes(pattern));
-}
-
 // ─── Size estimation ──────────────────────────────────────────────────────────
 
 const platform = process.platform;
-
-// Max paths per du invocation — stays well under ARG_MAX on all platforms.
 const DU_CHUNK_SIZE = 50;
 
-/**
- * Batch size estimate for multiple paths via a single `du` invocation per chunk.
- *
- * Drastically faster than one subprocess per entry: a monorepo with 20
- * node_modules goes from 20 process spawns down to 1.
- *
- * Returns a Map<path, bytes>. Paths not in the map fell back to statSync.
- *
- * - Linux:   `du -sb paths...`  → bytes (GNU du)
- * - macOS:   `du -sk paths...`  → kilobytes (BSD du, no -b flag)
- * - Other:   skipped — callers use statSync fallback
- */
-function batchEstimate(paths: string[]): Map<string, number> {
+async function batchEstimateAsync(paths: string[]): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   if (paths.length === 0 || (platform !== "linux" && platform !== "darwin")) {
     return result;
@@ -74,17 +58,15 @@ function batchEstimate(paths: string[]): Map<string, number> {
   const flag = platform === "linux" ? "-sb" : "-sk";
   const multiplier = platform === "linux" ? 1 : 1024;
 
-  // Process in chunks to stay under ARG_MAX
   for (let i = 0; i < paths.length; i += DU_CHUNK_SIZE) {
     const chunk = paths.slice(i, i + DU_CHUNK_SIZE);
     try {
-      const out = execFileSync("du", [flag, ...chunk], {
-        encoding: "utf8",
+      const { stdout } = await execFileAsync("du", [flag, ...chunk], {
         timeout: 30_000,
-        stdio: ["ignore", "pipe", "ignore"],
+        encoding: "utf8",
       });
 
-      for (const line of out.split("\n")) {
+      for (const line of stdout.split("\n")) {
         if (!line) continue;
         const tab = line.indexOf("\t");
         if (tab === -1) continue;
@@ -102,7 +84,6 @@ function batchEstimate(paths: string[]): Map<string, number> {
   return result;
 }
 
-/** Fallback size for a single path when du is unavailable or fails. */
 function statFallback(entryPath: string): number {
   try {
     return statSync(entryPath).size;
@@ -111,10 +92,7 @@ function statFallback(entryPath: string): number {
   }
 }
 
-/**
- * Exact recursive size by walking all files under a path.
- * Slow on large node_modules — only called for --dry-run.
- */
+/** Exact recursive size by walking all files under a path. */
 export function exactSize(entryPath: string): number {
   let total = 0;
 
@@ -127,7 +105,7 @@ export function exactSize(entryPath: string): number {
     }
     for (const item of items) {
       const full = join(p, item.name);
-      if (item.isSymbolicLink()) continue; // don't follow links
+      if (item.isSymbolicLink()) continue;
       if (item.isDirectory()) {
         walk(full);
       } else {
@@ -152,56 +130,91 @@ export function exactSize(entryPath: string): number {
   return total;
 }
 
+async function estimateEntryBytes(entry: ScanEntry, exact: boolean): Promise<number> {
+  if (exact) {
+    return exactSize(entry.path);
+  }
+
+  const sizeMap = await batchEstimateAsync([entry.path]);
+  const fromDu = sizeMap.get(entry.path);
+  if (fromDu !== undefined) {
+    return fromDu;
+  }
+  if (entry.entryType === "directory") {
+    return exactSize(entry.path);
+  }
+  return statFallback(entry.path);
+}
+
+async function applySizeEstimatesStreaming(
+  entries: ScanEntry[],
+  exact: boolean,
+  hooks: ScanHooks,
+): Promise<void> {
+  await mapPool(entries, SIZE_CONCURRENCY, async (entry) => {
+    entry.estimatedBytes = await estimateEntryBytes(entry, exact);
+    hooks.onEntrySized?.(entry);
+    return entry;
+  });
+}
+
 // ─── Recursive scanner ────────────────────────────────────────────────────────
 
 /**
  * Recursively scan targetDir for entries matching config.patterns.
  *
- * Key behaviors:
- * - Does NOT recurse into matched directories (avoids double-counting)
- * - Does NOT follow symlinks (marks them as isSymlink: true, doesn't recurse)
- * - Skips entries in config.ignore
- * - Respects config.depth (-1 = unlimited)
- * - Fast path: sizes estimated via a single batched `du` call after the walk
- * - Exact path: recursive stat walk per entry (opt-in only — very slow on large trees)
+ * Emits `onEntry` during the walk (time-to-first-result). Size estimation runs
+ * concurrently per entry; `onEntrySized` fires as each size resolves.
  */
-export function scan(
+export async function scan(
   targetDir: string,
   config: SweepConfig,
   exact = false,
   hooks: ScanHooks = {},
-): ScanResult {
+): Promise<ScanResult> {
   const entries: ScanEntry[] = [];
   let scannedDirs = 0;
-
-  // Compile patterns once — O(1) Set lookup for exact names, pre-built regexes for globs.
   const matches = compileMatcher(config.patterns);
+  const signal = hooks.signal;
 
   type Frame = { dir: string; depth: number };
-  const frontier: Frame[] = [{ dir: targetDir, depth: 0 }];
 
-  while (frontier.length > 0) {
-    const { dir, depth } = frontier.pop()!;
-    if (config.depth !== -1 && depth > config.depth) continue;
+  async function walkDir(frame: Frame): Promise<void> {
+    if (signal?.aborted) {
+      return;
+    }
+    const { dir, depth } = frame;
+    if (config.depth !== -1 && depth > config.depth) {
+      return;
+    }
 
     let items: import("node:fs").Dirent<string>[];
     try {
-      items = readdirSync(dir, { withFileTypes: true, encoding: "utf8" });
+      items = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
     } catch {
-      continue;
+      return;
     }
 
     scannedDirs++;
+    const childDirs: Frame[] = [];
 
     for (const item of items) {
+      if (signal?.aborted) {
+        return;
+      }
+
       const fullPath = join(dir, item.name);
 
-      if (shouldIgnore(fullPath, config.ignore)) continue;
+      if (isIgnoredEntry(targetDir, fullPath, item.name, config.ignore)) continue;
 
       let isLink = item.isSymbolicLink();
+      if (!isLink && item.isDirectory()) {
+        isLink = isReparsePointOrSymlink(fullPath);
+      }
       if (!isLink && !item.isFile() && !item.isDirectory()) {
         try {
-          isLink = lstatSync(fullPath).isSymbolicLink();
+          const stat = await lstat(fullPath);
+          isLink = stat.isSymbolicLink();
         } catch {
           continue;
         }
@@ -216,33 +229,22 @@ export function scan(
           entryType: isLink ? "symlink" : item.isDirectory() ? "directory" : "file",
         };
         entries.push(entry);
+        hooks.onEntry?.(entry);
         continue;
       }
 
       if (item.isDirectory() && !isLink && !SKIP_DIR_NAMES.has(item.name)) {
-        frontier.push({ dir: fullPath, depth: depth + 1 });
+        childDirs.push({ dir: fullPath, depth: depth + 1 });
       }
     }
-  }
 
-  // ── Size estimation ─────────────────────────────────────────────────────────
-
-  if (exact) {
-    // Exact mode: recursive stat walk per entry (slow but accurate, used for --dry-run)
-    for (const entry of entries) {
-      entry.estimatedBytes = exactSize(entry.path);
-    }
-  } else {
-    // Fast mode: single batched du call for all entries, then fill gaps with statSync
-    const sizeMap = batchEstimate(entries.map((e) => e.path));
-    for (const entry of entries) {
-      entry.estimatedBytes = sizeMap.get(entry.path) ?? statFallback(entry.path);
+    if (childDirs.length > 0) {
+      await mapPool(childDirs, TRAVERSAL_CONCURRENCY, (child) => walkDir(child));
     }
   }
 
-  for (const entry of entries) {
-    hooks.onEntry?.(entry);
-  }
+  await walkDir({ dir: targetDir, depth: 0 });
+  await applySizeEstimatesStreaming(entries, exact, hooks);
 
   return {
     entries,

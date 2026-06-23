@@ -10,7 +10,12 @@ import type {
   ScanResult,
   SelectionPolicy,
 } from "@kitsunekode/sweep-protocol";
-import { DEFAULT_SELECTION_POLICY, PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
+import {
+  candidateKindFromName,
+  DEFAULT_SELECTION_POLICY,
+  PROTOCOL_VERSION,
+} from "@kitsunekode/sweep-protocol";
+import { isPathWithinRoot, pathHasProtectedVcsSegment } from "./guardrails.js";
 
 export function buildPlan(
   targetDir: string,
@@ -69,7 +74,10 @@ export function resolveSelectedCandidates(plan: ScanPlan): ScanCandidate[] {
   return plan.candidates.filter((candidate) => selectedIds.has(candidate.id));
 }
 
-export function revalidateCandidates(candidates: ScanCandidate[]): {
+export function revalidateCandidates(
+  candidates: ScanCandidate[],
+  targetDir?: string,
+): {
   ready: ScanEntry[];
   failedPaths: PathFailure[];
 } {
@@ -77,6 +85,15 @@ export function revalidateCandidates(candidates: ScanCandidate[]): {
   const failedPaths: PathFailure[] = [];
 
   for (const candidate of candidates) {
+    if (targetDir && !isPathWithinRoot(candidate.path, targetDir)) {
+      failedPaths.push({
+        path: candidate.path,
+        code: "outside_target",
+        error: "candidate path is outside the plan target directory",
+      });
+      continue;
+    }
+
     try {
       const stat = lstatSync(candidate.path);
       const isSymlink = stat.isSymbolicLink();
@@ -129,28 +146,10 @@ export function countRiskTiers(candidates: ScanCandidate[]): Record<RiskTier, nu
   );
 }
 
-export function candidateKindFromName(name: string): CandidateKind {
-  switch (name) {
-    case "node_modules":
-    case "dist":
-    case "build":
-    case "out":
-    case ".next":
-    case ".nuxt":
-    case ".svelte-kit":
-    case ".turbo":
-    case ".vite":
-    case ".parcel-cache":
-    case "target":
-    case "coverage":
-    case ".nyc_output":
-      return name;
-    default:
-      return name.endsWith(".tsbuildinfo") ? "tsbuildinfo" : "custom";
-  }
-}
+export { candidateKindFromName } from "@kitsunekode/sweep-protocol";
 
 export function inferRiskTier(entry: ScanEntry, kind: CandidateKind): RiskTier {
+  if (pathHasProtectedVcsSegment(entry.path)) return "blocked";
   if (entry.isSymlink) return "caution";
   if (kind === "custom") return "dangerous";
   return "safe";
@@ -158,6 +157,9 @@ export function inferRiskTier(entry: ScanEntry, kind: CandidateKind): RiskTier {
 
 export function inferReasons(entry: ScanEntry, kind: CandidateKind): string[] {
   const reasons: string[] = [];
+  if (pathHasProtectedVcsSegment(entry.path)) {
+    reasons.push("protected-vcs-path");
+  }
   if (entry.isSymlink) reasons.push("symlink");
   if (kind === "custom") {
     reasons.push("custom-pattern");

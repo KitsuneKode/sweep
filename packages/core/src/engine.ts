@@ -14,6 +14,7 @@ import { clean } from "./cleaner.js";
 import type { ScanHooks } from "./scanner.js";
 import { scan } from "./scanner.js";
 import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./planner.js";
+import { assertPathWithinRoot, assertSafeCwd } from "./guardrails.js";
 import { applyPlanViaRust, type EngineBackend } from "./rust-engine.js";
 
 export interface ScanToPlanOptions extends ScanHooks {
@@ -38,12 +39,11 @@ export function scanToPlan(
   targetDir: string,
   config: SweepConfig,
   options: ScanToPlanOptions = {},
-): ScanToPlanResult {
-  const result = scan(targetDir, config, options.exact ?? false, options);
-  return {
+): Promise<ScanToPlanResult> {
+  return scan(targetDir, config, options.exact ?? false, options).then((result) => ({
     result,
     plan: buildPlan(targetDir, result, options.selectionPolicy),
-  };
+  }));
 }
 
 export interface ApplyPlanOptions {
@@ -54,13 +54,21 @@ export async function applyPlan(
   plan: ScanPlan,
   options: ApplyPlanOptions = {},
 ): Promise<ApplyPlanResult> {
+  assertSafeCwd(plan.targetDir);
   const selected = resolveSelectedCandidates(plan);
 
   if (selected.length === 0) {
     return emptyApplyPlanResult(plan);
   }
 
-  const { ready, failedPaths: revalidationFailures } = revalidateCandidates(selected);
+  for (const candidate of selected) {
+    assertPathWithinRoot(candidate.path, plan.targetDir);
+  }
+
+  const { ready, failedPaths: revalidationFailures } = revalidateCandidates(
+    selected,
+    plan.targetDir,
+  );
   const cleanResult = await clean(ready, (entry) => {
     options.onDeleted?.(entry);
   });
@@ -115,19 +123,30 @@ export async function applyPlanWithBackend(
     return applyPlan(plan, options);
   }
 
+  assertSafeCwd(plan.targetDir);
   const selected = resolveSelectedCandidates(plan);
   if (selected.length === 0) {
     return emptyApplyPlanResult(plan);
   }
 
-  const { ready, failedPaths: revalidationFailures } = revalidateCandidates(selected);
-  if (revalidationFailures.length > 0 || ready.length === 0) {
-    return applyPlan(plan, options);
+  for (const candidate of selected) {
+    assertPathWithinRoot(candidate.path, plan.targetDir);
   }
 
   const report = applyPlanViaRust(plan);
-  const failedPaths = new Set(report.failedPaths.map((failure) => failure.path));
-  const deleted = selected.filter((candidate) => !failedPaths.has(candidate.path));
+  const failedPathSet = new Set(report.failedPaths.map((failure) => failure.path));
+  const revalidationCodes = new Set<PathFailure["code"]>([
+    "missing",
+    "changed_symlink_state",
+    "changed_entry_type",
+  ]);
+  const revalidationFailures = report.failedPaths.filter((failure) =>
+    revalidationCodes.has(failure.code),
+  );
+  const deleted = selected.filter((candidate) => !failedPathSet.has(candidate.path));
+  const ready = selected.filter(
+    (candidate) => !revalidationFailures.some((failure) => failure.path === candidate.path),
+  );
 
   for (const candidate of deleted) {
     options.onDeleted?.(candidate);
@@ -144,7 +163,7 @@ export async function applyPlanWithBackend(
     report,
     cleanResult,
     selected,
-    ready: deleted,
+    ready,
     revalidationFailures,
   };
 }

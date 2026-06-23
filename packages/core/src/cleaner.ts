@@ -1,11 +1,14 @@
-import { rmSync, unlinkSync } from "node:fs";
+import { rm, unlink } from "node:fs/promises";
 import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
+import { mapPool } from "./async-pool.js";
+
+const DELETE_CONCURRENCY = 4;
 
 /**
- * Delete all entries in the list.
+ * Delete all entries in the list with bounded concurrency.
  *
- * Symlinks are removed with unlinkSync (removes the link entry, not the target).
- * Directories are removed with rmSync({ recursive: true, force: true }).
+ * Symlinks are removed with unlink (removes the link entry, not the target).
+ * Directories are removed with rm({ recursive: true, force: true }).
  *
  * Returns a CleanResult with stats. Never throws — failed entries are collected.
  */
@@ -17,17 +20,12 @@ export async function clean(
   const deleted: ScanEntry[] = [];
   const failedPaths: PathFailure[] = [];
 
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    if (!entry) continue;
-
+  await mapPool(entries, DELETE_CONCURRENCY, async (entry, index) => {
     try {
       if (entry.isSymlink) {
-        // IMPORTANT: unlinkSync removes the symlink entry itself.
-        // rmSync with recursive:true on a symlink would follow the link.
-        unlinkSync(entry.path);
+        await unlink(entry.path);
       } else {
-        rmSync(entry.path, { recursive: true, force: true });
+        await rm(entry.path, { recursive: true, force: true });
       }
       deleted.push(entry);
     } catch (err) {
@@ -39,13 +37,13 @@ export async function clean(
       });
     }
 
-    onProgress?.(entry, i, entries.length);
-  }
+    onProgress?.(entry, index, entries.length);
+    return entry;
+  });
 
   return {
     deleted,
     failedPaths,
-    // Use estimatedBytes for freed — we can't measure actual freed bytes post-deletion
     totalBytesFreed: deleted.reduce((sum, e) => sum + e.estimatedBytes, 0),
     durationMs: Date.now() - startTime,
   };

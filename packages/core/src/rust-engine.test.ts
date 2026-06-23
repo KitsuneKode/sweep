@@ -15,19 +15,19 @@ describe("rustScanBlockedReason", () => {
     expect(rustScanBlockedReason(project, project, {})).toBeNull();
   });
 
-  test("blocks progressive scan callbacks", () => {
+  test("allows progressive scan callbacks", () => {
     expect(
       rustScanBlockedReason(DEFAULT_CONFIG, DEFAULT_CONFIG, {
         onEntry: () => {},
       }),
-    ).toContain("JS engine");
+    ).toBeNull();
   });
 
-  test("blocks exact sizing", () => {
+  test("allows exact sizing", () => {
     expect(
       rustScanBlockedReason(DEFAULT_CONFIG, DEFAULT_CONFIG, {
         exact: true,
       }),
-    ).toContain("exact sizing");
+    ).toBeNull();
   });
 });

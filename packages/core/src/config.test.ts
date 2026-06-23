@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_CONFIG, DEFAULT_PATTERNS, loadConfig, ConfigParseError } from "./config.js";
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_PATTERNS,
+  loadConfig,
+  buildRescanConfig,
+  ConfigParseError,
+  validateProjectConfigFile,
+  writeInitSweeprc,
+} from "./config.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -95,6 +103,49 @@ describe("loadConfig — project config (.sweeprc)", () => {
   });
 });
 
+describe("validateProjectConfigFile", () => {
+  test("accepts a valid project config", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    writeConfig(dir("project"), { patterns: ["custom-output"], maxSizeGB: 5 });
+    const result = validateProjectConfigFile(dir("project", ".sweeprc"), dir("project"));
+    expect(result.ok).toBe(true);
+  });
+
+  test("rejects unknown fields", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    writeFileSync(dir("project", ".sweeprc"), JSON.stringify({ extraField: true }));
+    const result = validateProjectConfigFile(dir("project", ".sweeprc"), dir("project"));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.detail).toContain("unknown field");
+    }
+  });
+
+  test("rejects invalid field types", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    writeConfig(dir("project"), { maxSizeGB: "ten" });
+    const result = validateProjectConfigFile(dir("project", ".sweeprc"), dir("project"));
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe("writeInitSweeprc", () => {
+  test("creates .sweeprc when missing", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    const configPath = dir("project", ".sweeprc");
+    expect(writeInitSweeprc(configPath)).toBe("created");
+    expect(loadConfig(dir("project")).patterns).toContain(".custom-output");
+  });
+
+  test("refuses to overwrite without force", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    writeConfig(dir("project"), { maxSizeGB: 1 });
+    const configPath = dir("project", ".sweeprc");
+    expect(writeInitSweeprc(configPath)).toBe("exists");
+    expect(loadConfig(dir("project")).maxSizeGB).toBe(1);
+  });
+});
+
 describe("loadConfig — explicit --config path", () => {
   test("uses explicit config file, skipping walk-up", () => {
     mkdirSync(dir("configs"), { recursive: true });
@@ -130,6 +181,63 @@ describe("loadConfig — CLI overrides", () => {
     writeConfig(dir("project"), { depth: 5 });
     const config = loadConfig(dir("project"), undefined, { depth: 2 });
     expect(config.depth).toBe(2);
+  });
+
+  test("disabledPatterns removes defaults from merged patterns", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    writeConfig(dir("project"), { disabledPatterns: ["dist", "build"] });
+    const config = loadConfig(dir("project"));
+    expect(config.patterns).toContain("node_modules");
+    expect(config.patterns).not.toContain("dist");
+    expect(config.patterns).not.toContain("build");
+    expect(config.disabledPatterns).toEqual(["dist", "build"]);
+  });
+
+  test("CLI disabledPatterns merge with project disabledPatterns", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    writeConfig(dir("project"), { disabledPatterns: ["dist"] });
+    const config = loadConfig(dir("project"), undefined, { disabledPatterns: ["target"] });
+    expect(config.patterns).not.toContain("dist");
+    expect(config.patterns).not.toContain("target");
+  });
+});
+
+describe("buildRescanConfig", () => {
+  test("uses UI disabled patterns authoritatively without re-merging project disabledPatterns", () => {
+    const current = loadConfig(dir("nonexistent"), undefined, {
+      patterns: [".cache"],
+      disabledPatterns: ["dist"],
+      ignore: ["vendor"],
+      depth: 3,
+      maxSizeGB: 4,
+    });
+
+    const next = buildRescanConfig(current, {
+      disabledPatterns: [],
+      extraPatterns: [".cache"],
+    });
+
+    expect(next.patterns).toContain("dist");
+    expect(next.patterns).toContain(".cache");
+    expect(next.disabledPatterns).toBeUndefined();
+    expect(next.ignore).toEqual(["vendor"]);
+    expect(next.depth).toBe(3);
+    expect(next.maxSizeGB).toBe(4);
+  });
+
+  test("rebuilds active catalog patterns from disabled + extra sets", () => {
+    const current = loadConfig(dir("nonexistent"));
+
+    const next = buildRescanConfig(current, {
+      disabledPatterns: ["dist", "build"],
+      extraPatterns: ["custom-artifact"],
+    });
+
+    expect(next.patterns).toContain("node_modules");
+    expect(next.patterns).toContain("custom-artifact");
+    expect(next.patterns).not.toContain("dist");
+    expect(next.patterns).not.toContain("build");
+    expect(next.disabledPatterns).toEqual(["dist", "build"]);
   });
 });
 

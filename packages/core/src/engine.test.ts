@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { applyPlan, scanToPlan } from "./engine.js";
 import { DEFAULT_CONFIG } from "./config.js";
-import { cleanupSeededFixtures, seedScenario } from "../test-support/fixtures.js";
+import { cleanupSeededFixtures, seedScenario } from "@kitsunekode/sweep-test-fixtures";
 
 let tmpDir: string;
 
@@ -19,11 +19,11 @@ afterEach(() => {
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
 describe("core engine", () => {
-  test("scanToPlan returns both scan summary and a selected plan", () => {
+  test("scanToPlan returns both scan summary and a selected plan", async () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("dist"));
 
-    const { result, plan } = scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const { result, plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
 
     expect(result.entries).toHaveLength(2);
     expect(plan.candidates).toHaveLength(2);
@@ -35,7 +35,7 @@ describe("core engine", () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("dist"));
 
-    const { plan } = scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
 
     rmSync(dir("node_modules"), { recursive: true, force: true });
     writeFileSync(dir("node_modules"), "drifted into a file");
@@ -48,10 +48,10 @@ describe("core engine", () => {
     expect(applied.cleanResult.deleted).toHaveLength(1);
   });
 
-  test("scanToPlan honors explicit selection policy", () => {
+  test("scanToPlan honors explicit selection policy", async () => {
     mkdirSync(dir("custom-cache"));
 
-    const { plan } = scanToPlan(
+    const { plan } = await scanToPlan(
       tmpDir,
       {
         ...DEFAULT_CONFIG,
@@ -74,7 +74,7 @@ describe("core engine", () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("dist"));
 
-    const { plan } = scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
 
     rmSync(dir("dist"), { recursive: true, force: true });
 
@@ -85,13 +85,13 @@ describe("core engine", () => {
     expect(applied.report.failedPaths[0]?.path).toBe(dir("dist"));
   });
 
-  test("scanToPlan preserves a mixed workspace scenario as a stable plan shape", () => {
+  test("scanToPlan preserves a mixed workspace scenario as a stable plan shape", async () => {
     mkdirSync(dir("packages", "web", "node_modules"), { recursive: true });
     mkdirSync(dir("packages", "api", "target"), { recursive: true });
     mkdirSync(dir("apps", "docs", ".next"), { recursive: true });
     mkdirSync(dir("apps", "docs", "custom-cache"), { recursive: true });
 
-    const { plan } = scanToPlan(
+    const { plan } = await scanToPlan(
       tmpDir,
       {
         ...DEFAULT_CONFIG,
@@ -108,10 +108,10 @@ describe("core engine", () => {
     expect(plan.summary.riskCounts.dangerous).toBe(1);
   });
 
-  test("scanToPlan handles the seeded large-plan scenario predictably", () => {
+  test("scanToPlan handles the seeded large-plan scenario predictably", async () => {
     const fixture = seedScenario("large-plan");
 
-    const { plan } = scanToPlan(
+    const { plan } = await scanToPlan(
       fixture.root,
       {
         ...DEFAULT_CONFIG,

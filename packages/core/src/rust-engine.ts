@@ -5,11 +5,17 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ApplyReport,
+  ScanCandidate,
+  ScanCompletedEvent,
+  ScanEntry,
+  ScanEvent,
   ScanPlan,
   SelectionPolicy,
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
+import { buildPlan } from "./planner.js";
+import type { ScanHooks } from "./scanner.js";
 import type { ScanToPlanOptions } from "./engine.js";
 import { nativePlatformForCurrentProcess } from "./native-platforms.js";
 
@@ -18,9 +24,9 @@ export type EngineBackend = "js" | "rust";
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Root of the published `@kitsunekode/sweep` npm package, or the repo root in dev.
+ * Root of the published `@kitsunekode/sweep` npm package (`apps/cli`), or the monorepo in dev.
  *
- * - Bundled CLI (`dist/sweep.js`): parent of `dist/`
+ * - Bundled CLI (`apps/cli/dist/sweep.js`): parent of `dist/`
  * - Dev (`packages/core/src/...`): walk up to `package.json` named `@kitsunekode/sweep`
  */
 export function sweepPackageRoot(fromModuleDir: string = MODULE_DIR): string {
@@ -130,17 +136,85 @@ function runEngine(args: string[], stdin?: string, options: RunEngineOptions = {
   return proc.stdout;
 }
 
-export interface RustScanOptions {
+export interface RustScanOptions extends ScanHooks {
   config: SweepConfig;
   selectionPolicy: SelectionPolicy;
+  exact?: boolean;
+}
+
+function scanEntryFromCandidate(candidate: ScanCandidate): ScanEntry {
+  return {
+    path: candidate.path,
+    name: candidate.name,
+    estimatedBytes: candidate.estimatedBytes,
+    isSymlink: candidate.isSymlink,
+    entryType: candidate.entryType,
+  };
+}
+
+function scanToPlanViaRustStreaming(targetDir: string, options: RustScanOptions): ScanPlan {
+  const absoluteTarget = resolve(targetDir);
+  const stdin = JSON.stringify({
+    config: options.config,
+    selectionPolicy: options.selectionPolicy,
+    exact: options.exact ?? false,
+    jsonStream: true,
+  });
+  const stdout = runEngine(["scan", absoluteTarget], stdin);
+
+  const entriesByPath = new Map<string, ScanEntry>();
+  let summary: ScanCompletedEvent["summary"] | null = null;
+  let exact = options.exact ?? false;
+
+  for (const line of stdout.trim().split("\n")) {
+    if (!line) continue;
+    const event = JSON.parse(line) as ScanEvent & {
+      summary?: ScanCompletedEvent["summary"] & { exact?: boolean };
+    };
+
+    if (event.type === "candidate_found") {
+      options.onEntry?.(scanEntryFromCandidate(event.candidate));
+    } else if (event.type === "candidate_updated") {
+      const entry = scanEntryFromCandidate(event.candidate);
+      entriesByPath.set(entry.path, entry);
+      options.onEntrySized?.(entry);
+    } else if (event.type === "scan_completed") {
+      summary = event.summary;
+      if ("exact" in event.summary && typeof event.summary.exact === "boolean") {
+        exact = event.summary.exact;
+      }
+    }
+  }
+
+  const entries = [...entriesByPath.values()];
+  const estimatedTotalBytes =
+    summary?.estimatedTotalBytes ?? entries.reduce((sum, entry) => sum + entry.estimatedBytes, 0);
+
+  return buildPlan(
+    absoluteTarget,
+    {
+      entries,
+      estimatedTotalBytes,
+      scannedDirs: summary?.scannedDirs ?? 0,
+      exact,
+    },
+    options.selectionPolicy,
+  );
 }
 
 /** Scan via the Rust `sweep-engine` subprocess and parse a [`ScanPlan`]. */
 export function scanToPlanViaRust(targetDir: string, options: RustScanOptions): ScanPlan {
   const absoluteTarget = resolve(targetDir);
+
+  if (options.onEntry || options.onEntrySized) {
+    return scanToPlanViaRustStreaming(absoluteTarget, options);
+  }
+
   const stdin = JSON.stringify({
     config: options.config,
     selectionPolicy: options.selectionPolicy,
+    exact: options.exact ?? false,
+    jsonStream: false,
   });
   const stdout = runEngine(["scan", absoluteTarget], stdin);
   return JSON.parse(stdout) as ScanPlan;
@@ -172,14 +246,8 @@ export function isRustEngineAvailable(): boolean {
 export function rustScanBlockedReason(
   _config: SweepConfig,
   _projectConfig: SweepConfig,
-  options: ScanToPlanOptions,
+  _options: ScanToPlanOptions,
 ): string | null {
-  if (options.onEntry) {
-    return "progressive scan requires the JS engine";
-  }
-  if (options.exact) {
-    return "exact sizing requires the JS engine";
-  }
   return null;
 }
 
