@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
-import { cleanupSeededFixtures, seedScenario } from "../../packages/core/test-support/fixtures.js";
+import { cleanupSeededFixtures, seedScenario } from "@kitsunekode/sweep-test-fixtures";
 
 afterEach(() => {
   cleanupSeededFixtures();

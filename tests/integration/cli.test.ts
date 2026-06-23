@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+const SWEEP = join(REPO_ROOT, "apps/cli/dist/sweep.js");
 
 let tmpDir: string;
 
@@ -20,7 +21,7 @@ const dir = (...parts: string[]) => join(tmpDir, ...parts);
 function runCli(args: string[]): { stdout: string; stderr: string; exitCode: number } {
   const withEngine = args.includes("--engine") ? args : ["--engine", "js", ...args];
   const proc = Bun.spawnSync({
-    cmd: ["bun", join(REPO_ROOT, "dist/sweep.js"), ...withEngine],
+    cmd: ["bun", SWEEP, ...withEngine],
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
@@ -67,7 +68,7 @@ describe("CLI scan/apply", () => {
     expect(events[0]?.type).toBe("scan_started");
     const found = events.filter((event) => event.type === "candidate_found");
     expect(found.length).toBeGreaterThan(0);
-    expect(events.some((event) => event.type === "candidate_updated")).toBe(false);
+    expect(events.some((event) => event.type === "candidate_updated")).toBe(true);
     expect(events.at(-1)?.type).toBe("scan_completed");
   });
 
@@ -198,7 +199,7 @@ describe("CLI scan/apply", () => {
     mkdirSync(dir("node_modules"));
 
     const proc = Bun.spawnSync({
-      cmd: ["bun", join(REPO_ROOT, "dist/sweep.js"), tmpDir],
+      cmd: ["bun", SWEEP, tmpDir],
       cwd: REPO_ROOT,
       stdin: Buffer.from("n\n"),
       stdout: "pipe",

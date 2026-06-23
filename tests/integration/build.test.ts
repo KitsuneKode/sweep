@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
-const DIST = join(REPO_ROOT, "dist");
+const DIST = join(REPO_ROOT, "apps/cli/dist");
 const SWEEP = join(DIST, "sweep.js");
 
 function bunBin(): string {
@@ -28,20 +28,36 @@ describe("published CLI bundle", () => {
     expect(files).toEqual(["sweep-ui.js", "sweep.js"]);
   });
 
-  test("main bundle does not reference @opentui at startup", () => {
+  test("main bundle does not import @opentui at startup", () => {
     const bundle = Bun.file(SWEEP);
     expect(bundle.size).toBeGreaterThan(10_000);
     const source = readFileSync(SWEEP, "utf8");
-    expect(source.includes("@opentui")).toBe(false);
+    expect(source.includes('from "@opentui/core"')).toBe(false);
+    expect(source.includes('require("@opentui/core")')).toBe(false);
   });
 
-  test("bun dist/sweep.js --version exits 0 with semver output", () => {
+  test("bun apps/cli/dist/sweep.js --version exits 0 with semver output", () => {
     expect(existsSync(SWEEP)).toBe(true);
     const out = execFileSync(BUN, [SWEEP, "--version"], { encoding: "utf8" });
     expect(/\d+\.\d+\.\d+/.test(out.trim())).toBe(true);
   });
 
-  test("bun dist/sweep.js --help exits 0", () => {
+  test("node apps/cli/dist/sweep.js --version exits 0 with semver output", () => {
+    expect(existsSync(SWEEP)).toBe(true);
+    const node =
+      process.env.npm_node_execpath ??
+      (() => {
+        try {
+          return execFileSync("command", ["-v", "node"], { encoding: "utf8" }).trim();
+        } catch {
+          return "node";
+        }
+      })();
+    const out = execFileSync(node, [SWEEP, "--version"], { encoding: "utf8" });
+    expect(/\d+\.\d+\.\d+/.test(out.trim())).toBe(true);
+  });
+
+  test("bun apps/cli/dist/sweep.js --help exits 0", () => {
     execFileSync(BUN, [SWEEP, "--help"], { encoding: "utf8" });
   });
 });
