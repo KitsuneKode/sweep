@@ -9,6 +9,8 @@ use sweep_types::{
     ApplyReport, EntryType, PathFailure, ScanCandidate, ScanEntry, ScanPlan, PROTOCOL_VERSION,
 };
 
+use crate::guardrails;
+
 /// Apply a [`ScanPlan`]: revalidate selected candidates, delete ready entries, return a report.
 pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
     if plan.protocol_version != PROTOCOL_VERSION {
@@ -19,6 +21,8 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
             },
         ));
     }
+
+    guardrails::assert_safe_cwd(&plan.target_dir)?;
 
     let selected: Vec<&ScanCandidate> = plan
         .candidates
@@ -230,6 +234,59 @@ mod tests {
         let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
         assert_eq!(report.deleted_count, 1);
         assert_eq!(report.failed_count, 0);
+        assert!(!artifact.exists());
+    }
+
+    #[test]
+    fn apply_plan_rejects_outside_target_candidates() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let root = dir.path().to_string_lossy();
+        let artifact = dir.path().join("node_modules");
+        fs::create_dir_all(&artifact).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let artifact_path = artifact.to_string_lossy().into_owned();
+        let outside_path = "/tmp/outside-node_modules".to_owned();
+        let plan = ScanPlan {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            target_dir: root.to_string(),
+            selection_policy: SelectionPolicy::default(),
+            candidates: vec![
+                candidate(&artifact_path, "node_modules", EntryType::Directory, false),
+                ScanCandidate {
+                    entry: ScanEntry {
+                        path: outside_path.clone(),
+                        name: "node_modules".to_owned(),
+                        estimated_bytes: 0,
+                        is_symlink: false,
+                        entry_type: EntryType::Directory,
+                    },
+                    id: "cand_outside".to_owned(),
+                    kind: "node_modules".to_owned(),
+                    risk_tier: RiskTier::Safe,
+                    reasons: vec!["default-pattern".to_owned()],
+                    selected_by_default: true,
+                },
+            ],
+            summary: ScanPlanSummary {
+                candidate_count: 2,
+                estimated_total_bytes: 0,
+                scanned_dirs: 1,
+                exact: false,
+                selected_count: 2,
+                risk_counts: Default::default(),
+            },
+            selected_candidate_ids: vec!["cand_node_modules".to_owned(), "cand_outside".to_owned()],
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+        };
+
+        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        assert_eq!(report.deleted_count, 1);
+        assert_eq!(report.failed_count, 1);
+        assert_eq!(
+            report.failed_paths[0].code,
+            FailureReasonCode::OutsideTarget.as_str()
+        );
+        assert_eq!(report.failed_paths[0].path, outside_path);
         assert!(!artifact.exists());
     }
 }

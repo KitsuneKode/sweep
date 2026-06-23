@@ -46,15 +46,14 @@ expression: "&actual"
         "default-pattern"
       ],
       "riskTier": "caution",
-      "selectedByDefault": true
+      "selectedByDefault": false
     }
   ],
   "createdAt": "1970-01-01T00:00:00.000Z",
   "protocolVersion": "1",
   "selectedCandidateIds": [
     "cand_00634678a3777636",
-    "cand_5a5fb400668a9fd1",
-    "cand_edaed5f47b66105a"
+    "cand_5a5fb400668a9fd1"
   ],
   "selectionPolicy": {
     "includeDangerous": false,
@@ -71,7 +70,7 @@ expression: "&actual"
       "safe": 2
     },
     "scannedDirs": 2,
-    "selectedCount": 3
+    "selectedCount": 2
   },
   "targetDir": "__FIXTURE_ROOT__"
 }

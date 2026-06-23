@@ -147,7 +147,7 @@ fn to_candidate(entry: &WalkEntry, estimated_bytes: u64) -> ScanCandidate {
     let kind = candidate_kind_from_name(&entry.name);
     let risk_tier = infer_risk_tier(&path, entry.is_symlink, &kind);
     let reasons = infer_reasons(&path, entry.is_symlink, &kind);
-    let selected_by_default = risk_tier != RiskTier::Dangerous && risk_tier != RiskTier::Blocked;
+    let selected_by_default = risk_tier == RiskTier::Safe;
 
     ScanCandidate {
         entry: sweep_types::ScanEntry {
