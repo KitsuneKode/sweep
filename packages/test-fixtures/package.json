@@ -1,0 +1,20 @@
+{
+  "name": "@kitsunekode/sweep-test-fixtures",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/fixtures.ts"
+  },
+  "scripts": {
+    "transit": "exit 0",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src",
+    "fmt": "oxfmt src"
+  },
+  "devDependencies": {
+    "@kitsunekode/sweep-typescript-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "typescript": "catalog:"
+  }
+}
