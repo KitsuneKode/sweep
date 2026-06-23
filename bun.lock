@@ -9,7 +9,7 @@
         "@commitlint/cli": "catalog:",
         "@commitlint/config-conventional": "catalog:",
         "@kitsunekode/sweep-core": "workspace:*",
-        "bun-types": "catalog:",
+        "@types/bun": "catalog:",
         "husky": "catalog:",
         "lint-staged": "catalog:",
         "oxfmt": "catalog:",
@@ -32,6 +32,7 @@
       },
       "devDependencies": {
         "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
         "typescript": "catalog:",
@@ -44,7 +45,7 @@
         "@kitsunekode/sweep-engine-windows-64": "0.2.0",
       },
       "peerDependencies": {
-        "@opentui/core": "catalog:",
+        "@opentui/core": "^0.2.16",
       },
       "optionalPeers": [
         "@opentui/core",
@@ -59,6 +60,7 @@
       "devDependencies": {
         "@kitsunekode/sweep-test-fixtures": "workspace:*",
         "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
         "typescript": "catalog:",
@@ -72,6 +74,7 @@
       },
       "devDependencies": {
         "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
         "typescript": "catalog:",
@@ -82,7 +85,7 @@
       "devDependencies": {
         "@kitsunekode/sweep-core": "workspace:*",
         "@kitsunekode/sweep-typescript-config": "workspace:*",
-        "bun-types": "catalog:",
+        "@types/bun": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
         "typescript": "catalog:",
@@ -94,7 +97,7 @@
         "@kitsunekode/sweep-core": "workspace:*",
         "@kitsunekode/sweep-protocol": "workspace:*",
         "@kitsunekode/sweep-test-fixtures": "workspace:*",
-        "bun-types": "catalog:",
+        "@types/bun": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
         "typescript": "catalog:",
@@ -104,6 +107,7 @@
       "name": "@kitsunekode/sweep-protocol",
       "devDependencies": {
         "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
         "typescript": "catalog:",
@@ -113,6 +117,7 @@
       "name": "@kitsunekode/sweep-test-fixtures",
       "devDependencies": {
         "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
         "typescript": "catalog:",
@@ -133,6 +138,7 @@
       },
       "devDependencies": {
         "@kitsunekode/sweep-typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
         "@types/react": "catalog:",
         "oxfmt": "catalog:",
         "oxlint": "catalog:",
@@ -146,9 +152,9 @@
     "@commitlint/config-conventional": "^19.6.0",
     "@opentui/core": "^0.2.16",
     "@opentui/react": "^0.2.16",
+    "@types/bun": "^1.3.0",
     "@types/react": "^19.2.0",
     "ajv": "^8.18.0",
-    "bun-types": "^1.3.0",
     "commander": "^12.1.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.2.10",
@@ -345,6 +351,8 @@
     "@turbo/windows-64": ["@turbo/windows-64@2.9.18", "", { "os": "win32", "cpu": "x64" }, "sha512-m0kDhZANxSNz9ck1ybogFscHabriAsp4eDFNrN/1H5WrgTF7b3VlcPZnhuO3v2+E2KnCbeAc+UUT10BZZHdDKw=="],
 
     "@turbo/windows-arm64": ["@turbo/windows-arm64@2.9.18", "", { "os": "win32", "cpu": "arm64" }, "sha512-nUdR8WqoomUys9iIQmG45TMiizJ+5BV8egSeLLZba/AWblyp3fVBcIH1kSE58OtK4g2YzbMJEth6Ttv9w5rqMA=="],
+
+    "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
     "@types/conventional-commits-parser": ["@types/conventional-commits-parser@5.0.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-BgT2szDXnVypgpNxOK8aL5SGjUdaQbC++WZNjF1Qge3Og2+zhHj+RWhmehLhYyvQwqAmvezruVfOf8+3m74W+g=="],
 

@@ -28,6 +28,7 @@
   "devDependencies": {
     "@kitsunekode/sweep-test-fixtures": "workspace:*",
     "@kitsunekode/sweep-typescript-config": "workspace:*",
+    "@types/bun": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:"

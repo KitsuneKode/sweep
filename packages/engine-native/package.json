@@ -14,7 +14,7 @@
   "devDependencies": {
     "@kitsunekode/sweep-core": "workspace:*",
     "@kitsunekode/sweep-typescript-config": "workspace:*",
-    "bun-types": "catalog:",
+    "@types/bun": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:"

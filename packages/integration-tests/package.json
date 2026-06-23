@@ -13,7 +13,7 @@
     "@kitsunekode/sweep-core": "workspace:*",
     "@kitsunekode/sweep-protocol": "workspace:*",
     "@kitsunekode/sweep-test-fixtures": "workspace:*",
-    "bun-types": "catalog:",
+    "@types/bun": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:"

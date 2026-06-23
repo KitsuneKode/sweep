@@ -59,12 +59,13 @@
   },
   "devDependencies": {
     "@kitsunekode/sweep-typescript-config": "workspace:*",
+    "@types/bun": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {
-    "@opentui/core": "catalog:"
+    "@opentui/core": "^0.2.16"
   },
   "peerDependenciesMeta": {
     "@opentui/core": {

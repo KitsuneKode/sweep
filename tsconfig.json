@@ -8,7 +8,7 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
     "lib": ["ES2022"],
-    "types": ["bun-types"],
+    "types": ["bun"],
     "skipLibCheck": true,
     "declaration": false,
     "isolatedModules": true,

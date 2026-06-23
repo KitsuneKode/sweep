@@ -127,6 +127,18 @@ Shared third-party versions are pinned once in root `package.json` under
 
 Run `bun install` after catalog changes to refresh the lockfile.
 
+#### Bun TypeScript types
+
+Install `@types/bun` (recommended by Bun; shim over canonical `bun-types`).
+Pin it in the catalog and add `"@types/bun": "catalog:"` to every workspace that
+runs `typecheck` or `bun test`. Shared tsconfig uses `"types": ["bun"]`.
+
+#### Publish manifests
+
+Use `"catalog:"` only in workspace `dependencies` / `devDependencies`. Published
+packages (e.g. `apps/cli`) must use **literal semver** in `peerDependencies` and
+`optionalDependencies` — npm consumers do not understand `catalog:`.
+
 CI runs:
 
 ```bash

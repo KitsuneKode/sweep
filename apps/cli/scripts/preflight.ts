@@ -184,6 +184,14 @@ check("native-packages templates exist for each platform", () => {
   }
 });
 
+check("peerDependencies use literal semver (not catalog:)", () => {
+  const { peerDependencies } = pkg() as { peerDependencies?: Record<string, string> };
+  if (!peerDependencies) return;
+  for (const [name, version] of Object.entries(peerDependencies)) {
+    assert(version !== "catalog:", `${name} peerDependency must not use catalog: (got catalog:)`);
+  }
+});
+
 check(".env is not tracked by git", () => {
   try {
     execFileSync("git", ["-C", REPO_ROOT, "ls-files", "--error-unmatch", ".env"], {
