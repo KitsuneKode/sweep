@@ -144,13 +144,13 @@ bun run dev -- ui /path/to/project   # in an interactive terminal only
 
 ## CI split
 
-| Workflow                     | When it runs                                              | What it does                                                     |
-| ---------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
-| `.github/workflows/ci.yml`   | Every push/PR to `main`                                   | `turbo check`, `build`, `preflight` (TypeScript)                 |
-| `.github/workflows/rust.yml` | Changes under `crates/**`, `Cargo.*`, `tests/fixtures/**` | `cargo fmt --check`, `cargo test`, `cargo clippy`, release build |
+| Workflow                        | When it runs                                    | What it does                                                                                        |
+| ------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`      | Every push/PR to `main`                         | `fixtures:sync`, `turbo check`, `build`, `preflight`, and Rust                                      |
+| `.github/workflows/release.yml` | Push to `main` (version PRs) or manual dispatch | Version PRs on normal pushes; native build + npm publish only when versioning merges or on dispatch |
 
-TypeScript quality is always gated on `main`. Rust jobs are path-filtered so
-crate-only work does not block the TS pipeline unnecessarily.
+Parity fixture trees (`node_modules/`, `dist/`, etc.) are gitignored globally; CI
+materializes them with `bun run fixtures:sync` before engine tests run.
 
 ## Seeded scenarios
 
