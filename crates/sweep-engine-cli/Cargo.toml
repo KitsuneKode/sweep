@@ -20,6 +20,7 @@ sweep-types = { path = "../sweep-types" }
 assert_cmd.workspace = true
 insta.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 sweep-engine = { path = "../sweep-engine" }
 sweep-types = { path = "../sweep-types" }
 tempfile.workspace = true

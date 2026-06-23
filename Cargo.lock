@@ -642,6 +642,7 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
+ "sha2",
  "sweep-engine",
  "sweep-fs",
  "sweep-types",

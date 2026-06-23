@@ -2,11 +2,18 @@
 
 use camino::Utf8PathBuf;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use sweep_engine::scan_to_plan;
 use sweep_types::ScanPlan;
 
 const FIXTURE_ROOT_PLACEHOLDER: &str = "__FIXTURE_ROOT__";
+
+fn stable_candidate_id(path: &str, name: &str) -> String {
+    let digest = Sha256::digest(format!("{path}:{name}").as_bytes());
+    let hex = format!("{digest:x}");
+    format!("cand_{}", &hex[..16])
+}
 
 /// Repository-relative path to `tests/fixtures`.
 pub fn fixtures_root() -> PathBuf {
@@ -63,13 +70,62 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
     value["createdAt"] = Value::String("1970-01-01T00:00:00.000Z".to_owned());
     value["summary"]["estimatedTotalBytes"] = Value::Number(0.into());
 
+    let selected_paths: std::collections::HashSet<String> = value
+        .get("candidates")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| {
+            let id = candidate.get("id").and_then(Value::as_str)?;
+            let path = candidate.get("path").and_then(Value::as_str)?;
+            let selected = value
+                .get("selectedCandidateIds")
+                .and_then(Value::as_array)?
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|selected_id| selected_id == id);
+            if !selected {
+                return None;
+            }
+            Some(replace_root(path.to_owned()))
+        })
+        .collect();
+
     if let Some(candidates) = value.get_mut("candidates").and_then(Value::as_array_mut) {
         for candidate in candidates.iter_mut() {
             if let Some(path) = candidate.get("path").and_then(Value::as_str) {
-                candidate["path"] = Value::String(replace_root(path.to_owned()));
+                let normalized_path = replace_root(path.to_owned());
+                candidate["path"] = Value::String(normalized_path.clone());
+                if let Some(name) = candidate.get("name").and_then(Value::as_str) {
+                    candidate["id"] = Value::String(stable_candidate_id(&normalized_path, name));
+                }
             }
             candidate["estimatedBytes"] = Value::Number(0.into());
         }
+    }
+
+    let selected_ids: Vec<Value> = {
+        let candidates = value
+            .get("candidates")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        candidates
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .is_some_and(|path| selected_paths.contains(path))
+            })
+            .filter_map(|candidate| candidate.get("id").cloned())
+            .collect()
+    };
+    if let Some(selected) = value
+        .get_mut("selectedCandidateIds")
+        .and_then(Value::as_array_mut)
+    {
+        *selected = selected_ids;
     }
 
     sort_plan_value(&mut value);
