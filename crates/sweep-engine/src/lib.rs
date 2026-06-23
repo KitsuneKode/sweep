@@ -1,15 +1,31 @@
 //! Sweep engine library for scan and apply flows.
 
 mod apply;
+mod guardrails;
 
 use camino::Utf8Path;
+use chrono::SecondsFormat;
 use sha2::{Digest, Sha256};
 use sweep_errors::EngineError;
-use sweep_fs::{estimate_bytes, walk_matched_entries, WalkConfig, WalkEntryType};
+use sweep_fs::{apply_size_estimates, walk_matched_entries, WalkConfig, WalkEntry};
 use sweep_types::{
     ApplyReport, EntryType, RiskTier, ScanCandidate, ScanPlan, ScanPlanSummary, SelectionMode,
     SelectionPolicy, SweepConfig, PROTOCOL_VERSION,
 };
+
+/// Options controlling scan behavior (exact sizing, progressive hooks).
+#[derive(Default)]
+pub struct ScanOptions<'a> {
+    pub exact: bool,
+    pub hooks: ScanHooks<'a>,
+}
+
+/// Progressive scan callbacks aligned with the JS scanner hooks.
+#[derive(Default)]
+pub struct ScanHooks<'a> {
+    pub on_entry: Option<&'a mut dyn FnMut(ScanCandidate)>,
+    pub on_entry_sized: Option<&'a mut dyn FnMut(ScanCandidate)>,
+}
 
 /// Scan `target_dir` with default patterns and produce a protocol-aligned [`ScanPlan`].
 pub fn scan_to_plan(target_dir: &Utf8Path) -> Result<ScanPlan, EngineError> {
@@ -17,6 +33,7 @@ pub fn scan_to_plan(target_dir: &Utf8Path) -> Result<ScanPlan, EngineError> {
         target_dir,
         &WalkConfig::default(),
         &SelectionPolicy::default(),
+        ScanOptions::default(),
     )
 }
 
@@ -25,6 +42,7 @@ pub fn scan_to_plan_with_config(
     target_dir: &Utf8Path,
     walk_config: &WalkConfig,
     selection_policy: &SelectionPolicy,
+    mut options: ScanOptions<'_>,
 ) -> Result<ScanPlan, EngineError> {
     if target_dir.as_str().is_empty() {
         return Err(EngineError::InvalidPlan {
@@ -32,14 +50,40 @@ pub fn scan_to_plan_with_config(
         });
     }
 
+    guardrails::assert_safe_cwd(target_dir.as_str())?;
+
     let walk = walk_matched_entries(target_dir, walk_config);
-    let candidates: Vec<ScanCandidate> = walk.entries.iter().map(to_candidate).collect();
+    let mut entries = walk.entries;
+    let scanned_dirs = walk.scanned_dirs;
+
+    let unsized_candidates: Vec<ScanCandidate> =
+        entries.iter().map(|entry| to_candidate(entry, 0)).collect();
+
+    if let Some(on_entry) = options.hooks.on_entry.as_mut() {
+        for candidate in &unsized_candidates {
+            on_entry(candidate.clone());
+        }
+    }
+
+    apply_size_estimates(&mut entries, options.exact);
+
+    let candidates: Vec<ScanCandidate> = entries
+        .iter()
+        .map(|entry| to_candidate(entry, entry.estimated_bytes))
+        .collect();
+
+    if let Some(on_entry_sized) = options.hooks.on_entry_sized.as_mut() {
+        for candidate in &candidates {
+            on_entry_sized(candidate.clone());
+        }
+    }
 
     Ok(build_plan(
         target_dir.as_str(),
         &candidates,
-        walk.scanned_dirs,
+        scanned_dirs,
         selection_policy,
+        options.exact,
     ))
 }
 
@@ -48,8 +92,15 @@ pub fn scan_to_plan_with_sweep_config(
     target_dir: &Utf8Path,
     config: &SweepConfig,
     selection_policy: &SelectionPolicy,
+    options: ScanOptions<'_>,
 ) -> Result<ScanPlan, EngineError> {
-    scan_to_plan_with_config(target_dir, &WalkConfig::from(config), selection_policy)
+    guardrails::assert_safe_config_patterns(config)?;
+    scan_to_plan_with_config(
+        target_dir,
+        &WalkConfig::from(config),
+        selection_policy,
+        options,
+    )
 }
 
 /// Apply a previously produced [`ScanPlan`] and return an [`ApplyReport`].
@@ -62,6 +113,7 @@ fn build_plan(
     candidates: &[ScanCandidate],
     scanned_dirs: u32,
     selection_policy: &SelectionPolicy,
+    exact: bool,
 ) -> ScanPlan {
     let selected_candidate_ids = compile_selected_candidate_ids(candidates, selection_policy);
     let estimated_total_bytes: u64 = candidates.iter().map(|c| c.entry.estimated_bytes).sum();
@@ -76,33 +128,37 @@ fn build_plan(
             candidate_count: candidates.len() as u32,
             estimated_total_bytes,
             scanned_dirs,
-            exact: false,
+            exact,
             selected_count: selected_candidate_ids.len() as u32,
             risk_counts,
         },
         selected_candidate_ids,
-        created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+        created_at: iso_timestamp_now(),
     }
 }
 
-fn to_candidate(entry: &sweep_fs::WalkEntry) -> ScanCandidate {
+fn iso_timestamp_now() -> String {
+    chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+fn to_candidate(entry: &WalkEntry, estimated_bytes: u64) -> ScanCandidate {
     let path = entry.path.as_str().to_owned();
     let id = format!("cand_{}", hash_string(&format!("{}:{}", path, entry.name)));
     let kind = candidate_kind_from_name(&entry.name);
-    let risk_tier = infer_risk_tier(entry.is_symlink, &kind);
-    let reasons = infer_reasons(entry.is_symlink, &kind);
+    let risk_tier = infer_risk_tier(&path, entry.is_symlink, &kind);
+    let reasons = infer_reasons(&path, entry.is_symlink, &kind);
     let selected_by_default = risk_tier != RiskTier::Dangerous && risk_tier != RiskTier::Blocked;
 
     ScanCandidate {
         entry: sweep_types::ScanEntry {
             path,
             name: entry.name.clone(),
-            estimated_bytes: estimate_bytes(&entry.path),
+            estimated_bytes,
             is_symlink: entry.is_symlink,
             entry_type: match entry.entry_type {
-                WalkEntryType::File => EntryType::File,
-                WalkEntryType::Directory => EntryType::Directory,
-                WalkEntryType::Symlink => EntryType::Symlink,
+                sweep_fs::WalkEntryType::File => EntryType::File,
+                sweep_fs::WalkEntryType::Directory => EntryType::Directory,
+                sweep_fs::WalkEntryType::Symlink => EntryType::Symlink,
             },
         },
         id,
@@ -164,8 +220,10 @@ fn candidate_kind_from_name(name: &str) -> String {
     }
 }
 
-fn infer_risk_tier(is_symlink: bool, kind: &str) -> RiskTier {
-    if is_symlink {
+fn infer_risk_tier(path: &str, is_symlink: bool, kind: &str) -> RiskTier {
+    if guardrails::path_has_protected_vcs_segment(path) {
+        RiskTier::Blocked
+    } else if is_symlink {
         RiskTier::Caution
     } else if kind == "custom" {
         RiskTier::Dangerous
@@ -174,8 +232,11 @@ fn infer_risk_tier(is_symlink: bool, kind: &str) -> RiskTier {
     }
 }
 
-fn infer_reasons(is_symlink: bool, kind: &str) -> Vec<String> {
+fn infer_reasons(path: &str, is_symlink: bool, kind: &str) -> Vec<String> {
     let mut reasons = Vec::new();
+    if guardrails::path_has_protected_vcs_segment(path) {
+        reasons.push("protected-vcs-path".to_owned());
+    }
     if is_symlink {
         reasons.push("symlink".to_owned());
     }
@@ -220,6 +281,7 @@ mod tests {
         assert_eq!(plan.protocol_version, PROTOCOL_VERSION);
         assert_eq!(plan.candidates.len(), 1);
         assert_eq!(plan.candidates[0].entry.name, "node_modules");
+        assert_ne!(plan.created_at, "1970-01-01T00:00:00.000Z");
 
         let expected_id = format!(
             "cand_{}",
@@ -229,14 +291,63 @@ mod tests {
     }
 
     #[test]
+    fn scan_to_plan_rejects_shallow_target() {
+        match scan_to_plan(Utf8Path::new("/tmp")) {
+            Err(EngineError::Guardrail(_)) => {}
+            other => panic!("expected guardrail error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn progressive_hooks_fire_before_sizing_completes() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        std::fs::create_dir_all(root.join("node_modules").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let order = std::cell::RefCell::new(Vec::<&'static str>::new());
+        let mut on_entry = |_candidate: ScanCandidate| {
+            order.borrow_mut().push("entry");
+        };
+        let mut on_entry_sized = |_candidate: ScanCandidate| {
+            order.borrow_mut().push("sized");
+        };
+
+        let hooks = ScanHooks {
+            on_entry: Some(&mut on_entry),
+            on_entry_sized: Some(&mut on_entry_sized),
+        };
+
+        scan_to_plan_with_config(
+            root,
+            &WalkConfig::default(),
+            &SelectionPolicy::default(),
+            ScanOptions {
+                exact: false,
+                hooks,
+            },
+        )
+        .unwrap_or_else(|err| panic!("scan failed: {err}"));
+
+        let order = order.into_inner();
+        assert!(order.contains(&"entry"));
+        assert!(order.contains(&"sized"));
+        assert!(
+            order.iter().position(|&step| step == "entry")
+                < order.iter().position(|&step| step == "sized")
+        );
+    }
+
+    #[test]
     fn apply_plan_rejects_unsupported_protocol_version() {
         let mut plan = ScanPlan::empty("/tmp", "1970-01-01T00:00:00.000Z");
         plan.protocol_version = "99".to_owned();
 
-        let err = apply_plan(&plan).unwrap_err();
-        assert!(matches!(
-            err,
-            EngineError::Guardrail(GuardrailError::UnsupportedProtocolVersion { .. })
-        ));
+        match apply_plan(&plan) {
+            Err(EngineError::Guardrail(GuardrailError::UnsupportedProtocolVersion { .. })) => {}
+            other => panic!("expected unsupported protocol version, got {other:?}"),
+        }
     }
 }

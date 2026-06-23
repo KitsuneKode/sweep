@@ -2,8 +2,15 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::fs;
-use std::sync::Mutex;
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+/// Maximum paths passed to a single `du` invocation (aligned with JS `DU_CHUNK_SIZE`).
+pub const DU_CHUNK_SIZE: usize = 50;
 
 /// Describes a filesystem entry discovered during a scan walk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +19,7 @@ pub struct WalkEntry {
     pub name: String,
     pub is_symlink: bool,
     pub entry_type: WalkEntryType,
+    pub estimated_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,8 +49,20 @@ impl Default for WalkConfig {
 
 impl From<&sweep_types::SweepConfig> for WalkConfig {
     fn from(config: &sweep_types::SweepConfig) -> Self {
+        let disabled: std::collections::HashSet<&str> = config
+            .disabled_patterns
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let patterns = config
+            .patterns
+            .iter()
+            .filter(|p| !disabled.contains(p.as_str()))
+            .cloned()
+            .collect();
+
         Self {
-            patterns: config.patterns.clone(),
+            patterns,
             ignore: config.ignore.clone(),
             depth: config.depth,
         }
@@ -53,15 +73,15 @@ impl From<&sweep_types::SweepConfig> for WalkConfig {
 pub fn default_patterns() -> Vec<String> {
     vec![
         "node_modules".to_owned(),
-        ".next".to_owned(),
         "dist".to_owned(),
         "build".to_owned(),
+        "out".to_owned(),
+        ".next".to_owned(),
         ".turbo".to_owned(),
         ".parcel-cache".to_owned(),
-        "target".to_owned(),
-        "out".to_owned(),
         ".nuxt".to_owned(),
         ".svelte-kit".to_owned(),
+        "target".to_owned(),
         "coverage".to_owned(),
         ".nyc_output".to_owned(),
         ".vite".to_owned(),
@@ -84,33 +104,29 @@ const SKIP_DIR_NAMES: &[&str] = &[".git", ".svn", ".hg", ".bzr"];
 /// Sibling subtrees are walked in parallel via rayon.
 pub fn walk_matched_entries(root: &Utf8Path, config: &WalkConfig) -> WalkResult {
     let matcher = PatternMatcher::compile(&config.patterns);
-    let result = Mutex::new(WalkResult::default());
-    walk_dir(root, 0, config, &matcher, &result);
-    result
-        .into_inner()
-        .unwrap_or_else(|err| panic!("walk result mutex poisoned: {err}"))
+    walk_dir(root, root, 0, config, &matcher)
 }
 
 fn walk_dir(
+    root: &Utf8Path,
     dir: &Utf8Path,
     depth: i32,
     config: &WalkConfig,
     matcher: &PatternMatcher,
-    result: &Mutex<WalkResult>,
-) {
+) -> WalkResult {
     if config.depth != -1 && depth > config.depth {
-        return;
+        return WalkResult::default();
     }
 
     let read_dir = match fs::read_dir(dir.as_std_path()) {
         Ok(items) => items,
-        Err(_) => return,
+        Err(_) => return WalkResult::default(),
     };
 
-    if let Ok(mut guard) = result.lock() {
-        guard.scanned_dirs += 1;
-    }
-
+    let mut result = WalkResult {
+        scanned_dirs: 1,
+        ..WalkResult::default()
+    };
     let mut subdirs: Vec<Utf8PathBuf> = Vec::new();
 
     for item in read_dir.flatten() {
@@ -120,7 +136,7 @@ fn walk_dir(
         };
 
         let full_path = dir.join(&file_name);
-        if should_ignore(full_path.as_str(), &config.ignore) {
+        if should_ignore(root, &full_path, &file_name, &config.ignore) {
             continue;
         }
 
@@ -130,8 +146,12 @@ fn walk_dir(
         };
 
         let is_symlink = file_type.is_symlink();
-        let is_dir = file_type.is_dir() && !is_symlink;
+        let mut is_dir = file_type.is_dir() && !is_symlink;
         let is_file = file_type.is_file() && !is_symlink;
+
+        if is_dir && is_reparse_point_or_symlink(&full_path) {
+            is_dir = false;
+        }
 
         if matcher.matches(&file_name) {
             let entry_type = if is_symlink {
@@ -142,14 +162,13 @@ fn walk_dir(
                 WalkEntryType::File
             };
 
-            if let Ok(mut guard) = result.lock() {
-                guard.entries.push(WalkEntry {
-                    path: full_path,
-                    name: file_name,
-                    is_symlink,
-                    entry_type,
-                });
-            }
+            result.entries.push(WalkEntry {
+                path: full_path,
+                name: file_name,
+                is_symlink,
+                entry_type,
+                estimated_bytes: 0,
+            });
             continue;
         }
 
@@ -173,13 +192,40 @@ fn walk_dir(
         }
     }
 
-    subdirs.par_iter().for_each(|subdir| {
-        walk_dir(subdir, depth + 1, config, matcher, result);
-    });
+    let child_results: Vec<WalkResult> = subdirs
+        .par_iter()
+        .map(|subdir| walk_dir(root, subdir, depth + 1, config, matcher))
+        .collect();
+
+    for child in child_results {
+        result.entries.extend(child.entries);
+        result.scanned_dirs += child.scanned_dirs;
+    }
+
+    result
 }
 
-fn should_ignore(full_path: &str, ignore: &[String]) -> bool {
-    ignore.iter().any(|pattern| full_path.contains(pattern))
+fn should_ignore(
+    root: &Utf8Path,
+    full_path: &Utf8Path,
+    entry_name: &str,
+    ignore: &[String],
+) -> bool {
+    let rel = full_path
+        .strip_prefix(root)
+        .map(|p| p.as_str())
+        .unwrap_or(full_path.as_str());
+
+    for pattern in ignore {
+        if pattern.contains('/') {
+            if rel == pattern.as_str() || rel.starts_with(&format!("{pattern}/")) {
+                return true;
+            }
+        } else if entry_name == pattern {
+            return true;
+        }
+    }
+    false
 }
 
 struct PatternMatcher {
@@ -215,12 +261,227 @@ impl PatternMatcher {
     }
 }
 
-/// Fast size estimate: directory metadata size or file length.
+/// Tree-aware byte estimate aligned with the JS scanner (`du` fast path + walk fallback).
 pub fn estimate_bytes(path: &Utf8Path) -> u64 {
-    match fs::metadata(path.as_std_path()) {
-        Ok(meta) => meta.len(),
-        Err(_) => 0,
+    batch_estimate_bytes(&[path])
+        .get(path.as_str())
+        .copied()
+        .unwrap_or_else(|| stat_fallback(path))
+}
+
+/// Batch `du` estimates for many paths (single subprocess per chunk of 50).
+pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
+    let mut result = HashMap::new();
+    if paths.is_empty() {
+        return result;
     }
+
+    let (flag, multiplier) = match std::env::consts::OS {
+        "linux" => ("-sb", 1u64),
+        "macos" => ("-sk", 1024u64),
+        _ => return result,
+    };
+
+    for chunk in paths.chunks(DU_CHUNK_SIZE) {
+        let Some(chunk_map) = du_estimate_chunk(flag, multiplier, chunk) else {
+            continue;
+        };
+        result.extend(chunk_map);
+    }
+
+    result
+}
+
+/// Exact recursive size by walking all files under a path (aligned with JS `exactSize`).
+pub fn exact_size(path: &Utf8Path) -> u64 {
+    let meta = match fs::symlink_metadata(path.as_std_path()) {
+        Ok(meta) => meta,
+        Err(_) => return 0,
+    };
+
+    if meta.file_type().is_symlink() {
+        return meta.len();
+    }
+    if meta.is_file() {
+        return meta.len();
+    }
+    if !meta.is_dir() {
+        return 0;
+    }
+
+    walk_size(path)
+}
+
+/// Apply size estimates to walk entries, optionally using exact recursive sizing.
+pub fn apply_size_estimates(entries: &mut [WalkEntry], exact: bool) {
+    if entries.is_empty() {
+        return;
+    }
+
+    if exact {
+        for entry in entries.iter_mut() {
+            entry.estimated_bytes = exact_size(&entry.path);
+        }
+        return;
+    }
+
+    let path_refs: Vec<&Utf8Path> = entries.iter().map(|entry| entry.path.as_path()).collect();
+    let size_map = batch_estimate_bytes(&path_refs);
+
+    for entry in entries.iter_mut() {
+        entry.estimated_bytes = size_map
+            .get(entry.path.as_str())
+            .copied()
+            .unwrap_or_else(|| {
+                if entry.entry_type == WalkEntryType::Directory {
+                    exact_size(&entry.path)
+                } else {
+                    stat_fallback(&entry.path)
+                }
+            });
+    }
+}
+
+const DU_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn du_estimate_chunk(
+    flag: &str,
+    multiplier: u64,
+    paths: &[&Utf8Path],
+) -> Option<HashMap<String, u64>> {
+    if paths.is_empty() {
+        return Some(HashMap::new());
+    }
+
+    let mut command = Command::new("du");
+    command.arg(flag);
+    for path in paths {
+        command.arg(path.as_str());
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::null());
+
+    let mut child = command.spawn().ok()?;
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if started.elapsed() >= DU_TIMEOUT {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return None,
+        }
+    };
+
+    if !status.success() {
+        return None;
+    }
+
+    let mut stdout = child.stdout.take()?;
+    let mut output = String::new();
+    stdout.read_to_string(&mut output).ok()?;
+
+    let mut result = HashMap::new();
+    for line in output.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let Some(tab) = line.find('\t') else {
+            continue;
+        };
+        let Some(raw) = line[..tab].trim().parse::<u64>().ok() else {
+            continue;
+        };
+        let path = line[tab + 1..].to_owned();
+        result.insert(path, raw * multiplier);
+    }
+
+    Some(result)
+}
+
+fn stat_fallback(path: &Utf8Path) -> u64 {
+    fs::metadata(path.as_std_path())
+        .map(|meta| meta.len())
+        .unwrap_or(0)
+}
+
+fn is_reparse_point_or_symlink(entry_path: &Utf8Path) -> bool {
+    let meta = match fs::symlink_metadata(entry_path.as_std_path()) {
+        Ok(meta) => meta,
+        Err(_) => return false,
+    };
+
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+
+    #[cfg(windows)]
+    if meta.is_dir() {
+        if let Ok(real) = std::fs::canonicalize(entry_path.as_std_path()) {
+            let resolved = normalize_path_buf(entry_path.as_std_path());
+            return normalize_path_buf(&real) != resolved;
+        }
+    }
+
+    false
+}
+
+#[cfg(windows)]
+fn normalize_path_buf(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut normalized = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
+fn walk_size(path: &Utf8Path) -> u64 {
+    let meta = match fs::symlink_metadata(path.as_std_path()) {
+        Ok(meta) => meta,
+        Err(_) => return 0,
+    };
+
+    if meta.file_type().is_symlink() {
+        return meta.len();
+    }
+
+    if meta.is_file() {
+        return meta.len();
+    }
+
+    if !meta.is_dir() {
+        return 0;
+    }
+
+    let mut total = 0u64;
+    let read_dir = match fs::read_dir(path.as_std_path()) {
+        Ok(items) => items,
+        Err(_) => return 0,
+    };
+
+    for item in read_dir.flatten() {
+        let child = Utf8PathBuf::from_path_buf(item.path()).ok();
+        let Some(child) = child else { continue };
+        if item.file_type().map(|ft| ft.is_symlink()).unwrap_or(false) {
+            continue;
+        }
+        total += walk_size(&child);
+    }
+
+    total
 }
 
 #[cfg(test)]
@@ -246,6 +507,63 @@ mod tests {
     }
 
     #[test]
+    fn walk_finds_nested_target_directory() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        fs::create_dir_all(root.join("packages/api/target").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::create_dir_all(root.join("packages/web/node_modules").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let result = walk_matched_entries(root, &WalkConfig::default());
+        let names: Vec<&str> = result
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert!(
+            names.contains(&"target"),
+            "expected nested target match, got: {names:?}"
+        );
+    }
+
+    #[test]
+    fn exact_size_sums_directory_contents() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let artifact = root.join("node_modules");
+        fs::create_dir_all(artifact.join("nested").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::write(artifact.join("file.txt").as_std_path(), "hello")
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+        fs::write(artifact.join("nested/file2.txt").as_std_path(), "world!!")
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+
+        let size = exact_size(&artifact);
+        assert_eq!(size, 5 + 7);
+    }
+
+    #[test]
+    fn batch_estimate_bytes_returns_map_for_existing_paths() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let artifact = root.join("node_modules");
+        fs::create_dir_all(artifact.as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let map = batch_estimate_bytes(&[artifact.as_path()]);
+        if std::env::consts::OS == "linux" || std::env::consts::OS == "macos" {
+            assert!(map.contains_key(artifact.as_str()));
+        }
+    }
+
+    #[test]
     fn walk_skips_git_directory() {
         let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
         let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
@@ -259,7 +577,6 @@ mod tests {
         let result = walk_matched_entries(root, &WalkConfig::default());
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].name, "node_modules");
-        // Should not count .git/objects as scanned dirs
         assert!(result.scanned_dirs < 4);
     }
 }

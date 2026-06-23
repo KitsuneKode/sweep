@@ -34,6 +34,15 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
     let mut failed_paths: Vec<PathFailure> = Vec::new();
 
     for candidate in selected {
+        if !is_path_within_root(&candidate.entry.path, &plan.target_dir) {
+            failed_paths.push(path_failure(
+                &candidate.entry.path,
+                FailureReasonCode::OutsideTarget,
+                "candidate path is outside the plan target directory".to_owned(),
+            ));
+            continue;
+        }
+
         match revalidate_candidate(candidate) {
             Ok(entry) => ready.push(entry),
             Err(failure) => failed_paths.push(failure),
@@ -103,6 +112,21 @@ fn revalidate_candidate(candidate: &ScanCandidate) -> Result<ScanEntry, PathFail
     }
 
     Ok(candidate.entry.clone())
+}
+
+fn is_path_within_root(candidate_path: &str, root_path: &str) -> bool {
+    let candidate = Path::new(candidate_path);
+    let root = Path::new(root_path);
+    if candidate == root {
+        return true;
+    }
+    match candidate.strip_prefix(root) {
+        Ok(relative) => {
+            let rel = relative.to_string_lossy();
+            !rel.is_empty() && !rel.starts_with("..")
+        }
+        Err(_) => false,
+    }
 }
 
 fn delete_entry(entry: &ScanEntry) -> Result<(), PathFailure> {

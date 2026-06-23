@@ -11,6 +11,8 @@ pub fn protocol_version() -> &'static str {
 #[serde(rename_all = "camelCase")]
 pub struct SweepConfig {
     pub patterns: Vec<String>,
+    #[serde(rename = "disabledPatterns", default)]
+    pub disabled_patterns: Vec<String>,
     pub ignore: Vec<String>,
     #[serde(rename = "maxSizeGB")]
     pub max_size_gb: f64,
