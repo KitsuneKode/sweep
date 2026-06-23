@@ -47,8 +47,88 @@ OpenTUI base unit `1` for padding and gap.
 
 ## Layout
 
-Header (title + stats) | body (sidebar + list) | context | footer (contextual shortcuts).
+Header (title + stats) | body (scope sidebar + list) | context | footer (contextual shortcuts).
+
+Body is a horizontal split when `width >= 72`:
+
+- **Scope sidebar** — fixed width (`28` at `width >= 100`, else `22`)
+- **Review pane** — filter input, bordered artifact list (or pattern editor), risk filter hint
+
+## Scope sidebar (ghui / hunk pattern)
+
+**Do not use `<select>` for scope navigation.** `<select>` is a dropdown picker; it fights global keymaps, truncates labels badly, and reads as the wrong control.
+
+**Use instead:**
+
+- `ScopeSidebar.tsx` — panel header + `scrollbox` list
+- `SelectableRow.tsx` — row hover/selection background + mouse handlers (ghui `SelectableRow`)
+- `sidebar.ts` — `buildScopeSidebarRows`, index ↔ `scopeFilter` mapping
+
+### Surface
+
+- Background: `tokens.bg` (same as canvas — not `tokens.surface`)
+- Border: `tokens.borderSoft`; focused panel → `tokens.borderFocus`
+- Padding: `paddingX={1}` `paddingY={1}` inside the bordered box
+- Panel label: muted `"scopes"` line above the scrollbox
+
+### Rows
+
+- First row is always **all scopes** (`scopeFilter === null`)
+- Then one row per workspace folder from `groupCandidatesByScope`
+- Marker column: `·` inactive, `›` active filter (accent)
+- Count column: right-aligned with shared `countWidth` (hunk stats alignment)
+- Label truncation: 18 chars + `…` when needed
+
+### Interaction
+
+| Input              | Behavior                                                                 |
+| ------------------ | ------------------------------------------------------------------------ |
+| `tab`              | Focus sidebar (`setFocus` syncs `sidebarIndex` to current `scopeFilter`) |
+| `j` / `k` / arrows | `moveSidebarCursor` — cursor only, filter unchanged                      |
+| `enter`            | `applySidebarScope` — set `scopeFilter`, move focus to list              |
+| click              | Apply scope immediately + focus list                                     |
+
+Scroll focused row into view: `scrollChildIntoView(\`scope-row-${index}\`)`.
+
+### State
+
+- `sidebarIndex` — cursor while sidebar focused
+- `scopeFilter` — active filter (`null` = all scopes)
+- `setScopeFilter` keeps `sidebarIndex` in sync
+
+## Artifact list
+
+- `ArtifactList.tsx` — `scrollbox` + inline `▸` scope group headers in the main pane
+- Same row chrome idea as sidebar: cursor `selectionBg`, hover `hoverBg`, click toggles selection
+- j/k via `moveCursor` (skips header rows)
+
+## Pattern editor
+
+`<select>` is still acceptable for the **pattern catalog** (true pick-list semantics) when `focus === "patterns"`.
+
+## Keymap
+
+- `keymap.ts` owns global shortcuts; one handler path per `focus` (`search`, `sidebar`, `list`, `patterns`, help, confirm)
+- Sidebar must **not** early-return without handling j/k/enter — do not delegate navigation to `<select>`
+
+## Anti-patterns (avoid)
+
+- `<select>` for scope / file / repo navigation sidebars
+- Different background color for sidebar vs canvas (“sidebar world” vs “content world”)
+- Plain string rows without `StyledText` markers and aligned columns
+- stdout spinners while alternate-screen TUI is mounted (stop spinner in `onScanComplete` before `runSweepUi`)
 
 ## Signature
 
 Scope sidebar + pattern palette + tabular risk-aware artifact rows.
+
+## Code map
+
+| Module                              | Role                                                     |
+| ----------------------------------- | -------------------------------------------------------- |
+| `packages/ui/src/ScopeSidebar.tsx`  | Scope panel UI                                           |
+| `packages/ui/src/SelectableRow.tsx` | Reusable row wrapper                                     |
+| `packages/ui/src/sidebar.ts`        | Row data + index helpers                                 |
+| `packages/ui/src/ArtifactList.tsx`  | Main artifact scroll list                                |
+| `packages/ui/src/keymap.ts`         | Focus-aware keyboard routing                             |
+| `packages/ui/src/state/store.ts`    | `sidebarIndex`, `moveSidebarCursor`, `applySidebarScope` |

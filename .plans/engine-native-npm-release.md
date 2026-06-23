@@ -1,10 +1,10 @@
 # Engine native npm release
 
-- **Status:** in_progress
+- **Status:** `done`
 - **Scope:** engine
 - **Created:** 2026-06-13
-- **Updated:** 2026-06-13
-- **Commit:** uncommitted
+- **Updated:** 2026-06-24
+- **Commit:** landed on `main`
 
 ## Goal
 
@@ -26,20 +26,18 @@ Ship `sweep-engine` via Turbo-style optional platform npm packages so
 
 ## Phases
 
-| Phase              | Status      | Notes                                              |
-| ------------------ | ----------- | -------------------------------------------------- |
-| Runtime resolution | done        | `sweepPackageRoot`, optional deps, `cwd` fix       |
-| Pack tooling       | done        | `engine:pack`, templates                           |
-| Version sync       | done        | `sync-engine-versions`, root optionalDependencies  |
-| CI publish         | done        | Matrix workflow + `publish-release.ts`             |
-| Rust parity        | in_progress | Config forwarding done; tree sizing + apply remain |
+| Phase              | Status | Notes                                                                                                  |
+| ------------------ | ------ | ------------------------------------------------------------------------------------------------------ |
+| Runtime resolution | done   | `sweepPackageRoot`, optional deps, `cwd` fix                                                           |
+| Pack tooling       | done   | `engine:pack`, templates                                                                               |
+| Version sync       | done   | `sync-engine-versions`, root optionalDependencies                                                      |
+| CI publish         | done   | Matrix workflow + `publish-release.ts`                                                                 |
+| Rust parity        | done   | Config, streaming, exact sizing, apply containment; byte-estimate drift documented in deferred backlog |
 
-## Known Rust parity gaps (non-blocking for npm scaffold)
+## Deferred (non-blocking)
 
-- Directory size estimates use metadata in Rust, not full tree `du` (byte estimates may differ)
-- `apply` parity incomplete per `monorepo-overhaul.md`
-
-Do not change default engine to `auto` until contract tests pass on published binaries.
+- Directory size estimates may differ slightly between JS batched `du` and Rust metadata fallbacks
+- Default engine stays `js` until published-binary CI verification is automated
 
 ## Invariants
 

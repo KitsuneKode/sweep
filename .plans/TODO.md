@@ -13,6 +13,9 @@
 
 ## Next
 
+- [ ] Execute [daily-driver overhaul](daily-driver-overhaul/master.md) — **unified
+      program**: Phase 0 catalog/hygiene → trust → TUI → streaming → orchestration →
+      CLI → Rust → polish ([scope index](daily-driver-overhaul/README.md))
 - [x] Add a first `sweep ui` flow on top of the shared scan/plan/apply engine
       using a well-supported TUI library instead of ad hoc terminal painting
 - [x] Add a testable UI state layer so selection/filter behavior is validated
@@ -40,5 +43,5 @@
 - [x] Add a lightweight doc hygiene check if drift becomes a recurring problem
       (`scripts/check-doc-links.ts`)
 - [ ] Capture release/process notes once the package surface stabilizes
-- [ ] Split product, protocol, engine, and UI plans into more focused files once
-      active execution begins
+- [x] Split product, protocol, engine, and UI plans into more focused files once
+      active execution begins (see `.plans/overhaul-roadmap.md`)

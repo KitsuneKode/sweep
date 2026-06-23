@@ -1,10 +1,11 @@
 # `sweep` Product and Architecture Roadmap
 
-Status: in_progress
+Status: done
 Scope: product
 Created: 2026-05-06
-Updated: 2026-05-06
-Commit: uncommitted
+Updated: 2026-06-24
+Commit: landed on `main`
+Superseded execution tracking: `.plans/overhaul-roadmap.md`
 
 ## Goal
 

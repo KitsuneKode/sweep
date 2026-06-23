@@ -45,7 +45,7 @@ If a tradeoff is required, choose correctness and guardrails over convenience.
 
 - Workspace layout: [.docs/workspace-layout.md](.docs/workspace-layout.md)
 - Engineering principles and doc ownership: [.docs/engineering-principles.md](.docs/engineering-principles.md)
-- For active work and backlog: [.plans/README.md](.plans/README.md)
+- For active work and backlog: [.plans/README.md](.plans/README.md) and [.plans/overhaul-roadmap.md](.plans/overhaul-roadmap.md)
 - For project architecture: [.docs/architecture.md](.docs/architecture.md)
 - For current product direction: [.docs/product-direction.md](.docs/product-direction.md)
 - For config behavior: [.docs/config.md](.docs/config.md)

@@ -5,7 +5,7 @@
 - **Created:** 2026-06-13
 - **Updated:** 2026-06-24
 - **Commit:** landed on `main` (see subsequent overhaul + packaging commits)
-- **Superseded by:** `.plans/packaging-restructure.md`, sweep Overhaul Roadmap (P0–P6)
+- **Superseded by:** `.plans/overhaul-roadmap.md`, `.plans/packaging-restructure.md`
 
 ## Summary
 

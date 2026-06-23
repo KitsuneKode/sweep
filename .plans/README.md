@@ -5,7 +5,10 @@ This directory is the working home for implementation plans.
 ## Structure
 
 - `TODO.md` — backlog and current execution order
+- `overhaul-roadmap.md` — completed P0–P6 overhaul (source of truth for roadmap status)
 - `*.md` — scoped plans that live directly in this directory
+- `<scope>/` — focused plan folders when a effort spans multiple files (e.g.
+  `daily-driver-overhaul/`)
 
 Avoid nested `active/` or `archive/` directories unless the number of plans
 eventually makes the flat structure hard to scan.

@@ -48,4 +48,4 @@ The sweep Overhaul Roadmap (`sweep_overhaul_roadmap_ce1b8314`) phases P0–P6 ar
 
 ## Open follow-up (out of scope here)
 
-- Forward `SweepConfig` (`--pattern`, `--ignore`, `--depth`) to the Rust engine.
+- None — see deferred backlog in `.plans/overhaul-roadmap.md`
