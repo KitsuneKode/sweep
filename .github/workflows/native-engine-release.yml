@@ -106,6 +106,7 @@ jobs:
             throw "expected usage output from $binary`n$output"
           }
           Write-Host "ok: $binary"
+          exit 0
 
       - uses: actions/upload-artifact@v4
         with:
