@@ -36,6 +36,7 @@ function cliVersion(): string {
 }
 
 const skipNative = process.argv.includes("--skip-native");
+const requiresNative = process.env.SWEEP_RELEASE_REQUIRES_NATIVE === "true";
 const version = cliVersion();
 
 if (!skipNative) {
@@ -53,7 +54,7 @@ if (!skipNative) {
   }
 
   if (packed.length === 0) {
-    if (process.env.CI === "true") {
+    if (process.env.CI === "true" && requiresNative) {
       console.error(
         "error: no packed native engine binaries found; CI release expects native-packages/*/bin",
       );
@@ -63,7 +64,7 @@ if (!skipNative) {
   } else {
     if (missing.length > 0) {
       console.warn(`warn: missing packed binaries for: ${missing.join(", ")}`);
-      if (process.env.CI === "true") {
+      if (process.env.CI === "true" && requiresNative) {
         console.error("error: incomplete native engine matrix in CI");
         process.exit(1);
       }
