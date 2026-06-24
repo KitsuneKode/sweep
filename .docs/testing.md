@@ -144,13 +144,15 @@ bun run dev -- ui /path/to/project   # in an interactive terminal only
 
 ## CI split
 
-| Workflow                        | When it runs                      | What it does                                                          |
-| ------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`      | Every push/PR to `main`           | `fixtures:sync`, `turbo check`, `build`, `preflight`, and Rust        |
-| `.github/workflows/release.yml` | Push to `main` or manual dispatch | Native engine matrix build, then changesets version PR or npm publish |
+| Workflow                        | When it runs                      | What it does                                                                                    |
+| ------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`      | Every push/PR to `main`           | `fixtures:sync`, `turbo check`, `build`, `preflight`, and Rust                                  |
+| `.github/workflows/release.yml` | Push to `main` or manual dispatch | Changesets version PR or npm publish; native engine matrix only on version-bump publish commits |
 
 Parity fixture trees (`node_modules/`, `dist/`, etc.) are gitignored globally; CI
-materializes them with `bun run fixtures:sync` before engine tests run.
+materializes them with `bun run fixtures:sync` before engine tests run. Golden
+`expected.plan.json` files must use stable candidate ids (`bun run fixtures:validate-goldens`);
+regenerate with `bun run scripts/generate-parity-fixture.ts -- tests/fixtures/<name>`.
 
 ## Seeded scenarios
 

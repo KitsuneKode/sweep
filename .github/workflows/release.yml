@@ -4,19 +4,56 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      build_native:
+        description: Build native engine matrix before publish
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  release-intent:
+    name: detect release intent
+    runs-on: ubuntu-latest
+    outputs:
+      needs_native_build: ${{ steps.intent.outputs.needs_native_build }}
+    steps:
+      - id: intent
+        shell: bash
+        run: |
+          needs_native="false"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.build_native }}" = "true" ]; then
+              needs_native="true"
+            fi
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            msg="${{ github.event.head_commit.message }}"
+            if printf '%s' "$msg" | grep -qiE '^chore: version packages'; then
+              needs_native="true"
+            fi
+          fi
+
+          echo "needs_native_build=$needs_native" >> "$GITHUB_OUTPUT"
+          echo "native engine build required: $needs_native"
+
   build-engine:
     name: build native engines
+    needs: release-intent
+    if: needs.release-intent.outputs.needs_native_build == 'true'
     uses: ./.github/workflows/native-engine-release.yml
 
   release:
     name: version or publish
-    needs: build-engine
+    needs: [release-intent, build-engine]
+    if: |
+      always() &&
+      needs.release-intent.result == 'success' &&
+      (needs.release-intent.outputs.needs_native_build != 'true' || needs.build-engine.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -28,6 +65,7 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/download-artifact@v4
+        if: needs.release-intent.outputs.needs_native_build == 'true'
         with:
           name: native-packages-all
           path: native-packages

@@ -28,6 +28,9 @@ jobs:
       - name: Sync parity fixture trees
         run: bun run fixtures:sync
 
+      - name: Validate parity golden candidate ids
+        run: bun run fixtures:validate-goldens
+
       - name: Check, build, and preflight
         run: bunx turbo run check build preflight
 
@@ -46,6 +49,9 @@ jobs:
 
       - name: Sync parity fixture trees
         run: bun run fixtures:sync
+
+      - name: Validate parity golden candidate ids
+        run: bun run fixtures:validate-goldens
 
       - uses: dtolnay/rust-toolchain@stable
         with:

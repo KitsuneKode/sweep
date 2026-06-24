@@ -58,7 +58,7 @@ function parseArgs(argv: string[]): { platform: string; binary?: string; version
 }
 
 function rootVersion(): string {
-  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as {
+  const pkg = JSON.parse(readFileSync(join(REPO_ROOT, "apps/cli/package.json"), "utf8")) as {
     version: string;
   };
   return pkg.version;

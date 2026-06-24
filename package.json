@@ -39,6 +39,7 @@
     "check:affected": "turbo run check --affected && bun run check:docs",
     "check:docs": "bun run scripts/check-doc-links.ts",
     "fixtures:sync": "bun run scripts/sync-fixture-trees.ts",
+    "fixtures:validate-goldens": "bun run scripts/validate-parity-goldens.ts",
     "preflight": "turbo run preflight",
     "pack:preview": "npm pack -w @kitsunekode/sweep --dry-run",
     "pack": "npm pack -w @kitsunekode/sweep",
