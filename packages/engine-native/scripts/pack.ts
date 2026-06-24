@@ -98,6 +98,14 @@ if (!platform) {
 }
 
 const version = versionArg ?? rootVersion();
+if (!version || version === "undefined") {
+  console.error("error: package version is missing; pass --version or set apps/cli/package.json");
+  process.exit(1);
+}
+if (!/^\d+\.\d+\.\d+/.test(version)) {
+  console.error(`error: invalid semver for native package: ${version}`);
+  process.exit(1);
+}
 const sourceBinary = resolve(binaryArg ?? defaultBinaryPath(platform));
 if (!existsSync(sourceBinary)) {
   console.error(`error: binary not found: ${sourceBinary}`);

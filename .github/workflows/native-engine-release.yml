@@ -37,6 +37,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             binary: sweep-engine
             verify: false
+            inspect: aarch64
           - id: darwin-64
             runs-on: macos-15-intel
             target: x86_64-apple-darwin
@@ -91,6 +92,10 @@ jobs:
         if: matrix.verify && runner.os != 'Windows'
         run: bun run packages/engine-native/scripts/verify-binary.ts --binary "native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}"
 
+      - name: Inspect cross-compiled binary
+        if: matrix.inspect
+        run: bun run packages/engine-native/scripts/inspect-binary.ts --binary "native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}" --expect ${{ matrix.inspect }}
+
       - name: Verify binary (windows)
         if: matrix.verify && runner.os == 'Windows'
         shell: pwsh
@@ -111,6 +116,7 @@ jobs:
   merge:
     name: merge native packages
     needs: build
+    if: success()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

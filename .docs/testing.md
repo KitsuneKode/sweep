@@ -149,6 +149,9 @@ bun run dev -- ui /path/to/project   # in an interactive terminal only
 | `.github/workflows/ci.yml`      | Every push/PR to `main`           | `fixtures:sync`, `turbo check`, `build`, `preflight`, and Rust                                  |
 | `.github/workflows/release.yml` | Push to `main` or manual dispatch | Changesets version PR or npm publish; native engine matrix only on version-bump publish commits |
 
+To smoke-test the native engine matrix without publishing, run the **Native engine release**
+workflow manually from GitHub Actions (`workflow_dispatch` on `native-engine-release.yml`).
+
 Parity fixture trees (`node_modules/`, `dist/`, etc.) are gitignored globally; CI
 materializes them with `bun run fixtures:sync` before engine tests run. Golden
 `expected.plan.json` files must use stable candidate ids (`bun run fixtures:validate-goldens`);

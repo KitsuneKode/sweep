@@ -52,6 +52,7 @@
     "engine:build": "cargo build --release -p sweep-engine-cli",
     "engine:pack": "bun run packages/engine-native/scripts/pack.ts",
     "engine:verify": "bun run packages/engine-native/scripts/verify-binary.ts",
+    "engine:inspect": "bun run packages/engine-native/scripts/inspect-binary.ts",
     "//#rust:fmt": "cargo fmt --all",
     "//#rust:lint": "cargo clippy --workspace -- -D warnings",
     "//#rust:test": "cargo test --workspace",
