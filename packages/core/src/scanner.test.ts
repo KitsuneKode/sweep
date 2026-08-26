@@ -143,14 +143,15 @@ describe("scan — ignore rules", () => {
     const config: SweepConfig = { ...DEFAULT_CONFIG, ignore: ["packages/vendor"] };
     const result = await scan(tmpDir, config);
     expect(result.entries).toHaveLength(1);
-    expect(result.entries[0]?.path).toContain("packages/web");
+    expect(result.entries[0]?.path).toContain(join("packages", "web"));
   });
 });
 
 describe("scan — adversarial / security", () => {
   test("handles directory names with shell metacharacters safely", async () => {
     // If size estimation used execSync with string interpolation, this would be exploitable.
-    // With execFileSync, the name is passed as a raw argument — no shell expansion.
+    // Windows NTFS forbids semicolon and redirection operators in filenames.
+    if (process.platform === "win32") return;
     const dangerous = dir("dist;echo PWNED>/tmp/sweep-pwned-$RANDOM");
     mkdirSync(dangerous, { recursive: true });
     const config: SweepConfig = {
@@ -183,7 +184,8 @@ describe("scan — adversarial / security", () => {
   });
 
   test("handles directory names with newlines safely", async () => {
-    // A path with a newline in the name should not confuse output parsing
+    // Windows NTFS forbids newlines in filenames
+    if (process.platform === "win32") return;
     const dangerous = dir("node_modules\nnewline");
     mkdirSync(dangerous, { recursive: true });
     const config: SweepConfig = { ...DEFAULT_CONFIG, patterns: ["node_modules\nnewline"] };
