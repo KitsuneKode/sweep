@@ -17,6 +17,8 @@ import { getVisibleCandidates, invalidateSelectorCache } from "./selectors.js";
 
 export type UiFocus = "search" | "sidebar" | "list" | "patterns";
 
+export type UiSortBy = "size" | "name";
+
 export interface SweepUiState {
   targetDir: string;
   candidates: ScanCandidate[];
@@ -32,6 +34,12 @@ export interface SweepUiState {
   focus: UiFocus;
   themeMode: ThemeMode;
   patternsDirty: boolean;
+  /** True while a streaming scan is still filling candidates. */
+  scanning: boolean;
+  /** Artifact ordering inside groups. */
+  sortBy: UiSortBy;
+  /** Scope groups hidden in the artifact list (key "" = project root). */
+  collapsedGroups: Set<string>;
 }
 
 export interface SweepUiSummary {
@@ -65,6 +73,9 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     focus: "list",
     themeMode: "auto",
     patternsDirty: false,
+    scanning: false,
+    sortBy: "size",
+    collapsedGroups: new Set<string>(),
   };
 
   const rows = buildDisplayRows(state);
@@ -164,6 +175,127 @@ export function setThemeMode(state: SweepUiState, themeMode: ThemeMode): SweepUi
   return { ...state, themeMode };
 }
 
+/** Merge streaming candidates by id (sized re-upserts replace discovery stubs). */
+export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[]): SweepUiState {
+  if (incoming.length === 0) return state;
+  invalidateSelectorCache();
+
+  const anchoredId = getCurrentCandidate(state)?.id;
+  const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
+  for (const candidate of incoming) {
+    const existing = byId.get(candidate.id);
+    // Never let a sized update clobber a user selection decision — ids are
+    // deterministic so sized entries arrive with identical fields except bytes.
+    byId.set(candidate.id, existing ? { ...existing, ...candidate } : candidate);
+  }
+
+  return reanchor({ ...state, candidates: [...byId.values()] }, undefined, anchoredId);
+}
+
+/** Re-run display rows and keep the cursor on `anchoredId` (or nearest item). */
+function reanchor(
+  state: SweepUiState,
+  overrides?: Partial<SweepUiState>,
+  anchoredId?: string,
+): SweepUiState {
+  const next = { ...state, ...overrides };
+  const rows = buildDisplayRows(next);
+  const id = anchoredId ?? getCurrentCandidate(state)?.id;
+  const index = id ? rows.findIndex((row) => row.kind === "item" && row.candidateId === id) : -1;
+
+  return {
+    ...next,
+    rowIndex: index >= 0 ? index : snapRowIndexToItem(rows, firstItemRowIndex(rows)),
+  };
+}
+
+/** After structural changes, snap the cursor to the closest surviving item row. */
+function snapToNearestItem(state: SweepUiState): SweepUiState {
+  const rows = buildDisplayRows(state);
+  return { ...state, rowIndex: snapRowIndexToItem(rows, state.rowIndex) };
+}
+
+export function setScanning(state: SweepUiState, scanning: boolean): SweepUiState {
+  if (state.scanning === scanning) return state;
+  return { ...state, scanning };
+}
+
+export function toggleSortBy(state: SweepUiState): SweepUiState {
+  invalidateSelectorCache();
+  const sortBy: UiSortBy = state.sortBy === "size" ? "name" : "size";
+  return reanchor(state, { ...state, sortBy });
+}
+
+/** Collapse or expand one scope group in the artifact list. */
+export function toggleGroup(state: SweepUiState, groupKey: string): SweepUiState {
+  const collapsedGroups = new Set(state.collapsedGroups);
+  if (collapsedGroups.has(groupKey)) {
+    collapsedGroups.delete(groupKey);
+  } else {
+    collapsedGroups.add(groupKey);
+  }
+  invalidateSelectorCache();
+  // Collapsing may remove the focused row; re-anchor to a visible item.
+  return snapToNearestItem({ ...state, collapsedGroups });
+}
+
+/** Expand every scope group. */
+export function expandAllGroups(state: SweepUiState): SweepUiState {
+  if (state.collapsedGroups.size === 0) return state;
+  invalidateSelectorCache();
+  return snapToNearestItem({ ...state, collapsedGroups: new Set<string>() });
+}
+
+/**
+ * One step of the esc ladder — walk backwards through UI state instead of
+ * quitting. Returns null when there is nothing left to unwind.
+ */
+export function escapeStep(state: SweepUiState): SweepUiState | null {
+  if (state.focus === "patterns") {
+    return setFocus(state, "list");
+  }
+  if (state.focus === "sidebar") {
+    return setFocus(state, "list");
+  }
+  if (state.focus === "search") {
+    return setFocus(state, "list");
+  }
+
+  // List focus — peel off view narrowing one layer at a time.
+  if (state.riskFilter !== "all") {
+    return setRiskFilter(state, "all");
+  }
+  if (state.scopeFilter !== null) {
+    return setScopeFilter(state, null);
+  }
+  if (state.filter.length > 0) {
+    return setFilter(state, "");
+  }
+  if (state.collapsedGroups.size > 0) {
+    return expandAllGroups(state);
+  }
+
+  return null;
+}
+
+/**
+ * Begin a fresh scan generation: drop discovered artifacts and selections,
+ * keep user view/config preferences (theme, patterns editor state, filters).
+ */
+export function resetForRescan(state: SweepUiState): SweepUiState {
+  invalidateSelectorCache();
+  return {
+    ...state,
+    candidates: [],
+    selectedIds: new Set<string>(),
+    rowIndex: 0,
+    sidebarIndex: 0,
+    scopeFilter: null,
+    collapsedGroups: new Set<string>(),
+    scanning: true,
+  };
+}
+
 export function moveCursor(state: SweepUiState, delta: number): SweepUiState {
   const rows = buildDisplayRows(state);
   if (rows.length === 0) return state;
@@ -193,7 +325,9 @@ export function toggleCurrentSelection(state: SweepUiState): SweepUiState {
 export function toggleSelectionById(state: SweepUiState, candidateId: string): SweepUiState {
   const candidate = state.candidates.find((entry) => entry.id === candidateId);
   if (!candidate) return state;
-  if (candidate.riskTier === "blocked" || candidate.riskTier === "dangerous") {
+  // Blocked items are hard-locked everywhere. Dangerous items CAN be selected,
+  // but only deliberately (one at a time) and always behind the red confirm.
+  if (candidate.riskTier === "blocked") {
     return state;
   }
 

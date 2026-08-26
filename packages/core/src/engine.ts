@@ -133,7 +133,7 @@ export async function applyPlanWithBackend(
     assertPathWithinRoot(candidate.path, plan.targetDir);
   }
 
-  const report = applyPlanViaRust(plan);
+  const report = await applyPlanViaRust(plan);
   const failedPathSet = new Set(report.failedPaths.map((failure) => failure.path));
   const revalidationCodes = new Set<PathFailure["code"]>([
     "missing",

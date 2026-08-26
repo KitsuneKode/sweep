@@ -82,7 +82,7 @@ export async function runScanToPlan(
     }
 
     const { engine: _engine, projectConfig: _projectConfig, ...rustOptions } = options;
-    const plan = scanToPlanViaRust(targetDir, {
+    const plan = await scanToPlanViaRust(targetDir, {
       config,
       selectionPolicy: defaultRustSelectionPolicy(options),
       ...rustOptions,
@@ -157,9 +157,21 @@ export function promptConfirm(question: string): Promise<boolean> {
       output: process.stdout,
     });
 
-    rl.on("close", () => resolvePromise(false));
+    const settle = (value: boolean): void => {
+      rl.close();
+      resolvePromise(value);
+    };
 
+    rl.on("close", () => {
+      // Only treat an unexpected close as "declined" when the question was
+      // never answered. A normal EOF (e.g. piped `y\n`) still resolves via the
+      // question callback above, so this never races the user's answer.
+      if (!answered) settle(false);
+    });
+
+    let answered = false;
     rl.question(`${question} [y/N] `, (answer) => {
+      answered = true;
       rl.close();
       const normalized = answer.trim().toLowerCase();
       resolvePromise(normalized === "y" || normalized === "yes");
@@ -253,8 +265,15 @@ export async function confirmPlanDeletion(
     .filter((candidate) => plan.selectedCandidateIds.includes(candidate.id))
     .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
 
+  const dangerousCount = plan.candidates.filter(
+    (candidate) =>
+      plan.selectedCandidateIds.includes(candidate.id) &&
+      (candidate.riskTier === "dangerous" || candidate.riskTier === "blocked"),
+  ).length;
+
+  const dangerNote = dangerousCount > 0 ? ` · ${dangerousCount} dangerous` : "";
   return promptConfirm(
-    `Delete ${plan.selectedCandidateIds.length} selected items (~${formatBytes(selectedBytes)})?`,
+    `Delete ${plan.selectedCandidateIds.length} selected items (~${formatBytes(selectedBytes)})${dangerNote}?`,
   );
 }
 
@@ -282,7 +301,7 @@ export async function executePlanDeletion(
         onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
           current++;
           freedBytes += entry.estimatedBytes;
-          printDeletionProgress(current, total, entry.path, freedBytes);
+          printDeletionProgress(current, total, entry.path, entry.estimatedBytes, freedBytes);
         },
       };
 

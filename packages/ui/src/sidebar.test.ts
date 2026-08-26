@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import { buildScopeSidebarRows, scopeFilterToSidebarIndex } from "./sidebar.js";
-import { applySidebarScope, createUiState, moveSidebarCursor, setScopeFilter } from "./state.js";
+import { applySidebarScope, createUiState, setScopeFilter } from "./state.js";
 
 function createPlan(): ScanPlan {
   return {
@@ -48,12 +48,14 @@ function createPlan(): ScanPlan {
 }
 
 describe("scope sidebar rows", () => {
-  test("lists all scopes first then workspace folders", () => {
+  test("lists all scopes first then workspace folders with bytes", () => {
     const state = createUiState(createPlan());
     const rows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
 
     expect(rows[0]?.label).toBe("all scopes");
     expect(rows[0]?.count).toBe(2);
+    expect(rows[0]?.bytes).toBe(5120);
+    expect(rows[0]?.selectedBytes).toBe(1024);
     expect(rows.some((row) => row.label === "apps/cli/")).toBe(true);
   });
 

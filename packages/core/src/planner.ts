@@ -101,6 +101,16 @@ export function toCandidate(entry: ScanEntry): ScanCandidate {
   };
 }
 
+/**
+ * Convert one discovered entry into a fully enriched candidate for
+ * streaming scans (ids are deterministic, so sized re-upserts match).
+ */
+export function candidateFromEntry(entry: ScanEntry): ScanCandidate {
+  const base = toCandidate(entry);
+  const [enriched] = normalizeSelectionDefaults(enrichCandidates([base]));
+  return enriched ?? base;
+}
+
 export function resolveSelectedCandidates(plan: ScanPlan): ScanCandidate[] {
   const selectedIds = new Set(plan.selectedCandidateIds);
   return plan.candidates.filter((candidate) => selectedIds.has(candidate.id));

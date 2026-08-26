@@ -27,10 +27,10 @@ describe("presentation formatters", () => {
 
   test("formatArtifactRow is a single dense line", () => {
     const line = formatArtifactRow(candidate(), true, darkTheme);
-    expect(line).toContain("[x]");
+    expect(line).toContain("●");
     expect(line).toContain("node_modules");
     expect(line).toContain("512 B");
-    expect(line).toContain("·");
+    expect(line).toContain("✓");
     expect(line.startsWith(" ")).toBe(true);
   });
 });

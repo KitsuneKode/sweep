@@ -4,16 +4,22 @@ import {
   applyUiSelection,
   clearSelection,
   createUiState,
+  escapeStep,
   getCurrentCandidate,
   getUiSummary,
   getVisibleCandidates,
   moveCursor,
+  resetForRescan,
   selectVisible,
   setFilter,
   setScopeFilter,
   toggleCurrentSelection,
+  toggleGroup,
   togglePattern,
+  toggleSortBy,
+  upsertCandidates,
 } from "./state.js";
+import { buildDisplayRows } from "./rows.js";
 
 function createPlan(): ScanPlan {
   return {
@@ -112,16 +118,18 @@ describe("sweep ui state", () => {
     expect(state.selectedIds.has("cand_safe")).toBe(true);
   });
 
-  test("toggleCurrentSelection ignores blocked and dangerous candidates", () => {
+  test("toggleCurrentSelection hard-locks blocked, allows deliberate dangerous", () => {
     let state = setFilter(createUiState(createPlan()), ".git");
     expect(getCurrentCandidate(state)?.riskTier).toBe("blocked");
     state = toggleCurrentSelection(state);
     expect(state.selectedIds.has("cand_blocked")).toBe(false);
 
+    // Dangerous items CAN be toggled deliberately — the red confirm dialog is
+    // the safety gate, not an unselectable row.
     state = setFilter(createUiState(createPlan()), "custom-cache");
     expect(getCurrentCandidate(state)?.riskTier).toBe("dangerous");
     state = toggleCurrentSelection(state);
-    expect(state.selectedIds.has("cand_dangerous")).toBe(false);
+    expect(state.selectedIds.has("cand_dangerous")).toBe(true);
   });
 
   test("selectVisible excludes dangerous and blocked candidates by default", () => {
@@ -197,5 +205,136 @@ describe("sweep ui state", () => {
 
     const scoped = setScopeFilter(createUiState(plan), "apps/web");
     expect(getVisibleCandidates(scoped).every((c) => c.path.includes("apps/web"))).toBe(true);
+  });
+
+  test("upsertCandidates streams in discoveries and replaces them when sized", () => {
+    let state = createUiState({ ...createPlan(), candidates: [] });
+    expect(state.candidates).toHaveLength(0);
+
+    state = upsertCandidates(state, [
+      {
+        id: "cand_a",
+        path: "/tmp/sweep-ui/node_modules",
+        name: "node_modules",
+        kind: "node_modules",
+        estimatedBytes: 0,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+      },
+    ]);
+    expect(state.candidates).toHaveLength(1);
+    expect(state.candidates[0]?.estimatedBytes).toBe(0);
+
+    // Sized re-upsert with the same deterministic id replaces the stub.
+    state = upsertCandidates(state, [{ ...state.candidates[0]!, estimatedBytes: 4096 }]);
+    expect(state.candidates).toHaveLength(1);
+    expect(state.candidates[0]?.estimatedBytes).toBe(4096);
+  });
+
+  test("upsert keeps the cursor anchored to the focused artifact", () => {
+    let state = createUiState(createPlan());
+    state = setFilter(state, "node_modules");
+    expect(getCurrentCandidate(state)?.id).toBe("cand_safe");
+
+    state = upsertCandidates(state, [
+      {
+        id: "cand_new",
+        path: "/tmp/sweep-ui/apps/cli/node_modules",
+        name: "node_modules",
+        kind: "node_modules",
+        estimatedBytes: 300,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+      },
+    ]);
+    expect(state.candidates).toHaveLength(4);
+    expect(getCurrentCandidate(state)?.id).toBe("cand_safe");
+  });
+
+  test("toggleSortBy cycles size and name ordering", () => {
+    let state = createUiState(createPlan());
+    expect(state.sortBy).toBe("size");
+
+    state = toggleSortBy(state);
+    expect(state.sortBy).toBe("name");
+
+    // Name ordering is visible in display rows (getVisibleCandidates only filters).
+    const itemIds = buildDisplayRows(state)
+      .filter((row) => row.kind === "item")
+      .map((row) => (row.kind === "item" ? row.candidateId : ""));
+    expect(itemIds).toEqual(["cand_dangerous", "cand_safe", "cand_blocked"]);
+
+    state = toggleSortBy(state);
+    expect(state.sortBy).toBe("size");
+    const sizedIds = buildDisplayRows(state)
+      .filter((row) => row.kind === "item")
+      .map((row) => (row.kind === "item" ? row.candidateId : ""));
+    // Largest first.
+    expect(sizedIds).toEqual(["cand_dangerous", "cand_safe", "cand_blocked"]);
+  });
+
+  test("resetForRescan clears artifacts and selections but keeps view config", () => {
+    let state = createUiState(createPlan());
+    state = togglePattern(state, "dist");
+
+    const reset = resetForRescan(state);
+
+    expect(reset.candidates).toHaveLength(0);
+    expect(reset.selectedIds.size).toBe(0);
+    expect(reset.scanning).toBe(true);
+    expect(reset.disabledPatterns.has("dist")).toBe(true);
+  });
+
+  test("toggleGroup hides group items but keeps the header row", () => {
+    let state = createUiState(createPlan());
+    const headerIndex = buildDisplayRows(state).findIndex((row) => row.kind === "header");
+    const header = buildDisplayRows(state)[headerIndex];
+    if (header?.kind !== "header") throw new Error("expected header row");
+    expect(header.collapsed).toBe(false);
+
+    state = toggleGroup(state, header.groupKey);
+
+    const rows = buildDisplayRows(state);
+    const collapsedHeader = rows[headerIndex];
+    expect(collapsedHeader?.kind).toBe("header");
+    if (collapsedHeader?.kind === "header") {
+      expect(collapsedHeader.collapsed).toBe(true);
+      // Header still reports the full item count even while folded.
+      expect(collapsedHeader.itemCount).toBe(header.itemCount);
+    }
+    // Only the folded group's items disappear.
+    const itemsBefore = header.itemCount;
+    expect(rows.filter((row) => row.kind === "item")).toHaveLength(3 - itemsBefore);
+
+    state = toggleGroup(state, header.groupKey);
+    expect(buildDisplayRows(state).filter((row) => row.kind === "item")).toHaveLength(3);
+  });
+
+  test("escape ladder unwinds filters before scopes before text search", () => {
+    let state = createUiState(createPlan());
+    state = setFilter(state, "node_modules");
+    state = { ...state, riskFilter: "safe" };
+
+    const step1 = escapeStep(state);
+    expect(step1?.riskFilter).toBe("all");
+
+    const step2 = escapeStep(step1!);
+    expect(step2?.filter).toBe("");
+
+    // Nothing left to unwind.
+    expect(escapeStep(step2!)).toBeNull();
+  });
+
+  test("esc from sidebar/patterns focus returns to the list, never quits", () => {
+    const base = createUiState(createPlan());
+
+    expect(escapeStep({ ...base, focus: "sidebar" })?.focus).toBe("list");
+    expect(escapeStep({ ...base, focus: "patterns" })?.focus).toBe("list");
   });
 });

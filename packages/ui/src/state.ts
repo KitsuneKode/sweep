@@ -1,4 +1,10 @@
-export type { SweepUiState, SweepUiSummary, UiFocus, SweepUiInitOptions } from "./state/store.js";
+export type {
+  SweepUiState,
+  SweepUiSummary,
+  UiFocus,
+  SweepUiInitOptions,
+  UiSortBy,
+} from "./state/store.js";
 export {
   activePatterns,
   applyUiSelection,
@@ -21,5 +27,12 @@ export {
   toggleSelectionById,
   togglePattern,
   countSelectedDangerous,
+  upsertCandidates,
+  setScanning,
+  toggleSortBy,
+  resetForRescan,
+  toggleGroup,
+  expandAllGroups,
+  escapeStep,
 } from "./state/store.js";
 export { getVisibleCandidates, invalidateSelectorCache } from "./state/selectors.js";

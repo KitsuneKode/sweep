@@ -1,22 +1,108 @@
 import type { SweepUiState } from "./state.js";
 import {
+  applySidebarScope,
   clearSelection,
+  escapeStep,
+  expandAllGroups,
   moveCursor,
   moveSidebarCursor,
-  applySidebarScope,
   rescanConfigFromState,
   selectVisible,
   setRiskFilter,
   setThemeMode,
   toggleCurrentSelection,
+  toggleGroup,
   togglePattern,
+  setRowIndex,
   type UiFocus,
 } from "./state.js";
+import { buildDisplayRows, snapRowIndexToItem } from "./rows.js";
 import { cycleThemeMode } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
 
 export interface KeyInput {
   name?: string;
+}
+
+const DEFAULT_PAGE_ROWS = 12;
+
+function pageRows(ctx: KeymapContext): number {
+  return ctx.pageRows ?? DEFAULT_PAGE_ROWS;
+}
+
+/** Next pane in the tab cycle; wraps in the requested direction. */
+function nextFocus(current: UiFocus, showSidebar: boolean, reverse: boolean): UiFocus {
+  const order = focusOrder(showSidebar);
+  // The patterns editor is opened/closed with p, not part of the main cycle.
+  const effective: UiFocus = current === "patterns" ? "list" : current;
+  const idx = order.indexOf(effective);
+  const delta = reverse ? -1 : 1;
+  return order[(idx + delta + order.length) % order.length] ?? "list";
+}
+
+function focusOrder(showSidebar: boolean): UiFocus[] {
+  return showSidebar ? ["list", "sidebar", "search"] : ["list", "search"];
+}
+
+/** Collapse every group; cursor snaps to the first visible item. */
+function collapseAllGroups(state: SweepUiState): SweepUiState {
+  const rows = buildDisplayRows(state);
+  const keys = new Set<string>();
+  for (const row of rows) {
+    if (row.kind === "header") keys.add(row.groupKey);
+  }
+  if (keys.size === 0 || keys.size === state.collapsedGroups.size) return state;
+
+  const collapsedGroups = keys;
+  const nextRows = buildDisplayRows({ ...state, collapsedGroups });
+  return {
+    ...state,
+    collapsedGroups,
+    rowIndex: snapRowIndexToItem(nextRows, 0),
+  };
+}
+
+/** Jump to first (-Infinity) or last (Infinity) item row. */
+function jumpCursor(state: SweepUiState, direction: number): SweepUiState {
+  const rows = buildDisplayRows(state);
+  if (direction < 0) {
+    const first = rows.findIndex((row) => row.kind === "item");
+    return { ...state, rowIndex: Math.max(0, first) };
+  }
+  let last = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i]?.kind === "item") {
+      last = i;
+      break;
+    }
+  }
+  return last >= 0 ? { ...state, rowIndex: last } : state;
+}
+
+/** Expand the nearest collapsed header at or above the cursor. */
+function expandCurrentGroup(state: SweepUiState): SweepUiState {
+  if (state.collapsedGroups.size === 0) return state;
+  const rows = buildDisplayRows(state);
+  for (let i = Math.min(state.rowIndex, rows.length - 1); i >= 0; i--) {
+    const row = rows[i];
+    if (row?.kind === "header" && row.collapsed) {
+      return toggleGroup(state, row.groupKey);
+    }
+  }
+  return state;
+}
+
+/** Collapse the group containing the focused item (nearest header above cursor). */
+function collapseCurrentGroup(state: SweepUiState): SweepUiState {
+  const rows = buildDisplayRows(state);
+  for (let i = Math.min(state.rowIndex, rows.length - 1); i >= 0; i--) {
+    const row = rows[i];
+    if (row?.kind === "header") {
+      if (row.collapsed) return state;
+      return toggleGroup(state, row.groupKey);
+    }
+  }
+  return state;
 }
 
 export interface KeymapActions {
@@ -27,6 +113,10 @@ export interface KeymapActions {
   setPendingApply: (pending: boolean) => void;
   requestApply: () => void;
   applyPlan: () => void;
+  /** Restart the scan in place (streaming mode). Falls back to legacy rescan outcome. */
+  requestRescan?: () => void;
+  /** Cycle artifact ordering between size and name. */
+  toggleSort?: () => void;
 }
 
 export interface KeymapContext {
@@ -36,6 +126,8 @@ export interface KeymapContext {
   pendingApply: boolean;
   showSidebar: boolean;
   listSelectIndex: number;
+  /** Visible rows in the artifact pane, for half-page scrolling. */
+  pageRows?: number;
 }
 
 /** Dispatch keyboard input by modal state and focused panel. */
@@ -53,22 +145,30 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (showHelp) {
-    if (key.name === "?" || key.name === "escape") {
+    if (key.name === "?" || key.name === "escape" || key.name === "q") {
       actions.setShowHelp(false);
     }
     return;
   }
 
   if (state.focus === "search") {
+    // The input owns printable keys; only chrome keys are intercepted here.
     if (key.name === "escape" || key.name === "return") {
       actions.focusPanel("list");
     } else if (key.name === "tab") {
-      actions.focusPanel(showSidebar ? "sidebar" : "list");
+      actions.focusPanel(nextFocus(state.focus, showSidebar, false));
     }
     return;
   }
 
-  if (key.name === "escape" || key.name === "q") {
+  if (key.name === "escape") {
+    // Walk back through narrowed views; esc NEVER quits the app.
+    const step = escapeStep(state);
+    if (step) actions.mutate(() => step);
+    return;
+  }
+
+  if (key.name === "q") {
     actions.finalize({ type: "abort" });
     return;
   }
@@ -78,12 +178,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     return;
   }
 
-  if (key.name === "tab") {
-    const order: UiFocus[] = showSidebar ? ["search", "sidebar", "list"] : ["search", "list"];
-    const current = state.focus === "patterns" ? "list" : state.focus;
-    const idx = order.indexOf(current);
-    const next = order[(idx + 1) % order.length] ?? "list";
-    actions.focusPanel(next);
+  if (key.name === "tab" || key.name === "shift+tab") {
+    actions.focusPanel(
+      key.name === "tab"
+        ? nextFocus(state.focus, showSidebar, false)
+        : nextFocus(state.focus, showSidebar, true),
+    );
     return;
   }
 
@@ -98,8 +198,17 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "r") {
+    if (actions.requestRescan) {
+      actions.requestRescan();
+      return;
+    }
     const { disabledPatterns, extraPatterns } = rescanConfigFromState(state);
     actions.finalize({ type: "rescan", disabledPatterns, extraPatterns });
+    return;
+  }
+
+  if (key.name === "o") {
+    actions.toggleSort?.();
     return;
   }
 
@@ -121,6 +230,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.mutate((s) => applySidebarScope(s));
       return;
     }
+    if (key.name === "left" || key.name === "h") {
+      actions.focusPanel("list");
+      return;
+    }
     return;
   }
 
@@ -129,18 +242,59 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       const pattern = state.catalogPatterns[listSelectIndex];
       if (pattern) actions.mutate((s) => togglePattern(s, pattern));
     }
+    if (key.name === "up" || key.name === "k") {
+      actions.mutate((s) => setRowIndex(s, Math.max(0, s.rowIndex - 1)));
+    } else if (key.name === "down" || key.name === "j") {
+      actions.mutate((s) => setRowIndex(s, s.rowIndex + 1));
+    }
     return;
   }
 
   if (state.focus === "list") {
-    if (key.name === "up" || key.name === "k") {
-      actions.mutate((s) => moveCursor(s, -1));
-      return;
+    switch (key.name) {
+      case "up":
+      case "k":
+        actions.mutate((s) => moveCursor(s, -1));
+        return;
+      case "down":
+      case "j":
+        actions.mutate((s) => moveCursor(s, 1));
+        return;
+      case "g":
+      case "home":
+        actions.mutate((s) => jumpCursor(s, -Infinity));
+        return;
+      case "G":
+      case "shift+g":
+      case "end":
+        actions.mutate((s) => jumpCursor(s, Infinity));
+        return;
+      case "pageup":
+      case "ctrl+u":
+        actions.mutate((s) => moveCursor(s, -pageRows(ctx)));
+        return;
+      case "pagedown":
+      case "ctrl+d":
+        actions.mutate((s) => moveCursor(s, pageRows(ctx)));
+        return;
+      case "h":
+      case "left":
+        actions.mutate((s) => collapseCurrentGroup(s));
+        return;
+      case "l":
+      case "right":
+        actions.mutate((s) => expandCurrentGroup(s));
+        return;
+      case "e":
+        actions.mutate(expandAllGroups);
+        return;
+      case "w":
+        actions.mutate(collapseAllGroups);
+        return;
+      default:
+        break;
     }
-    if (key.name === "down" || key.name === "j") {
-      actions.mutate((s) => moveCursor(s, 1));
-      return;
-    }
+
     if (key.name === "return") {
       actions.requestApply();
       return;
@@ -158,7 +312,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "a") {
-    actions.mutate((s) => selectVisible(s, true));
+    // Bulk select is conservative by design: safe + caution only. Dangerous
+    // items require an explicit per-item toggle, which then routes through
+    // the red confirmation dialog before anything is deleted.
+    actions.mutate((s) => selectVisible(s, false));
     return;
   }
 

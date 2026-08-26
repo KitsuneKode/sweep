@@ -90,7 +90,7 @@ describe("engine contract fixtures", () => {
       assertMatchesGolden(plan, fixture.root);
     });
 
-    test(`rust engine: ${fixture.name}`, () => {
+    test(`rust engine: ${fixture.name}`, async () => {
       if (!rustAvailable()) {
         return;
       }
@@ -98,7 +98,7 @@ describe("engine contract fixtures", () => {
       expect(isRustEngineAvailable()).toBe(true);
       expect(resolveRustEngineBinary()).toBe(LOCAL_BINARY);
 
-      const plan = scanToPlanViaRust(fixture.root, {
+      const plan = await scanToPlanViaRust(fixture.root, {
         config: DEFAULT_CONFIG,
         selectionPolicy: fixture.request.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
         exact: fixture.request.exact ?? false,
@@ -120,7 +120,7 @@ describe("engine contract fixtures", () => {
       };
 
       const { plan: jsPlan } = await scanToPlan(fixture.root, DEFAULT_CONFIG, options);
-      const rustPlan = scanToPlanViaRust(fixture.root, {
+      const rustPlan = await scanToPlanViaRust(fixture.root, {
         config: DEFAULT_CONFIG,
         ...options,
       });
@@ -129,20 +129,20 @@ describe("engine contract fixtures", () => {
     });
   }
 
-  test("rust engine rejects shallow guardrail targets", () => {
+  test("rust engine rejects shallow guardrail targets", async () => {
     if (!rustAvailable()) {
       return;
     }
 
-    expect(() =>
+    await expect(
       scanToPlanViaRust("/tmp", {
         config: DEFAULT_CONFIG,
         selectionPolicy: DEFAULT_SELECTION_POLICY,
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  test("rust progressive hooks emit candidates before sizing completes", () => {
+  test("rust progressive hooks emit candidates before sizing completes", async () => {
     if (!rustAvailable()) {
       return;
     }
@@ -153,7 +153,7 @@ describe("engine contract fixtures", () => {
     }
 
     const order: string[] = [];
-    scanToPlanViaRust(basicFixture.root, {
+    await scanToPlanViaRust(basicFixture.root, {
       config: DEFAULT_CONFIG,
       selectionPolicy: DEFAULT_SELECTION_POLICY,
       onEntry: () => {
@@ -168,7 +168,7 @@ describe("engine contract fixtures", () => {
     expect(order.indexOf("entry")).toBeLessThan(order.indexOf("sized"));
   });
 
-  test("rust exact sizing marks plan summary as exact", () => {
+  test("rust exact sizing marks plan summary as exact", async () => {
     if (!rustAvailable()) {
       return;
     }
@@ -178,7 +178,7 @@ describe("engine contract fixtures", () => {
       return;
     }
 
-    const plan = scanToPlanViaRust(basicFixture.root, {
+    const plan = await scanToPlanViaRust(basicFixture.root, {
       config: DEFAULT_CONFIG,
       selectionPolicy: DEFAULT_SELECTION_POLICY,
       exact: true,
@@ -222,7 +222,7 @@ describe("rust SweepConfig forwarding", () => {
     };
 
     const { plan: jsPlan } = await scanToPlan(tempRoot, config, options);
-    const rustPlan = scanToPlanViaRust(tempRoot, { config, ...options });
+    const rustPlan = await scanToPlanViaRust(tempRoot, { config, ...options });
 
     const jsNames = jsPlan.candidates.map((candidate) => candidate.name).sort();
     const rustNames = rustPlan.candidates.map((candidate) => candidate.name).sort();

@@ -2,12 +2,13 @@ import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { useMemo } from "react";
 import { ArtifactList } from "./ArtifactList.js";
 import { ScopeSidebar } from "./ScopeSidebar.js";
-import { formatPatternRow } from "./presentation.js";
+import { buildContextCaption, formatPatternRow } from "./presentation.js";
 import type { UiDisplayRow } from "./rows.js";
 import {
   setFilter,
   setRowIndex,
   setScopeFilter,
+  toggleGroup,
   togglePattern,
   type SweepUiState,
   type UiFocus,
@@ -56,9 +57,15 @@ export function ReviewPane({
     [state.catalogPatterns, state.disabledPatterns],
   );
 
-  const riskLabel = state.riskFilter === "all" ? "all risks" : `${state.riskFilter} only`;
   const scopeEmpty = state.scopeFilter !== null && visibleItems.length === 0;
   const filterEmpty = visibleItems.length === 0 && !scopeEmpty;
+  const searchFocused = state.focus === "search";
+  const listFocused = state.focus === "list" || state.focus === "patterns";
+
+  const contextCaption = useMemo(
+    () => (listFocused ? buildContextCaption(state) : undefined),
+    [state, listFocused],
+  );
 
   return (
     <box width="100%" flexGrow={1} flexDirection="row" gap={1}>
@@ -66,16 +73,22 @@ export function ReviewPane({
         <box
           width={sidebarWidth}
           height="100%"
+          flexDirection="column"
+          borderStyle="rounded"
           border
           borderColor={state.focus === "sidebar" ? tokens.borderFocus : tokens.borderSoft}
+          title=" scopes "
           backgroundColor={tokens.bg}
+          overflow="hidden"
           paddingX={1}
-          paddingY={1}
+          paddingTop={1}
+          paddingBottom={0}
         >
           <ScopeSidebar
             state={state}
             tokens={tokens}
             focused={state.focus === "sidebar"}
+            paneWidth={sidebarWidth - 4}
             onApplyScope={(scopeFilter) => {
               onMutate((s) => setScopeFilter(s, scopeFilter));
               onFocusPanel("list");
@@ -83,66 +96,82 @@ export function ReviewPane({
           />
         </box>
       ) : null}
-      <box flexGrow={1} height="100%" flexDirection="column" gap={1}>
+      <box
+        flexGrow={1}
+        height="100%"
+        flexDirection="column"
+        gap={1}
+        borderStyle="rounded"
+        border
+        borderColor={listFocused || searchFocused ? tokens.borderFocus : tokens.borderSoft}
+        title=" artifacts "
+        {...(contextCaption ? { bottomTitle: contextCaption } : {})}
+        backgroundColor={tokens.surface}
+        overflow="hidden"
+        paddingX={1}
+        paddingTop={1}
+        paddingBottom={0}
+      >
         <input
-          focused={state.focus === "search"}
+          focused={searchFocused}
           value={filterDraft}
-          placeholder="filter artifacts… (/ to focus)"
-          onInput={(value) => {
+          placeholder="filter artifacts…  (/ to focus)"
+          backgroundColor={tokens.surfaceInset}
+          focusedBackgroundColor={tokens.surfaceInset}
+          textColor={tokens.text}
+          cursorColor={tokens.accent}
+          onInput={(value: string) => {
             onFilterDraftChange(value);
             onMutate((s) => setFilter(s, value));
           }}
+          onSubmit={() => onFocusPanel("list")}
         />
-        <box
-          flexGrow={1}
-          border
-          borderColor={
-            state.focus === "list" || state.focus === "patterns"
-              ? tokens.borderFocus
-              : tokens.borderSoft
-          }
-          backgroundColor={tokens.surface}
-          paddingX={1}
-          flexDirection="column"
-        >
-          {state.focus === "patterns" ? (
-            <select
-              focused
-              showDescription={false}
-              showScrollIndicator
-              wrapSelection={false}
-              backgroundColor={tokens.surface}
-              textColor={tokens.textSecondary}
-              selectedBackgroundColor={tokens.selectionBg}
-              selectedTextColor={tokens.accent}
-              selectedIndex={listSelectIndex}
-              options={patternOptions}
-              onChange={(index) => onMutate((s) => setRowIndex(s, index))}
-              onSelect={(_, option) => {
-                if (option?.value) onMutate((s) => togglePattern(s, option.value));
-              }}
+        {state.focus === "patterns" ? (
+          <select
+            focused
+            showDescription={false}
+            showScrollIndicator
+            wrapSelection={false}
+            backgroundColor={tokens.surface}
+            textColor={tokens.textSecondary}
+            selectedBackgroundColor={tokens.selectionBg}
+            selectedTextColor={tokens.accent}
+            selectedIndex={listSelectIndex}
+            options={patternOptions}
+            onChange={(index: number) => onMutate((s) => setRowIndex(s, index))}
+            onSelect={(_: number, option: { value?: string } | null) => {
+              const value = option?.value;
+              if (value) onMutate((s) => togglePattern(s, value));
+            }}
+          />
+        ) : scopeEmpty ? (
+          <box flexGrow={1} justifyContent="center" alignItems="center" padding={2}>
+            <text content="No artifacts in this scope." fg={tokens.textMuted} />
+          </box>
+        ) : filterEmpty ? (
+          <box flexGrow={1} justifyContent="center" alignItems="center" padding={2}>
+            <text
+              content={
+                filterDraft.length > 0
+                  ? `No artifacts match “${filterDraft}”.`
+                  : "No artifacts match the current filter."
+              }
+              fg={tokens.textMuted}
             />
-          ) : scopeEmpty ? (
-            <box flexGrow={1} justifyContent="center" alignItems="center" padding={2}>
-              <text content="No artifacts in this scope." fg={tokens.textMuted} />
-            </box>
-          ) : filterEmpty ? (
-            <box flexGrow={1} justifyContent="center" alignItems="center" padding={2}>
-              <text content="No artifacts match the current filter." fg={tokens.textMuted} />
-            </box>
-          ) : (
-            <ArtifactList
-              rows={displayRows}
-              candidatesById={candidatesById}
-              selectedIds={state.selectedIds}
-              currentRowIndex={state.rowIndex}
-              focused={state.focus === "list"}
-              tokens={tokens}
-              onToggleSelection={onToggleSelection}
-            />
-          )}
-        </box>
-        <text content={`risk filter: ${riskLabel} (1-4)`} fg={tokens.textMuted} />
+          </box>
+        ) : (
+          <ArtifactList
+            rows={displayRows}
+            candidatesById={candidatesById}
+            selectedIds={state.selectedIds}
+            currentRowIndex={state.rowIndex}
+            focused={state.focus === "list"}
+            tokens={tokens}
+            onToggleSelection={onToggleSelection}
+            onToggleGroup={(groupKey) => onMutate((s) => toggleGroup(s, groupKey))}
+            onSetCursor={(rowIndex) => onMutate((s) => setRowIndex(s, rowIndex))}
+          />
+        )}
       </box>
     </box>
   );

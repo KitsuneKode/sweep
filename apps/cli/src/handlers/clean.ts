@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
-import { printAborted, printCleanResult, printDryRunNotice } from "@kitsunekode/sweep-display";
+import { printCleanResult, printDeclined, printDryRunNotice } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { applyReviewedPlan } from "./apply-plan.js";
 import {
@@ -74,7 +74,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     }
 
     if (!(await confirmPlanDeletion(plan, { yes: opts.yes }))) {
-      printAborted();
+      printDeclined();
       exitWith(EXIT.ABORTED);
     }
 

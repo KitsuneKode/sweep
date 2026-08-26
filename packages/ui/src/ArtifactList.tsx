@@ -1,8 +1,10 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import type { ScrollBoxRenderable } from "@opentui/core";
 import type { BoxProps } from "@opentui/react";
-import { useEffect, useRef, useState } from "react";
+import { useTerminalDimensions } from "@opentui/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  artifactRowWidths,
   buildArtifactRowContent,
   buildGroupHeaderContent,
   buildListColumnHeader,
@@ -18,6 +20,8 @@ export interface ArtifactListProps {
   focused: boolean;
   tokens: ThemeTokens;
   onToggleSelection?: (candidateId: string) => void;
+  onToggleGroup?: (groupKey: string) => void;
+  onSetCursor?: (rowIndex: number) => void;
 }
 
 export function ArtifactList({
@@ -28,9 +32,18 @@ export function ArtifactList({
   focused,
   tokens,
   onToggleSelection,
+  onToggleGroup,
+  onSetCursor,
 }: ArtifactListProps) {
   const scrollRef = useRef<ScrollBoxRenderable>(null);
   const [hoveredRowIndex, setHoveredRowIndex] = useState<number | null>(null);
+  const dimensions = useTerminalDimensions();
+
+  // Pane padding + borders consume ~4 columns; size the columns off what remains.
+  const widths = useMemo(
+    () => artifactRowWidths(Math.max(40, dimensions.width - (dimensions.width >= 72 ? 40 : 6))),
+    [dimensions.width],
+  );
 
   useEffect(() => {
     if (!focused) return;
@@ -48,19 +61,21 @@ export function ArtifactList({
       height="100%"
       viewportCulling
       verticalScrollbarOptions={{
-        trackOptions: { backgroundColor: tokens.surfaceInset },
+        trackOptions: { backgroundColor: tokens.surfaceInset, foregroundColor: tokens.border },
       }}
     >
       <box width="100%" paddingBottom={1}>
-        <text content={buildListColumnHeader(tokens)} />
+        <text content={buildListColumnHeader(widths, tokens)} />
       </box>
       {rows.map((row, index) => {
         if (row.kind === "header") {
           return (
             <box
               key={`header-${row.groupKey}-${index}`}
+              id={`artifact-row-${index}`}
               width="100%"
               paddingTop={index > 0 ? 1 : 0}
+              onMouseDown={() => onToggleGroup?.(row.groupKey)}
             >
               <text content={buildGroupHeaderContent(row, tokens)} />
             </box>
@@ -79,7 +94,14 @@ export function ArtifactList({
           selectable: true,
           onMouseMove: () => setHoveredRowIndex(index),
           onMouseLeave: () => setHoveredRowIndex((prev) => (prev === index ? null : prev)),
-          onMouseDown: () => onToggleSelection?.(candidate.id),
+          // First click moves the cursor; clicking the focused row toggles it.
+          onMouseDown: () => {
+            if (isCurrent) {
+              onToggleSelection?.(candidate.id);
+            } else {
+              onSetCursor?.(index);
+            }
+          },
         } as BoxProps;
 
         return (
@@ -90,7 +112,9 @@ export function ArtifactList({
             {...(rowBg ? { backgroundColor: rowBg } : {})}
             {...mouseProps}
           >
-            <text content={buildArtifactRowContent(candidate, isSelected, isCurrent, tokens)} />
+            <text
+              content={buildArtifactRowContent(candidate, isSelected, isCurrent, widths, tokens)}
+            />
           </box>
         );
       })}

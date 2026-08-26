@@ -13,6 +13,7 @@ export interface ArtifactScopeGroup {
 export function groupCandidatesByScope(
   targetDir: string,
   candidates: ScanCandidate[],
+  compareItems?: (a: ScanCandidate, b: ScanCandidate) => number,
 ): ArtifactScopeGroup[] {
   const buckets = new Map<string, { label: string; ids: string[] }>();
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
@@ -34,9 +35,14 @@ export function groupCandidatesByScope(
       key,
       label: bucket.label,
       candidateIds: bucket.ids.sort((leftId, rightId) => {
-        const left = byId.get(leftId)?.name ?? "";
-        const right = byId.get(rightId)?.name ?? "";
-        return left.localeCompare(right);
+        if (compareItems) {
+          const left = byId.get(leftId);
+          const right = byId.get(rightId);
+          if (left && right) return compareItems(left, right);
+        }
+        const leftName = byId.get(leftId)?.name ?? "";
+        const rightName = byId.get(rightId)?.name ?? "";
+        return leftName.localeCompare(rightName);
       }),
     }));
 }

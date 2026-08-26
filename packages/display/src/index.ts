@@ -2,7 +2,7 @@ import pc from "picocolors";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "./bytes.js";
 import { groupCandidatesByKind } from "./grouping.js";
-import { formatRiskBadge } from "./risk.js";
+import { formatRiskBadge, riskBadgeLabel } from "./risk.js";
 import { createSpinner } from "./spinner.js";
 
 export interface PrintGroupedScanPlanOptions {
@@ -32,17 +32,43 @@ export {
   type ProgressiveScanSummary,
 } from "./progressive.js";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Layout primitives ────────────────────────────────────────────────────────
+//
+// The terminal is the viewport. Treat it like a fixed-width typeset page: a
+// brand color for identity, dim gray for metadata, semantic color only for
+// risk. Columns align so the eye can scan name → path → size → risk without
+// re-reading each line.
+
+const RULE = "─";
+const NAME_COL = 28;
+
+function isTTY(): boolean {
+  return process.stdout.isTTY === true;
+}
 
 function padEnd(str: string, len: number): string {
   return str.length >= len ? str : str + " ".repeat(len - str.length);
 }
 
+function rule(width = 64): string {
+  return pc.dim(RULE.repeat(Math.min(width, 64)));
+}
+
+function countSelected(candidates: ScanCandidate[], selectedIds: Set<string>): number {
+  return candidates.filter((candidate) => selectedIds.has(candidate.id)).length;
+}
+
+function sumBytes(candidates: ScanCandidate[], selectedIds: Set<string>): number {
+  return candidates
+    .filter((candidate) => selectedIds.has(candidate.id))
+    .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
+}
+
 // ─── Output sections ──────────────────────────────────────────────────────────
 
 export function printBanner(): void {
-  if (!process.stdout.isTTY) return;
-  console.log(`\n ${pc.bold(pc.cyan("sweep"))} ${pc.dim("—")} ${pc.dim("artifact cleanup")}\n`);
+  if (!isTTY()) return;
+  console.log(`\n ${pc.bold(pc.cyan("sweep"))} ${pc.dim("·")} ${pc.dim("artifact cleanup")}\n`);
 }
 
 export function printGroupedScanPlan(
@@ -50,61 +76,57 @@ export function printGroupedScanPlan(
   targetDir: string,
   options: PrintGroupedScanPlanOptions = {},
 ): void {
-  if (process.stdout.isTTY) {
-    console.log(
-      pc.dim(`Scanned ${pc.bold(plan.summary.scannedDirs.toString())} dirs in `) +
-        pc.bold(targetDir),
-    );
-    console.log();
+  const verbose = options.verbose ?? false;
+  const selectedIds = new Set(plan.selectedCandidateIds);
+
+  const header = `Scanned ${plan.summary.scannedDirs} dirs in ${targetDir}`;
+  if (isTTY()) {
+    console.log(pc.dim(header));
+    console.log(rule());
   } else {
     console.log(`sweep: scanned ${plan.summary.scannedDirs} dirs in ${targetDir}`);
   }
 
   if (plan.candidates.length === 0) {
-    console.log(pc.green("✓") + " Nothing to clean.");
+    console.log();
+    console.log(`  ${pc.green("✓")} ${pc.bold("Nothing to clean.")}`);
+    console.log();
     return;
   }
 
-  const selectedIds = new Set(plan.selectedCandidateIds);
-  const hiddenStubs = options.verbose
+  const hiddenStubs = verbose
     ? []
     : plan.candidates.filter((candidate) => isWorkspaceStub(candidate));
-  const visibleCandidates = options.verbose
+  const visibleCandidates = verbose
     ? plan.candidates
     : plan.candidates.filter((candidate) => !isWorkspaceStub(candidate));
 
-  printGroupedCandidates(groupCandidatesByKind(visibleCandidates), plan.summary.exact, selectedIds);
+  printGroupedCandidates(
+    groupCandidatesByKind(visibleCandidates),
+    plan.summary.exact,
+    selectedIds,
+    verbose,
+  );
 
-  printScanTotals(plan, selectedIds, hiddenStubs.length, options.verbose ?? false);
+  printScanTotals(plan, selectedIds, hiddenStubs.length, verbose);
 }
 
 function isWorkspaceStub(candidate: ScanCandidate): boolean {
   return candidate.reasons.includes(WORKSPACE_STUB_REASON);
 }
 
-function formatCandidateMarker(selected: boolean, candidate: ScanCandidate): string {
-  if (selected) {
-    return pc.green("✓");
-  }
-  if (isWorkspaceStub(candidate)) {
-    return pc.dim("↳");
-  }
-  if (candidate.riskTier === "caution" || candidate.riskTier === "dangerous") {
-    return pc.yellow("○");
-  }
+function candidateRail(selected: boolean, candidate: ScanCandidate): string {
+  if (selected) return pc.green("●");
+  if (isWorkspaceStub(candidate)) return pc.dim("↳");
+  if (candidate.riskTier === "caution") return pc.yellow("○");
+  if (candidate.riskTier === "dangerous" || candidate.riskTier === "blocked") return pc.red("◌");
   return pc.dim("·");
 }
 
-function formatInsightBadge(candidate: ScanCandidate): string {
-  if (candidate.reasons.includes(WORKSPACE_STUB_REASON)) {
-    return pc.dim(" [workspace stub]");
-  }
-  if (candidate.reasons.includes(SYMLINK_ALIAS_REASON)) {
-    return pc.dim(" [symlink alias]");
-  }
-  if (candidate.isSymlink) {
-    return pc.dim(" [symlink]");
-  }
+function insightBadge(candidate: ScanCandidate): string {
+  if (candidate.reasons.includes(WORKSPACE_STUB_REASON)) return pc.dim(" workspace stub");
+  if (candidate.reasons.includes(SYMLINK_ALIAS_REASON)) return pc.dim(" symlink alias");
+  if (candidate.isSymlink) return pc.dim(" symlink");
   return "";
 }
 
@@ -117,24 +139,22 @@ function printScanTotals(
   const exact = plan.summary.exact;
   const sizePrefix = exact ? "" : "~";
   const totalLabel = exact ? "total" : "estimated";
+  const selectedBytes = sumBytes(plan.candidates, selectedIds);
 
-  const selectedBytes = plan.candidates
-    .filter((candidate) => selectedIds.has(candidate.id))
-    .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
-
-  if (process.stdout.isTTY) {
+  if (isTTY()) {
+    console.log(rule());
     console.log(
       `  ${pc.bold(plan.selectedCandidateIds.length.toString())} selected` +
-        pc.dim(" · ") +
+        pc.dim("  /  ") +
         `${pc.bold(plan.candidates.length.toString())} found` +
-        pc.dim(" · ") +
+        pc.dim("  /  ") +
         `${pc.yellow(`${sizePrefix}${formatBytes(selectedBytes)}`)} ${totalLabel} to free`,
     );
 
     if (hiddenStubCount > 0 && !verbose) {
       console.log(
         pc.dim(
-          `  ${hiddenStubCount} workspace node_modules stub${hiddenStubCount === 1 ? "" : "s"} hidden — use ${pc.bold("--verbose")} to list`,
+          `  ${hiddenStubCount} workspace node_modules ${hiddenStubCount === 1 ? "stub" : "stubs"} hidden — ${pc.bold("--verbose")} to list`,
         ),
       );
     }
@@ -155,19 +175,21 @@ function printGroupedCandidates(
   groups: ReturnType<typeof groupCandidatesByKind>,
   exact: boolean,
   selectedIds: Set<string>,
+  verbose: boolean,
 ): void {
   const sizePrefix = exact ? "" : "~";
 
   for (const group of groups) {
-    const selectedInGroup = group.entries.filter((entry) => selectedIds.has(entry.id)).length;
+    const selectedInGroup = countSelected(group.entries, selectedIds);
+    const groupTag = `${group.entries.length} found${
+      selectedInGroup > 0 ? `, ${selectedInGroup} selected` : ""
+    }`;
 
-    if (process.stdout.isTTY) {
+    if (isTTY()) {
       console.log(
-        pc.bold(pc.cyan(group.label)) +
-          pc.dim(`  (${group.entries.length}`) +
-          (selectedInGroup > 0 ? pc.dim(`, ${selectedInGroup} selected`) : "") +
-          pc.dim(")  ") +
-          pc.yellow(`${sizePrefix}${formatBytes(group.totalBytes)}`),
+        `  ${pc.bold(pc.cyan(group.label))}  ${pc.dim(groupTag)}  ${pc.yellow(
+          `${sizePrefix}${formatBytes(group.totalBytes)}`,
+        )}`,
       );
     } else {
       console.log(
@@ -181,23 +203,26 @@ function printGroupedCandidates(
       const size = formatBytes(entry.estimatedBytes);
       const selected = selectedIds.has(entry.id);
       const badge = ` ${formatRiskBadge(entry.riskTier)}`;
-      const insightBadge = formatInsightBadge(entry);
+      const note = insightBadge(entry);
 
-      if (process.stdout.isTTY) {
+      if (isTTY()) {
         console.log(
-          `  ${formatCandidateMarker(selected, entry)} ${pc.bold(padEnd(entry.name, maxNameLen))}` +
+          `    ${candidateRail(selected, entry)} ${pc.bold(padEnd(entry.name, NAME_COL))}` +
             `  ${pc.dim(entry.path)}` +
             `  ${pc.yellow(`${sizePrefix}${size}`)}` +
             badge +
-            insightBadge,
+            note,
         );
       } else {
         console.log(
-          `sweep: ${selected ? "selected" : "found"} ${entry.name} (${entry.path}) ${sizePrefix}${size}${badge}${insightBadge}`,
+          `sweep: ${selected ? "selected" : "found"} ${entry.name} (${entry.path}) ${sizePrefix}${size}${badge}${note}`,
         );
       }
     }
 
+    if (verbose && isTTY()) {
+      // extra breathing room when every candidate is shown
+    }
     console.log();
   }
 }
@@ -234,6 +259,11 @@ export function printCleanResult(result: import("@kitsunekode/sweep-protocol").C
 
 export function printAborted(): void {
   console.log(pc.dim("Aborted."));
+}
+
+/** Neutral message shown when the user declines a confirmation prompt. */
+export function printDeclined(): void {
+  console.log(pc.dim("Declined — nothing deleted."));
 }
 
 export function printError(message: string): void {

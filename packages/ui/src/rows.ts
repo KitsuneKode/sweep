@@ -1,6 +1,6 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { groupCandidatesByScope } from "./grouping.js";
-import type { SweepUiState } from "./state.js";
+import type { SweepUiState, UiSortBy } from "./state.js";
 import { getVisibleCandidates } from "./state.js";
 
 export type UiDisplayRow =
@@ -10,17 +10,32 @@ export type UiDisplayRow =
       label: string;
       itemCount: number;
       selectedCount: number;
+      collapsed: boolean;
     }
   | {
       kind: "item";
       candidateId: string;
     };
 
+function itemComparator(sortBy: UiSortBy): (a: ScanCandidate, b: ScanCandidate) => number {
+  if (sortBy === "name") {
+    return (a, b) => a.name.localeCompare(b.name);
+  }
+  // Largest first — ncdu-style triage order; ties break alphabetically.
+  return (a, b) => b.estimatedBytes - a.estimatedBytes || a.name.localeCompare(b.name);
+}
+
 export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
   const visible = getVisibleCandidates(state);
-  const groups = groupCandidatesByScope(state.targetDir, visible);
+  const compare = itemComparator(state.sortBy);
+  const groups = groupCandidatesByScope(state.targetDir, visible, compare);
   const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
   const rows: UiDisplayRow[] = [];
+
+  if (state.sortBy === "size") {
+    // Heaviest scope first so the top of the list is the biggest win.
+    groups.sort((left, right) => groupBytes(right, byId) - groupBytes(left, byId));
+  }
 
   for (const group of groups) {
     const groupCandidates = group.candidateIds
@@ -31,13 +46,18 @@ export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
       state.selectedIds.has(candidate.id),
     ).length;
 
+    const collapsed = state.collapsedGroups.has(group.key);
+
     rows.push({
       kind: "header",
       groupKey: group.key,
       label: group.label,
       itemCount: groupCandidates.length,
       selectedCount,
+      collapsed,
     });
+
+    if (collapsed) continue;
 
     for (const candidate of groupCandidates) {
       rows.push({ kind: "item", candidateId: candidate.id });
@@ -45,6 +65,14 @@ export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
   }
 
   return rows;
+}
+
+function groupBytes(group: { candidateIds: string[] }, byId: Map<string, ScanCandidate>): number {
+  let total = 0;
+  for (const id of group.candidateIds) {
+    total += byId.get(id)?.estimatedBytes ?? 0;
+  }
+  return total;
 }
 
 export function firstItemRowIndex(rows: UiDisplayRow[]): number {

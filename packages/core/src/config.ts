@@ -183,11 +183,50 @@ function subtractPatterns(patterns: string[], disabled: string[]): string[] {
 
 // ─── Ignore matching ──────────────────────────────────────────────────────────
 
+/** Per-entry ignore check produced by compileIgnoreMatcher (targetDir pre-resolved). */
+export type IgnoreMatcher = (entryPath: string, entryName: string) => boolean;
+
+/**
+ * Compile ignore patterns once per scan so the hot walk path avoids
+ * re-resolving targetDir and re-scanning pattern strings for every entry.
+ *
+ * Returns null when there are no ignore rules — callers skip the check entirely.
+ */
+export function compileIgnoreMatcher(targetDir: string, ignore: string[]): IgnoreMatcher | null {
+  if (ignore.length === 0) return null;
+
+  const root = resolve(targetDir);
+  const exactNames = new Set<string>();
+  const pathPrefixes: string[] = [];
+
+  for (const pattern of ignore) {
+    if (pattern.includes("/")) {
+      const normalized = pattern.replace(/\/+$/, "");
+      if (normalized.length > 0) pathPrefixes.push(normalized);
+    } else {
+      exactNames.add(pattern);
+    }
+  }
+
+  return (entryPath, entryName) => {
+    if (exactNames.has(entryName)) return true;
+    if (pathPrefixes.length === 0) return false;
+
+    const rel = relative(root, entryPath).replace(/\\/g, "/");
+    for (const prefix of pathPrefixes) {
+      if (rel === prefix || rel.startsWith(`${prefix}/`)) return true;
+    }
+    return false;
+  };
+}
+
 /**
  * Returns true when a matched artifact should be skipped.
  *
  * - Path-style ignore (`packages/vendor`): matches relative path prefix under targetDir.
  * - Name-style ignore (`dist`): matches the entry basename exactly.
+ *
+ * Prefer compileIgnoreMatcher() in scan loops — this form re-resolves paths per call.
  */
 export function isIgnoredEntry(
   targetDir: string,
