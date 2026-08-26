@@ -336,11 +336,16 @@ export function buildSidebarLine(
   bytesWidth: number,
   tokens: ThemeTokens,
   selectedCount = 0,
+  maxLabelWidth = 14,
 ): StyledText {
   const marker = active ? fg(tokens.accent)("›") : fg(tokens.textDim)(" ");
   const countText = String(count).padStart(countWidth);
   const bytesText = compactBytesLabel(bytes).padStart(bytesWidth);
-  const labelText = label.length > 14 ? `${label.slice(0, 13)}…` : label.padEnd(14);
+  const effectiveMax = Math.max(6, maxLabelWidth);
+  const labelText =
+    label.length > effectiveMax
+      ? `${label.slice(0, effectiveMax - 1)}…`
+      : label.padEnd(effectiveMax);
   const labelColor = active ? tokens.text : tokens.textSecondary;
   const base = t`${marker} ${active ? bold(fg(labelColor)(labelText)) : fg(labelColor)(labelText)}  ${fg(tokens.textMuted)(countText)}  ${fg(active ? tokens.textSecondary : tokens.textDim)(bytesText)}`;
 

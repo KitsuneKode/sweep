@@ -135,6 +135,7 @@ export async function runSweepUiStreaming(
               exact: false,
               onEntry: record,
               onEntrySized: record,
+              signal,
             });
             scannedDirs = plan.summary.scannedDirs;
           } else {

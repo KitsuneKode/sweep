@@ -65,7 +65,7 @@ type SweepUiOutcome =
   | { type: "rescan"; disabledPatterns: string[]; extraPatterns: string[] }
   | { type: "abort" };
 
-interface SweepUiModule {
+export interface SweepUiModule {
   runSweepUiStreaming: (options: {
     targetDir: string;
     config: import("@kitsunekode/sweep-protocol").SweepConfig;
@@ -86,10 +86,18 @@ interface SweepUiModule {
  * the bundled `sweep.js`; running from source falls back to the workspace
  * package so `sweep ui` works in development too.
  *
- * The fallback specifier is held in a variable so neither TypeScript nor the
- * bundler statically resolves the JSX UI module into the Node CLI.
+ * Standalone compiled binaries register the UI module statically at startup
+ * (see bin-standalone.ts) so Bun embeds the UI code and OpenTUI native assets;
+ * that registration short-circuits the dynamic resolution below.
  */
+export function registerUiModule(mod: SweepUiModule): void {
+  registeredUiModule = mod;
+}
+
+let registeredUiModule: SweepUiModule | null = null;
+
 async function loadSweepUi(): Promise<SweepUiModule> {
+  if (registeredUiModule) return registeredUiModule;
   const sibling = new URL("./sweep-ui.js", import.meta.url).href;
   const workspacePackage = "@kitsunekode/sweep-ui";
   try {

@@ -1,4 +1,5 @@
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { useTerminalDimensions } from "@opentui/react";
 import { useMemo } from "react";
 import { ArtifactList } from "./ArtifactList.js";
 import { ScopeSidebar } from "./ScopeSidebar.js";
@@ -57,10 +58,19 @@ export function ReviewPane({
     [state.catalogPatterns, state.disabledPatterns],
   );
 
+  const dimensions = useTerminalDimensions();
+  // Artifact pane inner width: total terminal width minus sidebar (if shown),
+  // gap between panes (1), outer padding (2), pane border+padding (4).
+  const artifactPaneInnerWidth = Math.max(
+    36,
+    dimensions.width - (showSidebar ? sidebarWidth + 1 : 0) - 2 - 4,
+  );
+
   const scopeEmpty = state.scopeFilter !== null && visibleItems.length === 0;
   const filterEmpty = visibleItems.length === 0 && !scopeEmpty;
   const searchFocused = state.focus === "search";
   const listFocused = state.focus === "list" || state.focus === "patterns";
+  const isScanning = state.scanning && state.candidates.length === 0;
 
   const contextCaption = useMemo(
     () => (listFocused ? buildContextCaption(state) : undefined),
@@ -144,6 +154,14 @@ export function ReviewPane({
               if (value) onMutate((s) => togglePattern(s, value));
             }}
           />
+        ) : isScanning ? (
+          <box flexGrow={1} justifyContent="center" alignItems="center" padding={2}>
+            <text
+              content={`◆ Scanning${".".repeat((Math.floor(Date.now() / 400) % 3) + 1).padEnd(3)}`}
+              fg={tokens.accent}
+            />
+            <text content="Artifacts will appear as they are discovered." fg={tokens.textMuted} />
+          </box>
         ) : scopeEmpty ? (
           <box flexGrow={1} justifyContent="center" alignItems="center" padding={2}>
             <text content="No artifacts in this scope." fg={tokens.textMuted} />
@@ -153,7 +171,7 @@ export function ReviewPane({
             <text
               content={
                 filterDraft.length > 0
-                  ? `No artifacts match “${filterDraft}”.`
+                  ? `No artifacts match "${filterDraft}".`
                   : "No artifacts match the current filter."
               }
               fg={tokens.textMuted}
@@ -167,6 +185,7 @@ export function ReviewPane({
             currentRowIndex={state.rowIndex}
             focused={state.focus === "list"}
             tokens={tokens}
+            paneWidth={artifactPaneInnerWidth}
             onToggleSelection={onToggleSelection}
             onToggleGroup={(groupKey) => onMutate((s) => toggleGroup(s, groupKey))}
             onSetCursor={(rowIndex) => onMutate((s) => setRowIndex(s, rowIndex))}

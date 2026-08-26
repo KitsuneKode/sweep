@@ -7,7 +7,8 @@ As of the current code:
 - project config file name: `.sweeprc`
 - project config format: JSON
 - explicit config path: `--config <path>`
-- global config path: `~/.config/sweep/config.json` (`%APPDATA%\sweep\config.json` on Windows)
+- global config path: `~/.config/sweep/config.json`
+  (honors `XDG_CONFIG_HOME`; `%APPDATA%\sweep\config.json` on Windows)
 
 Config resolution order (scalars — highest priority wins):
 
@@ -46,7 +47,8 @@ Example `.sweeprc`:
 ```
 
 Use `disabledPatterns` to turn off a default like `dist`. Use `ignore` to skip specific
-matches (by artifact name or path prefix such as `packages/vendor`).
+matches (by artifact name or path prefix such as `packages/vendor`). A trailing
+slash is normalized, so `ignore: ["dist/"]` also skips a top-level `dist` entry.
 
 ### Filename rationale
 

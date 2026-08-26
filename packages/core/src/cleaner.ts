@@ -12,7 +12,7 @@ const DELETE_CONCURRENCY = 4;
  */
 export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
   // Sort shallowest paths first
-  const sorted = [...entries].sort((a, b) => a.path.length - b.path.length);
+  const sorted = [...entries].sort((a, b) => a.path.localeCompare(b.path));
   const retained: ScanEntry[] = [];
 
   for (const entry of sorted) {

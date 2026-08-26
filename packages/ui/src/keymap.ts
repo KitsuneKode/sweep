@@ -7,6 +7,7 @@ import {
   moveCursor,
   moveSidebarCursor,
   rescanConfigFromState,
+  selectSafeOnly,
   selectVisible,
   setRiskFilter,
   setThemeMode,
@@ -318,7 +319,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "s") {
-    actions.mutate((s) => selectVisible(s, false));
+    actions.mutate((s) => selectSafeOnly(s));
     return;
   }
 

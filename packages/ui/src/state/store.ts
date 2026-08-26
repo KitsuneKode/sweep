@@ -351,6 +351,17 @@ export function countSelectedDangerous(state: SweepUiState): number {
   return count;
 }
 
+export function selectSafeOnly(state: SweepUiState): SweepUiState {
+  const selectedIds = new Set(state.selectedIds);
+  for (const candidate of getVisibleCandidates(state)) {
+    if (candidate.riskTier === "safe") {
+      selectedIds.add(candidate.id);
+    }
+  }
+
+  return { ...state, selectedIds };
+}
+
 export function selectVisible(state: SweepUiState, includeDangerous: boolean): SweepUiState {
   const selectedIds = new Set(state.selectedIds);
   for (const candidate of getVisibleCandidates(state)) {
@@ -405,14 +416,21 @@ export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan 
     return candidate !== undefined && candidate.riskTier !== "blocked";
   });
 
+  const totalBytes = state.candidates.reduce((sum, c) => sum + c.estimatedBytes, 0);
+  const selectedBytes = state.candidates
+    .filter((c) => selectedCandidateIds.includes(c.id))
+    .reduce((sum, c) => sum + c.estimatedBytes, 0);
+
   return {
     ...plan,
+    targetDir: state.targetDir,
     candidates: state.candidates.slice(),
     selectedCandidateIds,
     summary: {
       ...plan.summary,
       candidateCount: state.candidates.length,
       selectedCount: selectedCandidateIds.length,
+      estimatedTotalBytes: totalBytes,
     },
   };
 }

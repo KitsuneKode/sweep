@@ -16,6 +16,7 @@ export {
   moveSidebarCursor,
   applySidebarScope,
   rescanConfigFromState,
+  selectSafeOnly,
   selectVisible,
   setFilter,
   setFocus,

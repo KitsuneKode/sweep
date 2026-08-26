@@ -54,12 +54,14 @@ jobs:
             win-x64) out="sweep-${{ matrix.id }}.exe" ;;
             *)       out="sweep-${{ matrix.id }}" ;;
           esac
-          bun build --compile apps/cli/src/bin.ts --outfile "$out"
+          bun run scripts/build-standalone.ts "" "$out"
           echo "OUT=$out" >> "$GITHUB_ENV"
 
-      - name: Smoke (--version)
+      - name: Smoke — embedded UI probe + version
         shell: bash
-        run: "./${OUT} --version"
+        run: |
+          "./$OUT" --ui-probe
+          "./$OUT" --version
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -28,11 +28,16 @@ The optional Rust engine ships separately via
 | `sweep-linux-x64`    | ubuntu-latest  | glibc         |
 | `sweep-win-x64`      | windows-latest | `.exe`        |
 
-Each is `bun build --compile apps/cli/dist/sweep.js` — Bun embeds OpenTUI's
-native library, worker, and grammars per the official standalone-executables
-guide, so no asset extraction or `OTUI_ASSET_ROOT` is required at runtime.
-Every binary runs a `--version` smoke test before upload; all four are
+Each is built by `scripts/build-standalone.ts` from `apps/cli/src/bin-standalone.ts`
+— an entrypoint that imports the UI module statically and registers it before the
+CLI boots. The static graph makes Bun embed the UI code and OpenTUI's native
+library/worker/grammars, so no asset extraction or `OTUI_ASSET_ROOT` is needed at
+runtime. Every binary runs two smoke tests before upload: `--ui-probe` (proves the
+embedded UI graph loads, including native dlopen) and `--version`. All four are
 attached to the tag's GitHub release.
+
+The npm package keeps the dynamic `sweep-ui.js` sibling loading — only standalone
+binaries use the static entrypoint.
 
 ### Cut a binary release
 

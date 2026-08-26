@@ -180,6 +180,10 @@ async function runEngineAsync(
     });
 
     if (stdin !== undefined) {
+      // Engine exiting early (bad config, bad args) can close the pipe while a
+      // large payload is mid-write; swallow EPIPE here so the close-handler's
+      // stderr-based error is what surfaces instead of an unhandled 'error'.
+      proc.stdin.on("error", () => {});
       proc.stdin.write(stdin);
     }
     proc.stdin.end();

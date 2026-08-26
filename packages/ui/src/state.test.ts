@@ -10,6 +10,7 @@ import {
   getVisibleCandidates,
   moveCursor,
   resetForRescan,
+  selectSafeOnly,
   selectVisible,
   setFilter,
   setScopeFilter,
@@ -134,6 +135,12 @@ describe("sweep ui state", () => {
 
   test("selectVisible excludes dangerous and blocked candidates by default", () => {
     const state = selectVisible(createUiState(createPlan()), false);
+
+    expect([...state.selectedIds]).toEqual(["cand_safe"]);
+  });
+
+  test("selectSafeOnly selects only safe risk tier candidates", () => {
+    const state = selectSafeOnly(createUiState(createPlan()));
 
     expect([...state.selectedIds]).toEqual(["cand_safe"]);
   });

@@ -40,6 +40,8 @@ export function ScopeSidebar({
 
   const countWidth = useMemo(() => sidebarCountWidth(rows), [rows]);
   const bytesWidth = useMemo(() => sidebarBytesWidth(rows), [rows]);
+  // Label gets the remaining space after marker(2) + count + bytes + gaps(6).
+  const maxLabelWidth = Math.max(8, paneWidth - countWidth - bytesWidth - 8);
   const totalBytes = rows[0]?.bytes ?? 0;
   const selectedBytes = rows[0]?.selectedBytes ?? 0;
   const cursorIndex = focused
@@ -93,6 +95,7 @@ export function ScopeSidebar({
                     bytesWidth,
                     tokens,
                     row.selectedCount,
+                    maxLabelWidth,
                   )}
                 />
               </box>
@@ -115,7 +118,27 @@ function ReclaimPanel({
   totalBytes: number;
   width: number;
 }) {
+  const hasSelection = selectedBytes > 0 && totalBytes > 0;
   const percent = totalBytes > 0 ? Math.round((selectedBytes / totalBytes) * 100) : 0;
+
+  if (!hasSelection) {
+    // Nothing selected — show a quiet prompt instead of an empty 0% meter.
+    return (
+      <box
+        width="100%"
+        height={3}
+        flexDirection="column"
+        paddingLeft={1}
+        backgroundColor={tokens.bg}
+        flexShrink={0}
+      >
+        <text content={t`${bold(fg(tokens.textDim)("RECLAIM"))}`} />
+        <text content={t`${fg(tokens.meterTrack)("░".repeat(Math.max(8, width - 4)))}`} />
+        <text content={t`${fg(tokens.textDim)(`0 of ${compactBytesLabel(totalBytes)}`)}`} />
+      </box>
+    );
+  }
+
   const percentLabel = `${String(percent).padStart(3, " ")}%`;
   const barWidth = Math.max(8, width - percentLabel.length - 1);
 
@@ -128,19 +151,15 @@ function ReclaimPanel({
       backgroundColor={tokens.bg}
       flexShrink={0}
     >
-      <text content={t`${bold(fg(tokens.textMuted)("RECLAIM"))}`} />
+      <text content={t`${bold(fg(tokens.accent)("RECLAIM"))}`} />
       <text
         content={concatStyled(
           buildMeter(selectedBytes, totalBytes, barWidth, tokens),
-          t` ${fg(tokens.textSecondary)(percentLabel)}`,
+          t` ${fg(tokens.positive)(percentLabel)}`,
         )}
       />
       <text
-        content={
-          selectedBytes > 0
-            ? t`${fg(tokens.positive)(compactBytesLabel(selectedBytes))} ${fg(tokens.textDim)("of")} ${fg(tokens.textMuted)(compactBytesLabel(totalBytes))}`
-            : t`${fg(tokens.textDim)(`0 of ${compactBytesLabel(totalBytes)}`)}`
-        }
+        content={t`${fg(tokens.positive)(compactBytesLabel(selectedBytes))} ${fg(tokens.textDim)("of")} ${fg(tokens.textMuted)(compactBytesLabel(totalBytes))}`}
       />
     </box>
   );

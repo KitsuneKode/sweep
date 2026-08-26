@@ -213,10 +213,11 @@ Layered guarantees:
 | Code | Meaning                          |
 | ---- | -------------------------------- |
 | `0`  | Success                          |
-| `1`  | User aborted / doctor warnings   |
+| `1`  | User aborted                     |
 | `2`  | Guardrail violation              |
 | `3`  | Config parse or validation error |
 | `4`  | Filesystem error during deletion |
+| `5`  | Doctor warnings                  |
 
 ---
 

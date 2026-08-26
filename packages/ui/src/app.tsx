@@ -337,7 +337,12 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
       {/* Header band */}
       <box width="100%" flexDirection="row" justifyContent="space-between" paddingBottom={1}>
         <text content={buildBrandLine(tokens)} />
-        <text content={headerStats} />
+        <box flexDirection="row" gap={2}>
+          {state.scanning ? (
+            <text content={t`${fg(tokens.accent)(`scanning… ${state.candidates.length} found`)}`} />
+          ) : null}
+          <text content={headerStats} />
+        </box>
       </box>
 
       <ReviewPane
@@ -376,9 +381,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
           ) : null}
         </box>
         <box paddingRight={1}>
-          <text
-            content={scanError ? t`${fg(tokens.danger)(`scan failed — r to retry`)}` : tallyContent}
-          />
+          <text content={tallyContent} />
         </box>
       </box>
 
@@ -391,6 +394,17 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
           dangerousCount={dangerousSelected}
           {...(dryRun ? { dryRun: true } : {})}
         />
+      ) : null}
+      {scanError ? (
+        <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
+          <text content={t`${fg(tokens.danger)("The scan engine reported an error:")}`} />
+          <text content="" />
+          <text content={scanError} fg={tokens.text} />
+          <text content="" />
+          <text
+            content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
+          />
+        </Modal>
       ) : null}
     </box>
   );

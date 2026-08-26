@@ -235,10 +235,9 @@ export function compileIgnoreMatcher(targetDir: string, ignore: string[]): Ignor
 /**
  * Returns true when a matched artifact should be skipped.
  *
- * - Path-style ignore (`packages/vendor`): matches relative path prefix under targetDir.
- * - Name-style ignore (`dist`): matches the entry basename exactly.
- *
- * Prefer compileIgnoreMatcher() in scan loops — this form re-resolves paths per call.
+ * Delegates to compileIgnoreMatcher() so the two implementations cannot drift;
+ * note the compiled matcher normalizes trailing slashes, so `ignore: ["dist/"]`
+ * also skips a top-level `dist` entry (the pre-compiled form did not).
  */
 export function isIgnoredEntry(
   targetDir: string,
@@ -246,24 +245,8 @@ export function isIgnoredEntry(
   entryName: string,
   ignore: string[],
 ): boolean {
-  if (ignore.length === 0) return false;
-
-  const rel = relative(resolve(targetDir), resolve(entryPath)).replace(/\\/g, "/");
-
-  for (const pattern of ignore) {
-    if (pattern.includes("/")) {
-      if (rel === pattern || rel.startsWith(`${pattern}/`)) {
-        return true;
-      }
-      continue;
-    }
-
-    if (entryName === pattern) {
-      return true;
-    }
-  }
-
-  return false;
+  const match = compileIgnoreMatcher(targetDir, ignore);
+  return match ? match(entryPath, entryName) : false;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
