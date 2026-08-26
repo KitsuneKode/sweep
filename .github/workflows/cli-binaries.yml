@@ -54,7 +54,7 @@ jobs:
             win-x64) out="sweep-${{ matrix.id }}.exe" ;;
             *)       out="sweep-${{ matrix.id }}" ;;
           esac
-          bun build --compile apps/cli/dist/sweep.js --outfile "$out"
+          bun build --compile apps/cli/src/bin.ts --outfile "$out"
           echo "OUT=$out" >> "$GITHUB_ENV"
 
       - name: Smoke (--version)

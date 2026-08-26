@@ -407,9 +407,11 @@ export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan 
 
   return {
     ...plan,
+    candidates: state.candidates.slice(),
     selectedCandidateIds,
     summary: {
       ...plan.summary,
+      candidateCount: state.candidates.length,
       selectedCount: selectedCandidateIds.length,
     },
   };

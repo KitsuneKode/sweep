@@ -19,6 +19,7 @@ export interface ArtifactListProps {
   currentRowIndex: number;
   focused: boolean;
   tokens: ThemeTokens;
+  paneWidth?: number;
   onToggleSelection?: (candidateId: string) => void;
   onToggleGroup?: (groupKey: string) => void;
   onSetCursor?: (rowIndex: number) => void;
@@ -31,6 +32,7 @@ export function ArtifactList({
   currentRowIndex,
   focused,
   tokens,
+  paneWidth,
   onToggleSelection,
   onToggleGroup,
   onSetCursor,
@@ -41,15 +43,22 @@ export function ArtifactList({
 
   // Pane padding + borders consume ~4 columns; size the columns off what remains.
   const widths = useMemo(
-    () => artifactRowWidths(Math.max(40, dimensions.width - (dimensions.width >= 72 ? 40 : 6))),
-    [dimensions.width],
+    () =>
+      artifactRowWidths(
+        paneWidth ?? Math.max(36, dimensions.width - (dimensions.width >= 72 ? 36 : 6)),
+      ),
+    [paneWidth, dimensions.width],
   );
 
   useEffect(() => {
     if (!focused) return;
     const scroll = scrollRef.current;
     if (!scroll) return;
-    scroll.scrollChildIntoView(`artifact-row-${currentRowIndex}`);
+    try {
+      scroll.scrollChildIntoView(`artifact-row-${currentRowIndex}`);
+    } catch {
+      // ignore if child row is not mounted yet during filter transitions
+    }
   }, [currentRowIndex, focused]);
 
   return (

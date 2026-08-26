@@ -337,4 +337,20 @@ describe("sweep ui state", () => {
     expect(escapeStep({ ...base, focus: "sidebar" })?.focus).toBe("list");
     expect(escapeStep({ ...base, focus: "patterns" })?.focus).toBe("list");
   });
+
+  test("applyUiSelection preserves all discovered candidates and sets selectedCandidateIds", () => {
+    const initialPlan: ScanPlan = {
+      ...createPlan(),
+      candidates: [],
+    };
+    let state = createUiState(initialPlan);
+    state = upsertCandidates(state, createPlan().candidates);
+    state = { ...state, selectedIds: new Set(["cand_safe", "cand_dangerous"]) };
+
+    const finalizedPlan = applyUiSelection(initialPlan, state);
+    expect(finalizedPlan.candidates).toHaveLength(3);
+    expect(finalizedPlan.selectedCandidateIds).toEqual(["cand_safe", "cand_dangerous"]);
+    expect(finalizedPlan.summary.candidateCount).toBe(3);
+    expect(finalizedPlan.summary.selectedCount).toBe(2);
+  });
 });

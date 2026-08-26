@@ -30,7 +30,7 @@ function duAvailable(): boolean {
     return false;
   }
   try {
-    execFileSync("du", ["--version"], { stdio: "ignore" });
+    execFileSync("du", ["-sk", "."], { stdio: "ignore", timeout: 2000 });
     return true;
   } catch {
     return false;

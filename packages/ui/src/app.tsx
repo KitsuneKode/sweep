@@ -1,6 +1,6 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { bold, dim, fg, t } from "@opentui/core";
+import { bold, fg, t } from "@opentui/core";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import {

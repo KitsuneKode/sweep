@@ -119,12 +119,18 @@ fn revalidate_candidate(candidate: &ScanCandidate) -> Result<ScanEntry, PathFail
 }
 
 fn is_path_within_root(candidate_path: &str, root_path: &str) -> bool {
-    let candidate = Path::new(candidate_path);
-    let root = Path::new(root_path);
+    let candidate = match fs::canonicalize(candidate_path) {
+        Ok(p) => p,
+        Err(_) => Path::new(candidate_path).to_path_buf(),
+    };
+    let root = match fs::canonicalize(root_path) {
+        Ok(p) => p,
+        Err(_) => Path::new(root_path).to_path_buf(),
+    };
     if candidate == root {
         return true;
     }
-    match candidate.strip_prefix(root) {
+    match candidate.strip_prefix(&root) {
         Ok(relative) => {
             let rel = relative.to_string_lossy();
             !rel.is_empty() && !rel.starts_with("..")

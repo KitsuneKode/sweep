@@ -1,5 +1,5 @@
 import type { ScrollBoxRenderable } from "@opentui/core";
-import { bold, dim, fg, t } from "@opentui/core";
+import { bold, fg, t } from "@opentui/core";
 import { useEffect, useMemo, useRef } from "react";
 import { SelectableRow, useHoverState } from "./SelectableRow.js";
 import { buildMeter, buildSidebarLine, concatStyled } from "./presentation.js";

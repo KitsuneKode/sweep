@@ -22,6 +22,9 @@ import type { SweepUiOutcome } from "./outcome.js";
 
 export interface KeyInput {
   name?: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  meta?: boolean;
 }
 
 const DEFAULT_PAGE_ROWS = 12;
@@ -133,6 +136,11 @@ export interface KeymapContext {
 /** Dispatch keyboard input by modal state and focused panel. */
 export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   const { key, state, showHelp, pendingApply, showSidebar, listSelectIndex } = ctx;
+  const isShiftTab = (key.name === "tab" && key.shift) || key.name === "shift+tab";
+  const isTab = key.name === "tab" && !key.shift;
+  const isCtrlU = (key.name === "u" && key.ctrl) || key.name === "ctrl+u" || key.name === "pageup";
+  const isCtrlD =
+    (key.name === "d" && key.ctrl) || key.name === "ctrl+d" || key.name === "pagedown";
 
   if (pendingApply) {
     if (key.name === "y") {
@@ -152,11 +160,17 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (state.focus === "search") {
-    // The input owns printable keys; only chrome keys are intercepted here.
-    if (key.name === "escape" || key.name === "return") {
+    // Escape or navigation keys hand focus back to the artifact list
+    if (
+      key.name === "escape" ||
+      key.name === "return" ||
+      key.name === "down" ||
+      (key.name === "n" && key.ctrl) ||
+      (key.name === "j" && key.ctrl)
+    ) {
       actions.focusPanel("list");
-    } else if (key.name === "tab") {
-      actions.focusPanel(nextFocus(state.focus, showSidebar, false));
+    } else if (isTab || isShiftTab) {
+      actions.focusPanel(nextFocus(state.focus, showSidebar, isShiftTab));
     }
     return;
   }
@@ -178,12 +192,8 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     return;
   }
 
-  if (key.name === "tab" || key.name === "shift+tab") {
-    actions.focusPanel(
-      key.name === "tab"
-        ? nextFocus(state.focus, showSidebar, false)
-        : nextFocus(state.focus, showSidebar, true),
-    );
+  if (isTab || isShiftTab) {
+    actions.focusPanel(nextFocus(state.focus, showSidebar, isShiftTab));
     return;
   }
 
@@ -251,6 +261,15 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (state.focus === "list") {
+    if (isCtrlU) {
+      actions.mutate((s) => moveCursor(s, -pageRows(ctx)));
+      return;
+    }
+    if (isCtrlD) {
+      actions.mutate((s) => moveCursor(s, pageRows(ctx)));
+      return;
+    }
+
     switch (key.name) {
       case "up":
       case "k":
@@ -268,14 +287,6 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       case "shift+g":
       case "end":
         actions.mutate((s) => jumpCursor(s, Infinity));
-        return;
-      case "pageup":
-      case "ctrl+u":
-        actions.mutate((s) => moveCursor(s, -pageRows(ctx)));
-        return;
-      case "pagedown":
-      case "ctrl+d":
-        actions.mutate((s) => moveCursor(s, pageRows(ctx)));
         return;
       case "h":
       case "left":

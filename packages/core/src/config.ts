@@ -80,11 +80,12 @@ export function findProjectConfigPath(startDir: string): string | null {
   let dir = resolve(startDir);
   const fsRoot = parse(dir).root;
 
-  while (dir !== fsRoot) {
+  while (true) {
     const candidate = join(dir, ".sweeprc");
     if (existsSync(candidate)) {
       return candidate;
     }
+    if (dir === fsRoot) break;
     const parent = dirname(dir);
     if (parent === dir) break; // safety: already at root
     dir = parent;
@@ -163,7 +164,12 @@ export function writeInitSweeprc(configPath: string, force = false): "created" |
 }
 
 function getGlobalConfig(): Partial<SweepConfig> | null {
-  const globalPath = join(homedir(), ".config", "sweep", "config.json");
+  const configDir =
+    process.env.XDG_CONFIG_HOME ||
+    (process.platform === "win32" && process.env.APPDATA
+      ? process.env.APPDATA
+      : join(homedir(), ".config"));
+  const globalPath = join(configDir, "sweep", "config.json");
   return readJsonConfig(globalPath);
 }
 

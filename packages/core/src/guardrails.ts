@@ -73,10 +73,6 @@ export function assertSafeCwd(targetPath: string): void {
   if (targetPath.includes("\x00")) {
     throw new GuardrailError(`Path contains null byte: ${JSON.stringify(targetPath)}`);
   }
-  // Reject path traversal before resolving (defense-in-depth)
-  if (targetPath.includes("..")) {
-    throw new GuardrailError(`Path traversal detected: ${targetPath}`);
-  }
 
   const resolved = normalize(resolve(targetPath));
 
@@ -183,9 +179,12 @@ export function pathSegmentsBelowRoot(resolved: string, parsedRoot: string): str
 
 /** Whether `candidatePath` is the target root or a path inside it. */
 export function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
-  const root = resolve(rootPath);
-  const candidate = resolve(candidatePath);
+  const root = normalize(resolve(rootPath));
+  const candidate = normalize(resolve(candidatePath));
   if (candidate === root) {
+    return true;
+  }
+  if (process.platform === "win32" && candidate.toLowerCase() === root.toLowerCase()) {
     return true;
   }
   const rel = relative(root, candidate);

@@ -96,7 +96,11 @@ async function loadSweepUi(): Promise<SweepUiModule> {
     return (await import(sibling)) as SweepUiModule;
   } catch (error) {
     if (!isModuleNotFound(error)) throw error;
-    return (await import(workspacePackage)) as SweepUiModule;
+    try {
+      return (await import(workspacePackage)) as SweepUiModule;
+    } catch {
+      throw error;
+    }
   }
 }
 

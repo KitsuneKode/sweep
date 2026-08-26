@@ -113,7 +113,8 @@ export function resolveRustEngineBinary(): string {
 }
 
 interface RunEngineOptions {
-  cwd?: string;
+  cwd?: string | undefined;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -132,6 +133,14 @@ async function runEngineAsync(
     cwd: options.cwd ?? process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
+
+  if (options.signal) {
+    if (options.signal.aborted) {
+      proc.kill("SIGTERM");
+    } else {
+      options.signal.addEventListener("abort", () => proc.kill("SIGTERM"), { once: true });
+    }
+  }
 
   return await new Promise<string>((resolvePromise, rejectPromise) => {
     let stdout = "";
@@ -216,27 +225,32 @@ export async function scanToPlanViaRust(
   const state: { summary: ScanCompletedEvent["summary"] | null } = { summary: null };
   let exact = options.exact ?? false;
 
-  await runEngineAsync(["scan", absoluteTarget], stdin, (line) => {
-    let event: ScanEvent & { summary?: ScanCompletedEvent["summary"] & { exact?: boolean } };
-    try {
-      event = JSON.parse(line);
-    } catch {
-      return;
-    }
-
-    if (event.type === "candidate_found") {
-      options.onEntry?.(scanEntryFromCandidate(event.candidate));
-    } else if (event.type === "candidate_updated") {
-      const entry = scanEntryFromCandidate(event.candidate);
-      entriesByPath.set(entry.path, entry);
-      options.onEntrySized?.(entry);
-    } else if (event.type === "scan_completed") {
-      state.summary = event.summary;
-      if ("exact" in event.summary && typeof event.summary.exact === "boolean") {
-        exact = event.summary.exact;
+  await runEngineAsync(
+    ["scan", absoluteTarget],
+    stdin,
+    (line) => {
+      let event: ScanEvent & { summary?: ScanCompletedEvent["summary"] & { exact?: boolean } };
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
       }
-    }
-  });
+
+      if (event.type === "candidate_found") {
+        options.onEntry?.(scanEntryFromCandidate(event.candidate));
+      } else if (event.type === "candidate_updated") {
+        const entry = scanEntryFromCandidate(event.candidate);
+        entriesByPath.set(entry.path, entry);
+        options.onEntrySized?.(entry);
+      } else if (event.type === "scan_completed") {
+        state.summary = event.summary;
+        if ("exact" in event.summary && typeof event.summary.exact === "boolean") {
+          exact = event.summary.exact;
+        }
+      }
+    },
+    { signal: options.signal },
+  );
 
   const entries = [...entriesByPath.values()];
   const completed = state.summary;

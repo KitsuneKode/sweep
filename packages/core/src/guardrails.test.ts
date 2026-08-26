@@ -37,12 +37,14 @@ describe("assertSafeCwd", () => {
 
   // ── Path traversal ─────────────────────────────────────────────────────────
 
-  test("blocks path traversal containing ..", () => {
+  test("blocks path traversal resolving to root or system directories", () => {
     expect(() => assertSafeCwd("/tmp/../../etc")).toThrow(GuardrailError);
+    expect(() => assertSafeCwd("../../../../../../../../etc")).toThrow(GuardrailError);
   });
 
-  test("blocks relative traversal", () => {
-    expect(() => assertSafeCwd("../etc/passwd")).toThrow(GuardrailError);
+  test("allows relative path to a valid project directory", () => {
+    expect(() => assertSafeCwd(".")).not.toThrow();
+    expect(() => assertSafeCwd("./packages/core")).not.toThrow();
   });
 
   // ── Safe paths ────────────────────────────────────────────────────────────
