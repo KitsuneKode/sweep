@@ -11,7 +11,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
+import { NATIVE_PLATFORMS, CLI_BINARY_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_PKG_PATH = join(REPO_ROOT, "apps/cli/package.json");
@@ -86,6 +86,31 @@ if (!skipNative) {
   }
 } else {
   console.log("skipping native engine publish (--skip-native)");
+}
+
+// ─── CLI platform packages (@kitsunekode/sweep-<id>) ────────────────────────
+// Workspace members under packages/platforms/<id>/ — `changeset publish`
+// below publishes them natively once the cli-binaries workflow has packed
+// binaries into their bin/. Here we only enforce matrix completeness.
+{
+  const requiresCli = process.env.SWEEP_RELEASE_REQUIRES_CLI === "true";
+  const missing = CLI_BINARY_PLATFORMS.filter(
+    (platform) =>
+      !existsSync(
+        join(REPO_ROOT, "packages", "platforms", platform.id, "bin", platform.binaryName),
+      ),
+  ).map((platform) => platform.id);
+
+  if (missing.length > 0) {
+    const msg = `missing cli binaries for: ${missing.join(", ")}`;
+    if (process.env.CI === "true" && requiresCli) {
+      console.error(`error: incomplete cli binary matrix in CI (${msg})`);
+      process.exit(1);
+    }
+    console.warn(`warn: ${msg} — those platform packages will be skipped by changeset publish`);
+  } else if (process.env.CI === "true") {
+    console.log(`cli binary matrix complete: ${CLI_BINARY_PLATFORMS.length} platforms`);
+  }
 }
 
 console.log("\nrunning prepublishOnly...");

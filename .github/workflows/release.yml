@@ -47,9 +47,15 @@ jobs:
     if: needs.release-intent.outputs.needs_native_build == 'true'
     uses: ./.github/workflows/native-engine-release.yml
 
+  build-cli:
+    name: build cli platform binaries
+    needs: release-intent
+    if: needs.release-intent.outputs.needs_native_build == 'true'
+    uses: ./.github/workflows/cli-binaries.yml
+
   release:
     name: version or publish
-    needs: [release-intent, build-engine]
+    needs: [release-intent, build-engine, build-cli]
     if: |
       always() &&
       needs.release-intent.result == 'success' &&
@@ -69,6 +75,13 @@ jobs:
         with:
           name: native-packages-all
           path: native-packages
+
+      - uses: actions/download-artifact@v4
+        if: needs.release-intent.outputs.needs_native_build == 'true'
+        with:
+          pattern: cli-platform-*
+          merge-multiple: true
+          path: packages/platforms
 
       - uses: oven-sh/setup-bun@v2
         with:

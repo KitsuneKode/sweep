@@ -195,10 +195,10 @@ check("native-packages templates exist for each platform", () => {
   }
 });
 
-check("cli platform templates exist under native-packages/cli", () => {
+check("platform packages exist for each cli binary target", () => {
   for (const p of CLI_BINARY_PLATFORMS) {
-    const templatePath = join(REPO_ROOT, "native-packages", "cli", p.id, "package.json");
-    assert(existsSync(templatePath), `missing template: ${templatePath}`);
+    const templatePath = join(REPO_ROOT, "packages", "platforms", p.id, "package.json");
+    assert(existsSync(templatePath), `missing platform package: ${templatePath}`);
   }
 });
 

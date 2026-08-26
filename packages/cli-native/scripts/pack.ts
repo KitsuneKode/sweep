@@ -26,9 +26,9 @@ import {
 } from "@kitsunekode/sweep-core/native-platforms";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-// CLI packages live under cli/ so they never collide with engine-native
-// template dirs (different npm names, overlapping platform ids).
-const NATIVE_PACKAGES = join(REPO_ROOT, "native-packages", "cli");
+// Platform packages are workspace members under packages/platforms/<id> so
+// changesets versions them in lockstep with @kitsunekode/sweep (fixed group).
+const PACK_OUT = join(REPO_ROOT, "packages", "platforms");
 
 function parseArgs(argv: string[]): { platform: string; binary?: string; version?: string } {
   let platform = "";
@@ -96,7 +96,7 @@ if (!existsSync(sourceBinary)) {
   process.exit(1);
 }
 
-const outDir = join(NATIVE_PACKAGES, platform.id);
+const outDir = join(PACK_OUT, platform.id);
 const binDir = join(outDir, "bin");
 mkdirSync(binDir, { recursive: true });
 

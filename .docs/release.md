@@ -17,10 +17,21 @@ The optional Rust engine ships separately via
 `.github/workflows/native-engine-release.yml` as platform packages
 (`@kitsunekode/sweep-engine-*`) resolved at runtime.
 
-## 2. Standalone binaries (npm platform packages + GitHub releases)
+## 2. Standalone binaries (npm platform packages — fully automated)
 
-`.github/workflows/cli-binaries.yml`, triggered by pushing a tag `v*`
-(or workflow_dispatch once the file lands on main):
+No tags, no manual steps. Everything rides the changesets flow:
+
+1. `packages/platforms/<id>/package.json` are workspace members pinned in
+   lockstep with `@kitsunekode/sweep` via the changesets **fixed** group
+   (see `.changeset/config.json`) — one Version PR bumps all six identically.
+2. When the Version PR merges, `release.yml` detects it and runs `build-cli` →
+   `.github/workflows/cli-binaries.yml` (`workflow_call`) on five native runners.
+3. Each runner bundles, compiles (`scripts/build-standalone.ts` from
+   `bin-standalone.ts`, embedding OpenTUI natives), smokes (`--ui-probe`,
+   `--version`), and packs into `packages/platforms/<id>/bin/`.
+4. The publish job downloads packed packages, enforces matrix completeness,
+   then `publish-release.ts` → `changeset publish` publishes the main package
+   and all five platform packages with provenance.
 
 | Platform package                  | Runner           | Binary          |
 | --------------------------------- | ---------------- | --------------- |
@@ -30,36 +41,21 @@ The optional Rust engine ships separately via
 | `@kitsunekode/sweep-linux-arm64`  | ubuntu-24.04-arm | `bin/sweep`     |
 | `@kitsunekode/sweep-win-x64`      | windows-latest   | `bin/sweep.exe` |
 
-Flow per runner: bundle CLI+UI → `bun build --compile` via
-`scripts/build-standalone.ts` from `apps/cli/src/bin-standalone.ts` (the static
-UI import embeds OpenTUI's native library/worker/grammars — no
-`OTUI_ASSET_ROOT` needed) → smoke (`--ui-probe`, `--version`) →
-`packages/cli-native/scripts/pack.ts` produces a publishable npm package under
-`native-packages/<id>/`.
-
-Jobs then:
-
-1. attach raw binaries to the tag's GitHub release
-2. `npm publish --access public --provenance` each platform package
-
 ### How installs resolve
 
-The main package's `bin/sweep.js` launcher prefers the matching platform
+The main package's `bin/sweep.cjs` launcher prefers the matching platform
 package's binary and falls back to bundled `dist/sweep.js` (plain Node ≥ 18).
-Platform packages ship as optionalDependencies of `@kitsunekode/sweep`; when a
-platform is added, also add its optionalDependencies entry (wiring this sync
-into the changesets publish step is a tracked follow-up).
+Platform packages ship as optionalDependencies of `@kitsunekode/sweep`.
 
 The dev/npm flow keeps dynamic `sweep-ui.js` sibling loading — only standalone
 binaries use the static entrypoint.
 
-### Cut a binary release
+### Manual validation run
 
-```bash
-git tag vX.Y.Z && git push origin vX.Y.Z   # builds, smokes, attaches, publishes
-```
+`.github/workflows/cli-binaries.yml` also supports `workflow_dispatch`
+(build-only, no publish) for validating binary builds without a release.
 
-### Verification checklist before tagging
+### Verification checklist before release
 
 - [ ] `bun run check` green locally
 - [ ] `bun run build` then `node apps/cli/dist/sweep.js scan . --json` sane

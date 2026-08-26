@@ -11,4 +11,4 @@ coverage/
 .turbo/
 target/
 native-packages/*/bin/
-native-packages/cli/*/bin/
+packages/platforms/*/bin/

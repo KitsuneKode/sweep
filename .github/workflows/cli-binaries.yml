@@ -1,27 +1,23 @@
 name: CLI Binaries
 
-# Builds standalone `sweep` executables on native runners, packs them as
-# @kitsunekode/sweep-<platform> npm packages, attaches binaries to the GitHub
-# release for the tag, and publishes the platform packages to npm.
-# Intentionally decoupled from release.yml's changesets flow.
+# Builds standalone `sweep` executables on native runners and packs them into
+# the platform workspace packages (@kitsunekode/sweep-<id>). Invoked as part
+# of the changesets release flow (release.yml → build-cli job) so versions
+# stay locked via the changesets `fixed` group — no tags, fully automated.
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call: {}
   workflow_dispatch: {}
 
 concurrency:
   group: cli-binaries-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  contents: write
-
 jobs:
   binaries:
     name: ${{ matrix.id }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -69,57 +65,37 @@ jobs:
           "./$OUT" --ui-probe
           "./$OUT" --version
 
-      - name: Pack platform npm package
+      # Packs the binary into packages/platforms/<id>/bin/ — the workspace
+      # package that changesets publishes alongside @kitsunekode/sweep.
+      - name: Pack platform package
         shell: bash
         run: bun run packages/cli-native/scripts/pack.ts --platform "${{ matrix.id }}" --binary "$OUT"
 
-      - name: Upload artifact
+      - name: Upload packed platform package
         uses: actions/upload-artifact@v4
         with:
-          name: sweep-${{ matrix.id }}
-          path: native-packages/cli/${{ matrix.id }}/
+          name: cli-platform-${{ matrix.id }}
+          path: packages/platforms/${{ matrix.id }}/
 
   attach:
-    name: attach binaries to release
+    name: attach raw binaries to GitHub release
     needs: binaries
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - name: Download all packed packages
+      - name: Download packed platform packages
         uses: actions/download-artifact@v4
         with:
+          pattern: cli-platform-*
           merge-multiple: true
-          path: native-packages
+          path: platforms
 
-      - name: Attach raw binaries to GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: native-packages/cli/*/bin/*
-
-  publish:
-    name: publish platform packages to npm
-    needs: binaries
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    environment: npm
-    steps:
-      - name: Download all packed packages
-        uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-          path: native-packages
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.12
-
-      - name: Publish @kitsunekode/sweep-* platform packages
+      - name: Attach binaries
         shell: bash
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          for dir in native-packages/cli/*/; do
-            (cd "$dir" && \
-             npm_config_registry=https://registry.npmjs.org/ \
-             bun x npm publish --access public --provenance) || exit 1
-          done
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || {
+            echo "no release yet (workflow_dispatch validation run); skipping attach";
+            exit 0;
+          }
+          gh release upload "$GITHUB_REF_NAME" platforms/*/bin/* --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
