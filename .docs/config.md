@@ -22,17 +22,17 @@ Array merge behavior:
 
 - `patterns` — merged and deduplicated from defaults + global + project + CLI
 - `disabledPatterns` — merged from global + project + CLI, then subtracted from `patterns`
-- `ignore` — merged from all layers; applied as name-level or path-prefix excludes at scan time
+- `ignore` — merged from all layers; applied as name, glob (`*.cache`), or path-prefix excludes at scan time
 
 ## Fields
 
-| Field              | Purpose                                                | Default |
-| ------------------ | ------------------------------------------------------ | ------- |
-| `patterns`         | Extra artifact names/globs to add to defaults          | `[]`    |
-| `disabledPatterns` | Default or merged patterns to disable for this project | `[]`    |
-| `ignore`           | Skip matched artifacts by name or relative path prefix | `[]`    |
-| `maxSizeGB`        | Size guardrail threshold                               | `10`    |
-| `depth`            | Max scan depth (-1 = unlimited)                        | `-1`    |
+| Field              | Purpose                                                         | Default |
+| ------------------ | --------------------------------------------------------------- | ------- |
+| `patterns`         | Extra artifact names/globs to add to defaults                   | `[]`    |
+| `disabledPatterns` | Default or merged patterns to disable for this project          | `[]`    |
+| `ignore`           | Skip matches by name, glob (`*.cache`), or relative path prefix | `[]`    |
+| `maxSizeGB`        | Size guardrail threshold                                        | `10`    |
+| `depth`            | Max scan depth (-1 = unlimited)                                 | `-1`    |
 
 Example `.sweeprc`:
 
@@ -47,7 +47,7 @@ Example `.sweeprc`:
 ```
 
 Use `disabledPatterns` to turn off a default like `dist`. Use `ignore` to skip specific
-matches (by artifact name or path prefix such as `packages/vendor`). A trailing
+matches (by artifact name, glob such as `*.cache`, or path prefix such as `packages/vendor`). A trailing
 slash is normalized, so `ignore: ["dist/"]` also skips a top-level `dist` entry.
 
 ### Filename rationale

@@ -145,6 +145,19 @@ describe("scan — ignore rules", () => {
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0]?.path).toContain(join("packages", "web"));
   });
+
+  test("ignore matches basename globs", async () => {
+    mkdirSync(dir("foo.cache"));
+    mkdirSync(dir("node_modules"));
+    const config: SweepConfig = {
+      ...DEFAULT_CONFIG,
+      patterns: ["node_modules", "*.cache"],
+      ignore: ["*.cache"],
+    };
+    const result = await scan(tmpDir, config);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]?.name).toBe("node_modules");
+  });
 });
 
 describe("scan — adversarial / security", () => {
@@ -241,6 +254,17 @@ describe("scan — streaming hooks", () => {
 
     expect(order.length).toBeGreaterThan(0);
     expect(order.indexOf("entry")).toBeLessThan(order.indexOf("sized"));
+  });
+
+  test("onProgress reports dirs walked during the scan", async () => {
+    mkdirSync(dir("a"));
+    mkdirSync(dir("b"));
+    const reports: Array<{ scannedDirs: number; found: number }> = [];
+    const result = await scan(tmpDir, DEFAULT_CONFIG, false, {
+      onProgress: (info) => reports.push(info),
+    });
+    expect(reports.length).toBeGreaterThan(0);
+    expect(reports[reports.length - 1]?.scannedDirs).toBe(result.scannedDirs);
   });
 });
 

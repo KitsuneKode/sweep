@@ -128,6 +128,7 @@ export const SCAN_EVENT_TYPES = [
   "scan_started",
   "candidate_found",
   "candidate_updated",
+  "scan_progress",
   "warning",
   "scan_completed",
 ] as const;
@@ -149,6 +150,12 @@ export interface CandidateUpdatedEvent {
   candidate: ScanCandidate;
 }
 
+export interface ScanProgressEvent {
+  type: "scan_progress";
+  scannedDirs: number;
+  found: number;
+}
+
 export interface WarningEvent {
   type: "warning";
   message: string;
@@ -168,6 +175,7 @@ export type ScanEvent =
   | ScanStartedEvent
   | CandidateFoundEvent
   | CandidateUpdatedEvent
+  | ScanProgressEvent
   | WarningEvent
   | ScanCompletedEvent;
 

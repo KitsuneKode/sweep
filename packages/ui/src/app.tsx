@@ -21,6 +21,7 @@ import {
   buildFooterLine,
   buildHeaderStats,
   buildRiskTally,
+  formatScanProgressLine,
   modeLabel,
 } from "./presentation.js";
 import { buildDisplayRows } from "./rows.js";
@@ -35,6 +36,7 @@ import {
   setScanning,
   toggleSelectionById,
   toggleSortBy,
+  setScannedDirs,
   upsertCandidates,
   type SweepUiInitOptions,
   type SweepUiState,
@@ -119,7 +121,7 @@ function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
         <text content={line("h · l", "collapse · expand scope group")} />
         <text content={line("w · e", "collapse all · expand all")} />
         <text content={line("space", "queue / unqueue for deletion")} />
-        <text content={line("a · s · u", "select all · safe only · clear")} />
+        <text content={line("a · s · u", "safe+caution · safe only · clear")} />
         <text content={line("o", "sort by size ↔ name")} />
         <text content={line("r", "rescan from disk")} />
         <text content={line("/ then tab", "filter · cycle panes (⇥ back)")} />
@@ -210,9 +212,16 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
           if (gen !== generationRef.current || controller.signal.aborted) return;
           dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
         },
-        onDone: () => {
+        onProgress: ({ scannedDirs }) => {
           if (gen !== generationRef.current || controller.signal.aborted) return;
-          dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
+          dispatch({ type: "mutate", fn: (s) => setScannedDirs(s, scannedDirs) });
+        },
+        onDone: ({ scannedDirs }) => {
+          if (gen !== generationRef.current || controller.signal.aborted) return;
+          dispatch({
+            type: "mutate",
+            fn: (s) => setScanning(setScannedDirs(s, scannedDirs), false),
+          });
         },
         onError: (error) => {
           if (gen !== generationRef.current || controller.signal.aborted) return;
@@ -333,7 +342,11 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
 
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
 
-  const footerContent = buildFooterLine(state.focus, tokens, dryRun, state.patternsDirty);
+  const footerContent = buildFooterLine(state.focus, tokens, dryRun, state.patternsDirty, {
+    scanning: state.scanning,
+    queuedCount: state.selectedIds.size,
+    candidateCount: state.candidates.length,
+  });
   const tallyContent = buildRiskTally(summary, tokens);
 
   return (
@@ -352,7 +365,9 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         <text content={buildBrandLine(tokens)} />
         <box flexDirection="row" gap={2}>
           {state.scanning ? (
-            <text content={t`${fg(tokens.accent)(`scanning… ${state.candidates.length} found`)}`} />
+            <text
+              content={t`${fg(tokens.accent)(formatScanProgressLine(state.candidates.length, state.scannedDirs))}`}
+            />
           ) : null}
           <text content={headerStats} />
         </box>

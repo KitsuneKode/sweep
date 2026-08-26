@@ -2,12 +2,14 @@ import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
-import { loadConfig } from "@kitsunekode/sweep-core/config";
+import { loadConfig, validateProjectConfigFile } from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import {
   isRustEngineAvailable,
   resolveRustEngineBinary,
 } from "@kitsunekode/sweep-core/rust-engine";
+import { scan } from "@kitsunekode/sweep-core/scanner";
+import { formatBytes } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { applyNoColor, isOpenTuiAvailable, writeJson } from "./shared.js";
 
@@ -19,7 +21,7 @@ export type DoctorHandlerOptions = {
   verbose?: boolean;
 };
 
-type DoctorCheck = {
+export type DoctorCheck = {
   name: string;
   ok: boolean;
   detail: string;
@@ -37,21 +39,39 @@ function duAvailable(): boolean {
   }
 }
 
-function collectDoctorChecks(targetDir: string): DoctorCheck[] {
+export async function collectDoctorChecks(targetDir: string): Promise<DoctorCheck[]> {
   const configPath = resolve(targetDir, ".sweeprc");
   const config = loadConfig(targetDir);
   const rustBinary = resolveRustEngineBinary();
   const rustOk = isRustEngineAvailable();
   const duOk = duAvailable();
   const openTuiOk = isOpenTuiAvailable();
+  const hasConfigFile = existsSync(configPath);
+  const configValidity = hasConfigFile
+    ? validateProjectConfigFile(configPath, targetDir)
+    : { ok: true as const, path: configPath };
+
+  let scanOk = true;
+  let scanDetail = "not run";
+  try {
+    const result = await scan(targetDir, config, false);
+    scanDetail = `${result.entries.length} candidates · ${formatBytes(result.estimatedTotalBytes)} · ${result.scannedDirs} dirs`;
+  } catch (error) {
+    scanOk = false;
+    scanDetail = error instanceof Error ? error.message : String(error);
+  }
 
   return [
     { name: "protocol", ok: true, detail: PROTOCOL_VERSION },
     { name: "target", ok: true, detail: targetDir },
     {
       name: "config",
-      ok: existsSync(configPath),
-      detail: existsSync(configPath) ? configPath : "defaults",
+      ok: configValidity.ok,
+      detail: hasConfigFile
+        ? configValidity.ok
+          ? configPath
+          : configValidity.detail
+        : "defaults (no .sweeprc)",
     },
     { name: "patterns", ok: config.patterns.length > 0, detail: String(config.patterns.length) },
     {
@@ -66,6 +86,7 @@ function collectDoctorChecks(targetDir: string): DoctorCheck[] {
       detail: openTuiOk ? "available" : "install @opentui/core for sweep ui",
     },
     { name: "rust_engine", ok: rustOk, detail: rustOk ? rustBinary : "not found" },
+    { name: "dry_scan", ok: scanOk, detail: scanDetail },
   ];
 }
 
@@ -77,7 +98,7 @@ export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
   try {
     assertSafeCwd(targetDir);
 
-    const checks = collectDoctorChecks(targetDir);
+    const checks = await collectDoctorChecks(targetDir);
     const hasWarnings = checks.some((check) => !check.ok);
 
     if (opts.json) {

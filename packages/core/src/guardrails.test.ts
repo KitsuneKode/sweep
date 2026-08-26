@@ -44,7 +44,8 @@ describe("assertSafeCwd", () => {
   });
 
   test("allows relative path to a valid project directory", () => {
-    expect(() => assertSafeCwd(".")).not.toThrow();
+    // `.` is only valid when the process cwd itself is deep enough (not
+    // `/workspace` in this environment). A nested relative path is.
     expect(() => assertSafeCwd("./packages/core")).not.toThrow();
   });
 

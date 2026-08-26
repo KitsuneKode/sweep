@@ -156,6 +156,20 @@ function truncateEnd(value: string, max: number): string {
   return `${value.slice(0, Math.max(1, max - 1))}…`;
 }
 
+/** Keep the leaf of a scope path visible when the sidebar column is tight. */
+export function truncateScopeLabel(label: string, max: number): string {
+  if (max <= 0) return "";
+  if (label.length <= max) return label.padEnd(max);
+  if (max === 1) return "…";
+  return `…${label.slice(label.length - (max - 1))}`;
+}
+
+/** Live scan strip: found count plus dirs walked when the engine reports them. */
+export function formatScanProgressLine(found: number, scannedDirs: number): string {
+  const dirs = scannedDirs > 0 ? `  ·  ${scannedDirs} dirs` : "";
+  return `scanning… ${found} found${dirs}`;
+}
+
 export function formatPatternRow(pattern: string, enabled: boolean): string {
   const mark = enabled ? "✓" : "·";
   return ` ${mark} ${pattern}`;
@@ -313,6 +327,7 @@ export function buildFooterLine(
   tokens: ThemeTokens,
   dryRun?: boolean,
   patternsDirty?: boolean,
+  extras?: { scanning?: boolean; queuedCount?: number; candidateCount?: number },
 ): StyledText {
   const key = (label: string) => fg(tokens.text)(label);
   const hint = (label: string) => fg(tokens.textMuted)(label);
@@ -331,11 +346,21 @@ export function buildFooterLine(
     return t`${key("enter")} ${hint("apply")}${sep}${key("esc")} ${hint("clear + back")}${sep}${key("⇥")} ${hint("panes")}`;
   }
 
-  if (dryRun) {
-    return t`${key("space")} ${hint("queue")}${sep}${key("a")} ${hint("all")}${sep}${key("o")} ${hint("sort")}${sep}${key("enter")} ${hint("done")}${sep}${key("?")} ${hint("help")}`;
+  const showFirstRun =
+    focus === "list" &&
+    !extras?.scanning &&
+    (extras?.candidateCount ?? 0) > 0 &&
+    (extras?.queuedCount ?? 0) === 0;
+
+  if (showFirstRun) {
+    return t`${key("space")} ${hint("queue this row")}${sep}${key("a")} ${hint("safe+caution")}${sep}${key("enter")} ${hint(dryRun ? "done" : "apply")}${sep}${key("?")} ${hint("help")}`;
   }
 
-  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("a/s/u")} ${hint("all/safe/clear")}${sep}${key("enter")} ${hint("apply")}${sep}${key("?")} ${hint("help")}`;
+  if (dryRun) {
+    return t`${key("space")} ${hint("queue")}${sep}${key("a")} ${hint("safe+")}${sep}${key("o")} ${hint("sort")}${sep}${key("enter")} ${hint("done")}${sep}${key("?")} ${hint("help")}`;
+  }
+
+  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("a/s/u")} ${hint("safe+/safe/clear")}${sep}${key("enter")} ${hint("apply")}${sep}${key("?")} ${hint("help")}`;
 }
 
 /** Statusline mode segment label for the focused panel. */
@@ -364,17 +389,18 @@ export function buildSidebarLine(
   tokens: ThemeTokens,
   selectedCount = 0,
   maxLabelWidth = 14,
+  showBytes = true,
 ): StyledText {
   const marker = active ? fg(tokens.accent)("›") : fg(tokens.textDim)(" ");
   const countText = String(count).padStart(countWidth);
-  const bytesText = compactBytesLabel(bytes).padStart(bytesWidth);
   const effectiveMax = Math.max(6, maxLabelWidth);
-  const labelText =
-    label.length > effectiveMax
-      ? `${label.slice(0, effectiveMax - 1)}…`
-      : label.padEnd(effectiveMax);
+  const labelText = truncateScopeLabel(label, effectiveMax);
   const labelColor = active ? tokens.text : tokens.textSecondary;
-  const base = t`${marker} ${active ? bold(fg(labelColor)(labelText)) : fg(labelColor)(labelText)}  ${fg(tokens.textMuted)(countText)}  ${fg(active ? tokens.textSecondary : tokens.textDim)(bytesText)}`;
+  const styledLabel = active ? bold(fg(labelColor)(labelText)) : fg(labelColor)(labelText);
+  const countStyled = fg(tokens.textMuted)(countText);
+  const base = showBytes
+    ? t`${marker} ${styledLabel}  ${countStyled}  ${fg(active ? tokens.textSecondary : tokens.textDim)(compactBytesLabel(bytes).padStart(bytesWidth))}`
+    : t`${marker} ${styledLabel}  ${countStyled}`;
 
   if (selectedCount <= 0 || !active) return base;
   return joinStyled([base, t`  ${fg(tokens.positive)(`+${selectedCount}`)}`]);

@@ -19,6 +19,7 @@ import type { SweepUiInitOptions } from "./state.js";
 export interface UiScanHooks {
   /** Candidates discovered or resized since the last flush. */
   onBatch: (candidates: ScanCandidate[]) => void;
+  onProgress?: (meta: { scannedDirs: number }) => void;
   onDone: (meta: { scannedDirs: number }) => void;
   onError: (error: unknown) => void;
 }
@@ -127,6 +128,10 @@ export async function runSweepUiStreaming(
 
         try {
           let scannedDirs = 0;
+          const reportProgress = (dirs: number) => {
+            scannedDirs = dirs;
+            if (!signal.aborted) hooks.onProgress?.({ scannedDirs: dirs });
+          };
           if (options.engine === "rust") {
             const { scanToPlanViaRust } = await import("@kitsunekode/sweep-core/rust-engine");
             const plan = await scanToPlanViaRust(options.targetDir, {
@@ -135,6 +140,7 @@ export async function runSweepUiStreaming(
               exact: false,
               onEntry: record,
               onEntrySized: record,
+              onProgress: ({ scannedDirs: dirs }) => reportProgress(dirs),
               signal,
             });
             scannedDirs = plan.summary.scannedDirs;
@@ -142,6 +148,7 @@ export async function runSweepUiStreaming(
             const result = await scan(options.targetDir, currentConfig, false, {
               onEntry: record,
               onEntrySized: record,
+              onProgress: ({ scannedDirs: dirs }) => reportProgress(dirs),
               signal,
             });
             scannedDirs = result.scannedDirs;

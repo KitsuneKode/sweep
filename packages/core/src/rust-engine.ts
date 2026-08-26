@@ -250,6 +250,11 @@ export async function scanToPlanViaRust(
         const entry = scanEntryFromCandidate(event.candidate);
         entriesByPath.set(entry.path, entry);
         options.onEntrySized?.(entry);
+      } else if (event.type === "scan_progress") {
+        options.onProgress?.({
+          scannedDirs: event.scannedDirs,
+          found: event.found,
+        });
       } else if (event.type === "scan_completed") {
         state.summary = event.summary;
         if ("exact" in event.summary && typeof event.summary.exact === "boolean") {

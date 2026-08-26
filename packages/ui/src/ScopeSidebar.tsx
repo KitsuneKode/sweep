@@ -8,6 +8,7 @@ import {
   compactBytesLabel,
   scopeFilterToSidebarIndex,
   sidebarBytesWidth,
+  sidebarColumnLayout,
   sidebarCountWidth,
   type ScopeSidebarRow,
 } from "./sidebar.js";
@@ -40,8 +41,10 @@ export function ScopeSidebar({
 
   const countWidth = useMemo(() => sidebarCountWidth(rows), [rows]);
   const bytesWidth = useMemo(() => sidebarBytesWidth(rows), [rows]);
-  // Label gets the remaining space after marker(2) + count + bytes + gaps(6).
-  const maxLabelWidth = Math.max(8, paneWidth - countWidth - bytesWidth - 8);
+  const layout = useMemo(
+    () => sidebarColumnLayout(paneWidth, countWidth, bytesWidth),
+    [paneWidth, countWidth, bytesWidth],
+  );
   const totalBytes = rows[0]?.bytes ?? 0;
   const selectedBytes = rows[0]?.selectedBytes ?? 0;
   const cursorIndex = focused
@@ -91,11 +94,12 @@ export function ScopeSidebar({
                     row.count,
                     row.bytes,
                     isActive,
-                    countWidth,
-                    bytesWidth,
+                    layout.countWidth,
+                    layout.bytesWidth,
                     tokens,
                     row.selectedCount,
-                    maxLabelWidth,
+                    layout.maxLabelWidth,
+                    layout.showBytes,
                   )}
                 />
               </box>

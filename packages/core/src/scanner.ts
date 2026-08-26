@@ -15,6 +15,8 @@ export interface ScanHooks {
   onEntry?: (entry: ScanEntry) => void;
   /** Fired after size estimation completes for an entry. */
   onEntrySized?: (entry: ScanEntry) => void;
+  /** Fired periodically with walk progress (dirs visited and matches found). */
+  onProgress?: (info: { scannedDirs: number; found: number }) => void;
   /** Optional cancellation signal for long-running scans. */
   signal?: AbortSignal;
 }
@@ -364,6 +366,13 @@ export async function scan(
 ): Promise<ScanResult> {
   const entries: ScanEntry[] = [];
   let scannedDirs = 0;
+  let progressAt = 0;
+  const emitProgress = (force = false) => {
+    if (!hooks.onProgress) return;
+    if (!force && scannedDirs !== 1 && scannedDirs - progressAt < 8) return;
+    progressAt = scannedDirs;
+    hooks.onProgress({ scannedDirs, found: entries.length });
+  };
   const matches = compileMatcher(config.patterns);
   // Compiled once per scan — the hot loop must not re-resolve paths per entry.
   const isIgnored = compileIgnoreMatcher(targetDir, config.ignore);
@@ -397,6 +406,7 @@ export async function scan(
     }
 
     scannedDirs++;
+    emitProgress();
     const childDirs: Frame[] = [];
 
     for (const item of items) {
@@ -446,6 +456,7 @@ export async function scan(
   }
 
   await walkDir({ dir: targetDir, depth: 0 });
+  emitProgress(true);
 
   if (sizer) {
     await sizer.finish();

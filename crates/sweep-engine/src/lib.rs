@@ -7,7 +7,9 @@ use camino::Utf8Path;
 use chrono::SecondsFormat;
 use sha2::{Digest, Sha256};
 use sweep_errors::EngineError;
-use sweep_fs::{apply_size_estimates, walk_matched_entries, WalkConfig, WalkEntry};
+use sweep_fs::{
+    apply_size_estimates, walk_matched_entries_with_hooks, WalkConfig, WalkEntry, WalkHooks,
+};
 use sweep_types::{
     ApplyReport, EntryType, RiskTier, ScanCandidate, ScanPlan, ScanPlanSummary, SelectionMode,
     SelectionPolicy, SweepConfig, PROTOCOL_VERSION,
@@ -21,10 +23,13 @@ pub struct ScanOptions<'a> {
 }
 
 /// Progressive scan callbacks aligned with the JS scanner hooks.
+///
+/// Callbacks are `Fn + Sync` so the rayon walk can emit matches from worker threads.
 #[derive(Default)]
 pub struct ScanHooks<'a> {
-    pub on_entry: Option<&'a mut dyn FnMut(ScanCandidate)>,
-    pub on_entry_sized: Option<&'a mut dyn FnMut(ScanCandidate)>,
+    pub on_entry: Option<&'a (dyn Fn(ScanCandidate) + Sync)>,
+    pub on_entry_sized: Option<&'a (dyn Fn(ScanCandidate) + Sync)>,
+    pub on_progress: Option<&'a (dyn Fn(u32, u32) + Sync)>,
 }
 
 /// Scan `target_dir` with default patterns and produce a protocol-aligned [`ScanPlan`].
@@ -42,7 +47,7 @@ pub fn scan_to_plan_with_config(
     target_dir: &Utf8Path,
     walk_config: &WalkConfig,
     selection_policy: &SelectionPolicy,
-    mut options: ScanOptions<'_>,
+    options: ScanOptions<'_>,
 ) -> Result<ScanPlan, EngineError> {
     if target_dir.as_str().is_empty() {
         return Err(EngineError::InvalidPlan {
@@ -52,18 +57,29 @@ pub fn scan_to_plan_with_config(
 
     guardrails::assert_safe_cwd(target_dir.as_str())?;
 
-    let walk = walk_matched_entries(target_dir, walk_config);
+    let on_entry = options.hooks.on_entry;
+    let on_progress = options.hooks.on_progress;
+    let found = std::sync::atomic::AtomicU32::new(0);
+
+    let on_match = |entry: &WalkEntry| {
+        found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Some(cb) = on_entry {
+            cb(to_candidate(entry, 0));
+        }
+    };
+    let on_dir = |dirs: u32| {
+        if let Some(cb) = on_progress {
+            cb(dirs, found.load(std::sync::atomic::Ordering::Relaxed));
+        }
+    };
+    let hooks = WalkHooks {
+        on_match: Some(&on_match),
+        on_dir: Some(&on_dir),
+    };
+
+    let walk = walk_matched_entries_with_hooks(target_dir, walk_config, Some(&hooks));
     let mut entries = walk.entries;
     let scanned_dirs = walk.scanned_dirs;
-
-    let unsized_candidates: Vec<ScanCandidate> =
-        entries.iter().map(|entry| to_candidate(entry, 0)).collect();
-
-    if let Some(on_entry) = options.hooks.on_entry.as_mut() {
-        for candidate in &unsized_candidates {
-            on_entry(candidate.clone());
-        }
-    }
 
     apply_size_estimates(&mut entries, options.exact);
 
@@ -72,7 +88,7 @@ pub fn scan_to_plan_with_config(
         .map(|entry| to_candidate(entry, entry.estimated_bytes))
         .collect();
 
-    if let Some(on_entry_sized) = options.hooks.on_entry_sized.as_mut() {
+    if let Some(on_entry_sized) = options.hooks.on_entry_sized {
         for candidate in &candidates {
             on_entry_sized(candidate.clone());
         }
@@ -307,17 +323,22 @@ mod tests {
         std::fs::create_dir_all(root.join("node_modules").as_std_path())
             .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
 
-        let order = std::cell::RefCell::new(Vec::<&'static str>::new());
-        let mut on_entry = |_candidate: ScanCandidate| {
-            order.borrow_mut().push("entry");
+        let order = std::sync::Mutex::new(Vec::<&'static str>::new());
+        let on_entry = |_candidate: ScanCandidate| {
+            if let Ok(mut steps) = order.lock() {
+                steps.push("entry");
+            }
         };
-        let mut on_entry_sized = |_candidate: ScanCandidate| {
-            order.borrow_mut().push("sized");
+        let on_entry_sized = |_candidate: ScanCandidate| {
+            if let Ok(mut steps) = order.lock() {
+                steps.push("sized");
+            }
         };
 
         let hooks = ScanHooks {
-            on_entry: Some(&mut on_entry),
-            on_entry_sized: Some(&mut on_entry_sized),
+            on_entry: Some(&on_entry),
+            on_entry_sized: Some(&on_entry_sized),
+            on_progress: None,
         };
 
         scan_to_plan_with_config(
@@ -331,7 +352,7 @@ mod tests {
         )
         .unwrap_or_else(|err| panic!("scan failed: {err}"));
 
-        let order = order.into_inner();
+        let order = order.into_inner().unwrap_or_else(|err| err.into_inner());
         assert!(order.contains(&"entry"));
         assert!(order.contains(&"sized"));
         assert!(

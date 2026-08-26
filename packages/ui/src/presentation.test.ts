@@ -4,7 +4,9 @@ import {
   artifactRowWidths,
   formatArtifactRow,
   formatArtifactRowPlain,
+  formatScanProgressLine,
   relativePath,
+  truncateScopeLabel,
 } from "./presentation.js";
 import { darkTheme } from "./theme.js";
 
@@ -49,5 +51,16 @@ describe("presentation formatters", () => {
     const line = formatArtifactRowPlain(candidate({ name: "node_modules" }), true, false, widths);
     expect(line.length).toBeLessThanOrEqual(80);
     expect(line.includes("\n")).toBe(false);
+  });
+
+  test("truncateScopeLabel keeps the leaf of a long path", () => {
+    expect(truncateScopeLabel("apps/cli/", 14)).toBe("apps/cli/     ");
+    expect(truncateScopeLabel("packages/core/src/", 10)).toBe("…core/src/");
+    expect(truncateScopeLabel("all scopes", 20).startsWith("all scopes")).toBe(true);
+  });
+
+  test("formatScanProgressLine includes dirs when reported", () => {
+    expect(formatScanProgressLine(3, 0)).toBe("scanning… 3 found");
+    expect(formatScanProgressLine(3, 12)).toBe("scanning… 3 found  ·  12 dirs");
   });
 });

@@ -38,6 +38,8 @@ export interface SweepUiState {
   patternsDirty: boolean;
   /** True while a streaming scan is still filling candidates. */
   scanning: boolean;
+  /** Directories visited by the current/last scan (0 until the engine reports). */
+  scannedDirs: number;
   /** Artifact ordering inside groups. */
   sortBy: UiSortBy;
   /** Scope groups hidden in the artifact list (key "" = project root). */
@@ -77,6 +79,7 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     themeMode: "auto",
     patternsDirty: false,
     scanning: false,
+    scannedDirs: plan.summary.scannedDirs,
     sortBy: "size",
     collapsedGroups: new Set<string>(),
   };
@@ -240,6 +243,11 @@ export function setScanning(state: SweepUiState, scanning: boolean): SweepUiStat
   return { ...state, scanning };
 }
 
+export function setScannedDirs(state: SweepUiState, scannedDirs: number): SweepUiState {
+  if (state.scannedDirs === scannedDirs) return state;
+  return { ...state, scannedDirs };
+}
+
 export function toggleSortBy(state: SweepUiState): SweepUiState {
   invalidateSelectorCache();
   const sortBy: UiSortBy = state.sortBy === "size" ? "name" : "size";
@@ -313,6 +321,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     scopeFilter: null,
     collapsedGroups: new Set<string>(),
     scanning: true,
+    scannedDirs: 0,
   };
 }
 

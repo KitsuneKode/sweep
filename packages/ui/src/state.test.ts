@@ -296,6 +296,7 @@ describe("sweep ui state", () => {
     expect(reset.candidates).toHaveLength(0);
     expect(reset.selectedIds.size).toBe(0);
     expect(reset.scanning).toBe(true);
+    expect(reset.scannedDirs).toBe(0);
     expect(reset.disabledPatterns.has("dist")).toBe(true);
   });
 

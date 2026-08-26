@@ -203,24 +203,36 @@ export function compileIgnoreMatcher(targetDir: string, ignore: string[]): Ignor
 
   const root = resolve(targetDir);
   const isCaseInsensitive = process.platform === "darwin" || process.platform === "win32";
-  const exactNames = new Set<string>(
-    ignore.filter((p) => !p.includes("/")).map((p) => (isCaseInsensitive ? p.toLowerCase() : p)),
-  );
+  const flags = isCaseInsensitive ? "i" : undefined;
+  const exactNames = new Set<string>();
+  const nameGlobs: RegExp[] = [];
   const pathPrefixes: string[] = [];
+  const pathGlobs: RegExp[] = [];
 
-  for (const pattern of ignore) {
-    if (pattern.includes("/")) {
-      const normalized = pattern.replace(/\/+$/, "");
-      if (normalized.length > 0) {
-        pathPrefixes.push(isCaseInsensitive ? normalized.toLowerCase() : normalized);
+  for (const raw of ignore) {
+    const pattern = raw.replace(/\/+$/, "");
+    if (pattern.length === 0) continue;
+    const key = isCaseInsensitive ? pattern.toLowerCase() : pattern;
+    if (pattern.includes("*")) {
+      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+      const re = new RegExp(`^${escaped}$`, flags);
+      if (pattern.includes("/")) {
+        pathGlobs.push(re);
+      } else {
+        nameGlobs.push(re);
       }
+    } else if (pattern.includes("/")) {
+      pathPrefixes.push(key);
+    } else {
+      exactNames.add(key);
     }
   }
 
   return (entryPath, entryName) => {
     const nameKey = isCaseInsensitive ? entryName.toLowerCase() : entryName;
     if (exactNames.has(nameKey)) return true;
-    if (pathPrefixes.length === 0) return false;
+    if (nameGlobs.some((re) => re.test(entryName))) return true;
+    if (pathPrefixes.length === 0 && pathGlobs.length === 0) return false;
 
     let rel = relative(root, entryPath).replace(/\\/g, "/");
     if (isCaseInsensitive) rel = rel.toLowerCase();
@@ -228,7 +240,7 @@ export function compileIgnoreMatcher(targetDir: string, ignore: string[]): Ignor
     for (const prefix of pathPrefixes) {
       if (rel === prefix || rel.startsWith(`${prefix}/`)) return true;
     }
-    return false;
+    return pathGlobs.some((re) => re.test(rel));
   };
 }
 

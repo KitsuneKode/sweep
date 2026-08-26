@@ -3,7 +3,7 @@ import { useTerminalDimensions } from "@opentui/react";
 import { useEffect, useMemo, useState } from "react";
 import { ArtifactList } from "./ArtifactList.js";
 import { ScopeSidebar } from "./ScopeSidebar.js";
-import { buildContextCaption, formatPatternRow } from "./presentation.js";
+import { buildContextCaption, formatPatternRow, formatScanProgressLine } from "./presentation.js";
 import type { UiDisplayRow } from "./rows.js";
 import {
   setFilter,
@@ -141,8 +141,18 @@ export function ReviewPane({
         {state.scanning && state.candidates.length > 0 ? (
           <box width="100%" paddingTop={0} paddingBottom={0} flexShrink={0}>
             <text
-              content={`scanning… ${state.candidates.length} found  ·  r cancel / rescan`}
+              content={`${formatScanProgressLine(state.candidates.length, state.scannedDirs)}  ·  r cancel`}
               fg={tokens.accent}
+            />
+          </box>
+        ) : !state.scanning &&
+          state.candidates.length > 0 &&
+          state.selectedIds.size === 0 &&
+          state.focus === "list" ? (
+          <box width="100%" paddingTop={0} paddingBottom={0} flexShrink={0}>
+            <text
+              content="space queues this row · a queues safe+caution · enter applies"
+              fg={tokens.textDim}
             />
           </box>
         ) : null}

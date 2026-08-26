@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
-import { buildScopeSidebarRows, scopeFilterToSidebarIndex } from "./sidebar.js";
+import {
+  buildScopeSidebarRows,
+  scopeFilterToSidebarIndex,
+  sidebarColumnLayout,
+} from "./sidebar.js";
 import { applySidebarScope, createUiState, setScopeFilter } from "./state.js";
 
 function createPlan(): ScanPlan {
@@ -77,5 +81,15 @@ describe("scope sidebar rows", () => {
     const next = setScopeFilter(state, "apps/cli");
 
     expect(next.sidebarIndex).toBe(scopeFilterToSidebarIndex("apps/cli", rows));
+  });
+
+  test("sidebarColumnLayout hides bytes when the pane is cramped", () => {
+    const wide = sidebarColumnLayout(36, 2, 6);
+    expect(wide.showBytes).toBe(true);
+    expect(wide.maxLabelWidth).toBeGreaterThanOrEqual(8);
+
+    const narrow = sidebarColumnLayout(16, 3, 8);
+    expect(narrow.showBytes).toBe(false);
+    expect(narrow.maxLabelWidth).toBeGreaterThanOrEqual(6);
   });
 });

@@ -69,7 +69,7 @@ sweep doctor --json     # config + environment + dry-scan report
 | `--yes`                  | `-y`  | Skip confirmation (CI / scripts)                   |
 | `--force-large`          |       | Allow deletion over `maxSizeGB` (requires `--yes`) |
 | `--pattern <p>`          | `-p`  | Add extra pattern (repeatable)                     |
-| `--ignore <p>`           | `-i`  | Ignore path/name match (repeatable)                |
+| `--ignore <p>`           | `-i`  | Ignore name, glob, or path prefix (repeatable)     |
 | `--disabled-pattern <p>` |       | Disable a default pattern for this run             |
 | `--select <mode>`        |       | `default`, `safe`, `all`, or `none`                |
 | `--include-dangerous`    |       | Include dangerous custom matches                   |

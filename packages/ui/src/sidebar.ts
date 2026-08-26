@@ -82,6 +82,30 @@ export function sidebarBytesWidth(rows: readonly ScopeSidebarRow[]): number {
   return Math.max(6, ...rows.map((row) => compactBytesLabel(row.bytes).length));
 }
 
+/** Drop the bytes column before the label when the pane is too narrow. */
+export function sidebarColumnLayout(
+  paneWidth: number,
+  countWidth: number,
+  bytesWidth: number,
+): { maxLabelWidth: number; showBytes: boolean; countWidth: number; bytesWidth: number } {
+  let showBytes = paneWidth >= 22;
+  let fittedBytesWidth = showBytes ? bytesWidth : 0;
+  let gaps = showBytes ? 8 : 6;
+  let maxLabelWidth = paneWidth - countWidth - fittedBytesWidth - gaps;
+  if (maxLabelWidth < 8 && showBytes) {
+    showBytes = false;
+    fittedBytesWidth = 0;
+    gaps = 6;
+    maxLabelWidth = paneWidth - countWidth - gaps;
+  }
+  return {
+    maxLabelWidth: Math.max(6, maxLabelWidth),
+    showBytes,
+    countWidth,
+    bytesWidth: fittedBytesWidth,
+  };
+}
+
 /** Compact byte label for dense sidebar columns (e.g. `1.2GB`, `400MB`). */
 export function compactBytesLabel(bytes: number): string {
   if (bytes <= 0) return "0B";
