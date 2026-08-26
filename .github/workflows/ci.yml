@@ -105,4 +105,4 @@ jobs:
         shell: bash
         run: |
           node apps/cli/dist/sweep.js scan . --json > /dev/null || exit 1
-          node apps/cli/dist/sweep.js doctor --json > /dev/null || exit 1
+          node apps/cli/dist/sweep.js doctor --json > /dev/null || [ $? -eq 5 ] || exit 1

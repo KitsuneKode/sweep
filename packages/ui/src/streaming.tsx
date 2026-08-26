@@ -79,10 +79,26 @@ export async function runSweepUiStreaming(
 
   return await new Promise<SweepUiOutcome>((resolvePromise, rejectPromise) => {
     const root = createRoot(renderer);
+    let cleanedUp = false;
     const cleanup = () => {
-      root.unmount();
-      renderer.destroy();
+      if (cleanedUp) return;
+      cleanedUp = true;
+      process.removeListener("exit", onProcessExit);
+      process.removeListener("uncaughtException", onProcessExit);
+      try {
+        root.unmount();
+      } catch {
+        // ignore
+      }
+      try {
+        renderer.destroy();
+      } catch {
+        // ignore
+      }
     };
+    const onProcessExit = () => cleanup();
+    process.once("exit", onProcessExit);
+    process.once("uncaughtException", onProcessExit);
 
     let currentConfig = options.config;
 

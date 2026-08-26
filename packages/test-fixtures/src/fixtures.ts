@@ -1,4 +1,5 @@
 import { rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export type FixtureScenario =
   | "basic"
@@ -17,7 +18,7 @@ export interface SeededFixtureReport {
 }
 
 const cleanupRoots: string[] = [];
-const REPO_ROOT = new URL("../../..", import.meta.url).pathname;
+const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 export function seedScenario(scenario: FixtureScenario): SeededFixtureReport {
   const proc = Bun.spawnSync({

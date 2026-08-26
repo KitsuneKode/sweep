@@ -1,6 +1,16 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, normalize, parse, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  parse,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 // ─── Blocked paths ────────────────────────────────────────────────────────────
 
@@ -165,8 +175,11 @@ export function isReparsePointOrSymlink(entryPath: string): boolean {
     }
     if (process.platform === "win32" && stat.isDirectory()) {
       try {
-        const real = realpathSync.native(entryPath);
-        return normalize(real) !== normalize(resolve(entryPath));
+        const parent = dirname(resolve(entryPath));
+        const parentReal = realpathSync(parent).replace(/^\\\\\?\\/, "");
+        const entryReal = realpathSync(entryPath).replace(/^\\\\\?\\/, "");
+        const expectedReal = join(parentReal, basename(entryPath));
+        return normalize(entryReal).toLowerCase() !== normalize(expectedReal).toLowerCase();
       } catch {
         return false;
       }

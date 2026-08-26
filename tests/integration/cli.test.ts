@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 
-const REPO_ROOT = new URL("../..", import.meta.url).pathname;
+const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SWEEP = join(REPO_ROOT, "apps/cli/dist/sweep.js");
 const LOCAL_RUST_ENGINE = join(REPO_ROOT, "target/debug/sweep-engine");
 
