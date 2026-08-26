@@ -53,6 +53,15 @@
         "@opentui/core",
       ],
     },
+    "packages/cli-native": {
+      "name": "@kitsunekode/sweep-cli-native",
+      "dependencies": {
+        "@kitsunekode/sweep-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+      },
+    },
     "packages/core": {
       "name": "@kitsunekode/sweep-core",
       "dependencies": {
@@ -246,6 +255,8 @@
     "@inquirer/external-editor": ["@inquirer/external-editor@1.0.3", "", { "dependencies": { "chardet": "^2.1.1", "iconv-lite": "^0.7.0" }, "peerDependencies": { "@types/node": ">=18" }, "optionalPeers": ["@types/node"] }, "sha512-RWbSrDiYmO4LbejWY7ttpxczuwQyZLBUyygsA9Nsv95hpzUWwnNTVQmAq3xuh7vNwCp07UTmE5i11XAEExx4RA=="],
 
     "@kitsunekode/sweep": ["@kitsunekode/sweep@workspace:apps/cli"],
+
+    "@kitsunekode/sweep-cli-native": ["@kitsunekode/sweep-cli-native@workspace:packages/cli-native"],
 
     "@kitsunekode/sweep-core": ["@kitsunekode/sweep-core@workspace:packages/core"],
 

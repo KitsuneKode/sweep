@@ -30,8 +30,10 @@ npx @kitsunekode/sweep .
 bunx @kitsunekode/sweep .
 ```
 
-**Platforms:** Linux, macOS, Windows (Node.js ≥ 18 or Bun). Standalone binaries are
-attached to GitHub releases for systems without a Node runtime.
+**Platforms:** Linux, macOS, Windows (Node.js ≥ 18 or Bun). On install, a
+platform-specific package (`@kitsunekode/sweep-<platform>`) provides a fast
+standalone binary when available; the bundled JS entry is the universal
+fallback. Raw binaries are also attached to GitHub releases.
 
 ---
 

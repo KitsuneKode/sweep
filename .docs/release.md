@@ -17,32 +17,46 @@ The optional Rust engine ships separately via
 `.github/workflows/native-engine-release.yml` as platform packages
 (`@kitsunekode/sweep-engine-*`) resolved at runtime.
 
-## 2. Standalone binaries (GitHub releases)
+## 2. Standalone binaries (npm platform packages + GitHub releases)
 
-`.github/workflows/cli-binaries.yml`, triggered by pushing a tag `v*`:
+`.github/workflows/cli-binaries.yml`, triggered by pushing a tag `v*`
+(or workflow_dispatch once the file lands on main):
 
-| Artifact             | Runner         | Notes         |
-| -------------------- | -------------- | ------------- |
-| `sweep-darwin-arm64` | macos-latest   | Apple Silicon |
-| `sweep-darwin-x64`   | macos-13       | Intel         |
-| `sweep-linux-x64`    | ubuntu-latest  | glibc         |
-| `sweep-win-x64`      | windows-latest | `.exe`        |
+| Platform package                  | Runner           | Binary          |
+| --------------------------------- | ---------------- | --------------- |
+| `@kitsunekode/sweep-darwin-arm64` | macos-latest     | `bin/sweep`     |
+| `@kitsunekode/sweep-darwin-x64`   | macos-13         | `bin/sweep`     |
+| `@kitsunekode/sweep-linux-x64`    | ubuntu-latest    | `bin/sweep`     |
+| `@kitsunekode/sweep-linux-arm64`  | ubuntu-24.04-arm | `bin/sweep`     |
+| `@kitsunekode/sweep-win-x64`      | windows-latest   | `bin/sweep.exe` |
 
-Each is built by `scripts/build-standalone.ts` from `apps/cli/src/bin-standalone.ts`
-— an entrypoint that imports the UI module statically and registers it before the
-CLI boots. The static graph makes Bun embed the UI code and OpenTUI's native
-library/worker/grammars, so no asset extraction or `OTUI_ASSET_ROOT` is needed at
-runtime. Every binary runs two smoke tests before upload: `--ui-probe` (proves the
-embedded UI graph loads, including native dlopen) and `--version`. All four are
-attached to the tag's GitHub release.
+Flow per runner: bundle CLI+UI → `bun build --compile` via
+`scripts/build-standalone.ts` from `apps/cli/src/bin-standalone.ts` (the static
+UI import embeds OpenTUI's native library/worker/grammars — no
+`OTUI_ASSET_ROOT` needed) → smoke (`--ui-probe`, `--version`) →
+`packages/cli-native/scripts/pack.ts` produces a publishable npm package under
+`native-packages/<id>/`.
 
-The npm package keeps the dynamic `sweep-ui.js` sibling loading — only standalone
+Jobs then:
+
+1. attach raw binaries to the tag's GitHub release
+2. `npm publish --access public --provenance` each platform package
+
+### How installs resolve
+
+The main package's `bin/sweep.js` launcher prefers the matching platform
+package's binary and falls back to bundled `dist/sweep.js` (plain Node ≥ 18).
+Platform packages ship as optionalDependencies of `@kitsunekode/sweep`; when a
+platform is added, also add its optionalDependencies entry (wiring this sync
+into the changesets publish step is a tracked follow-up).
+
+The dev/npm flow keeps dynamic `sweep-ui.js` sibling loading — only standalone
 binaries use the static entrypoint.
 
 ### Cut a binary release
 
 ```bash
-git tag vX.Y.Z && git push origin vX.Y.Z   # binaries build + attach automatically
+git tag vX.Y.Z && git push origin vX.Y.Z   # builds, smokes, attaches, publishes
 ```
 
 ### Verification checklist before tagging

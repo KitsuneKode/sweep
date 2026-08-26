@@ -1,0 +1,14 @@
+{
+  "name": "@kitsunekode/sweep-cli-native",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pack": "bun run scripts/pack.ts"
+  },
+  "dependencies": {
+    "@kitsunekode/sweep-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:"
+  }
+}

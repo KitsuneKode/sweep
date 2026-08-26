@@ -22,9 +22,10 @@
     "url": "git+https://github.com/KitsuneKode/sweep.git"
   },
   "bin": {
-    "sweep": "dist/sweep.js"
+    "sweep": "bin/sweep.cjs"
   },
   "files": [
+    "bin",
     "dist",
     "README.md",
     "LICENSE"

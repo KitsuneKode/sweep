@@ -56,6 +56,73 @@ export const NATIVE_PLATFORMS: readonly NativePlatform[] = [
 
 export const NATIVE_PLATFORM_NPM_NAMES = NATIVE_PLATFORMS.map((p) => p.npmName);
 
+/**
+ * Platforms for standalone `sweep` CLI executables, published as
+ * `@kitsunekode/sweep-<id>` npm packages (optionalDependencies of the main
+ * package). Built by .github/workflows/cli-binaries.yml on native runners.
+ */
+export interface CliBinaryPlatform {
+  id: string;
+  npmName: string;
+  os: "linux" | "darwin" | "win32";
+  cpu: "x64" | "arm64";
+  /** Bun compile target passed to `bun build --compile --target`. */
+  bunTarget: string;
+  binaryName: string;
+}
+
+export const CLI_BINARY_PLATFORMS: readonly CliBinaryPlatform[] = [
+  {
+    id: "darwin-arm64",
+    npmName: "@kitsunekode/sweep-darwin-arm64",
+    os: "darwin",
+    cpu: "arm64",
+    bunTarget: "bun-darwin-arm64",
+    binaryName: "sweep",
+  },
+  {
+    id: "darwin-x64",
+    npmName: "@kitsunekode/sweep-darwin-x64",
+    os: "darwin",
+    cpu: "x64",
+    bunTarget: "bun-darwin-x64",
+    binaryName: "sweep",
+  },
+  {
+    id: "linux-x64",
+    npmName: "@kitsunekode/sweep-linux-x64",
+    os: "linux",
+    cpu: "x64",
+    bunTarget: "bun-linux-x64",
+    binaryName: "sweep",
+  },
+  {
+    id: "linux-arm64",
+    npmName: "@kitsunekode/sweep-linux-arm64",
+    os: "linux",
+    cpu: "arm64",
+    bunTarget: "bun-linux-arm64",
+    binaryName: "sweep",
+  },
+  {
+    id: "win-x64",
+    npmName: "@kitsunekode/sweep-win-x64",
+    os: "win32",
+    cpu: "x64",
+    bunTarget: "bun-windows-x64",
+    binaryName: "sweep.exe",
+  },
+] as const;
+
+/** Map `process.platform` / `process.arch` to a CLI binary platform, if supported. */
+export function cliBinaryPlatformForProcess(): CliBinaryPlatform | undefined {
+  return CLI_BINARY_PLATFORMS.find(
+    (p) =>
+      p.os === (process.platform as CliBinaryPlatform["os"]) &&
+      p.cpu === (process.arch as CliBinaryPlatform["cpu"]),
+  );
+}
+
 /** Map `process.platform` / `process.arch` to a native platform id, if supported. */
 export function currentNativePlatformId(): string | null {
   const os =
