@@ -7,11 +7,16 @@ machinery — do not couple them without a decision-log entry.
 
 Driven by changesets in `.github/workflows/release.yml`:
 
-1. Merge PRs with changeset files (`bunx changeset`).
-2. On main, the changesets action opens/merges a **"chore: version packages"** PR.
-3. On merge, `scripts/publish-release.ts` publishes `@kitsunekode/sweep` to npm.
-   `dist/sweep.js` + `dist/sweep-ui.js` are built by `apps/cli/scripts/build.ts`
-   (shared config in `scripts/bundle.ts`).
+    1. Merge PRs with changeset files (`bunx changeset`).
+    2. On main, the changesets action opens/merges a **"chore: version packages"** PR.
+    3. On merge, `scripts/publish-release.ts` publishes `@kitsunekode/sweep` to npm.
+       `dist/sweep.js` + `dist/sweep-ui.js` are built by `apps/cli/scripts/build.ts`
+       (shared config in `scripts/bundle.ts`).
+
+Internal workspace packages are `private` and unpublished. They still need a
+`version` field so `@kitsunekode/sweep` can depend on them during `changeset
+version`. `.changeset/config.json` sets `privatePackages.version: true` so
+those packages are not skipped; they are not tagged or published.
 
 The optional Rust engine ships separately via
 `.github/workflows/native-engine-release.yml` as platform packages
