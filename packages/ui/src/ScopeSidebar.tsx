@@ -122,7 +122,6 @@ function ReclaimPanel({
   const percent = totalBytes > 0 ? Math.round((selectedBytes / totalBytes) * 100) : 0;
 
   if (!hasSelection) {
-    // Nothing selected — show a quiet prompt instead of an empty 0% meter.
     return (
       <box
         width="100%"
@@ -132,9 +131,9 @@ function ReclaimPanel({
         backgroundColor={tokens.bg}
         flexShrink={0}
       >
-        <text content={t`${bold(fg(tokens.textDim)("RECLAIM"))}`} />
-        <text content={t`${fg(tokens.meterTrack)("░".repeat(Math.max(8, width - 4)))}`} />
-        <text content={t`${fg(tokens.textDim)(`0 of ${compactBytesLabel(totalBytes)}`)}`} />
+        <text content={t`${bold(fg(tokens.textSecondary)("RECLAIM"))}`} />
+        <text content={t`${fg(tokens.textMuted)("space / a to queue")}`} />
+        <text content={t`${fg(tokens.textDim)(`0 / ${compactBytesLabel(totalBytes)} scanned`)}`} />
       </box>
     );
   }

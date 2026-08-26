@@ -8,6 +8,8 @@ import {
   buildArtifactRowContent,
   buildGroupHeaderContent,
   buildListColumnHeader,
+  buildListLegend,
+  buildListRule,
 } from "./presentation.js";
 import type { UiDisplayRow } from "./rows.js";
 import type { ThemeTokens } from "./theme.js";
@@ -20,6 +22,7 @@ export interface ArtifactListProps {
   focused: boolean;
   tokens: ThemeTokens;
   paneWidth?: number;
+  scanning?: boolean;
   onToggleSelection?: (candidateId: string) => void;
   onToggleGroup?: (groupKey: string) => void;
   onSetCursor?: (rowIndex: number) => void;
@@ -33,6 +36,7 @@ export function ArtifactList({
   focused,
   tokens,
   paneWidth,
+  scanning,
   onToggleSelection,
   onToggleGroup,
   onSetCursor,
@@ -41,14 +45,12 @@ export function ArtifactList({
   const [hoveredRowIndex, setHoveredRowIndex] = useState<number | null>(null);
   const dimensions = useTerminalDimensions();
 
-  // Pane padding + borders consume ~4 columns; size the columns off what remains.
-  const widths = useMemo(
-    () =>
-      artifactRowWidths(
-        paneWidth ?? Math.max(36, dimensions.width - (dimensions.width >= 72 ? 36 : 6)),
-      ),
-    [paneWidth, dimensions.width],
+  // Pane padding + borders + scrollbar consume columns; size rows off what remains.
+  const listWidth = Math.max(
+    36,
+    (paneWidth ?? Math.max(36, dimensions.width - (dimensions.width >= 72 ? 36 : 6))) - 2,
   );
+  const widths = useMemo(() => artifactRowWidths(listWidth), [listWidth]);
 
   useEffect(() => {
     if (!focused) return;
@@ -62,71 +64,82 @@ export function ArtifactList({
   }, [currentRowIndex, focused]);
 
   return (
-    <scrollbox
-      ref={scrollRef}
-      focused={focused}
-      flexGrow={1}
-      width="100%"
-      height="100%"
-      viewportCulling
-      verticalScrollbarOptions={{
-        trackOptions: { backgroundColor: tokens.surfaceInset, foregroundColor: tokens.border },
-      }}
-    >
-      <box width="100%" paddingBottom={1}>
+    <box width="100%" flexGrow={1} minHeight={0} flexDirection="column">
+      <box width="100%" flexShrink={0} flexDirection="column">
         <text content={buildListColumnHeader(widths, tokens)} />
+        <text content={buildListRule(widths, tokens)} />
+        <text content={buildListLegend(tokens)} />
       </box>
-      {rows.map((row, index) => {
-        if (row.kind === "header") {
+      <scrollbox
+        ref={scrollRef}
+        focused={focused}
+        flexGrow={1}
+        width="100%"
+        height="100%"
+        viewportCulling
+        verticalScrollbarOptions={{
+          trackOptions: { backgroundColor: tokens.surfaceInset, foregroundColor: tokens.border },
+        }}
+      >
+        {rows.map((row, index) => {
+          if (row.kind === "header") {
+            return (
+              <box
+                key={`header-${row.groupKey}-${index}`}
+                id={`artifact-row-${index}`}
+                width="100%"
+                height={1}
+                onMouseDown={() => onToggleGroup?.(row.groupKey)}
+              >
+                <text content={buildGroupHeaderContent(row, tokens, widths.nameWidth + 8)} />
+              </box>
+            );
+          }
+
+          const candidate = candidatesById.get(row.candidateId);
+          if (!candidate) return null;
+
+          const isCurrent = index === currentRowIndex;
+          const isSelected = selectedIds.has(candidate.id);
+          const isHovered = hoveredRowIndex === index && !isCurrent;
+          const rowBg = isCurrent ? tokens.selectionBg : isHovered ? tokens.hoverBg : undefined;
+
+          const mouseProps = {
+            selectable: true,
+            onMouseMove: () => setHoveredRowIndex(index),
+            onMouseLeave: () => setHoveredRowIndex((prev) => (prev === index ? null : prev)),
+            // First click moves the cursor; clicking the focused row toggles it.
+            onMouseDown: () => {
+              if (isCurrent) {
+                onToggleSelection?.(candidate.id);
+              } else {
+                onSetCursor?.(index);
+              }
+            },
+          } as BoxProps;
+
           return (
             <box
-              key={`header-${row.groupKey}-${index}`}
+              key={row.candidateId}
               id={`artifact-row-${index}`}
               width="100%"
-              paddingTop={index > 0 ? 1 : 0}
-              onMouseDown={() => onToggleGroup?.(row.groupKey)}
+              height={1}
+              flexDirection="row"
+              {...(rowBg ? { backgroundColor: rowBg } : {})}
+              {...mouseProps}
             >
-              <text content={buildGroupHeaderContent(row, tokens)} />
+              <text
+                content={buildArtifactRowContent(candidate, isSelected, isCurrent, widths, tokens)}
+              />
             </box>
           );
-        }
-
-        const candidate = candidatesById.get(row.candidateId);
-        if (!candidate) return null;
-
-        const isCurrent = index === currentRowIndex;
-        const isSelected = selectedIds.has(candidate.id);
-        const isHovered = hoveredRowIndex === index && !isCurrent;
-        const rowBg = isCurrent ? tokens.selectionBg : isHovered ? tokens.hoverBg : undefined;
-
-        const mouseProps = {
-          selectable: true,
-          onMouseMove: () => setHoveredRowIndex(index),
-          onMouseLeave: () => setHoveredRowIndex((prev) => (prev === index ? null : prev)),
-          // First click moves the cursor; clicking the focused row toggles it.
-          onMouseDown: () => {
-            if (isCurrent) {
-              onToggleSelection?.(candidate.id);
-            } else {
-              onSetCursor?.(index);
-            }
-          },
-        } as BoxProps;
-
-        return (
-          <box
-            key={row.candidateId}
-            id={`artifact-row-${index}`}
-            width="100%"
-            {...(rowBg ? { backgroundColor: rowBg } : {})}
-            {...mouseProps}
-          >
-            <text
-              content={buildArtifactRowContent(candidate, isSelected, isCurrent, widths, tokens)}
-            />
+        })}
+        {scanning ? (
+          <box width="100%" height={1} paddingTop={0}>
+            <text content="  discovering more artifacts…" fg={tokens.textMuted} />
           </box>
-        );
-      })}
-    </scrollbox>
+        ) : null}
+      </scrollbox>
+    </box>
   );
 }

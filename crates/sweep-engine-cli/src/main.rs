@@ -5,9 +5,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::cell::RefCell;
 use std::io::{self, IsTerminal, Read, Write};
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
 use sweep_engine::{apply_plan, scan_to_plan_with_sweep_config, ScanHooks, ScanOptions};
 use sweep_types::{ApplyReport, ScanCandidate, ScanPlan, SelectionPolicy, SweepConfig};
 
@@ -193,21 +190,11 @@ fn read_stdin_if_present() -> Option<String> {
         return None;
     }
 
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let mut input = String::new();
-        let payload = match io::stdin().read_to_string(&mut input) {
-            Ok(_) if input.trim().is_empty() => None,
-            Ok(_) => Some(input),
-            Err(_) => None,
-        };
-        let _ = tx.send(payload);
-    });
-
-    match rx.recv_timeout(Duration::from_millis(100)) {
-        Ok(payload) => payload,
-        Err(mpsc::RecvTimeoutError::Timeout) => None,
-        Err(mpsc::RecvTimeoutError::Disconnected) => None,
+    let mut input = String::new();
+    match io::stdin().read_to_string(&mut input) {
+        Ok(_) if input.trim().is_empty() => None,
+        Ok(_) => Some(input),
+        Err(_) => None,
     }
 }
 

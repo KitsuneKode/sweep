@@ -25,7 +25,17 @@ function itemComparator(sortBy: UiSortBy): (a: ScanCandidate, b: ScanCandidate) 
   return (a, b) => b.estimatedBytes - a.estimatedBytes || a.name.localeCompare(b.name);
 }
 
+const displayRowsCache = new WeakMap<SweepUiState, UiDisplayRow[]>();
+
 export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
+  const cached = displayRowsCache.get(state);
+  if (cached) return cached;
+  const rows = computeDisplayRows(state);
+  displayRowsCache.set(state, rows);
+  return rows;
+}
+
+function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
   const visible = getVisibleCandidates(state);
   const compare = itemComparator(state.sortBy);
   const groups = groupCandidatesByScope(state.targetDir, visible, compare);

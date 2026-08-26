@@ -138,21 +138,23 @@ async function runEngineAsync(
     if (options.signal.aborted) {
       proc.kill("SIGTERM");
     } else {
-      options.signal.addEventListener("abort", () => proc.kill("SIGTERM"), { once: true });
+      const onAbort = () => proc.kill("SIGTERM");
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      proc.on("close", () => options.signal?.removeEventListener("abort", onAbort));
     }
   }
 
   return await new Promise<string>((resolvePromise, rejectPromise) => {
     let stdout = "";
     let stderr = "";
+    let lines: ReturnType<typeof createInterface> | undefined;
 
     proc.stdout.setEncoding("utf8");
     proc.stderr.setEncoding("utf8");
 
     if (onLine) {
-      const lines = createInterface({ input: proc.stdout });
+      lines = createInterface({ input: proc.stdout });
       lines.on("line", (line) => {
-        stdout += `${line}\n`;
         if (line.length > 0) onLine(line);
       });
     } else {
@@ -166,10 +168,12 @@ async function runEngineAsync(
     });
 
     proc.on("error", (error) => {
+      lines?.close();
       rejectPromise(new Error(`failed to spawn rust engine at ${binary}: ${error.message}`));
     });
 
     proc.on("close", (code) => {
+      lines?.close();
       if (code === 0) {
         resolvePromise(stdout);
       } else {

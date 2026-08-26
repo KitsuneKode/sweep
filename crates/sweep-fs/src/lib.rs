@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 /// Maximum paths passed to a single `du` invocation (aligned with JS `DU_CHUNK_SIZE`).
 pub const DU_CHUNK_SIZE: usize = 50;
+/// Stay well under ARG_MAX even with deep monorepo paths (aligned with JS `DU_ARGV_BUDGET`).
+pub const DU_ARGV_BUDGET: usize = 96 * 1024;
 
 /// Describes a filesystem entry discovered during a scan walk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,12 +147,13 @@ fn walk_dir(
             Err(_) => continue,
         };
 
-        let is_symlink = file_type.is_symlink();
+        let mut is_symlink = file_type.is_symlink();
         let mut is_dir = file_type.is_dir() && !is_symlink;
         let is_file = file_type.is_file() && !is_symlink;
 
         if is_dir && is_reparse_point_or_symlink(&full_path) {
             is_dir = false;
+            is_symlink = true;
         }
 
         if matcher.matches(&file_name) {
@@ -217,8 +220,9 @@ fn should_ignore(
         .unwrap_or(full_path.as_str());
 
     for pattern in ignore {
+        let pattern = pattern.trim_end_matches('/');
         if pattern.contains('/') {
-            if rel == pattern.as_str() || rel.starts_with(&format!("{pattern}/")) {
+            if rel == pattern || rel.starts_with(&format!("{pattern}/")) {
                 return true;
             }
         } else if entry_name == pattern {
@@ -282,7 +286,7 @@ pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
         _ => return result,
     };
 
-    for chunk in paths.chunks(DU_CHUNK_SIZE) {
+    for chunk in chunk_paths_for_du(paths) {
         let Some(chunk_map) = du_estimate_chunk(flag, multiplier, chunk) else {
             continue;
         };
@@ -290,6 +294,25 @@ pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
     }
 
     result
+}
+
+fn chunk_paths_for_du<'a>(paths: &'a [&'a Utf8Path]) -> Vec<&'a [&'a Utf8Path]> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut used = 3usize;
+    for (index, path) in paths.iter().enumerate() {
+        let cost = path.as_str().len() + 1;
+        if index > start && (index - start >= DU_CHUNK_SIZE || used + cost > DU_ARGV_BUDGET) {
+            chunks.push(&paths[start..index]);
+            start = index;
+            used = 3;
+        }
+        used += cost;
+    }
+    if start < paths.len() {
+        chunks.push(&paths[start..]);
+    }
+    chunks
 }
 
 /// Exact recursive size by walking all files under a path (aligned with JS `exactSize`).

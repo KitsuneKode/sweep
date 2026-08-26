@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { dirname, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import {
   currentNativePlatformId,
   NATIVE_PLATFORM_NPM_NAMES,
@@ -35,7 +36,8 @@ describe("sweepPackageRoot", () => {
   test("resolves repo root from packages/core/src", () => {
     const coreSrc = resolve(import.meta.dir);
     const root = sweepPackageRoot(coreSrc);
-    expect(root.endsWith("/sweep") || root.endsWith("\\sweep")).toBe(true);
+    expect(existsSync(join(root, "package.json"))).toBe(true);
+    expect(existsSync(join(root, "apps/cli"))).toBe(true);
   });
 
   test("resolves package root from dist layout", () => {

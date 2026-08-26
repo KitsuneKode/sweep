@@ -56,11 +56,47 @@ function compileMatcher(patterns: string[]): (name: string) => boolean {
 
 const platform = process.platform;
 const DU_CHUNK_SIZE = 50;
+/** Stay well under ARG_MAX even with deep monorepo paths. */
+const DU_ARGV_BUDGET = 96 * 1024;
 
-/** Size one batch (≤ DU_CHUNK_SIZE paths) via a single du subprocess. */
-async function batchEstimateAsync(paths: string[]): Promise<Map<string, number>> {
+function argvCost(paths: string[]): number {
+  let bytes = 3; // "du" + flag
+  for (const path of paths) bytes += path.length + 1;
+  return bytes;
+}
+
+function splitEntriesByArgvBudget(entries: ScanEntry[]): ScanEntry[][] {
+  const chunks: ScanEntry[][] = [];
+  let current: ScanEntry[] = [];
+  for (const entry of entries) {
+    const next = [...current, entry];
+    if (
+      current.length > 0 &&
+      (next.length > DU_CHUNK_SIZE || argvCost(next.map((item) => item.path)) > DU_ARGV_BUDGET)
+    ) {
+      chunks.push(current);
+      current = [entry];
+    } else {
+      current = next;
+    }
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+function isExecTooBig(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? error.code : undefined;
+  return code === "E2BIG" || code === "ERR_SPAWN_E2BIG";
+}
+
+/** Size one batch via a single du subprocess. Splits and retries on ARG_MAX. */
+async function batchEstimateAsync(
+  paths: string[],
+  signal?: AbortSignal,
+): Promise<Map<string, number>> {
   const result = new Map<string, number>();
-  if (paths.length === 0 || (platform !== "linux" && platform !== "darwin")) {
+  if (paths.length === 0 || signal?.aborted || (platform !== "linux" && platform !== "darwin")) {
     return result;
   }
 
@@ -71,6 +107,7 @@ async function batchEstimateAsync(paths: string[]): Promise<Map<string, number>>
     const { stdout } = await execFileAsync("du", [flag, ...paths], {
       timeout: 30_000,
       encoding: "utf8",
+      signal,
     });
 
     for (const line of stdout.split("\n")) {
@@ -83,8 +120,15 @@ async function batchEstimateAsync(paths: string[]): Promise<Map<string, number>>
         result.set(path, raw * multiplier);
       }
     }
-  } catch {
-    // Batch failed — paths land in the caller's fallback path
+  } catch (error) {
+    if (signal?.aborted) return result;
+    if (isExecTooBig(error) && paths.length > 1) {
+      const mid = Math.ceil(paths.length / 2);
+      const left = await batchEstimateAsync(paths.slice(0, mid), signal);
+      const right = await batchEstimateAsync(paths.slice(mid), signal);
+      for (const [key, value] of left) result.set(key, value);
+      for (const [key, value] of right) result.set(key, value);
+    }
   }
 
   return result;
@@ -98,7 +142,7 @@ function statFallback(entryPath: string): number {
   }
 }
 
-/** Exact recursive size by walking all files under a path. Synchronous — opt-in exact mode and rare du fallbacks only. */
+/** Exact recursive size by walking all files under a path. Synchronous — tests and tiny helpers. */
 export function exactSize(entryPath: string): number {
   let total = 0;
 
@@ -137,8 +181,61 @@ export function exactSize(entryPath: string): number {
   return total;
 }
 
-function applyFallbackSize(entry: ScanEntry): number {
-  return entry.entryType === "directory" ? exactSize(entry.path) : statFallback(entry.path);
+/** Async exact size so fallback walks yield to the event loop and honor abort. */
+export async function exactSizeAsync(entryPath: string, signal?: AbortSignal): Promise<number> {
+  if (signal?.aborted) return 0;
+
+  try {
+    const st = await lstat(entryPath);
+    if (st.isSymbolicLink() || st.isFile()) return st.size;
+  } catch {
+    return 0;
+  }
+
+  let total = 0;
+  const stack = [entryPath];
+  let yielded = 0;
+
+  while (stack.length > 0) {
+    if (signal?.aborted) return total;
+    const current = stack.pop();
+    if (!current) break;
+
+    let items: import("node:fs").Dirent<string>[];
+    try {
+      items = await readdir(current, { withFileTypes: true, encoding: "utf8" });
+    } catch {
+      continue;
+    }
+
+    for (const item of items) {
+      const full = join(current, item.name);
+      if (item.isSymbolicLink()) continue;
+      if (process.platform === "win32" && isReparsePointOrSymlink(full)) continue;
+      if (item.isDirectory()) {
+        stack.push(full);
+      } else {
+        try {
+          total += (await lstat(full)).size;
+        } catch {
+          // skip
+        }
+      }
+    }
+
+    yielded += 1;
+    if (yielded % 32 === 0) {
+      await new Promise<void>((resolveYield) => setImmediate(resolveYield));
+    }
+  }
+
+  return total;
+}
+
+async function applyFallbackSizeAsync(entry: ScanEntry, signal?: AbortSignal): Promise<number> {
+  return entry.entryType === "directory"
+    ? exactSizeAsync(entry.path, signal)
+    : statFallback(entry.path);
 }
 
 /** Minimal async counting semaphore for bounding subprocess concurrency. */
@@ -192,31 +289,38 @@ class ProgressiveSizer {
   /** Queue an entry as soon as it is discovered; launches a batch when one fills. */
   add(entry: ScanEntry): void {
     this.pending.push(entry);
-    if (this.pending.length >= DU_CHUNK_SIZE) {
-      this.launch(this.pending.splice(0, DU_CHUNK_SIZE));
+    const pendingPaths = this.pending.map((item) => item.path);
+    if (this.pending.length >= DU_CHUNK_SIZE || argvCost(pendingPaths) >= DU_ARGV_BUDGET) {
+      this.launch(this.pending.splice(0, this.pending.length));
     }
   }
 
   /** Spawn one bounded du batch without blocking the walk. */
   private launch(batch: ScanEntry[]): void {
-    const task = this.runBatch(batch);
-    const tracked = task.then(() => {
-      this.inflight.delete(tracked);
-    });
-    this.inflight.add(tracked);
+    for (const entries of splitEntriesByArgvBudget(batch)) {
+      if (entries.length === 0) continue;
+      const task = this.runBatch(entries);
+      const tracked = task.then(() => {
+        this.inflight.delete(tracked);
+      });
+      this.inflight.add(tracked);
+    }
   }
 
   private async runBatch(batch: ScanEntry[]): Promise<void> {
     await this.slots.acquire();
     try {
       if (this.signal?.aborted) return;
-      const sizes = await batchEstimateAsync(batch.map((entry) => entry.path));
+      const sizes = await batchEstimateAsync(
+        batch.map((entry) => entry.path),
+        this.signal,
+      );
       for (const entry of batch) {
         const bytes = sizes.get(entry.path);
         if (bytes !== undefined) {
           entry.estimatedBytes = bytes;
           this.hooks.onEntrySized?.(entry);
-        } else {
+        } else if (!this.signal?.aborted) {
           this.unsized.push(entry);
         }
       }
@@ -231,12 +335,13 @@ class ProgressiveSizer {
       this.launch(this.pending.splice(0, this.pending.length));
     }
     await Promise.all(this.inflight);
+    if (this.signal?.aborted) return;
 
     const remaining = [...this.unsized];
     this.unsized.length = 0;
     await mapPool(remaining, SIZE_CONCURRENCY, async (entry) => {
       if (this.signal?.aborted) return;
-      entry.estimatedBytes = applyFallbackSize(entry);
+      entry.estimatedBytes = await applyFallbackSizeAsync(entry, this.signal);
       this.hooks.onEntrySized?.(entry);
     });
   }
@@ -366,7 +471,9 @@ async function applySizeEstimatesPostWalk(
 
   await mapPool(entries, SIZE_CONCURRENCY, async (entry) => {
     if (signal?.aborted) return;
-    entry.estimatedBytes = exact ? exactSize(entry.path) : applyFallbackSize(entry);
+    entry.estimatedBytes = exact
+      ? await exactSizeAsync(entry.path, signal)
+      : await applyFallbackSizeAsync(entry, signal);
     hooks.onEntrySized?.(entry);
   });
 }

@@ -58,6 +58,8 @@ describe("handleKeymap", () => {
       setPendingApply: mock(() => {}),
       requestApply: mock(() => {}),
       applyPlan: mock(() => {}),
+      clearFilterDraft: mock(() => {}),
+      dismissScanError: mock(() => {}),
     };
   }
 
@@ -97,6 +99,49 @@ describe("handleKeymap", () => {
     const actionsCtrlN = makeActions();
     handleKeymap(ctxCtrlN, actionsCtrlN);
     expect(actionsCtrlN.focusPanel).toHaveBeenCalledWith("list");
+  });
+
+  test("Shift+g jumps to last item, g jumps to first", () => {
+    const state = createUiState(mockPlan());
+    const toLast = makeActions();
+    handleKeymap(
+      makeContext({ key: { name: "g", shift: true }, state: { ...state, focus: "list" } }),
+      toLast,
+    );
+    expect(toLast.mutate).toHaveBeenCalled();
+
+    const toFirst = makeActions();
+    handleKeymap(
+      makeContext({ key: { name: "g", shift: false }, state: { ...state, focus: "list" } }),
+      toFirst,
+    );
+    expect(toFirst.mutate).toHaveBeenCalled();
+  });
+
+  test("escape in search clears the filter then returns to the list", () => {
+    const ctx = makeContext({
+      key: { name: "escape" },
+      state: { ...createUiState(mockPlan()), focus: "search", filter: "node" },
+    });
+    const actions = makeActions();
+    handleKeymap(ctx, actions);
+    expect(actions.mutate).toHaveBeenCalled();
+    expect(actions.clearFilterDraft).toHaveBeenCalled();
+    expect(actions.focusPanel).toHaveBeenCalledWith("list");
+  });
+
+  test("scan error modal traps keys until retry or dismiss", () => {
+    const retry = makeActions();
+    handleKeymap(makeContext({ key: { name: "j" }, scanError: "du failed" }), retry);
+    expect(retry.mutate).not.toHaveBeenCalled();
+    expect(retry.requestApply).not.toHaveBeenCalled();
+
+    const rescan = makeActions();
+    handleKeymap(makeContext({ key: { name: "r" }, scanError: "du failed" }), {
+      ...rescan,
+      requestRescan: mock(() => {}),
+    });
+    expect(rescan.dismissScanError).toHaveBeenCalled();
   });
 
   test("Ctrl+U and Ctrl+D page scrolling", () => {

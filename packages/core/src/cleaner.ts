@@ -7,8 +7,8 @@ const DELETE_CONCURRENCY = 4;
 
 /**
  * Filter out candidate entries that are contained within an ancestor candidate
- * that is already scheduled for recursive removal. This prevents concurrent
- * deletion races, ENOENT false errors, and double-counted freed bytes.
+ * that is already scheduled for recursive removal. Sort is lexicographic so a
+ * parent path is retained before any children that start with that prefix.
  */
 export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
   // Sort shallowest paths first

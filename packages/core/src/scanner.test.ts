@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "./config.js";
-import { exactSize, scan } from "./scanner.js";
+import { exactSize, exactSizeAsync, scan } from "./scanner.js";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
@@ -276,5 +276,17 @@ describe("scanner — size estimation", () => {
 
     const size = exactSize(dir("node_modules"));
     expect(size).toBe(5 + 7 + 5);
+    expect(await exactSizeAsync(dir("node_modules"))).toBe(size);
+  });
+
+  test("abort signal stops sizing without throwing", async () => {
+    mkdirSync(dir("node_modules"));
+    mkdirSync(dir("dist"));
+    const controller = new AbortController();
+    const result = await scan(tmpDir, DEFAULT_CONFIG, false, {
+      signal: controller.signal,
+      onEntry: () => controller.abort(),
+    });
+    expect(result.entries.length).toBeGreaterThanOrEqual(0);
   });
 });

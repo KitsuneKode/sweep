@@ -14,7 +14,8 @@ import {
   toggleCurrentSelection,
   toggleGroup,
   togglePattern,
-  setRowIndex,
+  setPatternIndex,
+  setFilter,
   type UiFocus,
 } from "./state.js";
 import { buildDisplayRows, snapRowIndexToItem } from "./rows.js";
@@ -121,6 +122,10 @@ export interface KeymapActions {
   requestRescan?: () => void;
   /** Cycle artifact ordering between size and name. */
   toggleSort?: () => void;
+  /** Clear the live filter input when search/esc unwinds the query. */
+  clearFilterDraft?: () => void;
+  /** Dismiss a scan-error modal without retrying. */
+  dismissScanError?: () => void;
 }
 
 export interface KeymapContext {
@@ -132,16 +137,37 @@ export interface KeymapContext {
   listSelectIndex: number;
   /** Visible rows in the artifact pane, for half-page scrolling. */
   pageRows?: number;
+  /** Full scan failure shown as a modal; traps keys until dismissed. */
+  scanError?: string | null;
 }
 
 /** Dispatch keyboard input by modal state and focused panel. */
 export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
-  const { key, state, showHelp, pendingApply, showSidebar, listSelectIndex } = ctx;
+  const { key, state, showHelp, pendingApply, showSidebar, listSelectIndex, scanError } = ctx;
   const isShiftTab = (key.name === "tab" && key.shift) || key.name === "shift+tab";
   const isTab = key.name === "tab" && !key.shift;
   const isCtrlU = (key.name === "u" && key.ctrl) || key.name === "ctrl+u" || key.name === "pageup";
   const isCtrlD =
     (key.name === "d" && key.ctrl) || key.name === "ctrl+d" || key.name === "pagedown";
+  const isShiftG = (key.name === "g" && key.shift) || key.name === "G" || key.name === "shift+g";
+
+  if (scanError) {
+    if (key.name === "r") {
+      actions.dismissScanError?.();
+      if (actions.requestRescan) {
+        actions.requestRescan();
+      }
+      return;
+    }
+    if (key.name === "q") {
+      actions.finalize({ type: "abort" });
+      return;
+    }
+    if (key.name === "escape" || key.name === "n") {
+      actions.dismissScanError?.();
+    }
+    return;
+  }
 
   if (pendingApply) {
     if (key.name === "y") {
@@ -161,16 +187,22 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (state.focus === "search") {
-    // Escape or navigation keys hand focus back to the artifact list
+    if (key.name === "escape") {
+      actions.mutate((s) => setFilter(s, ""));
+      actions.clearFilterDraft?.();
+      actions.focusPanel("list");
+      return;
+    }
     if (
-      key.name === "escape" ||
       key.name === "return" ||
       key.name === "down" ||
       (key.name === "n" && key.ctrl) ||
       (key.name === "j" && key.ctrl)
     ) {
       actions.focusPanel("list");
-    } else if (isTab || isShiftTab) {
+      return;
+    }
+    if (isTab || isShiftTab) {
       actions.focusPanel(nextFocus(state.focus, showSidebar, isShiftTab));
     }
     return;
@@ -254,9 +286,9 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       if (pattern) actions.mutate((s) => togglePattern(s, pattern));
     }
     if (key.name === "up" || key.name === "k") {
-      actions.mutate((s) => setRowIndex(s, Math.max(0, s.rowIndex - 1)));
+      actions.mutate((s) => setPatternIndex(s, s.patternIndex - 1));
     } else if (key.name === "down" || key.name === "j") {
-      actions.mutate((s) => setRowIndex(s, s.rowIndex + 1));
+      actions.mutate((s) => setPatternIndex(s, s.patternIndex + 1));
     }
     return;
   }
@@ -280,9 +312,11 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       case "j":
         actions.mutate((s) => moveCursor(s, 1));
         return;
-      case "g":
       case "home":
         actions.mutate((s) => jumpCursor(s, -Infinity));
+        return;
+      case "g":
+        actions.mutate((s) => jumpCursor(s, isShiftG ? Infinity : -Infinity));
         return;
       case "G":
       case "shift+g":

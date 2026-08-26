@@ -19,6 +19,7 @@ import {
   togglePattern,
   toggleSortBy,
   upsertCandidates,
+  setPatternIndex,
 } from "./state.js";
 import { buildDisplayRows } from "./rows.js";
 
@@ -359,5 +360,25 @@ describe("sweep ui state", () => {
     expect(finalizedPlan.selectedCandidateIds).toEqual(["cand_safe", "cand_dangerous"]);
     expect(finalizedPlan.summary.candidateCount).toBe(3);
     expect(finalizedPlan.summary.selectedCount).toBe(2);
+    expect(finalizedPlan.summary.estimatedTotalBytes).toBe(3584);
+    expect(finalizedPlan.summary.riskCounts).toEqual({
+      safe: 1,
+      caution: 0,
+      dangerous: 1,
+      blocked: 1,
+    });
+  });
+
+  test("setPatternIndex stays inside the catalog and does not snap to artifact rows", () => {
+    const state = createUiState(createPlan());
+    const next = {
+      ...state,
+      catalogPatterns: ["node_modules", "dist", "build"],
+      rowIndex: 4,
+    };
+    const moved = setPatternIndex(next, 2);
+    expect(moved.patternIndex).toBe(2);
+    expect(moved.rowIndex).toBe(4);
+    expect(moved.focus).toBe("patterns");
   });
 });

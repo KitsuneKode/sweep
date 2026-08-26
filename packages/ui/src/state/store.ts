@@ -30,6 +30,8 @@ export interface SweepUiState {
   riskFilter: RiskTier | "all";
   rowIndex: number;
   sidebarIndex: number;
+  /** Cursor in the pattern editor; independent of artifact `rowIndex`. */
+  patternIndex: number;
   selectedIds: Set<string>;
   focus: UiFocus;
   themeMode: ThemeMode;
@@ -69,6 +71,7 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     riskFilter: "all",
     rowIndex: 0,
     sidebarIndex: 0,
+    patternIndex: 0,
     selectedIds,
     focus: "list",
     themeMode: "auto",
@@ -141,15 +144,32 @@ export function togglePattern(state: SweepUiState, pattern: string): SweepUiStat
 }
 
 export function setFocus(state: SweepUiState, focus: UiFocus): SweepUiState {
-  if (focus !== "sidebar") {
-    return { ...state, focus };
+  if (focus === "sidebar") {
+    const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+    return {
+      ...state,
+      focus,
+      sidebarIndex: scopeFilterToSidebarIndex(state.scopeFilter, sidebarRows),
+    };
   }
 
-  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+  if (focus === "patterns") {
+    return {
+      ...state,
+      focus,
+      patternIndex: clamp(state.patternIndex, 0, Math.max(0, state.catalogPatterns.length - 1)),
+    };
+  }
+
+  return { ...state, focus };
+}
+
+export function setPatternIndex(state: SweepUiState, patternIndex: number): SweepUiState {
+  if (state.catalogPatterns.length === 0) return { ...state, patternIndex: 0 };
   return {
     ...state,
-    focus,
-    sidebarIndex: scopeFilterToSidebarIndex(state.scopeFilter, sidebarRows),
+    patternIndex: clamp(patternIndex, 0, state.catalogPatterns.length - 1),
+    focus: "patterns",
   };
 }
 
@@ -322,8 +342,15 @@ export function toggleCurrentSelection(state: SweepUiState): SweepUiState {
   return toggleSelectionById(state, candidate.id);
 }
 
+function candidateById(state: SweepUiState, candidateId: string): ScanCandidate | undefined {
+  for (const candidate of state.candidates) {
+    if (candidate.id === candidateId) return candidate;
+  }
+  return undefined;
+}
+
 export function toggleSelectionById(state: SweepUiState, candidateId: string): SweepUiState {
-  const candidate = state.candidates.find((entry) => entry.id === candidateId);
+  const candidate = candidateById(state, candidateId);
   if (!candidate) return state;
   // Blocked items are hard-locked everywhere. Dangerous items CAN be selected,
   // but only deliberately (one at a time) and always behind the red confirm.
@@ -378,11 +405,8 @@ export function clearSelection(state: SweepUiState): SweepUiState {
 }
 
 export function getCurrentCandidate(state: SweepUiState): ScanCandidate | undefined {
-  const rows = buildDisplayRows(state);
-  const candidateId = rowCandidateId(rows, state.rowIndex);
-  return candidateId
-    ? state.candidates.find((candidate) => candidate.id === candidateId)
-    : undefined;
+  const candidateId = rowCandidateId(buildDisplayRows(state), state.rowIndex);
+  return candidateId ? candidateById(state, candidateId) : undefined;
 }
 
 export function getUiSummary(state: SweepUiState): SweepUiSummary {
@@ -411,15 +435,23 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
 }
 
 export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan {
-  const selectedCandidateIds = [...state.selectedIds].filter((id) => {
-    const candidate = state.candidates.find((entry) => entry.id === id);
-    return candidate !== undefined && candidate.riskTier !== "blocked";
-  });
+  const selectedSet = new Set(state.selectedIds);
+  const selectedCandidateIds: string[] = [];
+  let totalBytes = 0;
+  const riskCounts: ScanPlan["summary"]["riskCounts"] = {
+    safe: 0,
+    caution: 0,
+    dangerous: 0,
+    blocked: 0,
+  };
 
-  const totalBytes = state.candidates.reduce((sum, c) => sum + c.estimatedBytes, 0);
-  const selectedBytes = state.candidates
-    .filter((c) => selectedCandidateIds.includes(c.id))
-    .reduce((sum, c) => sum + c.estimatedBytes, 0);
+  for (const candidate of state.candidates) {
+    totalBytes += candidate.estimatedBytes;
+    riskCounts[candidate.riskTier] += 1;
+    if (selectedSet.has(candidate.id) && candidate.riskTier !== "blocked") {
+      selectedCandidateIds.push(candidate.id);
+    }
+  }
 
   return {
     ...plan,
@@ -431,6 +463,7 @@ export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan 
       candidateCount: state.candidates.length,
       selectedCount: selectedCandidateIds.length,
       estimatedTotalBytes: totalBytes,
+      riskCounts,
     },
   };
 }

@@ -22,6 +22,7 @@ export {
   setFocus,
   setRiskFilter,
   setRowIndex,
+  setPatternIndex,
   setScopeFilter,
   setThemeMode,
   toggleCurrentSelection,

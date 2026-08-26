@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
-import { formatArtifactRow, relativePath } from "./presentation.js";
+import {
+  artifactRowWidths,
+  formatArtifactRow,
+  formatArtifactRowPlain,
+  relativePath,
+} from "./presentation.js";
 import { darkTheme } from "./theme.js";
 
 function candidate(overrides: Partial<ScanCandidate> = {}): ScanCandidate {
@@ -36,5 +41,13 @@ describe("presentation formatters", () => {
     expect(line).toContain("512 B");
     expect(line).toContain("✓");
     expect(line.startsWith(" ")).toBe(true);
+    expect(line.includes("\n")).toBe(false);
+  });
+
+  test("plain artifact rows stay within the computed list width", () => {
+    const widths = artifactRowWidths(80);
+    const line = formatArtifactRowPlain(candidate({ name: "node_modules" }), true, false, widths);
+    expect(line.length).toBeLessThanOrEqual(80);
+    expect(line.includes("\n")).toBe(false);
   });
 });

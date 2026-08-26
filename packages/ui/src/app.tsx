@@ -118,7 +118,7 @@ function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
         <text content={line("ctrl-u / ctrl-d", "half page up / down")} />
         <text content={line("h · l", "collapse · expand scope group")} />
         <text content={line("w · e", "collapse all · expand all")} />
-        <text content={line("space", "toggle selection")} />
+        <text content={line("space", "queue / unqueue for deletion")} />
         <text content={line("a · s · u", "select all · safe only · clear")} />
         <text content={line("o", "sort by size ↔ name")} />
         <text content={line("r", "rescan from disk")} />
@@ -202,6 +202,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
     const controller = new AbortController();
     abortRef.current = controller;
     const gen = ++generationRef.current;
+    setScanError(null);
     dispatch({ type: "mutate", fn: (s) => setScanning(s, true) });
     scan.start(
       {
@@ -244,7 +245,16 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   const showSidebar = dimensions.width >= 72;
 
   const mutate = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
-    dispatch({ type: "mutate", fn });
+    dispatch({
+      type: "mutate",
+      fn: (s) => {
+        const next = fn(s);
+        if (next.filter !== s.filter && next.filter.length === 0) {
+          setFilterDraft("");
+        }
+        return next;
+      },
+    });
   }, []);
 
   const visibleItems = useMemo(() => getVisibleCandidates(state), [state]);
@@ -256,7 +266,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   );
 
   const listSelectIndex = useMemo(() => {
-    if (state.focus === "patterns") return state.rowIndex;
+    if (state.focus === "patterns") return state.patternIndex;
     const currentId = displayRows[state.rowIndex];
     if (!currentId || currentId.kind !== "item") return 0;
     const idx = visibleItems.findIndex((c: ScanCandidate) => c.id === currentId.candidateId);
@@ -272,7 +282,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
 
   const requestApply = useCallback(() => {
     if (summary.selectedCount === 0) return;
-    if (dangerousSelected > 0 || summary.dangerousVisibleCount > 0) {
+    if (dangerousSelected > 0) {
       setPendingApply(true);
       return;
     }
@@ -299,6 +309,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         pendingApply,
         showSidebar,
         listSelectIndex,
+        scanError,
         // Approximate visible list rows: full height minus header/status chrome.
         pageRows: Math.max(6, dimensions.height - 9),
       },
@@ -312,6 +323,8 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         applyPlan,
         requestRescan,
         toggleSort: () => dispatch({ type: "mutate", fn: toggleSortBy }),
+        clearFilterDraft: () => setFilterDraft(""),
+        dismissScanError: () => setScanError(null),
       },
     );
   });

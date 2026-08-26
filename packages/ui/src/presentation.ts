@@ -29,8 +29,10 @@ export const UNSELECTED_MARK = "○";
 export const ROW_NAME_OFFSET = 4;
 const SIZE_COLUMN_WIDTH = 9;
 const RISK_COLUMN_WIDTH = 1;
-const SIZE_GAP = 3;
+const SIZE_GAP = 2;
 const GLYPH_GAP = 2;
+/** Extra cells reserved so a scrollbar or wide glyph cannot wrap the row. */
+const WRAP_SAFETY = 2;
 
 export interface RowWidths {
   nameWidth: number;
@@ -39,9 +41,10 @@ export interface RowWidths {
 
 /** Column math shared by rows and the column header so they always align. */
 export function artifactRowWidths(listWidth: number): RowWidths {
+  const usable = Math.max(24, listWidth - WRAP_SAFETY);
   const tail = SIZE_COLUMN_WIDTH + RISK_COLUMN_WIDTH + SIZE_GAP + GLYPH_GAP;
   return {
-    nameWidth: Math.max(12, listWidth - ROW_NAME_OFFSET - tail),
+    nameWidth: Math.max(12, usable - ROW_NAME_OFFSET - tail),
     sizeWidth: SIZE_COLUMN_WIDTH,
   };
 }
@@ -56,20 +59,39 @@ export function formatGroupHeaderRow(row: Extract<UiDisplayRow, { kind: "header"
 }
 
 export function buildListColumnHeader(widths: RowWidths, tokens: ThemeTokens): StyledText {
-  const namePad = " ".repeat(Math.max(0, widths.nameWidth - "artifact".length));
-  const sizeLabel = "size".padStart(widths.sizeWidth);
-  return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textMuted)("artifact")}${namePad}${" ".repeat(SIZE_GAP)}${fg(tokens.textDim)(sizeLabel)}`;
+  const nameLabel = "NAME";
+  const namePad = " ".repeat(Math.max(0, widths.nameWidth - nameLabel.length));
+  const sizeLabel = "SIZE".padStart(widths.sizeWidth);
+  return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textSecondary)(nameLabel)}${namePad}${" ".repeat(SIZE_GAP)}${fg(tokens.textSecondary)(sizeLabel)}${" ".repeat(GLYPH_GAP)}${fg(tokens.textSecondary)("R")}`;
+}
+
+export function buildListRule(widths: RowWidths, tokens: ThemeTokens): StyledText {
+  const width =
+    ROW_NAME_OFFSET +
+    widths.nameWidth +
+    SIZE_GAP +
+    widths.sizeWidth +
+    GLYPH_GAP +
+    RISK_COLUMN_WIDTH;
+  return t`${fg(tokens.border)("─".repeat(Math.max(8, width)))}`;
+}
+
+export function buildListLegend(tokens: ThemeTokens): StyledText {
+  return t`${fg(tokens.textDim)("● queued")}  ${fg(tokens.textDim)("○ available")}  ${fg(tokens.positive)("✓ safe")}  ${fg(tokens.warning)("! caution")}  ${fg(tokens.danger)("✗ dangerous")}`;
 }
 
 export function buildGroupHeaderContent(
   row: Extract<UiDisplayRow, { kind: "header" }>,
   tokens: ThemeTokens,
+  maxLabelWidth = 48,
 ): StyledText {
   const glyph = row.collapsed ? fg(tokens.textDim)("▸") : fg(tokens.accent)("▾");
-  const base = t`${glyph} ${bold(fg(tokens.textSecondary)(row.label))}  ${dim("·")}  ${fg(tokens.textMuted)(`${row.itemCount} item${row.itemCount === 1 ? "" : "s"}`)}`;
+  const label = truncateEnd(row.label, maxLabelWidth);
+  const count = `${row.itemCount}`;
+  const base = t`${glyph} ${bold(fg(tokens.textSecondary)(label))}  ${fg(tokens.textDim)(count)}`;
   if (row.selectedCount <= 0) return base;
 
-  return joinStyled([base, t`  ${fg(tokens.positive)(`· ${row.selectedCount} queued`)}`]);
+  return joinStyled([base, t`  ${fg(tokens.positive)(`${row.selectedCount} queued`)}`]);
 }
 
 /** Plain-text row layout — canonical spacing for tests and debugging. */
@@ -114,9 +136,14 @@ export function buildArtifactRowContent(
       ? tokens.blocked
       : tokens.text;
   const size = formatSizeCell(candidate.estimatedBytes, widths.sizeWidth);
-  const sizeColor = selected && !isCurrent ? tokens.positive : tokens.textSecondary;
+  const sizeColor = isCurrent
+    ? tokens.selectionText
+    : selected
+      ? tokens.positive
+      : tokens.textSecondary;
+  const glyphColor = isCurrent ? tokens.selectionText : tierColor;
 
-  return t`${rail}${mark} ${fg(nameColor)(name)}${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}${" ".repeat(GLYPH_GAP)}${fg(tierColor)(riskGlyph[candidate.riskTier])}`;
+  return t`${rail} ${mark} ${fg(nameColor)(name)}${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}${" ".repeat(GLYPH_GAP)}${fg(glyphColor)(riskGlyph[candidate.riskTier])}`;
 }
 
 function formatSizeCell(bytes: number, width: number): string {
@@ -301,14 +328,14 @@ export function buildFooterLine(
   }
 
   if (focus === "search") {
-    return t`${key("enter")} ${hint("apply filter")}${sep}${key("esc")} ${hint("clear + back")}${sep}${key("⇥")} ${hint("panes")}`;
+    return t`${key("enter")} ${hint("apply")}${sep}${key("esc")} ${hint("clear + back")}${sep}${key("⇥")} ${hint("panes")}`;
   }
 
   if (dryRun) {
-    return t`${key("space")} ${hint("toggle")}${sep}${key("a")} ${hint("all")}${sep}${key("o")} ${hint("sort")}${sep}${key("enter")} ${hint("done")}${sep}${key("?")} ${hint("help")}`;
+    return t`${key("space")} ${hint("queue")}${sep}${key("a")} ${hint("all")}${sep}${key("o")} ${hint("sort")}${sep}${key("enter")} ${hint("done")}${sep}${key("?")} ${hint("help")}`;
   }
 
-  return t`${key("j/k")} ${hint("move")}${sep}${key("space")} ${hint("toggle")}${sep}${key("s/a/u")} ${hint("select")}${sep}${key("enter")} ${hint("apply")}${sep}${key("?")} ${hint("help")}`;
+  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("a/s/u")} ${hint("all/safe/clear")}${sep}${key("enter")} ${hint("apply")}${sep}${key("?")} ${hint("help")}`;
 }
 
 /** Statusline mode segment label for the focused panel. */

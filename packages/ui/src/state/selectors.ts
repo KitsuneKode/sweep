@@ -2,8 +2,10 @@ import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { groupCandidatesByScope } from "../grouping.js";
 import type { SweepUiState } from "./store.js";
 
+const visibleCache = new WeakMap<SweepUiState, ScanCandidate[]>();
+
 export function invalidateSelectorCache(): void {
-  // Pure selectors don't rely on global mutable state; retained for API compatibility
+  // WeakMap caches are keyed by immutable state objects; this remains for API compatibility.
 }
 
 function filterCandidates(candidates: ScanCandidate[], filter: string): ScanCandidate[] {
@@ -18,6 +20,9 @@ function filterCandidates(candidates: ScanCandidate[], filter: string): ScanCand
 }
 
 export function getVisibleCandidates(state: SweepUiState): ScanCandidate[] {
+  const cached = visibleCache.get(state);
+  if (cached) return cached;
+
   let result = filterCandidates(state.candidates, state.filter);
 
   if (state.scopeFilter !== null) {
@@ -31,5 +36,6 @@ export function getVisibleCandidates(state: SweepUiState): ScanCandidate[] {
     result = result.filter((candidate) => candidate.riskTier === state.riskFilter);
   }
 
+  visibleCache.set(state, result);
   return result;
 }
