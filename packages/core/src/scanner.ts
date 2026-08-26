@@ -30,20 +30,26 @@ const DU_MAX_INFLIGHT = 4;
 // ─── Pattern matching ─────────────────────────────────────────────────────────
 
 function compileMatcher(patterns: string[]): (name: string) => boolean {
-  const exact = new Set<string>();
+  const isCaseInsensitive = process.platform === "darwin" || process.platform === "win32";
+  const exact = new Set<string>(
+    patterns.filter((p) => !p.includes("*")).map((p) => (isCaseInsensitive ? p.toLowerCase() : p)),
+  );
   const regexes: RegExp[] = [];
 
   for (const p of patterns) {
-    if (!p.includes("*")) {
-      exact.add(p);
-    } else {
+    if (p.includes("*")) {
       const escaped = p.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
-      regexes.push(new RegExp(`^${escaped}$`));
+      regexes.push(new RegExp(`^${escaped}$`, isCaseInsensitive ? "i" : undefined));
     }
   }
 
-  if (regexes.length === 0) return (name) => exact.has(name);
-  return (name) => exact.has(name) || regexes.some((re) => re.test(name));
+  if (regexes.length === 0) {
+    return (name) => exact.has(isCaseInsensitive ? name.toLowerCase() : name);
+  }
+  return (name) => {
+    const key = isCaseInsensitive ? name.toLowerCase() : name;
+    return exact.has(key) || regexes.some((re) => re.test(name));
+  };
 }
 
 // ─── Size estimation ──────────────────────────────────────────────────────────
@@ -106,6 +112,7 @@ export function exactSize(entryPath: string): number {
     for (const item of items) {
       const full = join(p, item.name);
       if (item.isSymbolicLink()) continue;
+      if (process.platform === "win32" && isReparsePointOrSymlink(full)) continue;
       if (item.isDirectory()) {
         walk(full);
       } else {

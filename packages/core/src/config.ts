@@ -202,23 +202,29 @@ export function compileIgnoreMatcher(targetDir: string, ignore: string[]): Ignor
   if (ignore.length === 0) return null;
 
   const root = resolve(targetDir);
-  const exactNames = new Set<string>();
+  const isCaseInsensitive = process.platform === "darwin" || process.platform === "win32";
+  const exactNames = new Set<string>(
+    ignore.filter((p) => !p.includes("/")).map((p) => (isCaseInsensitive ? p.toLowerCase() : p)),
+  );
   const pathPrefixes: string[] = [];
 
   for (const pattern of ignore) {
     if (pattern.includes("/")) {
       const normalized = pattern.replace(/\/+$/, "");
-      if (normalized.length > 0) pathPrefixes.push(normalized);
-    } else {
-      exactNames.add(pattern);
+      if (normalized.length > 0) {
+        pathPrefixes.push(isCaseInsensitive ? normalized.toLowerCase() : normalized);
+      }
     }
   }
 
   return (entryPath, entryName) => {
-    if (exactNames.has(entryName)) return true;
+    const nameKey = isCaseInsensitive ? entryName.toLowerCase() : entryName;
+    if (exactNames.has(nameKey)) return true;
     if (pathPrefixes.length === 0) return false;
 
-    const rel = relative(root, entryPath).replace(/\\/g, "/");
+    let rel = relative(root, entryPath).replace(/\\/g, "/");
+    if (isCaseInsensitive) rel = rel.toLowerCase();
+
     for (const prefix of pathPrefixes) {
       if (rel === prefix || rel.startsWith(`${prefix}/`)) return true;
     }

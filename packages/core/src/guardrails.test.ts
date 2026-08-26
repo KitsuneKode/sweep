@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { GuardrailError, assertSafeCwd, assertSafePattern, assertSizeLimit } from "./guardrails.js";
 
 describe("assertSafeCwd", () => {
@@ -50,14 +51,13 @@ describe("assertSafeCwd", () => {
   // ── Safe paths ────────────────────────────────────────────────────────────
 
   test("allows a normal project path inside home", () => {
-    const projectPath = `${homedir()}/projects/myapp`;
+    const projectPath = join(homedir(), "projects", "myapp");
     expect(() => assertSafeCwd(projectPath)).not.toThrow();
   });
 
-  test("allows /tmp/some/project (3 levels) and /tmp/project (2 levels)", () => {
-    // /tmp is 1 level (blocked) — but /tmp/project is 2 levels and /tmp/user/project is 3 levels, and should be allowed
-    expect(() => assertSafeCwd("/tmp/project")).not.toThrow();
-    expect(() => assertSafeCwd("/tmp/user/project")).not.toThrow();
+  test("allows multi-level temporary project directories", () => {
+    expect(() => assertSafeCwd(join(tmpdir(), "project"))).not.toThrow();
+    expect(() => assertSafeCwd(join(tmpdir(), "user", "project"))).not.toThrow();
   });
 
   // ── Error codes ───────────────────────────────────────────────────────────
@@ -105,31 +105,31 @@ describe("assertSafePattern", () => {
 describe("assertSafeCwd — adversarial inputs", () => {
   test("blocks null-byte injection in path", () => {
     // Null bytes in paths can confuse C-level FS calls
-    expect(() => assertSafeCwd("/tmp/project\x00evil")).toThrow(GuardrailError);
+    expect(() => assertSafeCwd(join(tmpdir(), "project\x00evil"))).toThrow(GuardrailError);
   });
 
-  test("blocks paths that resolve to /etc via symlink-style traversal", () => {
-    expect(() => assertSafeCwd("/usr/lib/../../etc")).toThrow(GuardrailError);
+  test("blocks paths that resolve to system directories via symlink-style traversal", () => {
+    if (process.platform === "win32") {
+      expect(() => assertSafeCwd("C:\\Windows\\System32\\..\\..")).toThrow(GuardrailError);
+    } else {
+      expect(() => assertSafeCwd("/usr/lib/../../etc")).toThrow(GuardrailError);
+    }
   });
 
-  test("blocks paths resolving to /usr/local (blocked root)", () => {
-    expect(() => assertSafeCwd("/usr/local")).toThrow(GuardrailError);
-  });
-
-  test("blocks /dev", () => {
-    expect(() => assertSafeCwd("/dev")).toThrow(GuardrailError);
-  });
-
-  test("blocks /proc", () => {
-    expect(() => assertSafeCwd("/proc")).toThrow(GuardrailError);
-  });
-
-  test("blocks /sys", () => {
-    expect(() => assertSafeCwd("/sys")).toThrow(GuardrailError);
+  test("blocks paths resolving to blocked roots", () => {
+    if (process.platform === "win32") {
+      expect(() => assertSafeCwd("C:\\Windows")).toThrow(GuardrailError);
+      expect(() => assertSafeCwd("C:\\Program Files")).toThrow(GuardrailError);
+    } else {
+      expect(() => assertSafeCwd("/usr/local")).toThrow(GuardrailError);
+      expect(() => assertSafeCwd("/dev")).toThrow(GuardrailError);
+      expect(() => assertSafeCwd("/proc")).toThrow(GuardrailError);
+      expect(() => assertSafeCwd("/sys")).toThrow(GuardrailError);
+    }
   });
 
   test("allows deeply nested project path", () => {
-    const deep = `${homedir()}/work/clients/acme/monorepo/packages/api`;
+    const deep = join(homedir(), "work", "clients", "acme", "monorepo", "packages", "api");
     expect(() => assertSafeCwd(deep)).not.toThrow();
   });
 });

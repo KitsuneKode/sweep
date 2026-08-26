@@ -35,12 +35,15 @@ function buildBlockedRoots(): Set<string> {
   if (process.platform === "win32") {
     for (const drive of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
       const letter = `${drive}:\\`;
-      roots.add(normalize(letter));
-      roots.add(normalize(`${letter}Windows`));
-      roots.add(normalize(`${letter}Program Files`));
-      roots.add(normalize(`${letter}Program Files (x86)`));
-      roots.add(normalize(`${letter}Users`));
-      roots.add(normalize(`${letter}ProgramData`));
+      roots.add(normalize(letter).toLowerCase());
+      roots.add(normalize(`${letter}Windows`).toLowerCase());
+      roots.add(normalize(`${letter}Program Files`).toLowerCase());
+      roots.add(normalize(`${letter}Program Files (x86)`).toLowerCase());
+      roots.add(normalize(`${letter}Users`).toLowerCase());
+      roots.add(normalize(`${letter}ProgramData`).toLowerCase());
+      roots.add(normalize(`${letter}usr\\local`).toLowerCase());
+      roots.add(normalize(`${letter}usr`).toLowerCase());
+      roots.add(normalize(`${letter}etc`).toLowerCase());
     }
   }
 
@@ -75,8 +78,11 @@ export function assertSafeCwd(targetPath: string): void {
   }
 
   const resolved = normalize(resolve(targetPath));
+  const isBlocked =
+    BLOCKED_ROOTS.has(resolved) ||
+    (process.platform === "win32" && BLOCKED_ROOTS.has(resolved.toLowerCase()));
 
-  if (BLOCKED_ROOTS.has(resolved)) {
+  if (isBlocked) {
     throw new GuardrailError(
       `Refusing to operate on protected path: ${resolved}\n` +
         `  sweep must be run inside a project directory, not at a system root.`,

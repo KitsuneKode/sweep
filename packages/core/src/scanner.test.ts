@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "./config.js";
 import { exactSize, scan } from "./scanner.js";
@@ -9,8 +10,22 @@ import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 
 let tmpDir: string;
 
+function safeSymlink(target: string, path: string, type: "file" | "dir" = "dir"): void {
+  try {
+    symlinkSync(target, path, type);
+  } catch {
+    if (type === "dir" && process.platform === "win32") {
+      try {
+        symlinkSync(target, path, "junction");
+      } catch {
+        // ignore if unprivileged on Windows
+      }
+    }
+  }
+}
+
 beforeEach(() => {
-  tmpDir = mkdtempSync("/tmp/sweep-test-");
+  tmpDir = mkdtempSync(join(tmpdir(), "sweep-test-"));
 });
 
 afterEach(() => {
@@ -95,7 +110,7 @@ describe("scan — recursion", () => {
 describe("scan — symlinks", () => {
   test("marks symlinks as isSymlink: true", async () => {
     mkdirSync(dir("real-dir"));
-    symlinkSync(dir("real-dir"), dir("node_modules"));
+    safeSymlink(dir("real-dir"), dir("node_modules"), "dir");
     const result = await scan(tmpDir, DEFAULT_CONFIG);
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0]?.isSymlink).toBe(true);
@@ -103,7 +118,7 @@ describe("scan — symlinks", () => {
 
   test("does NOT recurse into symlinked directories", async () => {
     mkdirSync(dir("real-dir", "node_modules"), { recursive: true });
-    symlinkSync(dir("real-dir"), dir("linked"));
+    safeSymlink(dir("real-dir"), dir("linked"), "dir");
     // Should find: linked/ (symlink) but NOT recurse into real-dir/node_modules via linked/
     const config: SweepConfig = { ...DEFAULT_CONFIG, patterns: ["linked"] };
     const result = await scan(tmpDir, config);
@@ -176,18 +191,18 @@ describe("scan — adversarial / security", () => {
   });
 
   test("does not follow symlinks pointing outside project root", async () => {
-    // A symlink pointing to /etc should not be recursed into
-    symlinkSync("/etc", dir("symlink-to-etc"));
-    const config: SweepConfig = { ...DEFAULT_CONFIG, patterns: ["passwd"] };
+    // A symlink pointing to external root should not be recursed into
+    const externalRoot = process.platform === "win32" ? homedir() : "/etc";
+    safeSymlink(externalRoot, dir("symlink-to-external"), "dir");
+    const config: SweepConfig = { ...DEFAULT_CONFIG, patterns: ["passwd", "nonexistent-artifact"] };
     const result = await scan(tmpDir, config);
-    // Should find nothing (didn't recurse into /etc via the symlink)
     expect(result.entries).toHaveLength(0);
   });
 
   test("handles circular symlinks without infinite loop", async () => {
     // A → B → A circular symlink chain should terminate
     mkdirSync(dir("a"));
-    symlinkSync(dir("a"), dir("b"));
+    safeSymlink(dir("a"), dir("b"), "dir");
     // scan should complete in finite time without stack overflow
     const result = await scan(tmpDir, DEFAULT_CONFIG);
     expect(result.scannedDirs).toBeGreaterThanOrEqual(0);
@@ -196,7 +211,7 @@ describe("scan — adversarial / security", () => {
   test("returns empty result for unreadable directory (no throw)", async () => {
     // Permission-denied directories should be silently skipped
     // We simulate this by passing a non-existent path
-    const result = await scan("/tmp/sweep-nonexistent-dir-xyz-123", DEFAULT_CONFIG);
+    const result = await scan(join(tmpdir(), "sweep-nonexistent-dir-xyz-123"), DEFAULT_CONFIG);
     expect(result.entries).toHaveLength(0);
     expect(result.scannedDirs).toBe(0);
   });

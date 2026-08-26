@@ -19,7 +19,7 @@ export function groupCandidatesByScope(
   const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
 
   for (const candidate of candidates) {
-    const relative = relativePath(targetDir, candidate.path);
+    const relative = relativePath(targetDir, candidate.path).replaceAll("\\", "/");
     const segments = relative.split("/").filter((segment) => segment.length > 0);
     const key = segments.length <= 1 ? "" : segments.slice(0, -1).join("/");
     const label = key.length === 0 ? "project root" : `${key}/`;

@@ -26,6 +26,18 @@ export function isWorkspaceStub(candidate: ScanCandidate): boolean {
 }
 
 function markSymlinkAliases(candidates: ScanCandidate[]): ScanCandidate[] {
+  const directoryCandidates = candidates
+    .filter((c) => !c.isSymlink && c.entryType === "directory")
+    .map((c) => {
+      let realPath = c.path;
+      try {
+        realPath = realpathSync(c.path);
+      } catch {
+        // fallback
+      }
+      return { candidate: c, realPath };
+    });
+
   return candidates.map((candidate) => {
     if (!candidate.isSymlink) {
       return candidate;
@@ -38,16 +50,16 @@ function markSymlinkAliases(candidates: ScanCandidate[]): ScanCandidate[] {
       return candidate;
     }
 
-    const host = candidates.find(
-      (other) =>
+    const hostMatch = directoryCandidates.find(
+      ({ candidate: other, realPath }) =>
         other.id !== candidate.id &&
-        other.entryType === "directory" &&
-        !other.isSymlink &&
-        (resolved === other.path ||
-          (isPathWithinRoot(resolved, other.path) && resolved !== other.path)),
+        (resolved === realPath ||
+          resolved === other.path ||
+          isPathWithinRoot(resolved, realPath) ||
+          isPathWithinRoot(resolved, other.path)),
     );
 
-    if (!host) {
+    if (!hostMatch) {
       return candidate;
     }
 

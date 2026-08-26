@@ -19,10 +19,14 @@ function candidate(overrides: Partial<ScanCandidate> = {}): ScanCandidate {
   };
 }
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 describe("presentation formatters", () => {
   test("relativePath strips the scan root prefix", () => {
-    expect(relativePath("/tmp/project", "/tmp/project/node_modules")).toBe("node_modules");
-    expect(relativePath("/tmp/project/", "/tmp/project/node_modules")).toBe("node_modules");
+    const root = join(tmpdir(), "project");
+    const target = join(root, "node_modules");
+    expect(relativePath(root, target)).toBe("node_modules");
   });
 
   test("formatArtifactRow is a single dense line", () => {
