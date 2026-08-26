@@ -189,6 +189,33 @@ describe("sweep ui state", () => {
     expect(nextPlan.summary.selectedCount).toBe(1);
   });
 
+  test("applyUiSelection updates estimatedTotalBytes and targetDir over empty bootstrap plan", () => {
+    const emptyBootstrapPlan: ScanPlan = {
+      protocolVersion: "1",
+      targetDir: "/tmp/old",
+      selectionPolicy: { mode: "default", includeDangerous: false },
+      candidates: [],
+      summary: {
+        candidateCount: 0,
+        estimatedTotalBytes: 0,
+        scannedDirs: 0,
+        exact: false,
+        selectedCount: 0,
+        riskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
+      },
+      selectedCandidateIds: [],
+      createdAt: new Date().toISOString(),
+    };
+
+    const state = createUiState(createPlan());
+    const updatedPlan = applyUiSelection(emptyBootstrapPlan, state);
+
+    expect(updatedPlan.targetDir).toBe(state.targetDir);
+    expect(updatedPlan.summary.estimatedTotalBytes).toBe(1024 + 2048 + 512);
+    expect(updatedPlan.summary.candidateCount).toBe(3);
+    expect(updatedPlan.candidates).toHaveLength(3);
+  });
+
   test("togglePattern marks patterns dirty and toggles disabled set", () => {
     const state = togglePattern(createUiState(createPlan()), "dist");
     expect(state.disabledPatterns.has("dist")).toBe(true);

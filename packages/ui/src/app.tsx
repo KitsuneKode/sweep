@@ -202,6 +202,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
     const controller = new AbortController();
     abortRef.current = controller;
     const gen = ++generationRef.current;
+    setScanError(null);
     dispatch({ type: "mutate", fn: (s) => setScanning(s, true) });
     scan.start(
       {
@@ -234,6 +235,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
     const { disabledPatterns, extraPatterns } = rescanConfigFromState(stateRef.current);
     scan.syncPatterns(disabledPatterns, extraPatterns);
     dispatch({ type: "mutate", fn: resetForRescan });
+    setScanError(null);
     startScan();
   }, [scan, startScan]);
 
@@ -299,6 +301,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         pendingApply,
         showSidebar,
         listSelectIndex,
+        hasScanError: scanError !== null,
         // Approximate visible list rows: full height minus header/status chrome.
         pageRows: Math.max(6, dimensions.height - 9),
       },

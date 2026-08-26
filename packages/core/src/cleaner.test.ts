@@ -61,4 +61,60 @@ describe("deduplicateNestedEntries", () => {
     const deduplicated = deduplicateNestedEntries(entries);
     expect(deduplicated.length).toBe(2);
   });
+
+  test("handles lexicographically sorted parent-child pairs regardless of length", () => {
+    const entries: ScanEntry[] = [
+      {
+        path: join(root, "a", "nested", "deep", "dir"),
+        name: "dir",
+        estimatedBytes: 200,
+        isSymlink: false,
+        entryType: "directory",
+      },
+      {
+        path: join(root, "a"),
+        name: "a",
+        estimatedBytes: 2000,
+        isSymlink: false,
+        entryType: "directory",
+      },
+      {
+        path: join(root, "z-long-sibling-name"),
+        name: "z-long-sibling-name",
+        estimatedBytes: 500,
+        isSymlink: false,
+        entryType: "directory",
+      },
+    ];
+
+    const deduplicated = deduplicateNestedEntries(entries);
+    expect(deduplicated.length).toBe(2);
+    expect(deduplicated.map((e) => e.path)).toEqual([
+      join(root, "a"),
+      join(root, "z-long-sibling-name"),
+    ]);
+  });
+
+  test("does not deduplicate inside symlink directories", () => {
+    const entries: ScanEntry[] = [
+      {
+        path: join(root, "symlink-dir"),
+        name: "symlink-dir",
+        estimatedBytes: 0,
+        isSymlink: true,
+        entryType: "symlink",
+      },
+      {
+        path: join(root, "symlink-dir", "child"),
+        name: "child",
+        estimatedBytes: 100,
+        isSymlink: false,
+        entryType: "file",
+      },
+    ];
+
+    const deduplicated = deduplicateNestedEntries(entries);
+    // Symlinks are not deleted recursively by parent, so child should not be filtered out
+    expect(deduplicated.length).toBe(2);
+  });
 });

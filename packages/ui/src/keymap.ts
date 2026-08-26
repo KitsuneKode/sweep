@@ -130,6 +130,7 @@ export interface KeymapContext {
   pendingApply: boolean;
   showSidebar: boolean;
   listSelectIndex: number;
+  hasScanError?: boolean;
   /** Visible rows in the artifact pane, for half-page scrolling. */
   pageRows?: number;
 }
@@ -142,6 +143,15 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   const isCtrlU = (key.name === "u" && key.ctrl) || key.name === "ctrl+u" || key.name === "pageup";
   const isCtrlD =
     (key.name === "d" && key.ctrl) || key.name === "ctrl+d" || key.name === "pagedown";
+
+  if (ctx.hasScanError) {
+    if (key.name === "q" || key.name === "escape") {
+      actions.finalize({ type: "abort" });
+    } else if (key.name === "r") {
+      actions.requestRescan?.();
+    }
+    return;
+  }
 
   if (pendingApply) {
     if (key.name === "y") {

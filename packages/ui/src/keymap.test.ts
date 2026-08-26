@@ -116,4 +116,82 @@ describe("handleKeymap", () => {
     handleKeymap(ctxCtrlD, actionsCtrlD);
     expect(actionsCtrlD.mutate).toHaveBeenCalled();
   });
+
+  test("s key triggers safe-only selection", () => {
+    const ctx = makeContext({ key: { name: "s" } });
+    const actions = makeActions();
+    handleKeymap(ctx, actions);
+    expect(actions.mutate).toHaveBeenCalled();
+  });
+
+  test("a key triggers bulk selection (safe + caution)", () => {
+    const ctx = makeContext({ key: { name: "a" } });
+    const actions = makeActions();
+    handleKeymap(ctx, actions);
+    expect(actions.mutate).toHaveBeenCalled();
+  });
+
+  test("u key clears current selection", () => {
+    const ctx = makeContext({ key: { name: "u" } });
+    const actions = makeActions();
+    handleKeymap(ctx, actions);
+    expect(actions.mutate).toHaveBeenCalled();
+  });
+
+  test("space key toggles focused candidate selection", () => {
+    const ctx = makeContext({ key: { name: "space" } });
+    const actions = makeActions();
+    handleKeymap(ctx, actions);
+    expect(actions.mutate).toHaveBeenCalled();
+  });
+
+  test("? key opens help overlay and q key aborts", () => {
+    const ctxHelp = makeContext({ key: { name: "?" } });
+    const actionsHelp = makeActions();
+    handleKeymap(ctxHelp, actionsHelp);
+    expect(actionsHelp.setShowHelp).toHaveBeenCalledWith(true);
+
+    const ctxQuit = makeContext({ key: { name: "q" } });
+    const actionsQuit = makeActions();
+    handleKeymap(ctxQuit, actionsQuit);
+    expect(actionsQuit.finalize).toHaveBeenCalledWith({ type: "abort" });
+  });
+
+  test("o key triggers toggleSort", () => {
+    const toggleSort = mock(() => {});
+    const ctx = makeContext({ key: { name: "o" } });
+    const actions = { ...makeActions(), toggleSort };
+    handleKeymap(ctx, actions);
+    expect(toggleSort).toHaveBeenCalled();
+  });
+
+  test("r key triggers requestRescan", () => {
+    const requestRescan = mock(() => {});
+    const ctx = makeContext({ key: { name: "r" } });
+    const actions = { ...makeActions(), requestRescan };
+    handleKeymap(ctx, actions);
+    expect(requestRescan).toHaveBeenCalled();
+  });
+
+  test("1-4 keys trigger risk filter changes", () => {
+    for (const num of ["1", "2", "3", "4"]) {
+      const ctx = makeContext({ key: { name: num } });
+      const actions = makeActions();
+      handleKeymap(ctx, actions);
+      expect(actions.mutate).toHaveBeenCalled();
+    }
+  });
+
+  test("hasScanError handles r to retry and q to abort", () => {
+    const requestRescan = mock(() => {});
+    const ctxRetry = makeContext({ key: { name: "r" }, hasScanError: true });
+    const actionsRetry = { ...makeActions(), requestRescan };
+    handleKeymap(ctxRetry, actionsRetry);
+    expect(requestRescan).toHaveBeenCalled();
+
+    const ctxAbort = makeContext({ key: { name: "q" }, hasScanError: true });
+    const actionsAbort = makeActions();
+    handleKeymap(ctxAbort, actionsAbort);
+    expect(actionsAbort.finalize).toHaveBeenCalledWith({ type: "abort" });
+  });
 });
