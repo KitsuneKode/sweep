@@ -7,7 +7,10 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NATIVE_PLATFORM_NPM_NAMES } from "@kitsunekode/sweep-core/native-platforms";
+import {
+  CLI_BINARY_PLATFORMS,
+  NATIVE_PLATFORM_NPM_NAMES,
+} from "@kitsunekode/sweep-core/native-platforms";
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(CLI_ROOT, "../..");
@@ -148,15 +151,23 @@ check("publishConfig.access is 'public' (required for scoped packages)", () => {
   assert(publishConfig?.access === "public", `got: ${JSON.stringify(publishConfig?.access)}`);
 });
 
-check("bin points to dist/sweep.js", () => {
+check("bin points to bin/sweep.cjs launcher", () => {
   const { bin } = pkg() as { bin?: Record<string, string> };
-  assert(bin?.["sweep"] === "dist/sweep.js", `got: ${JSON.stringify(bin)}`);
+  assert(bin?.sweep === "bin/sweep.cjs", `got: ${JSON.stringify(bin)}`);
+  assert(
+    existsSync(join(REPO_ROOT, "apps/cli/bin/sweep.cjs")),
+    "missing launcher: apps/cli/bin/sweep.cjs",
+  );
+  assert(
+    existsSync(join(REPO_ROOT, "apps/cli/dist/sweep.js")),
+    "missing JS fallback entry: dist/sweep.js",
+  );
 });
 
-check("files array includes dist, README.md, and LICENSE", () => {
+check("files array includes dist, bin, README.md, and LICENSE", () => {
   const { files } = pkg() as { files?: string[] };
   assert(Array.isArray(files), `got: ${JSON.stringify(files)}`);
-  for (const entry of ["dist", "README.md", "LICENSE"]) {
+  for (const entry of ["bin", "dist", "README.md", "LICENSE"]) {
     assert(files.includes(entry), `missing files entry: "${entry}"`);
   }
 });
@@ -181,6 +192,28 @@ check("native-packages templates exist for each platform", () => {
     const id = name.replace("@kitsunekode/sweep-engine-", "");
     const templatePath = join(REPO_ROOT, "native-packages", id, "package.json");
     assert(existsSync(templatePath), `missing template: ${templatePath}`);
+  }
+});
+
+check("cli platform templates exist under native-packages/cli", () => {
+  for (const p of CLI_BINARY_PLATFORMS) {
+    const templatePath = join(REPO_ROOT, "native-packages", "cli", p.id, "package.json");
+    assert(existsSync(templatePath), `missing template: ${templatePath}`);
+  }
+});
+
+check("optionalDependencies include all cli platform packages", () => {
+  const { optionalDependencies, version } = pkg() as {
+    optionalDependencies?: Record<string, string>;
+    version: string;
+  };
+  assert(optionalDependencies, "missing optionalDependencies");
+  for (const p of CLI_BINARY_PLATFORMS) {
+    assert(p.npmName in optionalDependencies, `missing optionalDependency: ${p.npmName}`);
+    assert(
+      optionalDependencies[p.npmName] === version,
+      `${p.npmName} version ${optionalDependencies[p.npmName]} !== package ${version}`,
+    );
   }
 });
 

@@ -26,7 +26,9 @@ import {
 } from "@kitsunekode/sweep-core/native-platforms";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-const NATIVE_PACKAGES = join(REPO_ROOT, "native-packages");
+// CLI packages live under cli/ so they never collide with engine-native
+// template dirs (different npm names, overlapping platform ids).
+const NATIVE_PACKAGES = join(REPO_ROOT, "native-packages", "cli");
 
 function parseArgs(argv: string[]): { platform: string; binary?: string; version?: string } {
   let platform = "";

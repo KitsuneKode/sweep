@@ -77,7 +77,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sweep-${{ matrix.id }}
-          path: native-packages/${{ matrix.id }}/
+          path: native-packages/cli/${{ matrix.id }}/
 
   attach:
     name: attach binaries to release
@@ -94,7 +94,7 @@ jobs:
       - name: Attach raw binaries to GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: native-packages/*/bin/*
+          files: native-packages/cli/*/bin/*
 
   publish:
     name: publish platform packages to npm
@@ -118,7 +118,7 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          for dir in native-packages/*/; do
+          for dir in native-packages/cli/*/; do
             (cd "$dir" && \
              npm_config_registry=https://registry.npmjs.org/ \
              bun x npm publish --access public --provenance) || exit 1

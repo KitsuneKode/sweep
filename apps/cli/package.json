@@ -74,11 +74,16 @@
     }
   },
   "optionalDependencies": {
+    "@kitsunekode/sweep-darwin-arm64": "0.2.0",
+    "@kitsunekode/sweep-darwin-x64": "0.2.0",
     "@kitsunekode/sweep-engine-darwin-64": "0.2.0",
     "@kitsunekode/sweep-engine-darwin-arm64": "0.2.0",
     "@kitsunekode/sweep-engine-linux-64": "0.2.0",
     "@kitsunekode/sweep-engine-linux-arm64": "0.2.0",
-    "@kitsunekode/sweep-engine-windows-64": "0.2.0"
+    "@kitsunekode/sweep-engine-windows-64": "0.2.0",
+    "@kitsunekode/sweep-linux-arm64": "0.2.0",
+    "@kitsunekode/sweep-linux-x64": "0.2.0",
+    "@kitsunekode/sweep-win-x64": "0.2.0"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -1,0 +1,17 @@
+{
+  "name": "@kitsunekode/sweep-linux-x64",
+  "version": "0.2.0",
+  "description": "Standalone sweep CLI binary for linux x64",
+  "files": [
+    "bin"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}
