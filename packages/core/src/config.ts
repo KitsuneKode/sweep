@@ -80,11 +80,12 @@ export function findProjectConfigPath(startDir: string): string | null {
   let dir = resolve(startDir);
   const fsRoot = parse(dir).root;
 
-  while (dir !== fsRoot) {
+  while (true) {
     const candidate = join(dir, ".sweeprc");
     if (existsSync(candidate)) {
       return candidate;
     }
+    if (dir === fsRoot) break;
     const parent = dirname(dir);
     if (parent === dir) break; // safety: already at root
     dir = parent;
@@ -163,7 +164,12 @@ export function writeInitSweeprc(configPath: string, force = false): "created" |
 }
 
 function getGlobalConfig(): Partial<SweepConfig> | null {
-  const globalPath = join(homedir(), ".config", "sweep", "config.json");
+  const configDir =
+    process.env.XDG_CONFIG_HOME ||
+    (process.platform === "win32" && process.env.APPDATA
+      ? process.env.APPDATA
+      : join(homedir(), ".config"));
+  const globalPath = join(configDir, "sweep", "config.json");
   return readJsonConfig(globalPath);
 }
 
@@ -183,11 +189,67 @@ function subtractPatterns(patterns: string[], disabled: string[]): string[] {
 
 // ─── Ignore matching ──────────────────────────────────────────────────────────
 
+/** Per-entry ignore check produced by compileIgnoreMatcher (targetDir pre-resolved). */
+export type IgnoreMatcher = (entryPath: string, entryName: string) => boolean;
+
+/**
+ * Compile ignore patterns once per scan so the hot walk path avoids
+ * re-resolving targetDir and re-scanning pattern strings for every entry.
+ *
+ * Returns null when there are no ignore rules — callers skip the check entirely.
+ */
+export function compileIgnoreMatcher(targetDir: string, ignore: string[]): IgnoreMatcher | null {
+  if (ignore.length === 0) return null;
+
+  const root = resolve(targetDir);
+  const isCaseInsensitive = process.platform === "darwin" || process.platform === "win32";
+  const flags = isCaseInsensitive ? "i" : undefined;
+  const exactNames = new Set<string>();
+  const nameGlobs: RegExp[] = [];
+  const pathPrefixes: string[] = [];
+  const pathGlobs: RegExp[] = [];
+
+  for (const raw of ignore) {
+    const pattern = raw.replace(/\/+$/, "");
+    if (pattern.length === 0) continue;
+    const key = isCaseInsensitive ? pattern.toLowerCase() : pattern;
+    if (pattern.includes("*")) {
+      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+      const re = new RegExp(`^${escaped}$`, flags);
+      if (pattern.includes("/")) {
+        pathGlobs.push(re);
+      } else {
+        nameGlobs.push(re);
+      }
+    } else if (pattern.includes("/")) {
+      pathPrefixes.push(key);
+    } else {
+      exactNames.add(key);
+    }
+  }
+
+  return (entryPath, entryName) => {
+    const nameKey = isCaseInsensitive ? entryName.toLowerCase() : entryName;
+    if (exactNames.has(nameKey)) return true;
+    if (nameGlobs.some((re) => re.test(entryName))) return true;
+    if (pathPrefixes.length === 0 && pathGlobs.length === 0) return false;
+
+    let rel = relative(root, entryPath).replace(/\\/g, "/");
+    if (isCaseInsensitive) rel = rel.toLowerCase();
+
+    for (const prefix of pathPrefixes) {
+      if (rel === prefix || rel.startsWith(`${prefix}/`)) return true;
+    }
+    return pathGlobs.some((re) => re.test(rel));
+  };
+}
+
 /**
  * Returns true when a matched artifact should be skipped.
  *
- * - Path-style ignore (`packages/vendor`): matches relative path prefix under targetDir.
- * - Name-style ignore (`dist`): matches the entry basename exactly.
+ * Delegates to compileIgnoreMatcher() so the two implementations cannot drift;
+ * note the compiled matcher normalizes trailing slashes, so `ignore: ["dist/"]`
+ * also skips a top-level `dist` entry (the pre-compiled form did not).
  */
 export function isIgnoredEntry(
   targetDir: string,
@@ -195,24 +257,8 @@ export function isIgnoredEntry(
   entryName: string,
   ignore: string[],
 ): boolean {
-  if (ignore.length === 0) return false;
-
-  const rel = relative(resolve(targetDir), resolve(entryPath)).replace(/\\/g, "/");
-
-  for (const pattern of ignore) {
-    if (pattern.includes("/")) {
-      if (rel === pattern || rel.startsWith(`${pattern}/`)) {
-        return true;
-      }
-      continue;
-    }
-
-    if (entryName === pattern) {
-      return true;
-    }
-  }
-
-  return false;
+  const match = compileIgnoreMatcher(targetDir, ignore);
+  return match ? match(entryPath, entryName) : false;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GuardrailError } from "./guardrails.js";
 import { applyPlan, applyPlanWithBackend, scanToPlan } from "./engine.js";
@@ -10,7 +11,7 @@ import { cleanupSeededFixtures, seedScenario } from "@kitsunekode/sweep-test-fix
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync("/tmp/sweep-engine-test-");
+  tmpDir = mkdtempSync(join(tmpdir(), "sweep-engine-test-"));
 });
 
 afterEach(() => {

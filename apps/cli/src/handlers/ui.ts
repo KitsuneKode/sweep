@@ -2,20 +2,16 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { GuardrailError, assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
-import {
-  printAborted,
-  printCleanResult,
-  printDryRunNotice,
-  type Spinner,
-} from "@kitsunekode/sweep-display";
+import { DEFAULT_PATTERNS } from "@kitsunekode/sweep-core/config";
+import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
+import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
+import { printCleanResult, printDeclined, printDryRunNotice } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { runInteractiveCleanup } from "../orchestration/interactive-cleanup.js";
 import {
   applyNoColor,
   assertOpenTuiAvailable,
+  executePlanDeletion,
   resolveEngineBackend,
-  resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
 } from "./shared.js";
@@ -69,19 +65,20 @@ type SweepUiOutcome =
   | { type: "rescan"; disabledPatterns: string[]; extraPatterns: string[] }
   | { type: "abort" };
 
-interface SweepUiModule {
-  runSweepUi: (
-    plan: ScanPlan,
-    options?: {
-      yes?: boolean;
-      dryRun?: boolean;
-      init?: {
-        catalogPatterns?: string[];
-        disabledPatterns?: string[];
-        extraPatterns?: string[];
-      };
-    },
-  ) => Promise<SweepUiOutcome>;
+export interface SweepUiModule {
+  runSweepUiStreaming: (options: {
+    targetDir: string;
+    config: import("@kitsunekode/sweep-protocol").SweepConfig;
+    selectionPolicy: import("@kitsunekode/sweep-protocol").SelectionPolicy;
+    engine: "js" | "rust";
+    dryRun?: boolean;
+    yes?: boolean;
+    init?: {
+      catalogPatterns?: string[];
+      disabledPatterns?: string[];
+      extraPatterns?: string[];
+    };
+  }) => Promise<SweepUiOutcome>;
 }
 
 /**
@@ -89,17 +86,29 @@ interface SweepUiModule {
  * the bundled `sweep.js`; running from source falls back to the workspace
  * package so `sweep ui` works in development too.
  *
- * The fallback specifier is held in a variable so neither TypeScript nor the
- * bundler statically resolves the JSX UI module into the Node CLI.
+ * Standalone compiled binaries register the UI module statically at startup
+ * (see bin-standalone.ts) so Bun embeds the UI code and OpenTUI native assets;
+ * that registration short-circuits the dynamic resolution below.
  */
+export function registerUiModule(mod: SweepUiModule): void {
+  registeredUiModule = mod;
+}
+
+let registeredUiModule: SweepUiModule | null = null;
+
 async function loadSweepUi(): Promise<SweepUiModule> {
+  if (registeredUiModule) return registeredUiModule;
   const sibling = new URL("./sweep-ui.js", import.meta.url).href;
   const workspacePackage = "@kitsunekode/sweep-ui";
   try {
     return (await import(sibling)) as SweepUiModule;
   } catch (error) {
     if (!isModuleNotFound(error)) throw error;
-    return (await import(workspacePackage)) as SweepUiModule;
+    try {
+      return (await import(workspacePackage)) as SweepUiModule;
+    } catch {
+      throw error;
+    }
   }
 }
 
@@ -124,7 +133,6 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       );
     }
 
-    const projectConfig = resolveProjectScanConfig(targetDir, opts);
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
 
@@ -132,63 +140,56 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
 
     await assertOpenTuiAvailable();
 
-    const { runSweepUi } = await loadSweepUi();
-    const { createSpinner } = await import("@kitsunekode/sweep-display");
+    const { runSweepUiStreaming } = await loadSweepUi();
 
-    const scanSpinner: { current: Spinner | null } = { current: null };
-    try {
-      const outcome = await runInteractiveCleanup({
-        targetDir,
-        scanConfig,
-        projectConfig,
-        selectionPolicy,
-        engine,
-        dryRun: opts.dryRun,
-        yes: opts.yes,
-        forceLarge: opts.forceLarge,
-        onScanStart: () => {
-          scanSpinner.current?.stop();
-          scanSpinner.current = createSpinner("Scanning for artifacts…");
-        },
-        onScanComplete: () => {
-          scanSpinner.current?.stop();
-          scanSpinner.current = null;
-        },
-        onScanProgress: (found) => {
-          scanSpinner.current?.update(`Scanning for artifacts… (${found} found)`);
-        },
-        review: async (plan, ctx) =>
-          runSweepUi(plan, {
-            ...(ctx.yes ? { yes: true } : {}),
-            ...(ctx.dryRun ? { dryRun: true } : {}),
-            init: ctx.init,
-          }),
-      });
+    const outcome = await runSweepUiStreaming({
+      targetDir,
+      config: scanConfig,
+      selectionPolicy,
+      engine,
+      ...(opts.dryRun ? { dryRun: true } : {}),
+      init: {
+        catalogPatterns: [...DEFAULT_PATTERNS],
+        disabledPatterns: scanConfig.disabledPatterns ?? [],
+        extraPatterns: scanConfig.patterns.filter(
+          (pattern) => !new Set<string>(DEFAULT_PATTERNS).has(pattern),
+        ),
+      },
+    });
 
-      if (outcome.type === "nothing") {
-        console.log(outcome.reason === "no_candidates" ? "Nothing to clean." : "Nothing selected.");
-        exitWith(EXIT.OK);
-      }
-
-      if (outcome.type === "aborted") {
-        printAborted();
-        exitWith(EXIT.ABORTED);
-      }
-
-      if (outcome.type === "dry_run") {
-        printDryRunNotice();
-        exitWith(EXIT.OK);
-      }
-
-      printCleanResult({
-        ...outcome.cleanResult,
-        failedPaths: outcome.report.failedPaths,
-      });
-
-      exitWith(outcome.report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
-    } finally {
-      scanSpinner.current?.stop();
+    if (outcome.type === "abort") {
+      printDeclined();
+      exitWith(EXIT.ABORTED);
     }
+
+    if (outcome.type === "rescan") {
+      // Streaming mode rescans internally; this outcome is legacy.
+      printDeclined();
+      exitWith(EXIT.ABORTED);
+    }
+
+    const selectedPlan = outcome.plan;
+
+    if (selectedPlan.selectedCandidateIds.length === 0) {
+      console.log("Nothing selected.");
+      exitWith(EXIT.OK);
+    }
+
+    assertSizeLimit(getSelectedBytes(selectedPlan), scanConfig.maxSizeGB, opts.forceLarge ?? false);
+
+    if (opts.dryRun) {
+      printDryRunNotice();
+      exitWith(EXIT.OK);
+    }
+
+    const { report, cleanResult } = await executePlanDeletion(selectedPlan, engine);
+
+    printCleanResult({
+      ...cleanResult,
+      failedPaths: report.failedPaths,
+    });
+
+    exitWith(report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
     handleFatalError(err);
   }

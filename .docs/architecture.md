@@ -33,7 +33,7 @@ CLI flags / config
   clean) to core engine calls.
 - `sweep ui` scans via core, then hands plan editing to `packages/ui`; final
   selection compiles back to explicit candidate IDs.
-- `scripts/seed-fixture.ts` and [packages/test-fixtures/src/fixtures.ts](file:///home/kitsunekode/Projects/cli-tools/sweep/packages/test-fixtures/src/fixtures.ts) seed parity scenarios
+- `scripts/seed-fixture.ts` and [packages/test-fixtures/src/fixtures.ts](../packages/test-fixtures/src/fixtures.ts) seed parity scenarios
   for integration tests and future JS-vs-Rust checks.
 
 ### Commands (implemented)

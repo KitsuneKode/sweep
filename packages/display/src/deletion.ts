@@ -12,15 +12,25 @@ export function formatDeletionProgress(
   return `${prefix} ${currentPath}`;
 }
 
-/** Print a deletion progress update, clearing the previous line in TTY mode. */
+/**
+ * Print a deletion progress update.
+ * @param itemBytes  size of the item just deleted (shown as the per-item size)
+ * @param runningBytes  optional cumulative freed total (trailing running tally)
+ */
 export function printDeletionProgress(
   current: number,
   total: number,
   currentPath?: string,
-  freedBytes = 0,
+  itemBytes = 0,
+  runningBytes = 0,
 ): void {
   const line = formatDeletionProgress(current, total, currentPath);
-  const suffix = freedBytes > 0 ? `  ${pc.green(formatBytes(freedBytes))} freed` : "";
+  const sizeTag = itemBytes > 0 ? `  ${pc.yellow(formatBytes(itemBytes))}` : "";
+  const runningTag =
+    runningBytes > 0 && runningBytes !== itemBytes
+      ? `  ${pc.green(`${formatBytes(runningBytes)} freed`)}`
+      : "";
+  const suffix = `${sizeTag}${runningTag}`;
 
   if (process.stdout.isTTY) {
     process.stdout.write(`\r${pc.cyan("…")} ${line}${suffix}`);

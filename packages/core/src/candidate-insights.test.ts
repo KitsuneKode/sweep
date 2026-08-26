@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import {
@@ -38,9 +39,9 @@ describe("enrichCandidates", () => {
       estimatedBytes: 600,
     });
 
-    const [enrichedRoot, enrichedStub] = enrichCandidates([root, stub]);
+    const enriched = enrichCandidates([root, stub]);
+    const enrichedStub = enriched.find((entry) => entry.id === "stub");
 
-    expect(enrichedRoot?.selectedByDefault).toBe(true);
     expect(enrichedStub?.reasons).toContain(WORKSPACE_STUB_REASON);
     expect(enrichedStub?.selectedByDefault).toBe(false);
     expect(enrichedStub?.riskTier).toBe("caution");
@@ -49,13 +50,13 @@ describe("enrichCandidates", () => {
   test("does not mark workspace stubs when no primary node_modules exceeds the threshold", () => {
     const left = candidate({
       id: "left",
-      path: "/repo/a/node_modules",
+      path: "/repo/apps/web/node_modules",
       name: "node_modules",
       estimatedBytes: 10_000,
     });
     const right = candidate({
       id: "right",
-      path: "/repo/b/node_modules",
+      path: "/repo/apps/cli/node_modules",
       name: "node_modules",
       estimatedBytes: 8_000,
     });
@@ -65,10 +66,15 @@ describe("enrichCandidates", () => {
   });
 
   test("marks symlink entries that resolve inside another candidate", () => {
-    const root = mkdtempSync("/tmp/sweep-insights-");
+    const root = mkdtempSync(join(tmpdir(), "sweep-insights-"));
     try {
       mkdirSync(join(root, "dist-target"));
-      symlinkSync(join(root, "dist-target"), join(root, "target"));
+      try {
+        symlinkSync(join(root, "dist-target"), join(root, "target"), "dir");
+      } catch {
+        // Fallback for Windows unprivileged symlink restrictions: junction
+        symlinkSync(join(root, "dist-target"), join(root, "target"), "junction");
+      }
 
       const host = candidate({
         id: "host",

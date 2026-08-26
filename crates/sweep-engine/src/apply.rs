@@ -53,6 +53,7 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
         }
     }
 
+    let ready = deduplicate_nested_entries(ready);
     let mut deleted_count = 0u32;
     let mut total_bytes_freed = 0u64;
 
@@ -119,18 +120,57 @@ fn revalidate_candidate(candidate: &ScanCandidate) -> Result<ScanEntry, PathFail
 }
 
 fn is_path_within_root(candidate_path: &str, root_path: &str) -> bool {
-    let candidate = Path::new(candidate_path);
-    let root = Path::new(root_path);
+    let candidate = lexical_abs(Path::new(candidate_path));
+    let root = lexical_abs(Path::new(root_path));
     if candidate == root {
         return true;
     }
-    match candidate.strip_prefix(root) {
+    match candidate.strip_prefix(&root) {
         Ok(relative) => {
             let rel = relative.to_string_lossy();
             !rel.is_empty() && !rel.starts_with("..")
         }
         Err(_) => false,
     }
+}
+
+fn lexical_abs(path: &Path) -> std::path::PathBuf {
+    use std::path::{Component, PathBuf};
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let mut out = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+fn deduplicate_nested_entries(mut entries: Vec<ScanEntry>) -> Vec<ScanEntry> {
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    let mut retained: Vec<ScanEntry> = Vec::new();
+    for entry in entries {
+        let is_inside = retained.iter().any(|parent| {
+            parent.entry_type == EntryType::Directory
+                && !parent.is_symlink
+                && (entry.path.starts_with(&format!("{}/", parent.path))
+                    || entry.path.starts_with(&format!("{}\\", parent.path)))
+        });
+        if !is_inside {
+            retained.push(entry);
+        }
+    }
+    retained
 }
 
 fn delete_entry(entry: &ScanEntry) -> Result<(), PathFailure> {
@@ -288,5 +328,45 @@ mod tests {
         );
         assert_eq!(report.failed_paths[0].path, outside_path);
         assert!(!artifact.exists());
+    }
+
+    #[test]
+    fn apply_plan_deduplicates_nested_directory_candidates() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let root = dir.path().to_string_lossy();
+        let parent = dir.path().join("dist");
+        let child = parent.join("nested");
+        fs::create_dir_all(&child).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let parent_path = parent.to_string_lossy().into_owned();
+        let child_path = child.to_string_lossy().into_owned();
+        let mut parent_candidate = candidate(&parent_path, "dist", EntryType::Directory, false);
+        parent_candidate.entry.estimated_bytes = 100;
+        let mut child_candidate = candidate(&child_path, "nested", EntryType::Directory, false);
+        child_candidate.id = "cand_nested".to_owned();
+        child_candidate.entry.estimated_bytes = 40;
+
+        let plan = ScanPlan {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            target_dir: root.to_string(),
+            selection_policy: SelectionPolicy::default(),
+            candidates: vec![parent_candidate, child_candidate],
+            summary: ScanPlanSummary {
+                candidate_count: 2,
+                estimated_total_bytes: 140,
+                scanned_dirs: 2,
+                exact: false,
+                selected_count: 2,
+                risk_counts: Default::default(),
+            },
+            selected_candidate_ids: vec!["cand_dist".to_owned(), "cand_nested".to_owned()],
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+        };
+
+        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        assert_eq!(report.deleted_count, 1);
+        assert_eq!(report.failed_count, 0);
+        assert_eq!(report.total_bytes_freed, 100);
+        assert!(!parent.exists());
     }
 }

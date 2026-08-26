@@ -3,11 +3,8 @@
 use camino::Utf8Path;
 use serde::Deserialize;
 use serde::Serialize;
-use std::cell::RefCell;
 use std::io::{self, IsTerminal, Read, Write};
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
+use std::sync::Mutex;
 use sweep_engine::{apply_plan, scan_to_plan_with_sweep_config, ScanHooks, ScanOptions};
 use sweep_types::{ApplyReport, ScanCandidate, ScanPlan, SelectionPolicy, SweepConfig};
 
@@ -59,6 +56,12 @@ enum ScanStreamEvent {
     CandidateFound { candidate: ScanCandidate },
     #[serde(rename = "candidate_updated")]
     CandidateUpdated { candidate: ScanCandidate },
+    #[serde(rename = "scan_progress")]
+    ScanProgress {
+        #[serde(rename = "scannedDirs")]
+        scanned_dirs: u32,
+        found: u32,
+    },
     #[serde(rename = "scan_completed")]
     ScanCompleted { summary: ScanCompletedSummary },
 }
@@ -104,12 +107,16 @@ fn run_scan() -> Result<(), String> {
         })?;
 
         let emitter = StreamEmitter::default();
-        let mut on_entry = |candidate: ScanCandidate| emitter.emit_found(candidate);
-        let mut on_entry_sized = |candidate: ScanCandidate| emitter.emit_updated(candidate);
+        let on_entry = |candidate: ScanCandidate| emitter.emit_found(candidate);
+        let on_entry_sized = |candidate: ScanCandidate| emitter.emit_updated(candidate);
+        let on_progress = |scanned_dirs: u32, found: u32| {
+            emitter.emit_progress(scanned_dirs, found);
+        };
 
         let hooks = ScanHooks {
-            on_entry: Some(&mut on_entry),
-            on_entry_sized: Some(&mut on_entry_sized),
+            on_entry: Some(&on_entry),
+            on_entry_sized: Some(&on_entry_sized),
+            on_progress: Some(&on_progress),
         };
 
         let plan = scan_to_plan_with_sweep_config(
@@ -149,32 +156,66 @@ fn run_scan() -> Result<(), String> {
     write_json_stdout(&plan)
 }
 
-#[derive(Default)]
 struct StreamEmitter {
-    error: RefCell<Option<String>>,
+    error: Mutex<Option<String>>,
+}
+
+impl Default for StreamEmitter {
+    fn default() -> Self {
+        Self {
+            error: Mutex::new(None),
+        }
+    }
 }
 
 impl StreamEmitter {
     fn emit_found(&self, candidate: ScanCandidate) {
-        if self.error.borrow().is_some() {
+        if self.has_error() {
             return;
         }
         if let Err(err) = write_json_line(&ScanStreamEvent::CandidateFound { candidate }) {
-            *self.error.borrow_mut() = Some(err);
+            self.set_error(err);
         }
     }
 
     fn emit_updated(&self, candidate: ScanCandidate) {
-        if self.error.borrow().is_some() {
+        if self.has_error() {
             return;
         }
         if let Err(err) = write_json_line(&ScanStreamEvent::CandidateUpdated { candidate }) {
-            *self.error.borrow_mut() = Some(err);
+            self.set_error(err);
+        }
+    }
+
+    fn emit_progress(&self, scanned_dirs: u32, found: u32) {
+        if self.has_error() {
+            return;
+        }
+        if let Err(err) = write_json_line(&ScanStreamEvent::ScanProgress {
+            scanned_dirs,
+            found,
+        }) {
+            self.set_error(err);
+        }
+    }
+
+    fn has_error(&self) -> bool {
+        self.error
+            .lock()
+            .map(|guard| guard.is_some())
+            .unwrap_or(true)
+    }
+
+    fn set_error(&self, err: String) {
+        if let Ok(mut guard) = self.error.lock() {
+            *guard = Some(err);
         }
     }
 
     fn into_error(self) -> Option<String> {
-        self.error.into_inner()
+        self.error
+            .into_inner()
+            .unwrap_or_else(|err| err.into_inner())
     }
 }
 
@@ -193,21 +234,11 @@ fn read_stdin_if_present() -> Option<String> {
         return None;
     }
 
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let mut input = String::new();
-        let payload = match io::stdin().read_to_string(&mut input) {
-            Ok(_) if input.trim().is_empty() => None,
-            Ok(_) => Some(input),
-            Err(_) => None,
-        };
-        let _ = tx.send(payload);
-    });
-
-    match rx.recv_timeout(Duration::from_millis(100)) {
-        Ok(payload) => payload,
-        Err(mpsc::RecvTimeoutError::Timeout) => None,
-        Err(mpsc::RecvTimeoutError::Disconnected) => None,
+    let mut input = String::new();
+    match io::stdin().read_to_string(&mut input) {
+        Ok(_) if input.trim().is_empty() => None,
+        Ok(_) => Some(input),
+        Err(_) => None,
     }
 }
 

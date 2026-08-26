@@ -12,6 +12,7 @@ export interface ThemeTokens {
   textMuted: string;
   textDim: string;
   accent: string;
+  accentContrast: string;
   positive: string;
   warning: string;
   danger: string;
@@ -21,52 +22,71 @@ export interface ThemeTokens {
   selectionText: string;
   hoverBg: string;
   headerText: string;
+  /** Statusline strip background. */
+  statusBg: string;
+  /** Translucent scrim behind modal overlays (#rrggbbaa). */
+  overlayBackdrop: string;
+  /** Unfilled portion of progress meters. */
+  meterTrack: string;
 }
 
+/**
+ * Reclaim / dust-and-ember palette.
+ * Structure in charcoal gray; meaning in restrained semantic color;
+ * identity in ember amber (the broom, the heat of reclaim).
+ */
 export const darkTheme: ThemeTokens = {
   bg: "#090b10",
   surface: "#10141c",
   surfaceInset: "#0c1018",
-  border: "#243044",
+  border: "#1c2430",
   borderSoft: "#94a3b824",
   borderFocus: "#d97706",
   text: "#e2e8f0",
   textSecondary: "#94a3b8",
   textMuted: "#64748b",
-  textDim: "#475569",
-  accent: "#d97706",
+  textDim: "#3f4b5a",
+  accent: "#f59e0b",
+  accentContrast: "#1a1206",
   positive: "#34d399",
   warning: "#fbbf24",
   danger: "#f87171",
   blocked: "#a78bfa",
   info: "#7dd3fc",
-  selectionBg: "#172033",
+  selectionBg: "#2a3a52",
   selectionText: "#f8fafc",
-  hoverBg: "#151a24",
+  hoverBg: "#182230",
   headerText: "#cbd5e1",
+  statusBg: "#10141c",
+  overlayBackdrop: "#090b10cc",
+  meterTrack: "#1c2430",
 };
 
 export const lightTheme: ThemeTokens = {
   bg: "#f7f6f3",
   surface: "#ffffff",
   surfaceInset: "#f9f9f8",
-  border: "#eaeaea",
+  border: "#e8e6e1",
   borderSoft: "#0000000f",
   borderFocus: "#956400",
   text: "#111111",
-  textSecondary: "#787774",
-  textMuted: "#9b9a97",
-  textDim: "#b5b3ad",
+  textSecondary: "#5c5a56",
+  textMuted: "#787774",
+  textDim: "#a8a49c",
   accent: "#956400",
-  positive: "#346538",
-  warning: "#956400",
-  danger: "#9f2f2d",
+  accentContrast: "#fffaf0",
+  positive: "#1d7a4d",
+  warning: "#9a6700",
+  danger: "#c0392b",
   blocked: "#6b4f9a",
   info: "#1f6c9f",
-  selectionBg: "#edf3ec",
-  selectionText: "#111111",
-  hoverBg: "#f0f0ee",
+  selectionBg: "#ead9b2",
+  selectionText: "#1f1608",
+  hoverBg: "#efe8d8",
   headerText: "#2f3437",
+  statusBg: "#efede8",
+  overlayBackdrop: "#2f343755",
+  meterTrack: "#e8e6e1",
 };
 
 export type ThemeMode = "dark" | "light" | "auto";

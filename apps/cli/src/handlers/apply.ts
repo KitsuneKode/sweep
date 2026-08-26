@@ -1,8 +1,8 @@
 import type { ApplyReport } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
-import { loadPlan } from "@kitsunekode/sweep-core/plan";
-import { formatBytes, printAborted, printCleanResult } from "@kitsunekode/sweep-display";
+import { getSelectedBytes, loadPlan } from "@kitsunekode/sweep-core/plan";
+import { formatBytes, printCleanResult, printDeclined } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
@@ -48,14 +48,12 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
     }
 
     if (!opts.yes) {
-      const totalBytes = plan.candidates
-        .filter((candidate) => plan.selectedCandidateIds.includes(candidate.id))
-        .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
+      const totalBytes = getSelectedBytes(plan);
       const confirmed = await promptConfirm(
-        `Apply plan with ${selectedCount} items (${formatBytes(totalBytes)})?`,
+        `Apply plan with ${selectedCount} items (~${formatBytes(totalBytes)})?`,
       );
       if (!confirmed) {
-        printAborted();
+        printDeclined();
         exitWith(EXIT.ABORTED);
       }
     }

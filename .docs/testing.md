@@ -165,5 +165,5 @@ regenerate with `bun run scripts/generate-parity-fixture.ts -- tests/fixtures/<n
 bun run scripts/seed-fixture.ts -- --scenario monorepo
 ```
 
-[packages/test-fixtures/src/fixtures.ts](file:///home/kitsunekode/Projects/cli-tools/sweep/packages/test-fixtures/src/fixtures.ts) wraps this for Bun tests; integration
+[packages/test-fixtures/src/fixtures.ts](../packages/test-fixtures/src/fixtures.ts) wraps this for Bun tests; integration
 `seed-script.test.ts` verifies the script end-to-end.

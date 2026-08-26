@@ -1,10 +1,14 @@
 import type { ScrollBoxRenderable } from "@opentui/core";
+import { bold, fg, t } from "@opentui/core";
 import { useEffect, useMemo, useRef } from "react";
 import { SelectableRow, useHoverState } from "./SelectableRow.js";
-import { buildSidebarLine } from "./presentation.js";
+import { buildMeter, buildSidebarLine, concatStyled } from "./presentation.js";
 import {
   buildScopeSidebarRows,
+  compactBytesLabel,
   scopeFilterToSidebarIndex,
+  sidebarBytesWidth,
+  sidebarColumnLayout,
   sidebarCountWidth,
   type ScopeSidebarRow,
 } from "./sidebar.js";
@@ -15,10 +19,18 @@ export interface ScopeSidebarProps {
   state: SweepUiState;
   tokens: ThemeTokens;
   focused: boolean;
+  /** Inner content width of the sidebar pane (already minus borders/padding). */
+  paneWidth: number;
   onApplyScope: (scopeFilter: string | null) => void;
 }
 
-export function ScopeSidebar({ state, tokens, focused, onApplyScope }: ScopeSidebarProps) {
+export function ScopeSidebar({
+  state,
+  tokens,
+  focused,
+  paneWidth,
+  onApplyScope,
+}: ScopeSidebarProps) {
   const scrollRef = useRef<ScrollBoxRenderable>(null);
   const { isHovered, onHoverChange } = useHoverState<number>();
 
@@ -28,6 +40,13 @@ export function ScopeSidebar({ state, tokens, focused, onApplyScope }: ScopeSide
   );
 
   const countWidth = useMemo(() => sidebarCountWidth(rows), [rows]);
+  const bytesWidth = useMemo(() => sidebarBytesWidth(rows), [rows]);
+  const layout = useMemo(
+    () => sidebarColumnLayout(paneWidth, countWidth, bytesWidth),
+    [paneWidth, countWidth, bytesWidth],
+  );
+  const totalBytes = rows[0]?.bytes ?? 0;
+  const selectedBytes = rows[0]?.selectedBytes ?? 0;
   const cursorIndex = focused
     ? state.sidebarIndex
     : scopeFilterToSidebarIndex(state.scopeFilter, rows);
@@ -43,22 +62,17 @@ export function ScopeSidebar({ state, tokens, focused, onApplyScope }: ScopeSide
     onApplyScope(row.key);
   };
 
+  const meterWidth = Math.max(10, paneWidth - 4);
+
   return (
-    <box width="100%" height="100%" flexDirection="column" gap={0}>
-      <box width="100%" paddingBottom={1}>
-        <text content="scopes" fg={tokens.textMuted} />
-      </box>
-      <scrollbox
-        ref={scrollRef}
-        focused={focused}
-        flexGrow={1}
-        width="100%"
-        height="100%"
-        viewportCulling
-        verticalScrollbarOptions={{
-          trackOptions: { backgroundColor: tokens.surfaceInset },
-        }}
-      >
+    <box width="100%" flexGrow={1} minHeight={0} flexDirection="column">
+      <ReclaimPanel
+        tokens={tokens}
+        selectedBytes={selectedBytes}
+        totalBytes={totalBytes}
+        width={meterWidth}
+      />
+      <scrollbox ref={scrollRef} focused={focused} flexGrow={1} minHeight={3} width="100%">
         {rows.map((row, index) => {
           const isCursor = index === cursorIndex && focused;
           const isActive =
@@ -75,13 +89,81 @@ export function ScopeSidebar({ state, tokens, focused, onApplyScope }: ScopeSide
             >
               <box id={`scope-row-${index}`} width="100%">
                 <text
-                  content={buildSidebarLine(row.label, row.count, isActive, countWidth, tokens)}
+                  content={buildSidebarLine(
+                    row.label,
+                    row.count,
+                    row.bytes,
+                    isActive,
+                    layout.countWidth,
+                    layout.bytesWidth,
+                    tokens,
+                    row.selectedCount,
+                    layout.maxLabelWidth,
+                    layout.showBytes,
+                  )}
                 />
               </box>
             </SelectableRow>
           );
         })}
       </scrollbox>
+    </box>
+  );
+}
+
+function ReclaimPanel({
+  tokens,
+  selectedBytes,
+  totalBytes,
+  width,
+}: {
+  tokens: ThemeTokens;
+  selectedBytes: number;
+  totalBytes: number;
+  width: number;
+}) {
+  const hasSelection = selectedBytes > 0 && totalBytes > 0;
+  const percent = totalBytes > 0 ? Math.round((selectedBytes / totalBytes) * 100) : 0;
+
+  if (!hasSelection) {
+    return (
+      <box
+        width="100%"
+        height={3}
+        flexDirection="column"
+        paddingLeft={1}
+        backgroundColor={tokens.bg}
+        flexShrink={0}
+      >
+        <text content={t`${bold(fg(tokens.textSecondary)("RECLAIM"))}`} />
+        <text content={t`${fg(tokens.textMuted)("space / a to queue")}`} />
+        <text content={t`${fg(tokens.textDim)(`0 / ${compactBytesLabel(totalBytes)} scanned`)}`} />
+      </box>
+    );
+  }
+
+  const percentLabel = `${String(percent).padStart(3, " ")}%`;
+  const barWidth = Math.max(8, width - percentLabel.length - 1);
+
+  return (
+    <box
+      width="100%"
+      height={3}
+      flexDirection="column"
+      paddingLeft={1}
+      backgroundColor={tokens.bg}
+      flexShrink={0}
+    >
+      <text content={t`${bold(fg(tokens.accent)("RECLAIM"))}`} />
+      <text
+        content={concatStyled(
+          buildMeter(selectedBytes, totalBytes, barWidth, tokens),
+          t` ${fg(tokens.positive)(percentLabel)}`,
+        )}
+      />
+      <text
+        content={t`${fg(tokens.positive)(compactBytesLabel(selectedBytes))} ${fg(tokens.textDim)("of")} ${fg(tokens.textMuted)(compactBytesLabel(totalBytes))}`}
+      />
     </box>
   );
 }

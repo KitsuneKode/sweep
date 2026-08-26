@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,7 +15,7 @@ import type {
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
-import { buildPlan, applyPlanInsights } from "./planner.js";
+import { buildPlan } from "./planner.js";
 import type { ScanHooks } from "./scanner.js";
 import type { ScanToPlanOptions } from "./engine.js";
 import { nativePlatformForCurrentProcess } from "./native-platforms.js";
@@ -112,28 +113,85 @@ export function resolveRustEngineBinary(): string {
 }
 
 interface RunEngineOptions {
-  cwd?: string;
+  cwd?: string | undefined;
+  signal?: AbortSignal | undefined;
 }
 
-function runEngine(args: string[], stdin?: string, options: RunEngineOptions = {}): string {
+/**
+ * Spawn the Rust engine asynchronously so the JS event loop stays live while
+ * it runs (spinners keep animating, progress hooks fire in real time).
+ * Resolves with full stdout once the process exits successfully.
+ */
+async function runEngineAsync(
+  args: string[],
+  stdin?: string,
+  onLine?: (line: string) => void,
+  options: RunEngineOptions = {},
+): Promise<string> {
   const binary = resolveRustEngineBinary();
-  const proc = spawnSync(binary, args, {
+  const proc = spawn(binary, args, {
     cwd: options.cwd ?? process.cwd(),
-    input: stdin,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
-  if (proc.error) {
-    throw new Error(`failed to spawn rust engine at ${binary}: ${proc.error.message}`);
+  if (options.signal) {
+    if (options.signal.aborted) {
+      proc.kill("SIGTERM");
+    } else {
+      const onAbort = () => proc.kill("SIGTERM");
+      options.signal.addEventListener("abort", onAbort, { once: true });
+      proc.on("close", () => options.signal?.removeEventListener("abort", onAbort));
+    }
   }
 
-  if (proc.status !== 0) {
-    const stderr = proc.stderr?.trim() || "rust engine exited with a non-zero status";
-    throw new Error(stderr);
-  }
+  return await new Promise<string>((resolvePromise, rejectPromise) => {
+    let stdout = "";
+    let stderr = "";
+    let lines: ReturnType<typeof createInterface> | undefined;
 
-  return proc.stdout;
+    proc.stdout.setEncoding("utf8");
+    proc.stderr.setEncoding("utf8");
+
+    if (onLine) {
+      lines = createInterface({ input: proc.stdout });
+      lines.on("line", (line) => {
+        if (line.length > 0) onLine(line);
+      });
+    } else {
+      proc.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+    }
+
+    proc.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    proc.on("error", (error) => {
+      lines?.close();
+      rejectPromise(new Error(`failed to spawn rust engine at ${binary}: ${error.message}`));
+    });
+
+    proc.on("close", (code) => {
+      lines?.close();
+      if (code === 0) {
+        resolvePromise(stdout);
+      } else {
+        rejectPromise(
+          new Error(stderr.trim() || `rust engine exited with status ${code ?? "signal"}`),
+        );
+      }
+    });
+
+    if (stdin !== undefined) {
+      // Engine exiting early (bad config, bad args) can close the pipe while a
+      // large payload is mid-write; swallow EPIPE here so the close-handler's
+      // stderr-based error is what surfaces instead of an unhandled 'error'.
+      proc.stdin.on("error", () => {});
+      proc.stdin.write(stdin);
+    }
+    proc.stdin.end();
+  });
 }
 
 export interface RustScanOptions extends ScanHooks {
@@ -152,77 +210,81 @@ function scanEntryFromCandidate(candidate: ScanCandidate): ScanEntry {
   };
 }
 
-function scanToPlanViaRustStreaming(targetDir: string, options: RustScanOptions): ScanPlan {
+/**
+ * Scan via the Rust `sweep-engine` subprocess and parse a [`ScanPlan`].
+ *
+ * True streaming: `onEntry`/`onEntrySized` fire while the engine is still
+ * running, so callers can render progress live.
+ */
+export async function scanToPlanViaRust(
+  targetDir: string,
+  options: RustScanOptions,
+): Promise<ScanPlan> {
   const absoluteTarget = resolve(targetDir);
   const stdin = JSON.stringify({
     config: options.config,
-    selectionPolicy: options.selectionPolicy,
+    selectionPolicy: options.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
     exact: options.exact ?? false,
     jsonStream: true,
   });
-  const stdout = runEngine(["scan", absoluteTarget], stdin);
 
   const entriesByPath = new Map<string, ScanEntry>();
-  let summary: ScanCompletedEvent["summary"] | null = null;
+  // Holder object: TS narrows plain `let` captures even when callbacks assign them.
+  const state: { summary: ScanCompletedEvent["summary"] | null } = { summary: null };
   let exact = options.exact ?? false;
 
-  for (const line of stdout.trim().split("\n")) {
-    if (!line) continue;
-    const event = JSON.parse(line) as ScanEvent & {
-      summary?: ScanCompletedEvent["summary"] & { exact?: boolean };
-    };
-
-    if (event.type === "candidate_found") {
-      options.onEntry?.(scanEntryFromCandidate(event.candidate));
-    } else if (event.type === "candidate_updated") {
-      const entry = scanEntryFromCandidate(event.candidate);
-      entriesByPath.set(entry.path, entry);
-      options.onEntrySized?.(entry);
-    } else if (event.type === "scan_completed") {
-      summary = event.summary;
-      if ("exact" in event.summary && typeof event.summary.exact === "boolean") {
-        exact = event.summary.exact;
+  await runEngineAsync(
+    ["scan", absoluteTarget],
+    stdin,
+    (line) => {
+      let event: ScanEvent & { summary?: ScanCompletedEvent["summary"] & { exact?: boolean } };
+      try {
+        event = JSON.parse(line);
+      } catch {
+        return;
       }
-    }
-  }
+
+      if (event.type === "candidate_found") {
+        options.onEntry?.(scanEntryFromCandidate(event.candidate));
+      } else if (event.type === "candidate_updated") {
+        const entry = scanEntryFromCandidate(event.candidate);
+        entriesByPath.set(entry.path, entry);
+        options.onEntrySized?.(entry);
+      } else if (event.type === "scan_progress") {
+        options.onProgress?.({
+          scannedDirs: event.scannedDirs,
+          found: event.found,
+        });
+      } else if (event.type === "scan_completed") {
+        state.summary = event.summary;
+        if ("exact" in event.summary && typeof event.summary.exact === "boolean") {
+          exact = event.summary.exact;
+        }
+      }
+    },
+    { signal: options.signal },
+  );
 
   const entries = [...entriesByPath.values()];
+  const completed = state.summary;
   const estimatedTotalBytes =
-    summary?.estimatedTotalBytes ?? entries.reduce((sum, entry) => sum + entry.estimatedBytes, 0);
+    completed?.estimatedTotalBytes ?? entries.reduce((sum, entry) => sum + entry.estimatedBytes, 0);
 
   return buildPlan(
     absoluteTarget,
     {
       entries,
       estimatedTotalBytes,
-      scannedDirs: summary?.scannedDirs ?? 0,
+      scannedDirs: completed?.scannedDirs ?? 0,
       exact,
     },
-    options.selectionPolicy,
+    options.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
   );
 }
 
-/** Scan via the Rust `sweep-engine` subprocess and parse a [`ScanPlan`]. */
-export function scanToPlanViaRust(targetDir: string, options: RustScanOptions): ScanPlan {
-  const absoluteTarget = resolve(targetDir);
-
-  if (options.onEntry || options.onEntrySized) {
-    return scanToPlanViaRustStreaming(absoluteTarget, options);
-  }
-
-  const stdin = JSON.stringify({
-    config: options.config,
-    selectionPolicy: options.selectionPolicy,
-    exact: options.exact ?? false,
-    jsonStream: false,
-  });
-  const stdout = runEngine(["scan", absoluteTarget], stdin);
-  return applyPlanInsights(JSON.parse(stdout) as ScanPlan);
-}
-
 /** Apply via the Rust `sweep-engine` subprocess. */
-export function applyPlanViaRust(plan: ScanPlan): ApplyReport {
-  const stdout = runEngine(["apply"], JSON.stringify(plan));
+export async function applyPlanViaRust(plan: ScanPlan): Promise<ApplyReport> {
+  const stdout = await runEngineAsync(["apply"], JSON.stringify(plan));
   return JSON.parse(stdout) as ApplyReport;
 }
 

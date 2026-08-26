@@ -1,6 +1,16 @@
 import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, normalize, parse, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  parse,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 
 // ─── Blocked paths ────────────────────────────────────────────────────────────
 
@@ -35,12 +45,15 @@ function buildBlockedRoots(): Set<string> {
   if (process.platform === "win32") {
     for (const drive of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
       const letter = `${drive}:\\`;
-      roots.add(normalize(letter));
-      roots.add(normalize(`${letter}Windows`));
-      roots.add(normalize(`${letter}Program Files`));
-      roots.add(normalize(`${letter}Program Files (x86)`));
-      roots.add(normalize(`${letter}Users`));
-      roots.add(normalize(`${letter}ProgramData`));
+      roots.add(normalize(letter).toLowerCase());
+      roots.add(normalize(`${letter}Windows`).toLowerCase());
+      roots.add(normalize(`${letter}Program Files`).toLowerCase());
+      roots.add(normalize(`${letter}Program Files (x86)`).toLowerCase());
+      roots.add(normalize(`${letter}Users`).toLowerCase());
+      roots.add(normalize(`${letter}ProgramData`).toLowerCase());
+      roots.add(normalize(`${letter}usr\\local`).toLowerCase());
+      roots.add(normalize(`${letter}usr`).toLowerCase());
+      roots.add(normalize(`${letter}etc`).toLowerCase());
     }
   }
 
@@ -73,14 +86,13 @@ export function assertSafeCwd(targetPath: string): void {
   if (targetPath.includes("\x00")) {
     throw new GuardrailError(`Path contains null byte: ${JSON.stringify(targetPath)}`);
   }
-  // Reject path traversal before resolving (defense-in-depth)
-  if (targetPath.includes("..")) {
-    throw new GuardrailError(`Path traversal detected: ${targetPath}`);
-  }
 
   const resolved = normalize(resolve(targetPath));
+  const isBlocked =
+    BLOCKED_ROOTS.has(resolved) ||
+    (process.platform === "win32" && BLOCKED_ROOTS.has(resolved.toLowerCase()));
 
-  if (BLOCKED_ROOTS.has(resolved)) {
+  if (isBlocked) {
     throw new GuardrailError(
       `Refusing to operate on protected path: ${resolved}\n` +
         `  sweep must be run inside a project directory, not at a system root.`,
@@ -163,8 +175,11 @@ export function isReparsePointOrSymlink(entryPath: string): boolean {
     }
     if (process.platform === "win32" && stat.isDirectory()) {
       try {
-        const real = realpathSync.native(entryPath);
-        return normalize(real) !== normalize(resolve(entryPath));
+        const parent = dirname(resolve(entryPath));
+        const parentReal = realpathSync(parent).replace(/^\\\\\?\\/, "");
+        const entryReal = realpathSync(entryPath).replace(/^\\\\\?\\/, "");
+        const expectedReal = join(parentReal, basename(entryPath));
+        return normalize(entryReal).toLowerCase() !== normalize(expectedReal).toLowerCase();
       } catch {
         return false;
       }
@@ -183,9 +198,12 @@ export function pathSegmentsBelowRoot(resolved: string, parsedRoot: string): str
 
 /** Whether `candidatePath` is the target root or a path inside it. */
 export function isPathWithinRoot(candidatePath: string, rootPath: string): boolean {
-  const root = resolve(rootPath);
-  const candidate = resolve(candidatePath);
+  const root = normalize(resolve(rootPath));
+  const candidate = normalize(resolve(candidatePath));
   if (candidate === root) {
+    return true;
+  }
+  if (process.platform === "win32" && candidate.toLowerCase() === root.toLowerCase()) {
     return true;
   }
   const rel = relative(root, candidate);

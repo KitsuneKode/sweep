@@ -45,6 +45,24 @@
     {
       "type": "object",
       "additionalProperties": false,
+      "required": ["type", "scannedDirs", "found"],
+      "properties": {
+        "type": {
+          "const": "scan_progress"
+        },
+        "scannedDirs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "found": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
       "required": ["type", "message"],
       "properties": {
         "type": {

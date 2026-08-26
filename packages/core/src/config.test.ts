@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DEFAULT_CONFIG,
@@ -9,6 +10,7 @@ import {
   ConfigParseError,
   validateProjectConfigFile,
   writeInitSweeprc,
+  isIgnoredEntry,
 } from "./config.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
@@ -16,7 +18,7 @@ import {
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync("/tmp/sweep-config-test-");
+  tmpDir = mkdtempSync(join(tmpdir(), "sweep-config-test-"));
 });
 
 afterEach(() => {
@@ -143,6 +145,30 @@ describe("writeInitSweeprc", () => {
     const configPath = dir("project", ".sweeprc");
     expect(writeInitSweeprc(configPath)).toBe("exists");
     expect(loadConfig(dir("project")).maxSizeGB).toBe(1);
+  });
+});
+
+describe("isIgnoredEntry — globs", () => {
+  test("matches basename globs like *.cache", () => {
+    mkdirSync(dir("project", "foo.cache"), { recursive: true });
+    expect(
+      isIgnoredEntry(dir("project"), dir("project", "foo.cache"), "foo.cache", ["*.cache"]),
+    ).toBe(true);
+    expect(
+      isIgnoredEntry(dir("project"), dir("project", "node_modules"), "node_modules", ["*.cache"]),
+    ).toBe(false);
+  });
+
+  test("still matches exact names and path prefixes", () => {
+    expect(isIgnoredEntry(dir("project"), dir("project", "dist"), "dist", ["dist"])).toBe(true);
+    expect(
+      isIgnoredEntry(
+        dir("project"),
+        dir("project", "packages", "vendor", "node_modules"),
+        "node_modules",
+        ["packages/vendor"],
+      ),
+    ).toBe(true);
   });
 });
 

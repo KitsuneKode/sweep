@@ -22,6 +22,7 @@ describe("protocol package", () => {
       "scan_started",
       "candidate_found",
       "candidate_updated",
+      "scan_progress",
       "warning",
       "scan_completed",
     ]);

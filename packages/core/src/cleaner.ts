@@ -1,13 +1,40 @@
-import { rm, unlink } from "node:fs/promises";
+import { rm, rmdir, unlink } from "node:fs/promises";
 import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
 import { mapPool } from "./async-pool.js";
+import { isReparsePointOrSymlink } from "./guardrails.js";
 
 const DELETE_CONCURRENCY = 4;
+
+/**
+ * Filter out candidate entries that are contained within an ancestor candidate
+ * that is already scheduled for recursive removal. Sort is lexicographic so a
+ * parent path is retained before any children that start with that prefix.
+ */
+export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
+  // Sort shallowest paths first
+  const sorted = [...entries].sort((a, b) => a.path.localeCompare(b.path));
+  const retained: ScanEntry[] = [];
+
+  for (const entry of sorted) {
+    const isInsideRetained = retained.some(
+      (parent) =>
+        parent.entryType === "directory" &&
+        !parent.isSymlink &&
+        (entry.path.startsWith(`${parent.path}/`) || entry.path.startsWith(`${parent.path}\\`)),
+    );
+    if (!isInsideRetained) {
+      retained.push(entry);
+    }
+  }
+
+  return retained;
+}
 
 /**
  * Delete all entries in the list with bounded concurrency.
  *
  * Symlinks are removed with unlink (removes the link entry, not the target).
+ * Reparse points / NTFS junctions on Windows are unlinked/removed safely without recursion.
  * Directories are removed with rm({ recursive: true, force: true }).
  *
  * Returns a CleanResult with stats. Never throws — failed entries are collected.
@@ -20,10 +47,19 @@ export async function clean(
   const deleted: ScanEntry[] = [];
   const failedPaths: PathFailure[] = [];
 
-  await mapPool(entries, DELETE_CONCURRENCY, async (entry, index) => {
+  const deduplicated = deduplicateNestedEntries(entries);
+
+  await mapPool(deduplicated, DELETE_CONCURRENCY, async (entry, index) => {
     try {
-      if (entry.isSymlink) {
-        await unlink(entry.path);
+      if (
+        entry.isSymlink ||
+        (process.platform === "win32" && isReparsePointOrSymlink(entry.path))
+      ) {
+        try {
+          await unlink(entry.path);
+        } catch {
+          await rmdir(entry.path);
+        }
       } else {
         await rm(entry.path, { recursive: true, force: true });
       }
@@ -37,7 +73,7 @@ export async function clean(
       });
     }
 
-    onProgress?.(entry, index, entries.length);
+    onProgress?.(entry, index, deduplicated.length);
     return entry;
   });
 

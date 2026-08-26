@@ -35,9 +35,12 @@ function createPlan(targetDir: string): ScanPlan {
   };
 }
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 describe("runInteractiveCleanup", () => {
   test("rescan then apply completes without executing delete in dry-run", async () => {
-    const targetDir = "/tmp/sweep-orchestration-test";
+    const targetDir = join(tmpdir(), "sweep-orchestration-test");
     let reviewCalls = 0;
     const plan = createPlan(targetDir);
     const result: ScanResult = {

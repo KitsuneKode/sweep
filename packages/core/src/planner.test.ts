@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScanEntry, ScanResult } from "@kitsunekode/sweep-protocol";
 import {
@@ -12,7 +13,7 @@ import {
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync("/tmp/sweep-planner-test-");
+  tmpDir = mkdtempSync(join(tmpdir(), "sweep-planner-test-"));
 });
 
 afterEach(() => {

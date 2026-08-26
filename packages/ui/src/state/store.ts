@@ -17,6 +17,8 @@ import { getVisibleCandidates, invalidateSelectorCache } from "./selectors.js";
 
 export type UiFocus = "search" | "sidebar" | "list" | "patterns";
 
+export type UiSortBy = "size" | "name";
+
 export interface SweepUiState {
   targetDir: string;
   candidates: ScanCandidate[];
@@ -28,10 +30,20 @@ export interface SweepUiState {
   riskFilter: RiskTier | "all";
   rowIndex: number;
   sidebarIndex: number;
+  /** Cursor in the pattern editor; independent of artifact `rowIndex`. */
+  patternIndex: number;
   selectedIds: Set<string>;
   focus: UiFocus;
   themeMode: ThemeMode;
   patternsDirty: boolean;
+  /** True while a streaming scan is still filling candidates. */
+  scanning: boolean;
+  /** Directories visited by the current/last scan (0 until the engine reports). */
+  scannedDirs: number;
+  /** Artifact ordering inside groups. */
+  sortBy: UiSortBy;
+  /** Scope groups hidden in the artifact list (key "" = project root). */
+  collapsedGroups: Set<string>;
 }
 
 export interface SweepUiSummary {
@@ -61,10 +73,15 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     riskFilter: "all",
     rowIndex: 0,
     sidebarIndex: 0,
+    patternIndex: 0,
     selectedIds,
     focus: "list",
     themeMode: "auto",
     patternsDirty: false,
+    scanning: false,
+    scannedDirs: plan.summary.scannedDirs,
+    sortBy: "size",
+    collapsedGroups: new Set<string>(),
   };
 
   const rows = buildDisplayRows(state);
@@ -130,15 +147,32 @@ export function togglePattern(state: SweepUiState, pattern: string): SweepUiStat
 }
 
 export function setFocus(state: SweepUiState, focus: UiFocus): SweepUiState {
-  if (focus !== "sidebar") {
-    return { ...state, focus };
+  if (focus === "sidebar") {
+    const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+    return {
+      ...state,
+      focus,
+      sidebarIndex: scopeFilterToSidebarIndex(state.scopeFilter, sidebarRows),
+    };
   }
 
-  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+  if (focus === "patterns") {
+    return {
+      ...state,
+      focus,
+      patternIndex: clamp(state.patternIndex, 0, Math.max(0, state.catalogPatterns.length - 1)),
+    };
+  }
+
+  return { ...state, focus };
+}
+
+export function setPatternIndex(state: SweepUiState, patternIndex: number): SweepUiState {
+  if (state.catalogPatterns.length === 0) return { ...state, patternIndex: 0 };
   return {
     ...state,
-    focus,
-    sidebarIndex: scopeFilterToSidebarIndex(state.scopeFilter, sidebarRows),
+    patternIndex: clamp(patternIndex, 0, state.catalogPatterns.length - 1),
+    focus: "patterns",
   };
 }
 
@@ -162,6 +196,133 @@ function clamp(value: number, min: number, max: number): number {
 
 export function setThemeMode(state: SweepUiState, themeMode: ThemeMode): SweepUiState {
   return { ...state, themeMode };
+}
+
+/** Merge streaming candidates by id (sized re-upserts replace discovery stubs). */
+export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[]): SweepUiState {
+  if (incoming.length === 0) return state;
+  invalidateSelectorCache();
+
+  const anchoredId = getCurrentCandidate(state)?.id;
+  const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
+  for (const candidate of incoming) {
+    const existing = byId.get(candidate.id);
+    // Never let a sized update clobber a user selection decision — ids are
+    // deterministic so sized entries arrive with identical fields except bytes.
+    byId.set(candidate.id, existing ? { ...existing, ...candidate } : candidate);
+  }
+
+  return reanchor({ ...state, candidates: [...byId.values()] }, undefined, anchoredId);
+}
+
+/** Re-run display rows and keep the cursor on `anchoredId` (or nearest item). */
+function reanchor(
+  state: SweepUiState,
+  overrides?: Partial<SweepUiState>,
+  anchoredId?: string,
+): SweepUiState {
+  const next = { ...state, ...overrides };
+  const rows = buildDisplayRows(next);
+  const id = anchoredId ?? getCurrentCandidate(state)?.id;
+  const index = id ? rows.findIndex((row) => row.kind === "item" && row.candidateId === id) : -1;
+
+  return {
+    ...next,
+    rowIndex: index >= 0 ? index : snapRowIndexToItem(rows, firstItemRowIndex(rows)),
+  };
+}
+
+/** After structural changes, snap the cursor to the closest surviving item row. */
+function snapToNearestItem(state: SweepUiState): SweepUiState {
+  const rows = buildDisplayRows(state);
+  return { ...state, rowIndex: snapRowIndexToItem(rows, state.rowIndex) };
+}
+
+export function setScanning(state: SweepUiState, scanning: boolean): SweepUiState {
+  if (state.scanning === scanning) return state;
+  return { ...state, scanning };
+}
+
+export function setScannedDirs(state: SweepUiState, scannedDirs: number): SweepUiState {
+  if (state.scannedDirs === scannedDirs) return state;
+  return { ...state, scannedDirs };
+}
+
+export function toggleSortBy(state: SweepUiState): SweepUiState {
+  invalidateSelectorCache();
+  const sortBy: UiSortBy = state.sortBy === "size" ? "name" : "size";
+  return reanchor(state, { ...state, sortBy });
+}
+
+/** Collapse or expand one scope group in the artifact list. */
+export function toggleGroup(state: SweepUiState, groupKey: string): SweepUiState {
+  const collapsedGroups = new Set(state.collapsedGroups);
+  if (collapsedGroups.has(groupKey)) {
+    collapsedGroups.delete(groupKey);
+  } else {
+    collapsedGroups.add(groupKey);
+  }
+  invalidateSelectorCache();
+  // Collapsing may remove the focused row; re-anchor to a visible item.
+  return snapToNearestItem({ ...state, collapsedGroups });
+}
+
+/** Expand every scope group. */
+export function expandAllGroups(state: SweepUiState): SweepUiState {
+  if (state.collapsedGroups.size === 0) return state;
+  invalidateSelectorCache();
+  return snapToNearestItem({ ...state, collapsedGroups: new Set<string>() });
+}
+
+/**
+ * One step of the esc ladder — walk backwards through UI state instead of
+ * quitting. Returns null when there is nothing left to unwind.
+ */
+export function escapeStep(state: SweepUiState): SweepUiState | null {
+  if (state.focus === "patterns") {
+    return setFocus(state, "list");
+  }
+  if (state.focus === "sidebar") {
+    return setFocus(state, "list");
+  }
+  if (state.focus === "search") {
+    return setFocus(state, "list");
+  }
+
+  // List focus — peel off view narrowing one layer at a time.
+  if (state.riskFilter !== "all") {
+    return setRiskFilter(state, "all");
+  }
+  if (state.scopeFilter !== null) {
+    return setScopeFilter(state, null);
+  }
+  if (state.filter.length > 0) {
+    return setFilter(state, "");
+  }
+  if (state.collapsedGroups.size > 0) {
+    return expandAllGroups(state);
+  }
+
+  return null;
+}
+
+/**
+ * Begin a fresh scan generation: drop discovered artifacts and selections,
+ * keep user view/config preferences (theme, patterns editor state, filters).
+ */
+export function resetForRescan(state: SweepUiState): SweepUiState {
+  invalidateSelectorCache();
+  return {
+    ...state,
+    candidates: [],
+    selectedIds: new Set<string>(),
+    rowIndex: 0,
+    sidebarIndex: 0,
+    scopeFilter: null,
+    collapsedGroups: new Set<string>(),
+    scanning: true,
+    scannedDirs: 0,
+  };
 }
 
 export function moveCursor(state: SweepUiState, delta: number): SweepUiState {
@@ -190,10 +351,19 @@ export function toggleCurrentSelection(state: SweepUiState): SweepUiState {
   return toggleSelectionById(state, candidate.id);
 }
 
+function candidateById(state: SweepUiState, candidateId: string): ScanCandidate | undefined {
+  for (const candidate of state.candidates) {
+    if (candidate.id === candidateId) return candidate;
+  }
+  return undefined;
+}
+
 export function toggleSelectionById(state: SweepUiState, candidateId: string): SweepUiState {
-  const candidate = state.candidates.find((entry) => entry.id === candidateId);
+  const candidate = candidateById(state, candidateId);
   if (!candidate) return state;
-  if (candidate.riskTier === "blocked" || candidate.riskTier === "dangerous") {
+  // Blocked items are hard-locked everywhere. Dangerous items CAN be selected,
+  // but only deliberately (one at a time) and always behind the red confirm.
+  if (candidate.riskTier === "blocked") {
     return state;
   }
 
@@ -217,6 +387,17 @@ export function countSelectedDangerous(state: SweepUiState): number {
   return count;
 }
 
+export function selectSafeOnly(state: SweepUiState): SweepUiState {
+  const selectedIds = new Set(state.selectedIds);
+  for (const candidate of getVisibleCandidates(state)) {
+    if (candidate.riskTier === "safe") {
+      selectedIds.add(candidate.id);
+    }
+  }
+
+  return { ...state, selectedIds };
+}
+
 export function selectVisible(state: SweepUiState, includeDangerous: boolean): SweepUiState {
   const selectedIds = new Set(state.selectedIds);
   for (const candidate of getVisibleCandidates(state)) {
@@ -233,11 +414,8 @@ export function clearSelection(state: SweepUiState): SweepUiState {
 }
 
 export function getCurrentCandidate(state: SweepUiState): ScanCandidate | undefined {
-  const rows = buildDisplayRows(state);
-  const candidateId = rowCandidateId(rows, state.rowIndex);
-  return candidateId
-    ? state.candidates.find((candidate) => candidate.id === candidateId)
-    : undefined;
+  const candidateId = rowCandidateId(buildDisplayRows(state), state.rowIndex);
+  return candidateId ? candidateById(state, candidateId) : undefined;
 }
 
 export function getUiSummary(state: SweepUiState): SweepUiSummary {
@@ -266,17 +444,35 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
 }
 
 export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan {
-  const selectedCandidateIds = [...state.selectedIds].filter((id) => {
-    const candidate = state.candidates.find((entry) => entry.id === id);
-    return candidate !== undefined && candidate.riskTier !== "blocked";
-  });
+  const selectedSet = new Set(state.selectedIds);
+  const selectedCandidateIds: string[] = [];
+  let totalBytes = 0;
+  const riskCounts: ScanPlan["summary"]["riskCounts"] = {
+    safe: 0,
+    caution: 0,
+    dangerous: 0,
+    blocked: 0,
+  };
+
+  for (const candidate of state.candidates) {
+    totalBytes += candidate.estimatedBytes;
+    riskCounts[candidate.riskTier] += 1;
+    if (selectedSet.has(candidate.id) && candidate.riskTier !== "blocked") {
+      selectedCandidateIds.push(candidate.id);
+    }
+  }
 
   return {
     ...plan,
+    targetDir: state.targetDir,
+    candidates: state.candidates.slice(),
     selectedCandidateIds,
     summary: {
       ...plan.summary,
+      candidateCount: state.candidates.length,
       selectedCount: selectedCandidateIds.length,
+      estimatedTotalBytes: totalBytes,
+      riskCounts,
     },
   };
 }

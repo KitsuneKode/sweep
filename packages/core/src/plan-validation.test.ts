@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import { PlanValidationError, loadPlan, validatePlan } from "@kitsunekode/sweep-core/plan";
 
@@ -67,7 +69,7 @@ describe("plan validation", () => {
   });
 
   test("loadPlan validates JSON from disk", () => {
-    const path = `/tmp/sweep-plan-load-${Date.now()}.json`;
+    const path = join(tmpdir(), `sweep-plan-load-${Date.now()}.json`);
     writeFileSync(path, JSON.stringify({ not: "a plan" }));
     try {
       expect(() => loadPlan(path)).toThrow(PlanValidationError);

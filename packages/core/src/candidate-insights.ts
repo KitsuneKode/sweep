@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { isPathWithinRoot } from "./guardrails.js";
 
@@ -25,29 +26,42 @@ export function isWorkspaceStub(candidate: ScanCandidate): boolean {
   return candidate.reasons.includes(WORKSPACE_STUB_REASON);
 }
 
+function canonicalPath(path: string): string {
+  let resolved = path;
+  try {
+    resolved = realpathSync(path);
+  } catch {
+    // dangling or unreadable — compare the unresolved path
+  }
+  const normalized = resolve(resolved)
+    .replace(/^\\\\\?\\/i, "")
+    .replace(/\\/g, "/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
 function markSymlinkAliases(candidates: ScanCandidate[]): ScanCandidate[] {
+  const directoryCandidates = candidates
+    .filter((c) => !c.isSymlink && c.entryType === "directory")
+    .map((c) => ({ candidate: c, realPath: canonicalPath(c.path) }));
+
   return candidates.map((candidate) => {
     if (!candidate.isSymlink) {
       return candidate;
     }
 
-    let resolved: string | null = null;
-    try {
-      resolved = realpathSync(candidate.path);
-    } catch {
-      return candidate;
-    }
+    const resolved = canonicalPath(candidate.path);
 
-    const host = candidates.find(
-      (other) =>
-        other.id !== candidate.id &&
-        other.entryType === "directory" &&
-        !other.isSymlink &&
-        (resolved === other.path ||
-          (isPathWithinRoot(resolved, other.path) && resolved !== other.path)),
-    );
+    const hostMatch = directoryCandidates.find(({ candidate: other, realPath }) => {
+      if (other.id === candidate.id) return false;
+      return (
+        resolved === realPath ||
+        resolved === canonicalPath(other.path) ||
+        isPathWithinRoot(resolved, realPath) ||
+        isPathWithinRoot(resolved, other.path)
+      );
+    });
 
-    if (!host) {
+    if (!hostMatch) {
       return candidate;
     }
 

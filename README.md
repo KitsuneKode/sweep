@@ -4,22 +4,17 @@
 
 `sweep` deletes build artifacts — `node_modules`, `dist`, `.next`, `target`, and more — recursively across monorepos, with hard safety guardrails so you never accidentally wipe the wrong directory.
 
-Think `cargo clean`, but language-agnostic and monorepo-aware.
+Think [`npkill`](https://github.com/voidcosmos/npkill), but monorepo-aware, risk-tiered, scriptable, and with a live TUI that boots instantly and streams results as it scans.
 
 ```
- sweep — artifact cleanup
-
-Scanned 47 dirs in /home/you/projects/myapp
-
-  ✗ node_modules    (/home/you/projects/myapp/node_modules)              ~412 MB
-  ✗ node_modules    (/home/you/projects/myapp/packages/web/node_modules) ~231 MB
-  ✗ dist            (/home/you/projects/myapp/packages/api/dist)         ~14 MB
-  ✗ .next           (/home/you/projects/myapp/apps/web/.next)            ~189 MB
-
-  4 items, ~846 MB estimated
-
-Delete 4 items (~846 MB)? [y/N] y
-✓ Cleaned 4 items, 846.4 MB freed (2.3s)
+ ◆ sweep                                    12 found · 8 selected · 2.2 GB
+ ╭─ scopes ────────────────╮ ╭─ artifacts ──────────────────────────────╮
+ │  RECLAIM                │ │ ▌● node_modules              1.4 GB  ✓  │
+ │  ██████████░░░░░░ 68%   │ │  ○ .turbo                     12 MB  ✓  │
+ │  2.2GB of 3.2GB         │ │  ! coverage                  240 MB  !  │
+ │ › all scopes  12  3.2G  │ │  ⊘ .git                              ⊘  │
+ ╰─────────────────────────╯ ╰─ node_modules · directory · /path ───────╯
+ NORMAL  j/k move · space toggle · s/a/u select · enter apply · ? help
 ```
 
 ---
@@ -35,7 +30,8 @@ npx @kitsunekode/sweep .
 bunx @kitsunekode/sweep .
 ```
 
-**Requirements:** Node.js ≥ 18 or Bun.
+**Platforms:** Linux, macOS, Windows (Node.js ≥ 18 or Bun). Standalone binaries are
+attached to GitHub releases for systems without a Node runtime.
 
 ---
 
@@ -73,7 +69,7 @@ sweep doctor --json     # config + environment + dry-scan report
 | `--yes`                  | `-y`  | Skip confirmation (CI / scripts)                   |
 | `--force-large`          |       | Allow deletion over `maxSizeGB` (requires `--yes`) |
 | `--pattern <p>`          | `-p`  | Add extra pattern (repeatable)                     |
-| `--ignore <p>`           | `-i`  | Ignore path/name match (repeatable)                |
+| `--ignore <p>`           | `-i`  | Ignore name, glob, or path prefix (repeatable)     |
 | `--disabled-pattern <p>` |       | Disable a default pattern for this run             |
 | `--select <mode>`        |       | `default`, `safe`, `all`, or `none`                |
 | `--include-dangerous`    |       | Include dangerous custom matches                   |
@@ -99,14 +95,50 @@ sweep doctor .
 
 ## Interactive UI (`sweep ui`)
 
-OpenTUI-powered terminal picker for reviewing monorepo scans before delete.
+The TUI boots **immediately** and fills in live as the scan streams — no spinner
+phase. Review, filter, and delete without leaving the terminal.
 
-- **Scope grouping** — artifacts grouped by directory (`project root`, `apps/cli/`, `packages/web/`, …)
-- **Risk markers** — `·` safe, `?` caution, `!` dangerous, `×` blocked
-- **Keyboard** — filter, toggle rows, bulk select (`s` safe, `a` all, `u` clear), Enter to apply
-- **Rescan** — toggle default patterns and add custom ones without leaving the UI
+### The screen
 
-Requires a TTY and `@opentui/core`.
+- **Scope tree** — artifacts grouped by directory; `h`/`l` (or clicking the
+  header) collapses/expands groups, `w`/`e` folds/unfolds all
+- **Risk glyphs** — `✓` safe · `!` caution · `✗` dangerous · `⊘` blocked (hard-locked)
+- **Reclaim meter** — live selected-vs-total bytes with percentage
+- **Statusline** — mode chip (`SCANNING`, `NORMAL`, …), contextual hints, active filters
+
+### Keys
+
+Arrows work everywhere; letter keys are speed aliases.
+
+| Key                                | Action                             | Notes                                     |
+| ---------------------------------- | ---------------------------------- | ----------------------------------------- |
+| `↑↓` / `j k`                       | move cursor                        |                                           |
+| `g` / `G` or `Home/End`            | first / last item                  |                                           |
+| `Ctrl-U` / `Ctrl-D` or `PgUp/PgDn` | half page                          |                                           |
+| `Space`                            | toggle selection                   | blocked items never toggle                |
+| `s` / `a` / `u`                    | select safe · safe+caution · clear | bulk never touches dangerous              |
+| `Enter`                            | apply deletion                     | red confirm when risky items are selected |
+| `h` / `l` (or click header)        | collapse / expand group            | tree-style triage                         |
+| `w` / `e`                          | collapse all · expand all          |                                           |
+| `o`                                | sort size ↔ name                   | size-desc default                         |
+| `/` then type                      | filter artifacts                   | matches name/path/kind/risk               |
+| `Tab` / `Shift+Tab`                | cycle panes                        | artifacts ↔ scopes ↔ filter               |
+| `1–4`                              | risk filter                        | all / safe / caution / dangerous          |
+| `p`                                | pattern editor                     | toggle defaults, add customs — then `r`   |
+| `r`                                | rescan from disk                   | honors pattern edits; safe mid-scan       |
+| `t`                                | theme                              | dark · light · auto                       |
+| `Esc`                              | **walk back one layer**            | never quits — see below                   |
+| `q`                                | quit                               | explicit only                             |
+
+**Esc philosophy:** pressing `Esc` unwinds exactly one thing per press — closes
+the help modal, leaves the filter, clears the risk filter, clears scope,
+clears text, expands groups. It can never exit the process or lose your
+selection to a mis-press.
+
+### Mouse
+
+Scroll, hover, click-to-focus rows, click again to toggle, click group headers
+to fold/unfold, drag the scrollbar.
 
 ---
 
@@ -153,12 +185,26 @@ Disable a default pattern:
 
 ## Safety
 
-Hard-blocked targets (not configurable): `/`, `/home`, `/usr`, your home directory root, and other system paths. Also:
+**Nothing is ever deleted on its own.** Scan, plan, and the TUI are read-only;
+deletion requires `Enter` on a non-empty selection, and risky selections get a
+red confirmation naming exactly what goes.
 
-- Path traversal (`..`, null bytes) rejected
-- Symlinks removed, never followed
-- `maxSizeGB` guardrail (default 10 GB) — use `--force-large --yes` to override
-- Unsafe patterns rejected at parse time
+Layered guarantees:
+
+1. **Hard-blocked targets** (not configurable): `/`, `/home`, `/usr`, your home
+   root, Windows system roots, and anything inside `.git`/`.svn`/`.hg`.
+2. **Tiered selection**: blocked items cannot be selected at all; dangerous
+   items only via deliberate per-item toggle + red confirm; bulk `a` covers
+   safe and caution tiers exclusively.
+3. **Path revalidation** immediately before each deletion — changed symlinks,
+   vanished paths, or anything escaping the target directory aborts that path
+   without touching the rest.
+4. **Size guardrail** — totals over `maxSizeGB` refuse to run without
+   `--force-large --yes`.
+5. **Symlinks are removed, never followed.** Path traversal (`..`, null bytes)
+   rejected; unsafe patterns rejected at parse time.
+6. **Partial-failure honesty** — the final report lists every path that failed
+   and why; exit code reflects it.
 
 ---
 
@@ -167,10 +213,11 @@ Hard-blocked targets (not configurable): `/`, `/home`, `/usr`, your home directo
 | Code | Meaning                          |
 | ---- | -------------------------------- |
 | `0`  | Success                          |
-| `1`  | User aborted / doctor warnings   |
+| `1`  | User aborted                     |
 | `2`  | Guardrail violation              |
 | `3`  | Config parse or validation error |
 | `4`  | Filesystem error during deletion |
+| `5`  | Doctor warnings                  |
 
 ---
 

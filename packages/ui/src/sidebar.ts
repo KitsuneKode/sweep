@@ -7,6 +7,10 @@ export interface ScopeSidebarRow {
   label: string;
   count: number;
   selectedCount: number;
+  /** Sum of estimatedBytes for candidates in this scope. */
+  bytes: number;
+  /** Sum of estimatedBytes for selected candidates in this scope. */
+  selectedBytes: number;
 }
 
 export function buildScopeSidebarRows(
@@ -22,6 +26,10 @@ export function buildScopeSidebarRows(
     label: "all scopes",
     count: candidates.length,
     selectedCount: candidates.filter((candidate) => selectedIds.has(candidate.id)).length,
+    bytes: candidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
+    selectedBytes: candidates
+      .filter((candidate) => selectedIds.has(candidate.id))
+      .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
   };
 
   const scopeRows = groups.map((group) => scopeGroupToRow(group, byId, selectedIds));
@@ -37,11 +45,15 @@ function scopeGroupToRow(
     .map((id) => byId.get(id))
     .filter((candidate): candidate is ScanCandidate => candidate !== undefined);
 
+  const selected = groupCandidates.filter((candidate) => selectedIds.has(candidate.id));
+
   return {
     key: group.key,
     label: group.label,
     count: groupCandidates.length,
-    selectedCount: groupCandidates.filter((candidate) => selectedIds.has(candidate.id)).length,
+    selectedCount: selected.length,
+    bytes: groupCandidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
+    selectedBytes: selected.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
   };
 }
 
@@ -63,4 +75,47 @@ export function sidebarIndexToScopeFilter(
 
 export function sidebarCountWidth(rows: readonly ScopeSidebarRow[]): number {
   return Math.max(1, ...rows.map((row) => String(row.count).length));
+}
+
+export function sidebarBytesWidth(rows: readonly ScopeSidebarRow[]): number {
+  // Pre-format via a compact helper-free estimate: max digit width for "999.9 GB"
+  return Math.max(6, ...rows.map((row) => compactBytesLabel(row.bytes).length));
+}
+
+/** Drop the bytes column before the label when the pane is too narrow. */
+export function sidebarColumnLayout(
+  paneWidth: number,
+  countWidth: number,
+  bytesWidth: number,
+): { maxLabelWidth: number; showBytes: boolean; countWidth: number; bytesWidth: number } {
+  let showBytes = paneWidth >= 22;
+  let fittedBytesWidth = showBytes ? bytesWidth : 0;
+  let gaps = showBytes ? 8 : 6;
+  let maxLabelWidth = paneWidth - countWidth - fittedBytesWidth - gaps;
+  if (maxLabelWidth < 8 && showBytes) {
+    showBytes = false;
+    fittedBytesWidth = 0;
+    gaps = 6;
+    maxLabelWidth = paneWidth - countWidth - gaps;
+  }
+  return {
+    maxLabelWidth: Math.max(6, maxLabelWidth),
+    showBytes,
+    countWidth,
+    bytesWidth: fittedBytesWidth,
+  };
+}
+
+/** Compact byte label for dense sidebar columns (e.g. `1.2GB`, `400MB`). */
+export function compactBytesLabel(bytes: number): string {
+  if (bytes <= 0) return "0B";
+  const units = ["B", "KB", "MB", "GB", "TB"] as const;
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = value >= 10 || unit === 0 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `${rounded}${units[unit]}`;
 }
