@@ -4,11 +4,9 @@ import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import type { SweepUiSummary } from "./state.js";
 import {
   artifactRowWidths,
+  buildArtifactRowContent,
+  buildGroupHeaderContent,
   buildHeaderStats,
-  formatArtifactRow,
-  formatArtifactRowPlain,
-  formatGroupHeaderRow,
-  formatScanProgressLine,
   relativePath,
   splitNameCell,
   truncateScopeLabel,
@@ -53,6 +51,17 @@ function candidate(overrides: Partial<ScanCandidate> = {}): ScanCandidate {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * Flatten a StyledText to its visible characters.
+ *
+ * These assertions used to run against parallel plain-text formatters, which
+ * meant the shipping renderer could drift while the tests stayed green. Asserting
+ * on the real output keeps the coverage honest.
+ */
+function plain(text: { chunks: Array<{ text: string }> }): string {
+  return text.chunks.map((chunk) => chunk.text).join("");
+}
+
 describe("presentation formatters", () => {
   test("relativePath strips the scan root prefix", () => {
     const root = join(tmpdir(), "project");
@@ -60,14 +69,26 @@ describe("presentation formatters", () => {
     expect(relativePath(root, target)).toBe("node_modules");
   });
 
-  test("formatArtifactRow is a single dense line", () => {
-    const line = formatArtifactRow(candidate(), true, darkTheme);
+  test("an artifact row is a single dense line", () => {
+    const line = plain(
+      buildArtifactRowContent(candidate(), true, false, artifactRowWidths(80), darkTheme),
+    );
     expect(line).toContain("●");
     expect(line).toContain("node_modules");
     expect(line).toContain("512 B");
     expect(line).toContain("✓");
     expect(line.startsWith(" ")).toBe(true);
     expect(line.includes("\n")).toBe(false);
+  });
+
+  test("the cursor row is railed and queued rows are marked", () => {
+    const widths = artifactRowWidths(80);
+    expect(plain(buildArtifactRowContent(candidate(), false, true, widths, darkTheme))).toContain(
+      "▌",
+    );
+    expect(plain(buildArtifactRowContent(candidate(), false, false, widths, darkTheme))).toContain(
+      "○",
+    );
   });
 
   test("splitNameCell keeps the artifact name and a muted parent path", () => {
@@ -77,14 +98,16 @@ describe("presentation formatters", () => {
     expect(nameText.length + parentText.length).toBe(24);
   });
 
-  test("formatArtifactRowPlain includes the parent when a scan root is provided", () => {
-    const widths = artifactRowWidths(80);
-    const line = formatArtifactRowPlain(
-      candidate({ path: "/tmp/project/apps/cli/dist", name: "dist" }),
-      false,
-      false,
-      widths,
-      "/tmp/project",
+  test("an artifact row includes its parent when a scan root is provided", () => {
+    const line = plain(
+      buildArtifactRowContent(
+        candidate({ path: "/tmp/project/apps/cli/dist", name: "dist" }),
+        false,
+        false,
+        artifactRowWidths(80),
+        darkTheme,
+        "/tmp/project",
+      ),
     );
     expect(line).toContain("dist");
     expect(line).toContain("apps/cli");
@@ -105,24 +128,46 @@ describe("presentation formatters", () => {
     expect(clipped).toContain("root");
   });
 
-  test("formatGroupHeaderRow puts bytes next to the count, not in place of the name", () => {
-    const line = formatGroupHeaderRow({
-      kind: "header",
-      groupKey: "apps/cli",
-      label: "apps/cli/",
-      itemCount: 3,
-      selectedCount: 0,
-      collapsed: false,
-      bytes: 1024,
-    });
+  test("a group heading puts bytes next to the count, not in place of the name", () => {
+    const line = plain(
+      buildGroupHeaderContent(
+        {
+          kind: "header",
+          groupKey: "apps/cli",
+          label: "apps/cli/",
+          itemCount: 3,
+          selectedCount: 0,
+          collapsed: false,
+          bytes: 1024,
+        },
+        darkTheme,
+        artifactRowWidths(80),
+      ),
+    );
     expect(line).toContain("apps/cli/");
     expect(line).toContain("3");
     expect(line).toContain("1KB");
   });
 
-  test("formatScanProgressLine includes dirs when reported", () => {
-    expect(formatScanProgressLine(3, 0)).toBe("scanning… 3 found");
-    expect(formatScanProgressLine(3, 12)).toBe("scanning… 3 found  ·  12 dirs");
+  test("a collapsed heading points right and an expanded one points down", () => {
+    const header = (collapsed: boolean) =>
+      plain(
+        buildGroupHeaderContent(
+          {
+            kind: "header",
+            groupKey: "apps/cli",
+            label: "apps/cli/",
+            itemCount: 3,
+            selectedCount: 0,
+            collapsed,
+            bytes: 1024,
+          },
+          darkTheme,
+          artifactRowWidths(80),
+        ),
+      );
+    expect(header(true).startsWith("▸")).toBe(true);
+    expect(header(false).startsWith("▾")).toBe(true);
   });
 });
 
@@ -135,10 +180,6 @@ describe("buildHeaderStats queue counts", () => {
     dangerousVisibleCount: 0,
     ...over,
   });
-
-  function plain(text: { chunks: Array<{ text: string }> }): string {
-    return text.chunks.map((chunk) => chunk.text).join("");
-  }
 
   test("reports the queue plainly when all of it is on screen", () => {
     const line = plain(buildHeaderStats(planFixture(), summary(), darkTheme));

@@ -26,12 +26,10 @@ export interface ReviewPaneProps {
   tokens: ThemeTokens;
   showSidebar: boolean;
   sidebarWidth: number;
-  filterDraft: string;
   displayRows: UiDisplayRow[];
   visibleItems: ScanCandidate[];
   candidatesById: Map<string, ScanCandidate>;
   listSelectIndex: number;
-  onFilterDraftChange: (value: string) => void;
   onMutate: (fn: (s: SweepUiState) => SweepUiState) => void;
   onFocusPanel: (focus: UiFocus) => void;
   onToggleSelection: (candidateId: string) => void;
@@ -42,12 +40,10 @@ export function ReviewPane({
   tokens,
   showSidebar,
   sidebarWidth,
-  filterDraft,
   displayRows,
   visibleItems,
   candidatesById,
   listSelectIndex,
-  onFilterDraftChange,
   onMutate,
   onFocusPanel,
   onToggleSelection,
@@ -70,7 +66,7 @@ export function ReviewPane({
     dimensions.width - (showSidebar ? sidebarWidth + 1 : 0) - 2 - 4,
   );
 
-  const hasFilter = filterDraft.length > 0 || state.riskFilter !== "all";
+  const hasFilter = state.filter.length > 0 || state.riskFilter !== "all";
   const scopeEmpty = state.scopeFilter !== null && visibleItems.length === 0;
   const nothingFound = visibleItems.length === 0 && !scopeEmpty && !state.scanning;
   const searchFocused = state.focus === "search";
@@ -124,16 +120,13 @@ export function ReviewPane({
         <box width="100%" height={1} flexShrink={0}>
           <input
             focused={searchFocused}
-            value={filterDraft}
+            value={state.filter}
             placeholder="Filter…"
             backgroundColor={tokens.surfaceInset}
             focusedBackgroundColor={tokens.surfaceInset}
             textColor={tokens.text}
             cursorColor={tokens.accent}
-            onInput={(value: string) => {
-              onFilterDraftChange(value);
-              onMutate((s) => setFilter(s, value));
-            }}
+            onInput={(value: string) => onMutate((s) => setFilter(s, value))}
             onSubmit={() => onFocusPanel("list")}
           />
         </box>
@@ -176,8 +169,8 @@ export function ReviewPane({
             <text
               content={
                 hasFilter
-                  ? filterDraft.length > 0
-                    ? `No artifacts match "${filterDraft}".`
+                  ? state.filter.length > 0
+                    ? `No artifacts match "${state.filter}".`
                     : "No artifacts match the current filter."
                   : "No artifacts found."
               }

@@ -53,12 +53,6 @@ export function relativePath(root: string, path: string): string {
   return relative(root, path);
 }
 
-export function formatGroupHeaderRow(row: Extract<UiDisplayRow, { kind: "header" }>): string {
-  const selected = row.selectedCount > 0 ? ` · ${row.selectedCount} queued` : "";
-  const size = row.bytes > 0 ? compactBytesLabel(row.bytes) : "";
-  return `▸ ${row.label} · ${row.itemCount}${size ? ` · ${size}` : ""}${selected}`;
-}
-
 export function buildListColumnHeader(widths: RowWidths, tokens: ThemeTokens): StyledText {
   const nameLabel = "Name";
   const namePad = " ".repeat(Math.max(0, widths.nameWidth - nameLabel.length));
@@ -75,10 +69,6 @@ export function buildListRule(widths: RowWidths, tokens: ThemeTokens): StyledTex
     GLYPH_GAP +
     RISK_COLUMN_WIDTH;
   return t`${fg(tokens.border)("─".repeat(Math.max(8, width)))}`;
-}
-
-export function buildListLegend(tokens: ThemeTokens): StyledText {
-  return t`${fg(tokens.textDim)("● queued")}  ${fg(tokens.textDim)("○ available")}  ${fg(tokens.positive)("✓ safe")}  ${fg(tokens.warning)("! caution")}  ${fg(tokens.danger)("✗ dangerous")}`;
 }
 
 export function buildGroupHeaderContent(
@@ -101,31 +91,6 @@ export function buildGroupHeaderContent(
   const statsStyled =
     row.selectedCount > 0 ? fg(tokens.positive)(`${stats}${queued}`) : fg(tokens.textDim)(stats);
   return t`${glyph} ${bold(fg(tokens.textMuted)(label))} ${statsStyled}`;
-}
-
-/** Plain-text row layout — canonical spacing for tests and debugging. */
-export function formatArtifactRow(
-  candidate: ScanCandidate,
-  selected: boolean,
-  _tokens: ThemeTokens,
-): string {
-  const widths = artifactRowWidths(80);
-  return formatArtifactRowPlain(candidate, selected, false, widths);
-}
-
-export function formatArtifactRowPlain(
-  candidate: ScanCandidate,
-  selected: boolean,
-  isCurrent: boolean,
-  widths: RowWidths,
-  root?: string,
-): string {
-  const mark = selected ? SELECTED_MARK : UNSELECTED_MARK;
-  const rail = isCurrent ? "▌" : " ";
-  const size = formatSizeCell(candidate.estimatedBytes, widths.sizeWidth);
-  const name = formatNameCell(candidate, widths.nameWidth, root);
-  const glyph = riskGlyph[candidate.riskTier];
-  return `${rail} ${mark} ${name}${" ".repeat(SIZE_GAP)}${size}${" ".repeat(GLYPH_GAP)}${glyph}`;
 }
 
 export function buildArtifactRowContent(
@@ -172,12 +137,6 @@ export function artifactParentLabel(root: string, path: string): string {
   const slash = rel.lastIndexOf("/");
   if (slash <= 0) return "";
   return rel.slice(0, slash);
-}
-
-function formatNameCell(candidate: ScanCandidate, width: number, root?: string): string {
-  const parent = root ? artifactParentLabel(root, candidate.path) : "";
-  const { nameText, parentText } = splitNameCell(candidate.name, parent, width);
-  return `${nameText}${parentText}`;
 }
 
 /** Command-style primary name plus muted location, padded to a fixed column. */
@@ -236,12 +195,6 @@ export function truncateScopeLabel(label: string, max: number): string {
   }
 
   return truncateMiddle(label, max).padEnd(max);
-}
-
-/** Live scan strip: found count plus dirs walked when the engine reports them. */
-export function formatScanProgressLine(found: number, scannedDirs: number): string {
-  const dirs = scannedDirs > 0 ? `  ·  ${scannedDirs} dirs` : "";
-  return `scanning… ${found} found${dirs}`;
 }
 
 export function formatPatternRow(pattern: string, enabled: boolean): string {
@@ -558,10 +511,4 @@ export function buildSidebarLine(options: SidebarLineOptions): StyledText {
 
   if (selectedCount <= 0) return base;
   return joinStyled([base, t`  ${fg(tokens.positive)(`+${selectedCount}`)}`]);
-}
-
-/** @deprecated Use buildSidebarLine with StyledText — plain string kept for tests. */
-export function formatSidebarLinePlain(label: string, count: number, active: boolean): string {
-  const mark = active ? "›" : "·";
-  return `${mark} ${label} ${count}`;
 }

@@ -28,12 +28,15 @@ export function sidebarIndexToScopeFilter(
   return rows[index]?.key ?? null;
 }
 
+// Folded rather than spread into `Math.max(...rows)`, which passes one argument
+// per row and has a hard engine limit (~500k in Bun). A sidebar that deep is not
+// reachable today; a fold has no downside, so there is no reason to sit near it.
 export function sidebarCountWidth(rows: readonly ScopeSidebarRow[]): number {
-  return Math.max(1, ...rows.map((row) => String(row.count).length));
+  return rows.reduce((widest, row) => Math.max(widest, String(row.count).length), 1);
 }
 
 export function sidebarBytesWidth(rows: readonly ScopeSidebarRow[]): number {
-  return Math.max(6, ...rows.map((row) => compactBytesLabel(row.bytes).length));
+  return rows.reduce((widest, row) => Math.max(widest, compactBytesLabel(row.bytes).length), 6);
 }
 
 /** Drop the bytes column before the label when the pane is too narrow. */

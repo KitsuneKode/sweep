@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import { handleKeymap, type KeymapActions, type KeymapContext } from "./keymap.js";
-import { createUiState } from "./state.js";
+import { createUiState, type SweepUiState } from "./state.js";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 
 function mockPlan(): ScanPlan {
@@ -58,7 +58,6 @@ describe("handleKeymap", () => {
       setPendingApply: mock(() => {}),
       requestApply: mock(() => {}),
       applyPlan: mock(() => {}),
-      clearFilterDraft: mock(() => {}),
       dismissScanError: mock(() => {}),
     };
   }
@@ -166,8 +165,11 @@ describe("handleKeymap", () => {
     });
     const actions = makeActions();
     handleKeymap(ctx, actions);
-    expect(actions.mutate).toHaveBeenCalled();
-    expect(actions.clearFilterDraft).toHaveBeenCalled();
+    // The store is the only source of truth for the input, so clearing the
+    // filter is all it takes for the text box to empty.
+    const mutator = (actions.mutate as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]?.[0] as (s: SweepUiState) => SweepUiState;
+    expect(mutator(ctx.state).filter).toBe("");
     expect(actions.focusPanel).toHaveBeenCalledWith("list");
   });
 

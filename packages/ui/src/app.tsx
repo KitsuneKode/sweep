@@ -195,7 +195,6 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) => createUiState(p, init));
   const [showHelp, setShowHelp] = useState(false);
   const [pendingApply, setPendingApply] = useState(false);
-  const [filterDraft, setFilterDraft] = useState("");
   const [scanError, setScanError] = useState<string | null>(null);
 
   const generationRef = useRef(0);
@@ -263,16 +262,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   const showSidebar = dimensions.width >= 72;
 
   const mutate = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
-    dispatch({
-      type: "mutate",
-      fn: (s) => {
-        const next = fn(s);
-        if (next.filter !== s.filter && next.filter.length === 0) {
-          setFilterDraft("");
-        }
-        return next;
-      },
-    });
+    dispatch({ type: "mutate", fn });
   }, []);
 
   const visibleItems = useMemo(() => getVisibleCandidates(state), [state]);
@@ -342,7 +332,6 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         applyPlan,
         requestRescan,
         toggleSort: () => dispatch({ type: "mutate", fn: toggleSortBy }),
-        clearFilterDraft: () => setFilterDraft(""),
         dismissScanError: () => setScanError(null),
       },
     );
@@ -403,12 +392,10 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
           tokens={tokens}
           showSidebar={showSidebar}
           sidebarWidth={sidebarWidth}
-          filterDraft={filterDraft}
           displayRows={displayRows}
           visibleItems={visibleItems}
           candidatesById={candidatesById}
           listSelectIndex={listSelectIndex}
-          onFilterDraftChange={setFilterDraft}
           onMutate={mutate}
           onFocusPanel={focusPanel}
           onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
