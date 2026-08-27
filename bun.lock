@@ -21,7 +21,7 @@
     },
     "apps/cli": {
       "name": "@kitsunekode/sweep",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "bin": {
         "sweep": "dist/sweep.js",
       },
@@ -40,11 +40,11 @@
         "typescript": "catalog:",
       },
       "optionalDependencies": {
-        "@kitsunekode/sweep-engine-darwin-64": "0.2.0",
-        "@kitsunekode/sweep-engine-darwin-arm64": "0.2.0",
-        "@kitsunekode/sweep-engine-linux-64": "0.2.0",
-        "@kitsunekode/sweep-engine-linux-arm64": "0.2.0",
-        "@kitsunekode/sweep-engine-windows-64": "0.2.0",
+        "@kitsunekode/sweep-engine-darwin-64": "0.3.0",
+        "@kitsunekode/sweep-engine-darwin-arm64": "0.3.0",
+        "@kitsunekode/sweep-engine-linux-64": "0.3.0",
+        "@kitsunekode/sweep-engine-linux-arm64": "0.3.0",
+        "@kitsunekode/sweep-engine-windows-64": "0.3.0",
       },
       "peerDependencies": {
         "@opentui/core": "^0.2.16",
@@ -55,6 +55,7 @@
     },
     "packages/core": {
       "name": "@kitsunekode/sweep-core",
+      "version": "0.0.0",
       "dependencies": {
         "@kitsunekode/sweep-protocol": "workspace:*",
         "ajv": "catalog:",
@@ -70,6 +71,7 @@
     },
     "packages/display": {
       "name": "@kitsunekode/sweep-display",
+      "version": "0.0.0",
       "dependencies": {
         "@kitsunekode/sweep-protocol": "workspace:*",
         "picocolors": "catalog:",
@@ -84,6 +86,7 @@
     },
     "packages/engine-native": {
       "name": "@kitsunekode/sweep-engine-native",
+      "version": "0.0.0",
       "devDependencies": {
         "@kitsunekode/sweep-core": "workspace:*",
         "@kitsunekode/sweep-typescript-config": "workspace:*",
@@ -95,6 +98,7 @@
     },
     "packages/integration-tests": {
       "name": "@kitsunekode/sweep-integration-tests",
+      "version": "0.0.0",
       "devDependencies": {
         "@kitsunekode/sweep": "workspace:*",
         "@kitsunekode/sweep-core": "workspace:*",
@@ -108,6 +112,7 @@
     },
     "packages/protocol": {
       "name": "@kitsunekode/sweep-protocol",
+      "version": "0.0.0",
       "devDependencies": {
         "@kitsunekode/sweep-typescript-config": "workspace:*",
         "@types/bun": "catalog:",
@@ -118,6 +123,7 @@
     },
     "packages/test-fixtures": {
       "name": "@kitsunekode/sweep-test-fixtures",
+      "version": "0.0.0",
       "devDependencies": {
         "@kitsunekode/sweep-typescript-config": "workspace:*",
         "@types/bun": "catalog:",
@@ -128,9 +134,11 @@
     },
     "packages/typescript-config": {
       "name": "@kitsunekode/sweep-typescript-config",
+      "version": "0.0.0",
     },
     "packages/ui": {
       "name": "@kitsunekode/sweep-ui",
+      "version": "0.0.0",
       "dependencies": {
         "@kitsunekode/sweep-core": "workspace:*",
         "@kitsunekode/sweep-display": "workspace:*",
@@ -251,7 +259,17 @@
 
     "@kitsunekode/sweep-display": ["@kitsunekode/sweep-display@workspace:packages/display"],
 
+    "@kitsunekode/sweep-engine-darwin-64": ["@kitsunekode/sweep-engine-darwin-64@0.3.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-8WOVUQl4WZkegJK1wNJW6KNnSTVlTLGpvmMbmo0L8W6IK9T7ObyVhvkMawNkzENAEnHJroXGW57XYq0A4AM9TQ=="],
+
+    "@kitsunekode/sweep-engine-darwin-arm64": ["@kitsunekode/sweep-engine-darwin-arm64@0.3.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-UO4fLqrVc1NIlG+sMq7ADQSu/H4x5htkDd2r1oNJ/mjHLXeZBhFvFKzP/sTFTHFMsFnTy0A3fTm6k5T9PJf16w=="],
+
+    "@kitsunekode/sweep-engine-linux-64": ["@kitsunekode/sweep-engine-linux-64@0.3.0", "", { "os": "linux", "cpu": "x64" }, "sha512-qy5y/h6LTNNK9+JLA2442eAxW3VsntFa0PrvBk2iIiIIGZfTey+w4mku/GT7JG84meJD+MNHZWS2g5AjpSdyQA=="],
+
+    "@kitsunekode/sweep-engine-linux-arm64": ["@kitsunekode/sweep-engine-linux-arm64@0.3.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-jHK5bgrAI9TrRirGQ8b00k4yGYExkNB0FeV3LQRww1o35V7CRcwr/Ox7c3NMDyKDz4PDeFlfds3xSOMmVQY0Aw=="],
+
     "@kitsunekode/sweep-engine-native": ["@kitsunekode/sweep-engine-native@workspace:packages/engine-native"],
+
+    "@kitsunekode/sweep-engine-windows-64": ["@kitsunekode/sweep-engine-windows-64@0.3.0", "", { "os": "win32", "cpu": "x64" }, "sha512-Y3/4wBrGluhWLcng78Kj4xS3ub9Uuyp7BNYOU2mXGiw25otYoABaFJSLrNu0Zokv3Zoq3rrHRlo6wKmOXz4EPA=="],
 
     "@kitsunekode/sweep-integration-tests": ["@kitsunekode/sweep-integration-tests@workspace:packages/integration-tests"],
 
