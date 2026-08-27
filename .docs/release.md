@@ -48,15 +48,18 @@ trusted-publisher setting on a package that already exists, so a new platform
 package needs one authenticated publish from a human before CI can take over:
 
 ```bash
-bun run bootstrap:native-placeholders             # report what is missing
-bun run bootstrap:native-placeholders -- --publish # publish placeholders (prompts 2FA)
+bun run bootstrap:npm-trust                      # report only
+bun run bootstrap:npm-trust -- --publish --trust # apply (prompts 2FA)
 ```
 
-That publishes a binary-free placeholder at `0.0.1` — deliberately below any
-shipping version, because the CLI pins its engines to an exact version. It skips
-packages that already exist, so re-run it whenever a platform is added to
-`NATIVE_PLATFORMS`. Afterwards, register the trusted publisher for each new
-package and let CI publish every version from then on.
+That publishes a binary-free placeholder at `0.0.1` for any missing package —
+deliberately below any shipping version, because the CLI pins its engines to an
+exact version — and then registers the trusted publisher for every package via
+`npm trust github`, so no clicking through npmjs.com. It skips packages that
+already exist, so re-run it whenever a platform is added to `NATIVE_PLATFORMS`.
+
+Every npm write on this account requires 2FA, including `npm trust list`, so
+this has to be run by a human; CI cannot do it.
 
 ## 2. Standalone binaries (GitHub releases)
 
