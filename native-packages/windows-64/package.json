@@ -1,6 +1,6 @@
 {
   "name": "@kitsunekode/sweep-engine-windows-64",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Native sweep-engine binary for win32 x64",
   "license": "MIT",
   "repository": {
