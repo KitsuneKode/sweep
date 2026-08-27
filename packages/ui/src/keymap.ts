@@ -131,8 +131,6 @@ export interface KeymapActions {
   requestRescan?: () => void;
   /** Cycle artifact ordering between size and name. */
   toggleSort?: () => void;
-  /** Clear the live filter input when search/esc unwinds the query. */
-  clearFilterDraft?: () => void;
   /** Dismiss a scan-error modal without retrying. */
   dismissScanError?: () => void;
 }
@@ -207,7 +205,6 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   if (state.focus === "search") {
     if (key.name === "escape") {
       actions.mutate((s) => setFilter(s, ""));
-      actions.clearFilterDraft?.();
       actions.focusPanel("list");
       return;
     }

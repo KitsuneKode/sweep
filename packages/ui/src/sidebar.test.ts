@@ -4,6 +4,9 @@ import {
   buildScopeSidebarRows,
   scopeFilterToSidebarIndex,
   sidebarColumnLayout,
+  sidebarCountWidth,
+  sidebarBytesWidth,
+  type ScopeSidebarRow,
 } from "./sidebar.js";
 import { applySidebarScope, createUiState, setScopeFilter } from "./state.js";
 
@@ -91,5 +94,37 @@ describe("scope sidebar rows", () => {
     const narrow = sidebarColumnLayout(16, 3, 8);
     expect(narrow.showBytes).toBe(false);
     expect(narrow.maxLabelWidth).toBeGreaterThanOrEqual(6);
+  });
+});
+
+describe("column widths on large trees", () => {
+  function row(count: number, bytes: number): ScopeSidebarRow {
+    return {
+      key: `k${count}`,
+      label: "scope/",
+      depth: 0,
+      hasChildren: false,
+      count,
+      selectedCount: 0,
+      bytes,
+      selectedBytes: 0,
+    };
+  }
+
+  test("widths come from the widest row", () => {
+    const rows = [row(1, 10), row(12345, 1024 ** 3), row(7, 0)];
+    expect(sidebarCountWidth(rows)).toBe(5);
+    expect(sidebarBytesWidth(rows)).toBe(6);
+  });
+
+  test("empty input falls back to the minimum widths", () => {
+    expect(sidebarCountWidth([])).toBe(1);
+    expect(sidebarBytesWidth([])).toBe(6);
+  });
+
+  test("a large tree is measured without spreading it into arguments", () => {
+    const rows = Array.from({ length: 50_000 }, (_, i) => row(i, i));
+    expect(sidebarCountWidth(rows)).toBe(5);
+    expect(sidebarBytesWidth(rows)).toBe(6);
   });
 });
