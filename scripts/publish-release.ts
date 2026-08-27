@@ -77,11 +77,9 @@ if (!skipNative) {
         continue;
       }
       console.log(`\npublishing ${platform.npmName}@${version}...`);
-      const publishArgs = ["publish", dir, "--access", "public", "--ignore-scripts"];
-      if (process.env.CI === "true") {
-        publishArgs.push("--provenance");
-      }
-      run("npm", publishArgs);
+      // No --provenance: trusted publishing attests automatically, and the
+      // flag is only needed for token-authenticated publishes.
+      run("npm", ["publish", dir, "--access", "public", "--ignore-scripts"]);
     }
   }
 } else {
@@ -92,11 +90,7 @@ console.log("\nrunning prepublishOnly...");
 run("bun", ["run", "prepublishOnly"]);
 
 console.log("\npublishing @kitsunekode/sweep...");
-const changesetArgs = ["changeset", "publish"];
-if (process.env.CI === "true") {
-  changesetArgs.push("--provenance");
-}
-run("bunx", changesetArgs);
+run("bunx", ["changeset", "publish"]);
 
 const distFiles = existsSync(CLI_DIST_DIR) ? readdirSync(CLI_DIST_DIR) : [];
 console.log(`\nrelease complete (apps/cli/dist: ${distFiles.join(", ") || "empty"})`);

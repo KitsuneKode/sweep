@@ -22,6 +22,32 @@ The optional Rust engine ships separately via
 `.github/workflows/native-engine-release.yml` as platform packages
 (`@kitsunekode/sweep-engine-*`) resolved at runtime.
 
+### npm authentication: trusted publishing (OIDC)
+
+There is no `NPM_TOKEN` secret. The release job authenticates to npm over OIDC,
+which needs three things to line up:
+
+- `id-token: write` on the job (already set).
+- npm >= 11.5.1 and Node >= 22.14. The job pins Node 24 and asserts the npm
+  version before publishing.
+- `actions/setup-node@v6` or newer. v4 and v5 write an `_authToken=` line into
+  `.npmrc`; npm reads that as "auth is configured" and never starts the OIDC
+  exchange, which fails the publish with `ENEEDAUTH` even though OIDC is
+  available. This is what broke the first 0.3.0 attempt.
+
+Provenance is generated automatically under trusted publishing, so nothing
+passes `--provenance`.
+
+Each published package needs a trusted publisher registered on npmjs.com
+(package Settings -> Trusted Publisher): GitHub Actions, owner `KitsuneKode`,
+repository `sweep`, workflow `release.yml`. That covers `@kitsunekode/sweep`
+and every `@kitsunekode/sweep-engine-*` package.
+
+**A brand-new package cannot be bootstrapped this way.** npm only exposes the
+trusted-publisher setting on a package that already exists, so the first
+version of a new package has to be published with a token, after which the
+trusted publisher can be configured and the token retired.
+
 ## 2. Standalone binaries (GitHub releases)
 
 `.github/workflows/cli-binaries.yml`, triggered by pushing a tag `v*`:
