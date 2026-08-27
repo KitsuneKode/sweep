@@ -1,5 +1,5 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
-import { groupCandidatesByScope } from "../grouping.js";
+import { artifactScopeKey, candidateMatchesScope } from "../scope-tree.js";
 import type { SweepUiState } from "./store.js";
 
 const visibleCache = new WeakMap<SweepUiState, ScanCandidate[]>();
@@ -26,10 +26,9 @@ export function getVisibleCandidates(state: SweepUiState): ScanCandidate[] {
   let result = filterCandidates(state.candidates, state.filter);
 
   if (state.scopeFilter !== null) {
-    const groups = groupCandidatesByScope(state.targetDir, state.candidates);
-    const group = groups.find((g) => g.key === state.scopeFilter);
-    const scopeIds = new Set(group?.candidateIds ?? []);
-    result = result.filter((candidate) => scopeIds.has(candidate.id));
+    result = result.filter((candidate) =>
+      candidateMatchesScope(artifactScopeKey(state.targetDir, candidate.path), state.scopeFilter),
+    );
   }
 
   if (state.riskFilter !== "all") {

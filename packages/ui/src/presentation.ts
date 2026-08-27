@@ -54,15 +54,16 @@ export function relativePath(root: string, path: string): string {
 }
 
 export function formatGroupHeaderRow(row: Extract<UiDisplayRow, { kind: "header" }>): string {
-  const selected = row.selectedCount > 0 ? ` · ${row.selectedCount} selected` : "";
-  return `▸ ${row.label} · ${row.itemCount}${selected}`;
+  const selected = row.selectedCount > 0 ? ` · ${row.selectedCount} queued` : "";
+  const size = row.bytes > 0 ? compactBytesLabel(row.bytes) : "";
+  return `▸ ${row.label} · ${row.itemCount}${size ? ` · ${size}` : ""}${selected}`;
 }
 
 export function buildListColumnHeader(widths: RowWidths, tokens: ThemeTokens): StyledText {
-  const nameLabel = "NAME";
+  const nameLabel = "Name";
   const namePad = " ".repeat(Math.max(0, widths.nameWidth - nameLabel.length));
-  const sizeLabel = "SIZE".padStart(widths.sizeWidth);
-  return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textSecondary)(nameLabel)}${namePad}${" ".repeat(SIZE_GAP)}${fg(tokens.textSecondary)(sizeLabel)}${" ".repeat(GLYPH_GAP)}${fg(tokens.textSecondary)("R")}`;
+  const sizeLabel = "Size".padStart(widths.sizeWidth);
+  return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textDim)(nameLabel)}${namePad}${" ".repeat(SIZE_GAP)}${fg(tokens.textDim)(sizeLabel)}${" ".repeat(GLYPH_GAP)}${fg(tokens.textDim)("R")}`;
 }
 
 export function buildListRule(widths: RowWidths, tokens: ThemeTokens): StyledText {
@@ -83,15 +84,23 @@ export function buildListLegend(tokens: ThemeTokens): StyledText {
 export function buildGroupHeaderContent(
   row: Extract<UiDisplayRow, { kind: "header" }>,
   tokens: ThemeTokens,
-  maxLabelWidth = 48,
+  widths: RowWidths,
 ): StyledText {
   const glyph = row.collapsed ? fg(tokens.textDim)("▸") : fg(tokens.accent)("▾");
-  const label = truncateEnd(row.label, maxLabelWidth);
-  const count = `${row.itemCount}`;
-  const base = t`${glyph} ${bold(fg(tokens.textSecondary)(label))}  ${fg(tokens.textDim)(count)}`;
-  if (row.selectedCount <= 0) return base;
-
-  return joinStyled([base, t`  ${fg(tokens.positive)(`${row.selectedCount} queued`)}`]);
+  const stats = `${row.itemCount} · ${compactBytesLabel(row.bytes)}`;
+  const queued = row.selectedCount > 0 ? ` · ${row.selectedCount} queued` : "";
+  const total =
+    ROW_NAME_OFFSET +
+    widths.nameWidth +
+    SIZE_GAP +
+    widths.sizeWidth +
+    GLYPH_GAP +
+    RISK_COLUMN_WIDTH;
+  const labelWidth = Math.max(4, total - 2 - stats.length - queued.length - 1);
+  const label = truncateScopeLabel(row.label, labelWidth);
+  const statsStyled =
+    row.selectedCount > 0 ? fg(tokens.positive)(`${stats}${queued}`) : fg(tokens.textDim)(stats);
+  return t`${glyph} ${bold(fg(tokens.textMuted)(label))} ${statsStyled}`;
 }
 
 /** Plain-text row layout — canonical spacing for tests and debugging. */
@@ -109,11 +118,12 @@ export function formatArtifactRowPlain(
   selected: boolean,
   isCurrent: boolean,
   widths: RowWidths,
+  root?: string,
 ): string {
   const mark = selected ? SELECTED_MARK : UNSELECTED_MARK;
   const rail = isCurrent ? "▌" : " ";
   const size = formatSizeCell(candidate.estimatedBytes, widths.sizeWidth);
-  const name = truncateEnd(candidate.name, widths.nameWidth);
+  const name = formatNameCell(candidate, widths.nameWidth, root);
   const glyph = riskGlyph[candidate.riskTier];
   return `${rail} ${mark} ${name}${" ".repeat(SIZE_GAP)}${size}${" ".repeat(GLYPH_GAP)}${glyph}`;
 }
@@ -124,26 +134,75 @@ export function buildArtifactRowContent(
   isCurrent: boolean,
   widths: RowWidths,
   tokens: ThemeTokens,
+  root?: string,
 ): StyledText {
   const colors = riskColor(tokens);
   const tierColor = colors[candidate.riskTier];
   const rail = isCurrent ? fg(tokens.accent)("▌") : fg(tokens.textDim)(" ");
   const mark = selected ? fg(tokens.accent)(SELECTED_MARK) : fg(tokens.textDim)(UNSELECTED_MARK);
-  const name = truncateEnd(candidate.name, widths.nameWidth);
+  const parent = root ? artifactParentLabel(root, candidate.path) : "";
+  const { nameText, parentText } = splitNameCell(candidate.name, parent, widths.nameWidth);
   const nameColor = isCurrent
     ? tokens.selectionText
     : candidate.riskTier === "blocked"
       ? tokens.blocked
       : tokens.text;
+  const parentColor = isCurrent ? tokens.selectionText : tokens.textDim;
   const size = formatSizeCell(candidate.estimatedBytes, widths.sizeWidth);
   const sizeColor = isCurrent
     ? tokens.selectionText
     : selected
       ? tokens.positive
       : tokens.textSecondary;
-  const glyphColor = isCurrent ? tokens.selectionText : tierColor;
+  const nameStyled =
+    parentText.length > 0
+      ? t`${fg(nameColor)(nameText)}${fg(parentColor)(parentText)}`
+      : t`${fg(nameColor)(nameText)}`;
 
-  return t`${rail} ${mark} ${fg(nameColor)(name)}${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}${" ".repeat(GLYPH_GAP)}${fg(glyphColor)(riskGlyph[candidate.riskTier])}`;
+  return joinStyled([
+    t`${rail} ${mark} `,
+    nameStyled,
+    t`${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}${" ".repeat(GLYPH_GAP)}${fg(tierColor)(riskGlyph[candidate.riskTier])}`,
+  ]);
+}
+
+/** Directory that contains the artifact, relative to the scan root. */
+export function artifactParentLabel(root: string, path: string): string {
+  const rel = relativePath(root, path).replaceAll("\\", "/");
+  const slash = rel.lastIndexOf("/");
+  if (slash <= 0) return "";
+  return rel.slice(0, slash);
+}
+
+function formatNameCell(candidate: ScanCandidate, width: number, root?: string): string {
+  const parent = root ? artifactParentLabel(root, candidate.path) : "";
+  const { nameText, parentText } = splitNameCell(candidate.name, parent, width);
+  return `${nameText}${parentText}`;
+}
+
+/** Command-style primary name plus muted location, padded to a fixed column. */
+export function splitNameCell(
+  name: string,
+  parent: string,
+  width: number,
+): { nameText: string; parentText: string } {
+  if (width <= 0) return { nameText: "", parentText: "" };
+  if (parent.length === 0) {
+    return { nameText: truncateEnd(name, width), parentText: "" };
+  }
+
+  const minName = Math.min(name.length, Math.max(4, Math.min(name.length, width)));
+  const parentBudget = width - minName - 1;
+  if (parentBudget < 4) {
+    return { nameText: truncateEnd(name, width), parentText: "" };
+  }
+
+  const parentShown = truncateMiddle(parent, parentBudget);
+  const nameBudget = width - parentShown.length - 1;
+  const nameShown =
+    name.length <= nameBudget ? name : `${name.slice(0, Math.max(1, nameBudget - 1))}…`;
+  const namePadded = nameShown.padEnd(nameBudget);
+  return { nameText: namePadded, parentText: ` ${parentShown}` };
 }
 
 function formatSizeCell(bytes: number, width: number): string {
@@ -156,12 +215,27 @@ function truncateEnd(value: string, max: number): string {
   return `${value.slice(0, Math.max(1, max - 1))}…`;
 }
 
-/** Keep the leaf of a scope path visible when the sidebar column is tight. */
+/**
+ * Keep a scope label identifiable in a tight column.
+ * Paths prefer the last two segments; otherwise middle-ellipsis.
+ * Never chops a short phrase into `…oject root`.
+ */
 export function truncateScopeLabel(label: string, max: number): string {
   if (max <= 0) return "";
   if (label.length <= max) return label.padEnd(max);
-  if (max === 1) return "…";
-  return `…${label.slice(label.length - (max - 1))}`;
+
+  const trailingSlash = label.endsWith("/");
+  const segments = label
+    .replace(/\/$/, "")
+    .split("/")
+    .filter((segment) => segment.length > 0);
+  if (segments.length >= 2) {
+    const tail = `${segments.slice(-2).join("/")}${trailingSlash ? "/" : ""}`;
+    if (tail.length <= max) return tail.padEnd(max);
+    return truncateMiddle(tail, max).padEnd(max);
+  }
+
+  return truncateMiddle(label, max).padEnd(max);
 }
 
 /** Live scan strip: found count plus dirs walked when the engine reports them. */
@@ -227,8 +301,16 @@ export function buildHeaderStats(
   ];
 
   if (summary.selectedCount > 0) {
+    // The queue outliving the current view is the point — you narrow, queue,
+    // narrow again, then apply. Say when part of it is off screen, so a header
+    // reading higher than the visible rows is explained rather than alarming.
+    const hidden = summary.selectedCount - summary.visibleSelectedCount;
+    const queued =
+      hidden > 0
+        ? `${padCount(summary.selectedCount)} queued (${summary.visibleSelectedCount} shown)`
+        : `${padCount(summary.selectedCount)} queued`;
     parts.push(
-      t`${fg(tokens.accent)(`${padCount(summary.selectedCount)} selected`)}`,
+      t`${fg(tokens.accent)(queued)}`,
       t`${bold(fg(tokens.positive)(formatBytes(summary.selectedBytes)))}`,
     );
   }
@@ -322,45 +404,67 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
   return t`${glyph}  ${kind}  ${size}  ${path}${flag}`;
 }
 
+/** Which key hints the statusline should show. Modals own the footer too. */
+export type FooterContext =
+  | { kind: "confirm" }
+  | { kind: "help" }
+  | { kind: "scanError" }
+  | { kind: "pane"; focus: UiFocus };
+
 export function buildFooterLine(
   focus: UiFocus,
   tokens: ThemeTokens,
   dryRun?: boolean,
   patternsDirty?: boolean,
-  extras?: { scanning?: boolean; queuedCount?: number; candidateCount?: number },
+  _extras?: { scanning?: boolean; queuedCount?: number; candidateCount?: number },
+): StyledText {
+  return buildFooterHints({ kind: "pane", focus }, tokens, {
+    ...(dryRun ? { dryRun } : {}),
+    ...(patternsDirty ? { patternsDirty } : {}),
+  });
+}
+
+/**
+ * Statusline key hints.
+ *
+ * Every reachable state names its own keys — including the overlays, which
+ * previously covered the footer and left the user with no visible way out.
+ */
+export function buildFooterHints(
+  context: FooterContext,
+  tokens: ThemeTokens,
+  options: { dryRun?: boolean; patternsDirty?: boolean } = {},
 ): StyledText {
   const key = (label: string) => fg(tokens.text)(label);
   const hint = (label: string) => fg(tokens.textMuted)(label);
   const sep = dim(" · ");
 
-  if (focus === "patterns") {
-    const rescan = patternsDirty ? "rescan*" : "rescan";
+  if (context.kind === "confirm") {
+    return t`${key("y")} ${hint("confirm")}${sep}${key("n")} ${hint("cancel")}${sep}${key("esc")} ${hint("back")}${sep}${key("ctrl-c")} ${hint("quit")}`;
+  }
+
+  if (context.kind === "help") {
+    return t`${key("?")} ${hint("close")}${sep}${key("esc")} ${hint("close")}${sep}${key("q")} ${hint("quit")}`;
+  }
+
+  if (context.kind === "scanError") {
+    return t`${key("r")} ${hint("retry")}${sep}${key("esc")} ${hint("dismiss")}${sep}${key("q")} ${hint("quit")}`;
+  }
+
+  if (context.focus === "patterns") {
+    const rescan = options.patternsDirty ? "rescan*" : "rescan";
     return t`${key("space")} ${hint("toggle")}${sep}${key("p")} ${hint("list")}${sep}${key("r")} ${hint(rescan)}${sep}${key("esc")} ${hint("back")}`;
   }
 
-  if (focus === "sidebar") {
-    return t`${key("j/k")} ${hint("move")}${sep}${key("enter")} ${hint("open")}${sep}${key("h")} ${hint("list")}${sep}${key("?")} ${hint("help")}`;
+  if (context.focus === "sidebar") {
+    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("open/close")}${sep}${key("enter")} ${hint("scope")}${sep}${key("tab")} ${hint("panes")}${sep}${key("?")} ${hint("help")}`;
   }
 
-  if (focus === "search") {
-    return t`${key("enter")} ${hint("apply")}${sep}${key("esc")} ${hint("clear + back")}${sep}${key("⇥")} ${hint("panes")}`;
+  if (context.focus === "search") {
+    return t`${key("enter")} ${hint("list")}${sep}${key("esc")} ${hint("clear")}${sep}${key("tab")} ${hint("panes")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
-  const showFirstRun =
-    focus === "list" &&
-    !extras?.scanning &&
-    (extras?.candidateCount ?? 0) > 0 &&
-    (extras?.queuedCount ?? 0) === 0;
-
-  if (showFirstRun) {
-    return t`${key("space")} ${hint("queue this row")}${sep}${key("a")} ${hint("safe+caution")}${sep}${key("enter")} ${hint(dryRun ? "done" : "apply")}${sep}${key("?")} ${hint("help")}`;
-  }
-
-  if (dryRun) {
-    return t`${key("space")} ${hint("queue")}${sep}${key("a")} ${hint("safe+")}${sep}${key("o")} ${hint("sort")}${sep}${key("enter")} ${hint("done")}${sep}${key("?")} ${hint("help")}`;
-  }
-
-  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("a/s/u")} ${hint("safe+/safe/clear")}${sep}${key("enter")} ${hint("apply")}${sep}${key("?")} ${hint("help")}`;
+  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("enter")} ${hint(options.dryRun ? "done" : "apply")}${sep}${key("/")} ${hint("filter")}${sep}${key("?")} ${hint("help")}`;
 }
 
 /** Statusline mode segment label for the focused panel. */
@@ -378,31 +482,81 @@ export function modeLabel(focus: UiFocus, scanning = false): string {
   }
 }
 
-/** Dense scope row: marker · label · count · bytes (+ queued suffix). */
-export function buildSidebarLine(
-  label: string,
-  count: number,
-  bytes: number,
-  active: boolean,
-  countWidth: number,
-  bytesWidth: number,
-  tokens: ThemeTokens,
-  selectedCount = 0,
-  maxLabelWidth = 14,
-  showBytes = true,
-): StyledText {
-  const marker = active ? fg(tokens.accent)("›") : fg(tokens.textDim)(" ");
-  const countText = String(count).padStart(countWidth);
-  const effectiveMax = Math.max(6, maxLabelWidth);
-  const labelText = truncateScopeLabel(label, effectiveMax);
-  const labelColor = active ? tokens.text : tokens.textSecondary;
-  const styledLabel = active ? bold(fg(labelColor)(labelText)) : fg(labelColor)(labelText);
-  const countStyled = fg(tokens.textMuted)(countText);
-  const base = showBytes
-    ? t`${marker} ${styledLabel}  ${countStyled}  ${fg(active ? tokens.textSecondary : tokens.textDim)(compactBytesLabel(bytes).padStart(bytesWidth))}`
-    : t`${marker} ${styledLabel}  ${countStyled}`;
+/**
+ * How a scope row relates to the applied scope filter. Cursor and active are
+ * deliberately different things: one is where you are looking, the other is
+ * what the artifact list is actually filtered to, and conflating them is why
+ * the sidebar stopped being readable.
+ */
+export type ScopeRowState = "cursor" | "active" | "ancestor" | "idle";
 
-  if (selectedCount <= 0 || !active) return base;
+export interface SidebarLineOptions {
+  label: string;
+  count: number;
+  bytes: number;
+  selectedCount?: number;
+  state: ScopeRowState;
+  /** Box-drawing prefix from `buildTreeGuides`; empty at the top level. */
+  guide?: string;
+  /** Disclosure triangle: `▾` open, `▸` closed, space for a leaf. */
+  branch?: "▸" | "▾" | " ";
+  countWidth: number;
+  bytesWidth: number;
+  maxLabelWidth?: number;
+  showBytes?: boolean;
+  tokens: ThemeTokens;
+}
+
+/** Dense scope row: tree guide · disclosure · label · count · bytes. */
+export function buildSidebarLine(options: SidebarLineOptions): StyledText {
+  const {
+    label,
+    count,
+    bytes,
+    selectedCount = 0,
+    state,
+    guide = "",
+    branch = " ",
+    countWidth,
+    bytesWidth,
+    maxLabelWidth = 14,
+    showBytes = true,
+    tokens,
+  } = options;
+
+  const onPath = state === "active" || state === "ancestor" || state === "cursor";
+
+  // The guide lights up along the path to the active scope, so a nested
+  // selection stays traceable back to its root at a glance.
+  const guideColor = state === "ancestor" || state === "active" ? tokens.accent : tokens.textDim;
+  const guideStyled = guide.length > 0 ? fg(guideColor)(guide) : "";
+
+  const marker =
+    state === "active"
+      ? fg(tokens.accent)("›")
+      : branch === " "
+        ? fg(tokens.textDim)(" ")
+        : fg(state === "ancestor" ? tokens.accent : tokens.textMuted)(branch);
+
+  const labelColor =
+    state === "active" || state === "cursor"
+      ? tokens.text
+      : state === "ancestor"
+        ? tokens.textSecondary
+        : tokens.textSecondary;
+  const labelText = truncateScopeLabel(label, Math.max(6, maxLabelWidth));
+  const styledLabel = onPath
+    ? bold(fg(labelColor)(labelText))
+    : fg(tokens.textSecondary)(labelText);
+
+  const countStyled = fg(tokens.textMuted)(String(count).padStart(countWidth));
+  const bytesColor = onPath ? tokens.textSecondary : tokens.textDim;
+
+  const base = showBytes
+    ? t`${guideStyled}${marker} ${styledLabel}  ${countStyled}  ${fg(bytesColor)(compactBytesLabel(bytes).padStart(bytesWidth))}`
+    : t`${guideStyled}${marker} ${styledLabel}  ${countStyled}`;
+
+  if (selectedCount <= 0) return base;
   return joinStyled([base, t`  ${fg(tokens.positive)(`+${selectedCount}`)}`]);
 }
 

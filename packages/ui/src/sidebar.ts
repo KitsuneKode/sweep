@@ -1,60 +1,15 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
-import { groupCandidatesByScope, type ArtifactScopeGroup } from "./grouping.js";
+import { buildScopeTreeRows, type ScopeSidebarRow } from "./scope-tree.js";
 
-export interface ScopeSidebarRow {
-  /** `null` means all scopes. */
-  key: string | null;
-  label: string;
-  count: number;
-  selectedCount: number;
-  /** Sum of estimatedBytes for candidates in this scope. */
-  bytes: number;
-  /** Sum of estimatedBytes for selected candidates in this scope. */
-  selectedBytes: number;
-}
+export type { ScopeSidebarRow } from "./scope-tree.js";
 
 export function buildScopeSidebarRows(
   targetDir: string,
   candidates: ScanCandidate[],
   selectedIds: Set<string>,
+  expandedKeys: ReadonlySet<string> = new Set(),
 ): ScopeSidebarRow[] {
-  const groups = groupCandidatesByScope(targetDir, candidates);
-  const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-
-  const allRow: ScopeSidebarRow = {
-    key: null,
-    label: "all scopes",
-    count: candidates.length,
-    selectedCount: candidates.filter((candidate) => selectedIds.has(candidate.id)).length,
-    bytes: candidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
-    selectedBytes: candidates
-      .filter((candidate) => selectedIds.has(candidate.id))
-      .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
-  };
-
-  const scopeRows = groups.map((group) => scopeGroupToRow(group, byId, selectedIds));
-  return [allRow, ...scopeRows];
-}
-
-function scopeGroupToRow(
-  group: ArtifactScopeGroup,
-  byId: Map<string, ScanCandidate>,
-  selectedIds: Set<string>,
-): ScopeSidebarRow {
-  const groupCandidates = group.candidateIds
-    .map((id) => byId.get(id))
-    .filter((candidate): candidate is ScanCandidate => candidate !== undefined);
-
-  const selected = groupCandidates.filter((candidate) => selectedIds.has(candidate.id));
-
-  return {
-    key: group.key,
-    label: group.label,
-    count: groupCandidates.length,
-    selectedCount: selected.length,
-    bytes: groupCandidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
-    selectedBytes: selected.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
-  };
+  return buildScopeTreeRows(targetDir, candidates, selectedIds, expandedKeys);
 }
 
 export function scopeFilterToSidebarIndex(
@@ -78,7 +33,6 @@ export function sidebarCountWidth(rows: readonly ScopeSidebarRow[]): number {
 }
 
 export function sidebarBytesWidth(rows: readonly ScopeSidebarRow[]): number {
-  // Pre-format via a compact helper-free estimate: max digit width for "999.9 GB"
   return Math.max(6, ...rows.map((row) => compactBytesLabel(row.bytes).length));
 }
 
@@ -87,16 +41,18 @@ export function sidebarColumnLayout(
   paneWidth: number,
   countWidth: number,
   bytesWidth: number,
+  depth = 0,
 ): { maxLabelWidth: number; showBytes: boolean; countWidth: number; bytesWidth: number } {
+  const indent = Math.max(0, depth) * 2;
   let showBytes = paneWidth >= 22;
   let fittedBytesWidth = showBytes ? bytesWidth : 0;
   let gaps = showBytes ? 8 : 6;
-  let maxLabelWidth = paneWidth - countWidth - fittedBytesWidth - gaps;
+  let maxLabelWidth = paneWidth - countWidth - fittedBytesWidth - gaps - indent;
   if (maxLabelWidth < 8 && showBytes) {
     showBytes = false;
     fittedBytesWidth = 0;
     gaps = 6;
-    maxLabelWidth = paneWidth - countWidth - gaps;
+    maxLabelWidth = paneWidth - countWidth - gaps - indent;
   }
   return {
     maxLabelWidth: Math.max(6, maxLabelWidth),

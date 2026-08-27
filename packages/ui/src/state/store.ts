@@ -13,6 +13,7 @@ import {
   snapRowIndexToItem,
 } from "../rows.js";
 import type { ThemeMode } from "../theme.js";
+import { ancestorKeysOf } from "../tree-line.js";
 import { getVisibleCandidates, invalidateSelectorCache } from "./selectors.js";
 
 export type UiFocus = "search" | "sidebar" | "list" | "patterns";
@@ -42,14 +43,36 @@ export interface SweepUiState {
   scannedDirs: number;
   /** Artifact ordering inside groups. */
   sortBy: UiSortBy;
+  /**
+   * Freeze the list in discovery order.
+   *
+   * Set while a live scan is streaming: sizes arrive after discovery, so
+   * "largest first" would re-sort the list on every batch and move rows out
+   * from under the cursor. Cleared when the scan ends — which re-sorts once,
+   * authoritatively — or when the user asks for a sort themselves.
+   */
+  orderPinned: boolean;
   /** Scope groups hidden in the artifact list (key "" = project root). */
+  /** Artifact list groups folded in the main pane. */
   collapsedGroups: Set<string>;
+  /** Folder keys expanded in the scopes tree. */
+  expandedScopes: Set<string>;
 }
 
 export interface SweepUiSummary {
   visibleCount: number;
+  /**
+   * Size of the whole queue, not just its visible part.
+   *
+   * `applyUiSelection` deletes every queued id regardless of the current
+   * filter or scope, so anything that warns the user — the header, the tally,
+   * the confirm dialog — has to count the same way. Counting only what is on
+   * screen made the confirmation understate the damage.
+   */
   selectedCount: number;
   selectedBytes: number;
+  /** Queued artifacts that also pass the current filter/scope. */
+  visibleSelectedCount: number;
   dangerousVisibleCount: number;
 }
 
@@ -81,7 +104,9 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     scanning: false,
     scannedDirs: plan.summary.scannedDirs,
     sortBy: "size",
+    orderPinned: false,
     collapsedGroups: new Set<string>(),
+    expandedScopes: new Set<string>(),
   };
 
   const rows = buildDisplayRows(state);
@@ -96,6 +121,15 @@ export function activePatterns(state: SweepUiState): string[] {
   return [...new Set([...enabled, ...state.extraPatterns])];
 }
 
+function sidebarRowsFor(state: SweepUiState) {
+  return buildScopeSidebarRows(
+    state.targetDir,
+    state.candidates,
+    state.selectedIds,
+    state.expandedScopes,
+  );
+}
+
 export function setFilter(state: SweepUiState, filter: string): SweepUiState {
   invalidateSelectorCache();
   const next: SweepUiState = { ...state, filter };
@@ -108,9 +142,17 @@ export function setFilter(state: SweepUiState, filter: string): SweepUiState {
 
 export function setScopeFilter(state: SweepUiState, scopeFilter: string | null): SweepUiState {
   invalidateSelectorCache();
-  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+
+  // Open the tree down to the chosen scope. Without this a nested selection
+  // applies while its row stays hidden behind collapsed parents, so the sidebar
+  // shows no sign of what the artifact list is filtered to.
+  const expandedScopes = new Set(state.expandedScopes);
+  for (const key of ancestorKeysOf(scopeFilter)) expandedScopes.add(key);
+
+  const withExpansion: SweepUiState = { ...state, expandedScopes };
+  const sidebarRows = sidebarRowsFor(withExpansion);
   const next: SweepUiState = {
-    ...state,
+    ...withExpansion,
     scopeFilter,
     sidebarIndex: scopeFilterToSidebarIndex(scopeFilter, sidebarRows),
   };
@@ -148,7 +190,7 @@ export function togglePattern(state: SweepUiState, pattern: string): SweepUiStat
 
 export function setFocus(state: SweepUiState, focus: UiFocus): SweepUiState {
   if (focus === "sidebar") {
-    const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+    const sidebarRows = sidebarRowsFor(state);
     return {
       ...state,
       focus,
@@ -177,7 +219,7 @@ export function setPatternIndex(state: SweepUiState, patternIndex: number): Swee
 }
 
 export function moveSidebarCursor(state: SweepUiState, delta: number): SweepUiState {
-  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+  const sidebarRows = sidebarRowsFor(state);
   if (sidebarRows.length === 0) return state;
 
   const nextIndex = clamp(state.sidebarIndex + delta, 0, sidebarRows.length - 1);
@@ -185,9 +227,30 @@ export function moveSidebarCursor(state: SweepUiState, delta: number): SweepUiSt
 }
 
 export function applySidebarScope(state: SweepUiState): SweepUiState {
-  const sidebarRows = buildScopeSidebarRows(state.targetDir, state.candidates, state.selectedIds);
+  const sidebarRows = sidebarRowsFor(state);
   const scopeFilter = sidebarIndexToScopeFilter(state.sidebarIndex, sidebarRows);
   return setScopeFilter({ ...state, focus: "list" }, scopeFilter);
+}
+
+export function toggleScopeExpand(state: SweepUiState): SweepUiState {
+  const rows = sidebarRowsFor(state);
+  const row = rows[state.sidebarIndex];
+  if (!row?.hasChildren || row.key === null) return state;
+  const expandedScopes = new Set(state.expandedScopes);
+  if (expandedScopes.has(row.key)) expandedScopes.delete(row.key);
+  else expandedScopes.add(row.key);
+  return { ...state, expandedScopes };
+}
+
+export function collapseScopeFolder(state: SweepUiState): SweepUiState {
+  const rows = sidebarRowsFor(state);
+  const row = rows[state.sidebarIndex];
+  if (row?.hasChildren && row.key !== null && state.expandedScopes.has(row.key)) {
+    const expandedScopes = new Set(state.expandedScopes);
+    expandedScopes.delete(row.key);
+    return { ...state, expandedScopes };
+  }
+  return setFocus(state, "list");
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -240,7 +303,22 @@ function snapToNearestItem(state: SweepUiState): SweepUiState {
 
 export function setScanning(state: SweepUiState, scanning: boolean): SweepUiState {
   if (state.scanning === scanning) return state;
-  return { ...state, scanning };
+  if (scanning) return { ...state, scanning: true, orderPinned: true };
+
+  // The scan is over (finished or failed): unpin and sort once.
+  const settled: SweepUiState = { ...state, scanning: false, orderPinned: false };
+
+  // If the cursor is still parked where it was auto-placed, the user never
+  // chose it — land them on the biggest win instead of wherever the first
+  // artifact discovered happens to have sorted to.
+  if (state.rowIndex === firstItemRowIndex(buildDisplayRows(state))) {
+    const rows = buildDisplayRows(settled);
+    return { ...settled, rowIndex: snapRowIndexToItem(rows, firstItemRowIndex(rows)) };
+  }
+
+  // The user moved the cursor, so that choice outranks the sort: the re-sort
+  // renumbers every row, hold onto their artifact rather than its index.
+  return reanchor(state, { scanning: false, orderPinned: false });
 }
 
 export function setScannedDirs(state: SweepUiState, scannedDirs: number): SweepUiState {
@@ -251,7 +329,9 @@ export function setScannedDirs(state: SweepUiState, scannedDirs: number): SweepU
 export function toggleSortBy(state: SweepUiState): SweepUiState {
   invalidateSelectorCache();
   const sortBy: UiSortBy = state.sortBy === "size" ? "name" : "size";
-  return reanchor(state, { ...state, sortBy });
+  // The user asked for this reorder, so apply it now rather than silently
+  // doing nothing until the scan finishes. Movement they requested is fine.
+  return reanchor(state, { sortBy, orderPinned: false });
 }
 
 /** Collapse or expand one scope group in the artifact list. */
@@ -321,6 +401,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     scopeFilter: null,
     collapsedGroups: new Set<string>(),
     scanning: true,
+    orderPinned: true,
     scannedDirs: 0,
   };
 }
@@ -420,25 +501,30 @@ export function getCurrentCandidate(state: SweepUiState): ScanCandidate | undefi
 
 export function getUiSummary(state: SweepUiState): SweepUiSummary {
   const visible = getVisibleCandidates(state);
-  let selectedCount = 0;
-  let selectedBytes = 0;
+  let visibleSelectedCount = 0;
   let dangerousVisibleCount = 0;
 
   for (const candidate of visible) {
-    if (state.selectedIds.has(candidate.id)) {
-      selectedCount++;
-      selectedBytes += candidate.estimatedBytes;
-    }
+    if (state.selectedIds.has(candidate.id)) visibleSelectedCount++;
+    if (candidate.riskTier === "dangerous") dangerousVisibleCount++;
+  }
 
-    if (candidate.riskTier === "dangerous") {
-      dangerousVisibleCount++;
-    }
+  // Count the queue over every candidate, matching applyUiSelection exactly.
+  // Filtering the view must never change what apply is about to delete.
+  let selectedCount = 0;
+  let selectedBytes = 0;
+  for (const candidate of state.candidates) {
+    if (candidate.riskTier === "blocked") continue; // apply drops these too
+    if (!state.selectedIds.has(candidate.id)) continue;
+    selectedCount++;
+    selectedBytes += candidate.estimatedBytes;
   }
 
   return {
     visibleCount: visible.length,
     selectedCount,
     selectedBytes,
+    visibleSelectedCount,
     dangerousVisibleCount,
   };
 }

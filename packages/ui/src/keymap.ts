@@ -14,11 +14,18 @@ import {
   toggleCurrentSelection,
   toggleGroup,
   togglePattern,
+  toggleScopeExpand,
+  collapseScopeFolder,
   setPatternIndex,
   setFilter,
   type UiFocus,
 } from "./state.js";
-import { buildDisplayRows, snapRowIndexToItem } from "./rows.js";
+import {
+  buildDisplayRows,
+  firstSelectableRow,
+  lastSelectableRow,
+  snapRowIndexToItem,
+} from "./rows.js";
 import { cycleThemeMode } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
 
@@ -30,6 +37,15 @@ export interface KeyInput {
 }
 
 const DEFAULT_PAGE_ROWS = 12;
+
+/**
+ * Ctrl+C — the terminal-wide "get me out" chord, honoured in every mode.
+ * Ctrl+D is deliberately excluded: it is bound to half-page-down here.
+ */
+export function isQuitChord(key: KeyInput): boolean {
+  if (key.name === "ctrl+c") return true;
+  return key.ctrl === true && key.name === "c";
+}
 
 function pageRows(ctx: KeymapContext): number {
   return ctx.pageRows ?? DEFAULT_PAGE_ROWS;
@@ -63,25 +79,18 @@ function collapseAllGroups(state: SweepUiState): SweepUiState {
   return {
     ...state,
     collapsedGroups,
-    rowIndex: snapRowIndexToItem(nextRows, 0),
+    rowIndex: firstSelectableRow(nextRows),
   };
 }
 
-/** Jump to first (-Infinity) or last (Infinity) item row. */
+/** Jump to the first (-Infinity) or last (Infinity) selectable item row. */
 function jumpCursor(state: SweepUiState, direction: number): SweepUiState {
   const rows = buildDisplayRows(state);
-  if (direction < 0) {
-    const first = rows.findIndex((row) => row.kind === "item");
-    return { ...state, rowIndex: Math.max(0, first) };
-  }
-  let last = -1;
-  for (let i = rows.length - 1; i >= 0; i--) {
-    if (rows[i]?.kind === "item") {
-      last = i;
-      break;
-    }
-  }
-  return last >= 0 ? { ...state, rowIndex: last } : state;
+  if (rows.length === 0) return state;
+  return {
+    ...state,
+    rowIndex: direction < 0 ? firstSelectableRow(rows) : lastSelectableRow(rows),
+  };
 }
 
 /** Expand the nearest collapsed header at or above the cursor. */
@@ -144,6 +153,15 @@ export interface KeymapContext {
 /** Dispatch keyboard input by modal state and focused panel. */
 export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   const { key, state, showHelp, pendingApply, showSidebar, listSelectIndex, scanError } = ctx;
+
+  // Quit is checked before every other branch. The terminal is in raw mode, so
+  // no SIGINT is generated for us: if a modal or the filter input swallows this
+  // key there is no other way out and `sweep ui` hangs.
+  if (isQuitChord(key)) {
+    actions.finalize({ type: "abort" });
+    return;
+  }
+
   const isShiftTab = (key.name === "tab" && key.shift) || key.name === "shift+tab";
   const isTab = key.name === "tab" && !key.shift;
   const isCtrlU = (key.name === "u" && key.ctrl) || key.name === "ctrl+u" || key.name === "pageup";
@@ -273,8 +291,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.mutate((s) => applySidebarScope(s));
       return;
     }
+    if (key.name === "right" || key.name === "l") {
+      actions.mutate((s) => toggleScopeExpand(s));
+      return;
+    }
     if (key.name === "left" || key.name === "h") {
-      actions.focusPanel("list");
+      actions.mutate((s) => collapseScopeFolder(s));
       return;
     }
     return;
@@ -348,7 +370,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "space") {
-    actions.mutate((s) => toggleCurrentSelection(s));
+    actions.mutate((s) => {
+      const rows = buildDisplayRows(s);
+      const row = rows[s.rowIndex];
+      if (row?.kind === "header") return toggleGroup(s, row.groupKey);
+      return toggleCurrentSelection(s);
+    });
     return;
   }
 

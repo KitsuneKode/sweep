@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   applyUiSelection,
   clearSelection,
@@ -20,8 +20,10 @@ import {
   toggleSortBy,
   upsertCandidates,
   setPatternIndex,
+  setScanning,
+  type SweepUiState,
 } from "./state.js";
-import { buildDisplayRows } from "./rows.js";
+import { buildDisplayRows, firstItemRowIndex } from "./rows.js";
 
 function createPlan(): ScanPlan {
   return {
@@ -97,15 +99,35 @@ describe("sweep ui state", () => {
     ]);
   });
 
-  test("cursor movement skips group headers and clamps to items", () => {
+  test("cursor movement stays on selectable items and clamps to the list", () => {
+    // Headings are chrome, not destinations: like cmdk, the cursor walks items
+    // only, so the detail line and `space` always have a subject.
     let state = createUiState(createPlan());
     expect(state.rowIndex).toBe(1);
+    expect(getCurrentCandidate(state)).toBeDefined();
 
     state = moveCursor(state, 50);
-    expect(state.rowIndex).toBe(4);
+    expect(buildDisplayRows(state)[state.rowIndex]?.kind).toBe("item");
+    expect(getCurrentCandidate(state)).toBeDefined();
 
     state = moveCursor(state, -50);
-    expect(state.rowIndex).toBe(1);
+    expect(buildDisplayRows(state)[state.rowIndex]?.kind).toBe("item");
+    expect(getCurrentCandidate(state)).toBeDefined();
+  });
+
+  test("stepping past the end of a group lands on the next item, not its heading", () => {
+    let state = createUiState(createPlan());
+    const rows = buildDisplayRows(state);
+    const headerIndexes = rows
+      .map((row, index) => (row.kind === "header" ? index : -1))
+      .filter((index) => index >= 0);
+    expect(headerIndexes.length).toBeGreaterThan(0);
+
+    // Walk the whole list one step at a time; never rest on a heading.
+    for (let i = 0; i < rows.length + 2; i++) {
+      state = moveCursor(state, 1);
+      expect(headerIndexes).not.toContain(state.rowIndex);
+    }
   });
 
   test("toggleCurrentSelection adds and removes the focused candidate", () => {
@@ -159,14 +181,48 @@ describe("sweep ui state", () => {
     expect(state.selectedIds.size).toBe(0);
   });
 
-  test("summary reflects visible selection count, bytes, and dangerous visibility", () => {
+  test("summary separates what is on screen from what is queued", () => {
+    // cand_safe is queued but filtered out of view here.
     const state = setFilter(createUiState(createPlan()), "custom");
     const summary = getUiSummary(state);
 
     expect(summary.visibleCount).toBe(2);
-    expect(summary.selectedCount).toBe(0);
-    expect(summary.selectedBytes).toBe(0);
     expect(summary.dangerousVisibleCount).toBe(1);
+    expect(summary.visibleSelectedCount).toBe(0);
+
+    // The queue is what apply acts on, so the totals must still count it.
+    expect(summary.selectedCount).toBe(1);
+    expect(summary.selectedBytes).toBe(1024);
+  });
+
+  test("summary totals always match what apply would delete", () => {
+    // Regression: the confirm dialog read visible-only counts, so queuing
+    // artifacts and then narrowing the view made it understate the damage —
+    // it offered to delete 1 item while apply removed 3.
+    const plan = createPlan();
+    const narrowing: Array<[string, (s: SweepUiState) => SweepUiState]> = [
+      ["no filter", (s) => s],
+      ["text filter", (s) => setFilter(s, "node_modules")],
+      ["scope filter", (s) => setScopeFilter(s, ".git")],
+      ["filter with no matches", (s) => setFilter(s, "zzz-nothing-matches")],
+    ];
+
+    for (const [label, narrow] of narrowing) {
+      const queued = selectVisible(createUiState(plan), true);
+      const state = narrow(queued);
+      const summary = getUiSummary(state);
+      const applied = applyUiSelection(plan, state);
+
+      expect(`${label}: ${summary.selectedCount}`).toBe(
+        `${label}: ${applied.selectedCandidateIds.length}`,
+      );
+
+      const appliedBytes = applied.selectedCandidateIds.reduce((total, id) => {
+        const candidate = state.candidates.find((entry) => entry.id === id);
+        return total + (candidate?.estimatedBytes ?? 0);
+      }, 0);
+      expect(`${label}: ${summary.selectedBytes}`).toBe(`${label}: ${appliedBytes}`);
+    }
   });
 
   test("applyUiSelection syncs selected ids back into a plan", () => {
@@ -381,5 +437,85 @@ describe("sweep ui state", () => {
     expect(moved.patternIndex).toBe(2);
     expect(moved.rowIndex).toBe(4);
     expect(moved.focus).toBe("patterns");
+  });
+
+  describe("order pinning across a live scan", () => {
+    /** Discovery order is c, a, b; size order is the reverse. */
+    function streamed() {
+      const base = createUiState({
+        ...createPlan(),
+        candidates: [],
+        selectedCandidateIds: [],
+      });
+      const make = (id: string, parent: string, bytes: number): ScanCandidate => ({
+        id,
+        path: `/tmp/sweep-ui/${parent}/node_modules`,
+        name: "node_modules",
+        kind: "node_modules",
+        estimatedBytes: bytes,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: false,
+      });
+      return upsertCandidates(setScanning(base, true), [
+        make("c", "apps/web", 100),
+        make("a", "apps/cli", 200),
+        make("b", "packages/core", 300),
+      ]);
+    }
+
+    test("a scan pins the order and finishing unpins it", () => {
+      const scanning = streamed();
+      expect(scanning.scanning).toBe(true);
+      expect(scanning.orderPinned).toBe(true);
+
+      const done = setScanning(scanning, false);
+      expect(done.scanning).toBe(false);
+      expect(done.orderPinned).toBe(false);
+    });
+
+    test("an untouched cursor lands on the biggest win, not its old artifact", () => {
+      // Nobody chose this row — it was auto-placed at the top when the first
+      // batch arrived — so the sort should win over preserving it.
+      const state = streamed();
+      expect(state.rowIndex).toBe(firstItemRowIndex(buildDisplayRows(state)));
+
+      const done = setScanning(state, false);
+      const rows = buildDisplayRows(done);
+      expect(done.rowIndex).toBe(firstItemRowIndex(rows));
+      expect(getCurrentCandidate(done)?.id).toBe("b"); // largest
+    });
+
+    test("the cursor keeps its artifact through the closing re-sort", () => {
+      let state = streamed();
+      // Park on the last row in discovery order — a different row number once
+      // the list re-sorts by size.
+      state = { ...state, rowIndex: buildDisplayRows(state).length - 1 };
+      const before = getCurrentCandidate(state);
+      expect(before?.id).toBe("b");
+
+      const done = setScanning(state, false);
+      expect(getCurrentCandidate(done)?.id).toBe(before?.id);
+      expect(buildDisplayRows(done)[done.rowIndex]?.kind).toBe("item");
+    });
+
+    test("a failed scan also unpins, so the list still sorts", () => {
+      // app.tsx routes onError through setScanning(s, false) like a clean finish.
+      expect(setScanning(streamed(), false).orderPinned).toBe(false);
+    });
+
+    test("an explicit sort unpins immediately rather than waiting", () => {
+      const sorted = toggleSortBy(streamed());
+      expect(sorted.orderPinned).toBe(false);
+      expect(sorted.sortBy).toBe("name");
+    });
+
+    test("a rescan re-pins for the new generation", () => {
+      const state = resetForRescan(setScanning(streamed(), false));
+      expect(state.orderPinned).toBe(true);
+      expect(state.scanning).toBe(true);
+    });
   });
 });

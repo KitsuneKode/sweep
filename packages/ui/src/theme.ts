@@ -20,6 +20,8 @@ export interface ThemeTokens {
   info: string;
   selectionBg: string;
   selectionText: string;
+  /** Applied-but-unfocused rows (e.g. the active scope while the list has focus). */
+  selectionSoftBg: string;
   hoverBg: string;
   headerText: string;
   /** Statusline strip background. */
@@ -53,8 +55,9 @@ export const darkTheme: ThemeTokens = {
   danger: "#f87171",
   blocked: "#a78bfa",
   info: "#7dd3fc",
-  selectionBg: "#2a3a52",
+  selectionBg: "#3d5270",
   selectionText: "#f8fafc",
+  selectionSoftBg: "#1d283a",
   hoverBg: "#182230",
   headerText: "#cbd5e1",
   statusBg: "#10141c",
@@ -82,6 +85,7 @@ export const lightTheme: ThemeTokens = {
   info: "#1f6c9f",
   selectionBg: "#ead9b2",
   selectionText: "#1f1608",
+  selectionSoftBg: "#f5edda",
   hoverBg: "#efe8d8",
   headerText: "#2f3437",
   statusBg: "#efede8",
