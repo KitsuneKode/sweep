@@ -1,6 +1,5 @@
-import { createCliRenderer } from "@opentui/core";
-import { createRoot, useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { bold, fg, t } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import {
@@ -16,13 +15,15 @@ import {
 import { ReviewPane } from "./ReviewPane.js";
 import { handleKeymap } from "./keymap.js";
 import type { SweepUiOutcome } from "./outcome.js";
+import { openUiSession } from "./runtime.js";
 import {
   buildBrandLine,
-  buildFooterLine,
+  buildContextLine,
+  buildFooterHints,
   buildHeaderStats,
   buildRiskTally,
-  formatScanProgressLine,
   modeLabel,
+  type FooterContext,
 } from "./presentation.js";
 import { buildDisplayRows } from "./rows.js";
 import {
@@ -43,7 +44,7 @@ import {
 } from "./state.js";
 import { getVisibleCandidates } from "./state/selectors.js";
 import { resolveTheme, type ThemeTokens } from "./theme.js";
-import { ModeChip, Modal } from "./widgets.js";
+import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
 import type { UiScanControl } from "./streaming.js";
 
 export { runSweepUiStreaming } from "./streaming.js";
@@ -110,30 +111,35 @@ export class UiErrorBoundary extends Component<{ children: ReactNode }, { error:
 
 function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
   const line = (keys: string, desc: string) =>
-    t`${fg(tokens.text)(keys.padEnd(16))} ${fg(tokens.textMuted)(desc)}`;
+    t`${fg(tokens.text)(keys.padEnd(20))} ${fg(tokens.textMuted)(desc)}`;
 
   return (
-    <Modal tokens={tokens} title=" keyboard " width={62}>
+    <Modal tokens={tokens} title=" keyboard " width={72}>
       <box flexDirection="column" gap={0}>
-        <text content={line("↑↓ / j k", "move cursor")} />
-        <text content={line("g / G", "jump to first / last")} />
-        <text content={line("ctrl-u / ctrl-d", "half page up / down")} />
-        <text content={line("h · l", "collapse · expand scope group")} />
-        <text content={line("w · e", "collapse all · expand all")} />
-        <text content={line("space", "queue / unqueue for deletion")} />
-        <text content={line("a · s · u", "safe+caution · safe only · clear")} />
-        <text content={line("o", "sort by size ↔ name")} />
-        <text content={line("r", "rescan from disk")} />
-        <text content={line("/ then tab", "filter · cycle panes (⇥ back)")} />
-        <text content={line("1 – 4", "filter by risk level")} />
-        <text content={line("p", "pattern editor")} />
-        <text content={line("enter", "apply deletion (confirms when risky)")} />
-        <text content={line("t", "cycle theme (dark · light · auto)")} />
-        <text content={line("? · q", "close help · quit")} />
+        <text content={line("↑↓ / j k", "move cursor (skips headings)")} wrapMode="none" />
+        <text content={line("g / G", "jump to first / last")} wrapMode="none" />
+        <text content={line("ctrl-u / ctrl-d", "half page up / down")} wrapMode="none" />
+        <text content={line("h · l", "collapse · expand the folder")} wrapMode="none" />
+        <text content={line("w · e", "collapse all · expand all")} wrapMode="none" />
+        <text content={line("space", "queue / unqueue for deletion")} wrapMode="none" />
+        <text content={line("a · s · u", "safe+caution · safe only · clear")} wrapMode="none" />
+        <text content={line("o", "sort by size ↔ name")} wrapMode="none" />
+        <text content={line("r", "rescan from disk")} wrapMode="none" />
+        <text content={line("/ then tab", "filter · cycle panes (⇥ back)")} wrapMode="none" />
+        <text content={line("1 – 4", "filter by risk level")} wrapMode="none" />
+        <text content={line("p", "pattern editor")} wrapMode="none" />
+        <text content={line("enter", "apply (confirms when risky)")} wrapMode="none" />
+        <text content={line("t", "cycle theme (dark · light · auto)")} wrapMode="none" />
+        <text content={line("? · q · ctrl-c", "help · quit · quit")} wrapMode="none" />
       </box>
       <text content="" />
       <text
-        content={t`${fg(tokens.textDim)("esc walks back through views — it never quits. q quits.")}`}
+        content={t`${fg(tokens.textDim)("esc walks back a view — it never quits.")}`}
+        wrapMode="none"
+      />
+      <text
+        content={t`${fg(tokens.textDim)("ctrl-c always quits, from any pane or dialog.")}`}
+        wrapMode="none"
       />
     </Modal>
   );
@@ -235,6 +241,9 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
 
   useEffect(() => {
     if (scan && initiallyScanning) startScan();
+    return () => {
+      abortRef.current?.abort();
+    };
     // Boot-only effect; rescans are triggered explicitly via r.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -250,7 +259,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   const tokens = useMemo(() => resolveTheme(state.themeMode), [state.themeMode]);
   const summary = useMemo(() => getUiSummary(state), [state]);
   const dimensions = useTerminalDimensions();
-  const sidebarWidth = dimensions.width >= 110 ? 32 : dimensions.width >= 90 ? 28 : 24;
+  const sidebarWidth = dimensions.width >= 110 ? 38 : dimensions.width >= 90 ? 32 : 26;
   const showSidebar = dimensions.width >= 72;
 
   const mutate = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
@@ -284,6 +293,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
 
   const finalize = useCallback(
     (outcome: SweepUiOutcome) => {
+      abortRef.current?.abort();
       onDone(outcome);
     },
     [onDone],
@@ -320,7 +330,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         listSelectIndex,
         scanError,
         // Approximate visible list rows: full height minus header/status chrome.
-        pageRows: Math.max(6, dimensions.height - 9),
+        pageRows: Math.max(6, dimensions.height - 10),
       },
       {
         finalize,
@@ -342,12 +352,26 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
 
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
 
-  const footerContent = buildFooterLine(state.focus, tokens, dryRun, state.patternsDirty, {
-    scanning: state.scanning,
-    queuedCount: state.selectedIds.size,
-    candidateCount: state.candidates.length,
+  // Overlays cover the panes but not the statusline, so the footer has to
+  // describe whatever is actually on top or the user is left with no visible
+  // way out of a modal.
+  const footerContext: FooterContext = scanError
+    ? { kind: "scanError" }
+    : pendingApply
+      ? { kind: "confirm" }
+      : showHelp
+        ? { kind: "help" }
+        : { kind: "pane", focus: state.focus };
+
+  const footerContent = buildFooterHints(footerContext, tokens, {
+    ...(dryRun ? { dryRun: true } : {}),
+    ...(state.patternsDirty ? { patternsDirty: true } : {}),
   });
   const tallyContent = buildRiskTally(summary, tokens);
+  // Below this width the tally and the risk/sort chips crowd the key hints out
+  // of the statusline entirely; the hints are the part that must survive.
+  const roomForTally = dimensions.width >= 84;
+  const roomForChips = dimensions.width >= 100;
 
   return (
     <box
@@ -361,56 +385,77 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
       backgroundColor={tokens.bg}
     >
       {/* Header band */}
-      <box width="100%" flexDirection="row" justifyContent="space-between" paddingBottom={1}>
-        <text content={buildBrandLine(tokens)} />
-        <box flexDirection="row" gap={2}>
-          {state.scanning ? (
-            <text
-              content={t`${fg(tokens.accent)(formatScanProgressLine(state.candidates.length, state.scannedDirs))}`}
-            />
-          ) : null}
-          <text content={headerStats} />
-        </box>
-      </box>
-
-      <ReviewPane
-        state={state}
-        plan={plan}
-        tokens={tokens}
-        showSidebar={showSidebar}
-        sidebarWidth={sidebarWidth}
-        filterDraft={filterDraft}
-        displayRows={displayRows}
-        visibleItems={visibleItems}
-        candidatesById={candidatesById}
-        listSelectIndex={listSelectIndex}
-        onFilterDraftChange={setFilterDraft}
-        onMutate={mutate}
-        onFocusPanel={focusPanel}
-        onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
-      />
-
-      {/* Statusline */}
       <box
         width="100%"
+        flexShrink={0}
+        height={1}
+        flexDirection="row"
+        justifyContent="space-between"
+      >
+        <text content={buildBrandLine(tokens)} wrapMode="none" />
+        <text content={headerStats} wrapMode="none" />
+      </box>
+
+      <box width="100%" flexGrow={1} minHeight={0} flexShrink={1}>
+        <ReviewPane
+          state={state}
+          plan={plan}
+          tokens={tokens}
+          showSidebar={showSidebar}
+          sidebarWidth={sidebarWidth}
+          filterDraft={filterDraft}
+          displayRows={displayRows}
+          visibleItems={visibleItems}
+          candidatesById={candidatesById}
+          listSelectIndex={listSelectIndex}
+          onFilterDraftChange={setFilterDraft}
+          onMutate={mutate}
+          onFocusPanel={focusPanel}
+          onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
+        />
+      </box>
+
+      <box
+        width="100%"
+        height={1}
+        flexShrink={0}
+        flexDirection="row"
+        paddingLeft={1}
+        backgroundColor={tokens.bg}
+      >
+        <text content={buildContextLine(state, tokens)} wrapMode="none" />
+      </box>
+
+      <box
+        width="100%"
+        height={1}
+        flexShrink={0}
         flexDirection="row"
         alignItems="center"
         backgroundColor={tokens.statusBg}
-        marginTop={1}
       >
-        <ModeChip label={` ${modeLabel(state.focus, state.scanning)} `} tokens={tokens} />
-        <box flexGrow={1} paddingLeft={1} flexDirection="row">
-          <text content={footerContent} />
-          {riskFilterLabel ? (
-            <text content={t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`} />
+        {state.scanning ? (
+          <ScanModeChip tokens={tokens} />
+        ) : (
+          <ModeChip label={` ${modeLabel(state.focus, false)} `} tokens={tokens} />
+        )}
+        <box flexGrow={1} flexShrink={0} paddingLeft={1} flexDirection="row">
+          <text content={footerContent} wrapMode="none" />
+          {roomForChips && riskFilterLabel ? (
+            <text
+              content={t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`}
+              wrapMode="none"
+            />
           ) : null}
-          {state.sortBy === "name" ? (
-            <text content={t`  ${fg(tokens.info)("· sorted by name")}`} />
+          {roomForChips && state.sortBy === "name" ? (
+            <text content={t`  ${fg(tokens.info)("· sorted by name")}`} wrapMode="none" />
           ) : null}
         </box>
-        <box paddingRight={1}>
-          <text content={tallyContent} />
-        </box>
+        {roomForTally ? (
+          <box paddingRight={1} flexShrink={1}>
+            <text content={tallyContent} wrapMode="none" />
+          </box>
+        ) : null}
       </box>
 
       {showHelp ? <HelpOverlay tokens={tokens} /> : null}
@@ -446,55 +491,23 @@ export async function runSweepUi(
     return { type: "apply", plan };
   }
 
-  const renderer = await createCliRenderer({
-    exitOnCtrlC: true,
-    screenMode: "alternate-screen",
-    useMouse: true,
-    targetFps: 30,
-  });
-
-  return await new Promise<SweepUiOutcome>((resolvePromise, rejectPromise) => {
-    const root = createRoot(renderer);
-    let cleanedUp = false;
-    const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      process.removeListener("exit", onProcessExit);
-      process.removeListener("uncaughtException", onProcessExit);
-      try {
-        root.unmount();
-      } catch {
-        // ignore
-      }
-      try {
-        renderer.destroy();
-      } catch {
-        // ignore
-      }
-    };
-    const onProcessExit = () => cleanup();
-    process.once("exit", onProcessExit);
-    process.once("uncaughtException", onProcessExit);
-
-    try {
-      root.render(
-        <UiErrorBoundary>
-          <SweepApp
-            plan={plan}
-            {...(options.dryRun ? { dryRun: true } : {})}
-            {...(options.init ? { init: options.init } : {})}
-            onDone={(outcome) => {
-              cleanup();
-              resolvePromise(outcome);
-            }}
-          />
-        </UiErrorBoundary>,
-      );
-    } catch (error) {
-      cleanup();
-      rejectPromise(error instanceof Error ? error : new Error(String(error)));
-    }
-  });
+  const session = await openUiSession();
+  try {
+    session.root.render(
+      <UiErrorBoundary>
+        <SweepApp
+          plan={plan}
+          {...(options.dryRun ? { dryRun: true } : {})}
+          {...(options.init ? { init: options.init } : {})}
+          onDone={session.finish}
+        />
+      </UiErrorBoundary>,
+    );
+  } catch (error) {
+    session.finish({ type: "abort" });
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+  return await session.done;
 }
 
 /** @deprecated Use SweepUiOutcome */

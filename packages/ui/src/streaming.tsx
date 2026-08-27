@@ -9,10 +9,9 @@ import type {
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
-import { createCliRenderer } from "@opentui/core";
-import { createRoot } from "@opentui/react";
 import { SweepApp, UiErrorBoundary } from "./app.js";
 import type { SweepUiOutcome } from "./outcome.js";
+import { openUiSession } from "./runtime.js";
 import type { SweepUiInitOptions } from "./state.js";
 
 /** Callbacks the app registers for one scan generation. */
@@ -71,123 +70,91 @@ function emptyPlan(targetDir: string, selectionPolicy: SelectionPolicy): ScanPla
 export async function runSweepUiStreaming(
   options: SweepUiStreamingOptions,
 ): Promise<SweepUiOutcome> {
-  const renderer = await createCliRenderer({
-    exitOnCtrlC: true,
-    screenMode: "alternate-screen",
-    useMouse: true,
-    targetFps: 30,
-  });
+  const session = await openUiSession();
+  let currentConfig = options.config;
 
-  return await new Promise<SweepUiOutcome>((resolvePromise, rejectPromise) => {
-    const root = createRoot(renderer);
-    let cleanedUp = false;
-    const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      process.removeListener("exit", onProcessExit);
-      process.removeListener("uncaughtException", onProcessExit);
+  const makeControl = (): UiScanControl => ({
+    async start(hooks, signal) {
+      // Buffer discoveries so React sees batches, not per-entry renders.
+      const buffer = new Map<string, ScanCandidate>();
+      let timer: ReturnType<typeof setTimeout> | null = null;
+
+      const flush = () => {
+        timer = null;
+        if (signal.aborted || buffer.size === 0) return;
+        const batch = [...buffer.values()];
+        buffer.clear();
+        hooks.onBatch(batch);
+      };
+      const schedule = () => {
+        if (timer === null && !signal.aborted) timer = setTimeout(flush, BATCH_FLUSH_MS);
+      };
+      const record = (entry: ScanEntry) => {
+        if (signal.aborted) return;
+        const candidate = candidateFromEntry(entry);
+        buffer.set(candidate.id, candidate); // sized upserts replace stubs
+        schedule();
+      };
+
       try {
-        root.unmount();
-      } catch {
-        // ignore
-      }
-      try {
-        renderer.destroy();
-      } catch {
-        // ignore
-      }
-    };
-    const onProcessExit = () => cleanup();
-    process.once("exit", onProcessExit);
-    process.once("uncaughtException", onProcessExit);
-
-    let currentConfig = options.config;
-
-    const makeControl = (): UiScanControl => ({
-      async start(hooks, signal) {
-        // Buffer discoveries so React sees batches, not per-entry renders.
-        const buffer = new Map<string, ScanCandidate>();
-        let timer: ReturnType<typeof setTimeout> | null = null;
-
-        const flush = () => {
-          timer = null;
-          if (signal.aborted || buffer.size === 0) return;
-          const batch = [...buffer.values()];
-          buffer.clear();
-          hooks.onBatch(batch);
+        let scannedDirs = 0;
+        const reportProgress = (dirs: number) => {
+          scannedDirs = dirs;
+          if (!signal.aborted) hooks.onProgress?.({ scannedDirs: dirs });
         };
-        const schedule = () => {
-          if (timer === null && !signal.aborted) timer = setTimeout(flush, BATCH_FLUSH_MS);
-        };
-        const record = (entry: ScanEntry) => {
-          if (signal.aborted) return;
-          const candidate = candidateFromEntry(entry);
-          buffer.set(candidate.id, candidate); // sized upserts replace stubs
-          schedule();
-        };
-
-        try {
-          let scannedDirs = 0;
-          const reportProgress = (dirs: number) => {
-            scannedDirs = dirs;
-            if (!signal.aborted) hooks.onProgress?.({ scannedDirs: dirs });
-          };
-          if (options.engine === "rust") {
-            const { scanToPlanViaRust } = await import("@kitsunekode/sweep-core/rust-engine");
-            const plan = await scanToPlanViaRust(options.targetDir, {
-              config: currentConfig,
-              selectionPolicy: options.selectionPolicy,
-              exact: false,
-              onEntry: record,
-              onEntrySized: record,
-              onProgress: ({ scannedDirs: dirs }) => reportProgress(dirs),
-              signal,
-            });
-            scannedDirs = plan.summary.scannedDirs;
-          } else {
-            const result = await scan(options.targetDir, currentConfig, false, {
-              onEntry: record,
-              onEntrySized: record,
-              onProgress: ({ scannedDirs: dirs }) => reportProgress(dirs),
-              signal,
-            });
-            scannedDirs = result.scannedDirs;
-          }
-
-          flush();
-          if (!signal.aborted) hooks.onDone({ scannedDirs });
-        } catch (error) {
-          flush();
-          if (!signal.aborted) hooks.onError(error);
+        if (options.engine === "rust") {
+          const { scanToPlanViaRust } = await import("@kitsunekode/sweep-core/rust-engine");
+          const plan = await scanToPlanViaRust(options.targetDir, {
+            config: currentConfig,
+            selectionPolicy: options.selectionPolicy,
+            exact: false,
+            onEntry: record,
+            onEntrySized: record,
+            onProgress: ({ scannedDirs: dirs }) => reportProgress(dirs),
+            signal,
+          });
+          scannedDirs = plan.summary.scannedDirs;
+        } else {
+          const result = await scan(options.targetDir, currentConfig, false, {
+            onEntry: record,
+            onEntrySized: record,
+            onProgress: ({ scannedDirs: dirs }) => reportProgress(dirs),
+            signal,
+          });
+          scannedDirs = result.scannedDirs;
         }
-      },
-      syncPatterns(disabledPatterns, extraPatterns) {
-        currentConfig = buildRescanConfig(options.config, {
-          disabledPatterns,
-          extraPatterns,
-        });
-      },
-    });
 
-    try {
-      root.render(
-        <UiErrorBoundary>
-          <SweepApp
-            plan={emptyPlan(options.targetDir, options.selectionPolicy)}
-            {...(options.dryRun ? { dryRun: true } : {})}
-            {...(options.init ? { init: options.init } : {})}
-            initiallyScanning
-            scan={makeControl()}
-            onDone={(outcome) => {
-              cleanup();
-              resolvePromise(outcome);
-            }}
-          />
-        </UiErrorBoundary>,
-      );
-    } catch (error) {
-      cleanup();
-      rejectPromise(error instanceof Error ? error : new Error(String(error)));
-    }
+        flush();
+        if (!signal.aborted) hooks.onDone({ scannedDirs });
+      } catch (error) {
+        flush();
+        if (!signal.aborted) hooks.onError(error);
+      }
+    },
+    syncPatterns(disabledPatterns, extraPatterns) {
+      currentConfig = buildRescanConfig(options.config, {
+        disabledPatterns,
+        extraPatterns,
+      });
+    },
   });
+
+  try {
+    session.root.render(
+      <UiErrorBoundary>
+        <SweepApp
+          plan={emptyPlan(options.targetDir, options.selectionPolicy)}
+          {...(options.dryRun ? { dryRun: true } : {})}
+          {...(options.init ? { init: options.init } : {})}
+          initiallyScanning
+          scan={makeControl()}
+          onDone={session.finish}
+        />
+      </UiErrorBoundary>,
+    );
+  } catch (error) {
+    session.finish({ type: "abort" });
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+  return await session.done;
 }

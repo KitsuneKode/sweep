@@ -272,7 +272,11 @@ describe("sweep TUI render", () => {
       return Array.isArray(f) ? (f as string[]).join("\n") : String(f);
     };
     const frame = frameText();
+    // Scanning is announced in the statusline and by the dot-matrix loader that
+    // takes over the empty pane; nothing has been discovered yet.
     expect(frame).toContain("SCANNING");
+    expect(frame).toContain("Scanning for artifacts");
+    expect(frame).toContain("•");
     expect(frame).not.toContain("node_modules");
 
     // Batch arrives → app must accept it without throwing and settle cleanly.
@@ -298,5 +302,107 @@ describe("sweep TUI render", () => {
       await setup.flush();
     });
     expect(hooksRef).not.toBeNull();
+  });
+});
+
+describe("streaming reorder", () => {
+  function streamCandidate(index: number, bytes: number): ScanCandidate {
+    const tree = `tree-${index % 8}`;
+    const pkg = ["apps/cli", "apps/docs", "packages/core"][index % 3];
+    const name = ["node_modules", "dist", ".next"][index % 3] ?? "dist";
+    return {
+      id: `stream_${index}`,
+      path: `/tmp/sweep-ui/.worktrees/${tree}/${pkg}/${name}`,
+      name,
+      kind: "build",
+      estimatedBytes: bytes,
+      isSymlink: false,
+      entryType: "directory",
+      riskTier: "safe",
+      reasons: ["default-pattern"],
+      selectedByDefault: false,
+    };
+  }
+
+  function emptyStreamPlan(): ScanPlan {
+    return {
+      ...createPlan(),
+      candidates: [],
+      selectedCandidateIds: [],
+      summary: {
+        candidateCount: 0,
+        estimatedTotalBytes: 0,
+        scannedDirs: 0,
+        exact: false,
+        selectedCount: 0,
+        riskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
+      },
+    };
+  }
+
+  /**
+   * Rows used to carry `id={`artifact-row-${index}`}`. OpenTUI keys a parent's
+   * child map by renderable id, so index-derived ids went stale the moment a
+   * sized batch re-sorted the list: `insertBefore` could not find its anchor,
+   * silently dropped the row, and the pane filled with blank gaps and
+   * out-of-order entries. The warnings are the only direct signal, so assert on
+   * them.
+   */
+  test("re-sorting a live scan never desyncs the renderable tree", async () => {
+    const count = 120;
+    const discovered = Array.from({ length: count }, (_, i) => streamCandidate(i, 0));
+
+    let hooks: Parameters<UiScanControl["start"]>[0] | null = null;
+    const control: UiScanControl = {
+      start: (h) => {
+        hooks = h;
+      },
+      syncPatterns: () => {},
+    };
+
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(" "));
+    };
+
+    try {
+      const setup = await testRender(
+        <SweepApp plan={emptyStreamPlan()} onDone={() => {}} scan={control} initiallyScanning />,
+        { width: 120, height: 32 },
+      );
+      teardown = () => setup.renderer.destroy();
+      await act(async () => {
+        await setup.renderOnce();
+      });
+
+      // Discovery: everything arrives unsized, so the list is alphabetical.
+      for (let i = 0; i < count; i += 20) {
+        const batch = discovered.slice(i, i + 20);
+        await act(async () => {
+          hooks?.onBatch(batch);
+          await setup.renderOnce();
+        });
+      }
+
+      // Sizing: the same ids come back with real bytes, reshuffling the sort.
+      for (let i = 0; i < count; i += 20) {
+        const batch = discovered
+          .slice(i, i + 20)
+          .map((candidate, k) => ({ ...candidate, estimatedBytes: ((i + k) * 7919) % 500_000 }));
+        await act(async () => {
+          hooks?.onBatch(batch);
+          await setup.renderOnce();
+        });
+      }
+
+      // The warnings are the regression signal. Painted-frame assertions after
+      // mount are not reliable here — the harness does not drive the renderer's
+      // own draw loop — so this asserts on the reconciler contract directly.
+      expect(warnings.filter((line) => line.includes("insertBefore"))).toEqual([]);
+      expect(warnings.filter((line) => line.includes("does not exist within"))).toEqual([]);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 });

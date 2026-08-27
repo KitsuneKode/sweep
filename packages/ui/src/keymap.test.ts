@@ -63,6 +63,47 @@ describe("handleKeymap", () => {
     };
   }
 
+  describe("Ctrl+C", () => {
+    // Raw mode means no SIGINT reaches the process, so if a mode swallows this
+    // chord there is no way out of `sweep ui` at all. Every mode must honour it.
+    const modes: Array<[string, Partial<KeymapContext>]> = [
+      ["the artifact list", {}],
+      ["the filter input", { state: { ...createUiState(mockPlan()), focus: "search" } }],
+      ["the scope sidebar", { state: { ...createUiState(mockPlan()), focus: "sidebar" } }],
+      ["the pattern editor", { state: { ...createUiState(mockPlan()), focus: "patterns" } }],
+      ["the help overlay", { showHelp: true }],
+      ["the apply confirmation", { pendingApply: true }],
+      ["the scan-error modal", { scanError: "engine exploded" }],
+    ];
+
+    for (const [label, overrides] of modes) {
+      test(`quits from ${label}`, () => {
+        const actions = makeActions();
+        handleKeymap(makeContext({ key: { name: "c", ctrl: true }, ...overrides }), actions);
+        expect(actions.finalize).toHaveBeenCalledWith({ type: "abort" });
+      });
+
+      test(`quits from ${label} when the key arrives pre-combined`, () => {
+        const actions = makeActions();
+        handleKeymap(makeContext({ key: { name: "ctrl+c" }, ...overrides }), actions);
+        expect(actions.finalize).toHaveBeenCalledWith({ type: "abort" });
+      });
+    }
+
+    test("plain c is not a quit", () => {
+      const actions = makeActions();
+      handleKeymap(makeContext({ key: { name: "c" } }), actions);
+      expect(actions.finalize).not.toHaveBeenCalled();
+    });
+
+    test("Ctrl+D still pages down rather than quitting", () => {
+      const actions = makeActions();
+      handleKeymap(makeContext({ key: { name: "d", ctrl: true } }), actions);
+      expect(actions.finalize).not.toHaveBeenCalled();
+      expect(actions.mutate).toHaveBeenCalled();
+    });
+  });
+
   test("Shift+Tab cycles focus in reverse", () => {
     const ctx = makeContext({
       key: { name: "tab", shift: true },
@@ -128,6 +169,12 @@ describe("handleKeymap", () => {
     expect(actions.mutate).toHaveBeenCalled();
     expect(actions.clearFilterDraft).toHaveBeenCalled();
     expect(actions.focusPanel).toHaveBeenCalledWith("list");
+  });
+
+  test("Ctrl+C aborts like q", () => {
+    const actions = makeActions();
+    handleKeymap(makeContext({ key: { name: "c", ctrl: true } }), actions);
+    expect(actions.finalize).toHaveBeenCalledWith({ type: "abort" });
   });
 
   test("scan error modal traps keys until retry or dismiss", () => {

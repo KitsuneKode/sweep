@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
@@ -118,6 +118,22 @@ interface RunEngineOptions {
 }
 
 /**
+ * SIGTERM first so the engine can flush; SIGKILL if it ignores the signal.
+ * Leaving a live `sweep-engine` child after Ctrl+C is what hangs `sweep ui`.
+ */
+function terminateEngine(proc: ChildProcess): void {
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
+  proc.kill("SIGTERM");
+  const forceKill = setTimeout(() => {
+    if (proc.exitCode === null && proc.signalCode === null) {
+      proc.kill("SIGKILL");
+    }
+  }, 250);
+  forceKill.unref();
+  proc.once("close", () => clearTimeout(forceKill));
+}
+
+/**
  * Spawn the Rust engine asynchronously so the JS event loop stays live while
  * it runs (spinners keep animating, progress hooks fire in real time).
  * Resolves with full stdout once the process exits successfully.
@@ -136,9 +152,9 @@ async function runEngineAsync(
 
   if (options.signal) {
     if (options.signal.aborted) {
-      proc.kill("SIGTERM");
+      terminateEngine(proc);
     } else {
-      const onAbort = () => proc.kill("SIGTERM");
+      const onAbort = () => terminateEngine(proc);
       options.signal.addEventListener("abort", onAbort, { once: true });
       proc.on("close", () => options.signal?.removeEventListener("abort", onAbort));
     }
@@ -148,6 +164,13 @@ async function runEngineAsync(
     let stdout = "";
     let stderr = "";
     let lines: ReturnType<typeof createInterface> | undefined;
+    let settled = false;
+
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
 
     proc.stdout.setEncoding("utf8");
     proc.stderr.setEncoding("utf8");
@@ -169,16 +192,24 @@ async function runEngineAsync(
 
     proc.on("error", (error) => {
       lines?.close();
-      rejectPromise(new Error(`failed to spawn rust engine at ${binary}: ${error.message}`));
+      settle(() =>
+        rejectPromise(new Error(`failed to spawn rust engine at ${binary}: ${error.message}`)),
+      );
     });
 
     proc.on("close", (code) => {
       lines?.close();
+      if (options.signal?.aborted) {
+        settle(() => resolvePromise(stdout));
+        return;
+      }
       if (code === 0) {
-        resolvePromise(stdout);
+        settle(() => resolvePromise(stdout));
       } else {
-        rejectPromise(
-          new Error(stderr.trim() || `rust engine exited with status ${code ?? "signal"}`),
+        settle(() =>
+          rejectPromise(
+            new Error(stderr.trim() || `rust engine exited with status ${code ?? "signal"}`),
+          ),
         );
       }
     });
