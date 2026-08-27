@@ -47,6 +47,7 @@
     "commitlint": "commitlint",
     "version": "changeset version && bun run sync-engine-versions",
     "sync-engine-versions": "bun run scripts/sync-engine-versions.ts",
+    "bootstrap:native-placeholders": "bun run scripts/bootstrap-native-placeholders.ts",
     "//#engine:build:debug": "cargo build -p sweep-engine-cli",
     "//#engine:build": "cargo build --release -p sweep-engine-cli",
     "engine:build": "cargo build --release -p sweep-engine-cli",
