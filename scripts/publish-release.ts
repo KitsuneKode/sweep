@@ -28,6 +28,21 @@ function run(command: string, args: string[], options: { cwd?: string } = {}): v
   }
 }
 
+/**
+ * True when this exact version is already on the registry.
+ *
+ * Publishing six packages behind an interactive 2FA prompt is easy to
+ * interrupt, and npm refuses to republish a version. Without this a retry dies
+ * on the first package that already made it, stranding the release half done.
+ */
+function alreadyPublished(name: string, version: string): boolean {
+  const result = spawnSync("npm", ["view", `${name}@${version}`, "version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return result.status === 0 && result.stdout.trim().length > 0;
+}
+
 function cliVersion(): string {
   return execFileSync("node", ["-p", "require('./package.json').version"], {
     cwd: join(REPO_ROOT, "apps/cli"),
@@ -74,6 +89,10 @@ if (!skipNative) {
       const dir = join(REPO_ROOT, "native-packages", platform.id);
       const binPath = join(dir, "bin", platform.binaryName);
       if (!existsSync(binPath)) {
+        continue;
+      }
+      if (alreadyPublished(platform.npmName, version)) {
+        console.log(`\nskipping ${platform.npmName}@${version} (already published)`);
         continue;
       }
       console.log(`\npublishing ${platform.npmName}@${version}...`);
