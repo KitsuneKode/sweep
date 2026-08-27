@@ -301,8 +301,16 @@ export function buildHeaderStats(
   ];
 
   if (summary.selectedCount > 0) {
+    // The queue outliving the current view is the point — you narrow, queue,
+    // narrow again, then apply. Say when part of it is off screen, so a header
+    // reading higher than the visible rows is explained rather than alarming.
+    const hidden = summary.selectedCount - summary.visibleSelectedCount;
+    const queued =
+      hidden > 0
+        ? `${padCount(summary.selectedCount)} queued (${summary.visibleSelectedCount} shown)`
+        : `${padCount(summary.selectedCount)} queued`;
     parts.push(
-      t`${fg(tokens.accent)(`${padCount(summary.selectedCount)} selected`)}`,
+      t`${fg(tokens.accent)(queued)}`,
       t`${bold(fg(tokens.positive)(formatBytes(summary.selectedBytes)))}`,
     );
   }

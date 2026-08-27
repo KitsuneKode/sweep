@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import type { ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { SweepUiSummary } from "./state.js";
 import {
   artifactRowWidths,
+  buildHeaderStats,
   formatArtifactRow,
   formatArtifactRowPlain,
   formatGroupHeaderRow,
@@ -11,6 +14,25 @@ import {
   truncateScopeLabel,
 } from "./presentation.js";
 import { darkTheme } from "./theme.js";
+
+function planFixture(): ScanPlan {
+  return {
+    protocolVersion: "1",
+    targetDir: "/tmp/project",
+    selectionPolicy: { mode: "default", includeDangerous: false },
+    candidates: [],
+    summary: {
+      candidateCount: 0,
+      estimatedTotalBytes: 0,
+      scannedDirs: 0,
+      exact: false,
+      selectedCount: 0,
+      riskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
+    },
+    selectedCandidateIds: [],
+    createdAt: new Date().toISOString(),
+  };
+}
 
 function candidate(overrides: Partial<ScanCandidate> = {}): ScanCandidate {
   return {
@@ -101,5 +123,46 @@ describe("presentation formatters", () => {
   test("formatScanProgressLine includes dirs when reported", () => {
     expect(formatScanProgressLine(3, 0)).toBe("scanning… 3 found");
     expect(formatScanProgressLine(3, 12)).toBe("scanning… 3 found  ·  12 dirs");
+  });
+});
+
+describe("buildHeaderStats queue counts", () => {
+  const summary = (over: Partial<SweepUiSummary> = {}): SweepUiSummary => ({
+    visibleCount: 10,
+    selectedCount: 3,
+    selectedBytes: 3072,
+    visibleSelectedCount: 3,
+    dangerousVisibleCount: 0,
+    ...over,
+  });
+
+  function plain(text: { chunks: Array<{ text: string }> }): string {
+    return text.chunks.map((chunk) => chunk.text).join("");
+  }
+
+  test("reports the queue plainly when all of it is on screen", () => {
+    const line = plain(buildHeaderStats(planFixture(), summary(), darkTheme));
+    expect(line).toContain("3 queued");
+    expect(line).not.toContain("shown");
+  });
+
+  test("says how much of the queue is hidden by the current view", () => {
+    // Regression: the header used to count only visible rows, so narrowing the
+    // view made a queued deletion look smaller than it was.
+    const line = plain(
+      buildHeaderStats(planFixture(), summary({ visibleSelectedCount: 1 }), darkTheme),
+    );
+    expect(line).toContain("3 queued (1 shown)");
+  });
+
+  test("stays silent about the queue when nothing is queued", () => {
+    const line = plain(
+      buildHeaderStats(
+        planFixture(),
+        summary({ selectedCount: 0, selectedBytes: 0, visibleSelectedCount: 0 }),
+        darkTheme,
+      ),
+    );
+    expect(line).not.toContain("queued");
   });
 });

@@ -76,7 +76,7 @@ describe("sweep TUI render", () => {
     expect(frame.length).toBeGreaterThan(0);
     expect(frame).toContain("sweep");
     expect(frame).toContain("found");
-    expect(frame).toContain("selected");
+    expect(frame).toContain("queued");
     expect(frame).toContain("apply");
     expect(frame).toContain("reclaimable");
   });
