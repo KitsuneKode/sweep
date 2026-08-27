@@ -44,9 +44,19 @@ repository `sweep`, workflow `release.yml`. That covers `@kitsunekode/sweep`
 and every `@kitsunekode/sweep-engine-*` package.
 
 **A brand-new package cannot be bootstrapped this way.** npm only exposes the
-trusted-publisher setting on a package that already exists, so the first
-version of a new package has to be published with a token, after which the
-trusted publisher can be configured and the token retired.
+trusted-publisher setting on a package that already exists, so a new platform
+package needs one authenticated publish from a human before CI can take over:
+
+```bash
+bun run bootstrap:native-placeholders             # report what is missing
+bun run bootstrap:native-placeholders -- --publish # publish placeholders (prompts 2FA)
+```
+
+That publishes a binary-free placeholder at `0.0.1` — deliberately below any
+shipping version, because the CLI pins its engines to an exact version. It skips
+packages that already exist, so re-run it whenever a platform is added to
+`NATIVE_PLATFORMS`. Afterwards, register the trusted publisher for each new
+package and let CI publish every version from then on.
 
 ## 2. Standalone binaries (GitHub releases)
 
