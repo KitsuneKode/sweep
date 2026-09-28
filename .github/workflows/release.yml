@@ -59,6 +59,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,6 +101,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Sync parity fixture trees
+        run: bun run fixtures:sync
+
       - name: Detect whether changesets should run
         id: changesets
         shell: bash
@@ -130,6 +134,7 @@ jobs:
         run: echo "No pending changesets or version publish; skipping changesets action."
 
       - name: Create release PR or publish
+        id: release
         if: steps.changesets.outputs.run == 'true'
         uses: changesets/action@v1
         with:
@@ -140,3 +145,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SWEEP_RELEASE_REQUIRES_NATIVE: ${{ needs.release-intent.outputs.needs_native_build }}
+
+      # The v* tag pushed by changesets/action above is a GITHUB_TOKEN event,
+      # which GitHub suppresses — cli-binaries.yml's `push: tags` trigger never
+      # fires. Dispatch it explicitly on the tag instead.
+      - name: Build standalone binaries for the tag
+        if: steps.release.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(node -p "require('./apps/cli/package.json').version")"
+          gh workflow run cli-binaries.yml --ref "$tag"
