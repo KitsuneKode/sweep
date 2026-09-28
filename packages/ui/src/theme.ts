@@ -127,14 +127,3 @@ export function riskColor(theme: ThemeTokens): Record<RiskTier, string> {
     blocked: theme.blocked,
   };
 }
-
-/** One-character risk markers for dense rows. */
-export const riskMark: Record<RiskTier, string> = {
-  safe: "·",
-  caution: "?",
-  dangerous: "!",
-  blocked: "×",
-};
-
-/** @deprecated Use resolveTheme() — kept for gradual migration */
-export const theme = darkTheme;

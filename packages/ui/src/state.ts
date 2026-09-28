@@ -7,9 +7,12 @@ export type {
 } from "./state/store.js";
 export {
   activePatterns,
+  allPatterns,
+  isCustomPattern,
   applyUiSelection,
   clearSelection,
   createUiState,
+  finalizeScan,
   getCurrentCandidate,
   getUiSummary,
   moveCursor,
@@ -34,6 +37,7 @@ export {
   upsertCandidates,
   setScanning,
   setScannedDirs,
+  setSkippedDirs,
   toggleSortBy,
   resetForRescan,
   toggleGroup,

@@ -13,6 +13,11 @@
 
 ## Next
 
+- [x] Execute [TUI + core audit fixes](tui-audit/README.md) — modal viewport
+      clamp, patterns pane, streaming queue + always-confirm apply, density
+      pass, engine/guardrail edge cases. Remaining leftovers tracked in
+      `tui-audit/04-edge-cases.md` (Rust `skippedDirs` emission, `pageRows`
+      estimate, `?` glob semantics).
 - [ ] Execute [daily-driver overhaul](daily-driver-overhaul/master.md) — **unified
       program**: Phase 0 catalog/hygiene → trust → TUI → streaming → orchestration →
       CLI → Rust → polish ([scope index](daily-driver-overhaul/README.md))

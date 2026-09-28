@@ -1,14 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { buildRescanConfig, DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import {
+  allPatterns,
   applyUiSelection,
   clearSelection,
   createUiState,
   escapeStep,
+  finalizeScan,
   getCurrentCandidate,
   getUiSummary,
   getVisibleCandidates,
+  isCustomPattern,
   moveCursor,
+  rescanConfigFromState,
   resetForRescan,
   selectSafeOnly,
   selectVisible,
@@ -17,6 +22,7 @@ import {
   toggleCurrentSelection,
   toggleGroup,
   togglePattern,
+  toggleSelectionById,
   toggleSortBy,
   upsertCandidates,
   setPatternIndex,
@@ -437,6 +443,119 @@ describe("sweep ui state", () => {
     expect(moved.patternIndex).toBe(2);
     expect(moved.rowIndex).toBe(4);
     expect(moved.focus).toBe("patterns");
+  });
+
+  test("allPatterns unions extras after the catalog without duplicating names", () => {
+    const state = createUiState(createPlan(), {
+      catalogPatterns: ["node_modules", "dist"],
+      extraPatterns: ["*.bak", "dist", "tmp-*"],
+    });
+
+    expect(allPatterns(state)).toEqual(["node_modules", "dist", "*.bak", "tmp-*"]);
+    expect(isCustomPattern(state, "*.bak")).toBe(true);
+    expect(isCustomPattern(state, "dist")).toBe(false);
+  });
+
+  test("rescanConfigFromState hands extras and disabled patterns back for rescan", () => {
+    let state = createUiState(createPlan(), { extraPatterns: ["*.bak"] });
+    state = togglePattern(state, "*.bak");
+
+    const ui = rescanConfigFromState(state);
+    expect(ui.extraPatterns).toEqual(["*.bak"]);
+    expect(ui.disabledPatterns).toEqual(["*.bak"]);
+
+    const rebuilt = buildRescanConfig(DEFAULT_CONFIG, ui);
+    expect(rebuilt.patterns).not.toContain("*.bak");
+  });
+
+  describe("streaming selection seeding", () => {
+    function discovery(id: string, overrides: Partial<ScanCandidate> = {}): ScanCandidate {
+      return {
+        id,
+        path: `/tmp/sweep-ui/${id}`,
+        name: id,
+        kind: "node_modules",
+        estimatedBytes: 0,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+        ...overrides,
+      };
+    }
+
+    test("new discoveries queue themselves when selectedByDefault", () => {
+      let state = createUiState({ ...createPlan(), candidates: [] });
+      state = upsertCandidates(state, [
+        discovery("a"),
+        discovery("b", { selectedByDefault: false }),
+        discovery("c", { riskTier: "blocked" }),
+      ]);
+
+      expect(state.selectedIds.has("a")).toBe(true);
+      expect(state.selectedIds.has("b")).toBe(false);
+      expect(state.selectedIds.has("c")).toBe(false);
+    });
+
+    test("a sized re-upsert never re-seeds a candidate the user dequeued", () => {
+      let state = createUiState({ ...createPlan(), candidates: [] });
+      state = upsertCandidates(state, [discovery("a")]);
+      expect(state.selectedIds.has("a")).toBe(true);
+
+      state = toggleSelectionById(state, "a");
+      expect(state.selectedIds.has("a")).toBe(false);
+
+      state = upsertCandidates(state, [discovery("a", { estimatedBytes: 999 })]);
+      expect(state.selectedIds.has("a")).toBe(false);
+      expect(state.candidates[0]?.estimatedBytes).toBe(999);
+    });
+
+    test("finalizeScan swaps stubs for enriched candidates and keeps user decisions", () => {
+      let state = createUiState({ ...createPlan(), candidates: [] });
+      state = setScanning(state, true);
+      state = upsertCandidates(state, [discovery("a"), discovery("b")]);
+
+      // Mid-scan the user dequeues b and deliberately queues a dangerous find.
+      state = toggleSelectionById(state, "b");
+      state = upsertCandidates(state, [
+        discovery("d", { riskTier: "dangerous", selectedByDefault: false }),
+      ]);
+      state = toggleSelectionById(state, "d");
+      expect(state.selectedIds.has("b")).toBe(false);
+      expect(state.selectedIds.has("d")).toBe(true);
+
+      const finalPlan: ScanPlan = {
+        ...createPlan(),
+        candidates: [
+          discovery("a", { estimatedBytes: 10, reasons: ["enriched"] }),
+          discovery("b", { estimatedBytes: 20 }),
+          discovery("d", { riskTier: "dangerous", estimatedBytes: 30 }),
+        ],
+        selectedCandidateIds: ["a", "b"],
+        summary: { ...createPlan().summary, selectedCount: 2 },
+      };
+
+      const done = finalizeScan(state, finalPlan);
+      expect(done.scanning).toBe(false);
+      expect(done.orderPinned).toBe(false);
+      // Enriched candidate data wins over the stub.
+      expect(done.candidates.find((c) => c.id === "a")?.reasons).toEqual(["enriched"]);
+      // Untouched ids follow the plan policy; touched ids keep the user's call.
+      expect(done.selectedIds.has("a")).toBe(true);
+      expect(done.selectedIds.has("b")).toBe(false);
+      expect(done.selectedIds.has("d")).toBe(true);
+    });
+
+    test("finalizeScan drops ids that vanished from the final plan", () => {
+      let state = createUiState({ ...createPlan(), candidates: [] });
+      state = upsertCandidates(state, [discovery("ghost")]);
+      expect(state.selectedIds.has("ghost")).toBe(true);
+
+      const done = finalizeScan(state, { ...createPlan(), candidates: [] });
+      expect(done.selectedIds.size).toBe(0);
+      expect(done.candidates).toHaveLength(0);
+    });
   });
 
   describe("order pinning across a live scan", () => {

@@ -1,5 +1,6 @@
 import { StyledText, TextAttributes, fg } from "@opentui/core";
 import type { TextChunk } from "@opentui/core";
+import { useTerminalDimensions } from "@opentui/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { DOT_GRID, dotFrame, dotRamp, dotStrip, type DotPattern } from "./dot-matrix.js";
 import type { ThemeTokens } from "./theme.js";
@@ -7,6 +8,12 @@ import type { ThemeTokens } from "./theme.js";
 /**
  * Full-screen scrim + centered dialog. Children render inside a rounded,
  * bordered card; the scrim dims and swallows attention behind it.
+ *
+ * The card is clamped to the viewport on both axes. A fixed-size box centered
+ * in a terminal smaller than the box gets negative layout offsets on both
+ * axes, and that combination crashes the native renderer outright — so the
+ * clamp is a hard correctness requirement, not cosmetic. Content that does not
+ * fit scrolls inside the card rather than overflowing it.
  */
 export function Modal({
   tokens,
@@ -21,6 +28,10 @@ export function Modal({
   width: number;
   children: ReactNode;
 }) {
+  const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
+  const modalWidth = Math.max(4, Math.min(width, Math.max(4, screenWidth - 2)));
+  const maxHeight = Math.max(3, screenHeight - 2);
+
   return (
     <box
       position="absolute"
@@ -33,7 +44,8 @@ export function Modal({
       backgroundColor={tokens.overlayBackdrop}
     >
       <box
-        width={width}
+        width={modalWidth}
+        maxHeight={maxHeight}
         border
         borderStyle="rounded"
         borderColor={titleColor ?? tokens.borderFocus}
@@ -43,7 +55,16 @@ export function Modal({
         paddingY={1}
         flexDirection="column"
       >
-        {children}
+        <scrollbox
+          flexGrow={1}
+          minHeight={0}
+          width="100%"
+          scrollX={false}
+          stickyScroll={false}
+          contentOptions={{ flexDirection: "column" }}
+        >
+          {children}
+        </scrollbox>
       </box>
     </box>
   );

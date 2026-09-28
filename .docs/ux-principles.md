@@ -14,17 +14,19 @@ documented as the primary binding.
 
 `Esc` unwinds exactly one layer of state per press: modal → panel → risk
 filter → scope → text filter → expand groups. Quitting is always the
-explicit `q`. An accidental `esc` must never destroy review context or exit
-the process.
+explicit `q`, or `Ctrl-C` — the one chord honoured in every mode, modal, and
+input, since raw mode gives us no SIGINT. An accidental `esc` must never
+destroy review context or exit the process.
 
 ## 3. Nothing destructive is automatic
 
 - Scan, plan, and review are read-only. Deletion requires `Enter` on a
   non-empty selection.
+- **Every apply confirms.** The dialog is always there; it turns red only
+  when dangerous-tier items are queued. A single `Enter` must never be able
+  to delete.
 - Bulk select (`a`) covers safe + caution only. Dangerous-tier items enter a
   selection only through deliberate per-item toggles.
-- Dangerous selections trigger a red confirmation naming the count and stating
-  irreversibility before any deletion begins.
 - Blocked items (VCS internals, protected roots) cannot be selected in any
   mode.
 
@@ -47,6 +49,28 @@ click. Keyboard remains sufficient for every action.
 
 ## 7. Feedback beats silence
 
-Every accepted key either changes the screen or updates the statusline. Silent
-no-ops are bugs (e.g. `Enter` with an empty selection does nothing _visibly_
-— the tally reads "nothing selected" so the reason is on-screen).
+Every accepted key either changes the screen or updates the statusline. A key
+that deliberately does nothing must say why via a one-line notice — e.g.
+`Enter` on an empty queue flashes `nothing queued — space on a row queues it`,
+`Esc` with nothing left to unwind flashes `nothing to unwind — ctrl-c quits`.
+
+## 8. Cursor and viewport are one
+
+Wheel scrolling moves the _cursor_, not a detached viewport — `Space`/`Enter`
+always act on the row under the cursor, which is always visible. The scroll
+lane is a passive position indicator, not a drag target. The same rule holds
+in the scope sidebar (`scrollbox` is `focusable={false}`; an inner handler
+swallows wheel events and moves the cursor instead).
+
+## 9. Chrome fits the terminal
+
+- Modals clamp to the viewport and scroll their contents when they don't fit.
+  A fixed-size dialog in a small terminal is a native crash, not an
+  inconvenience — this is a hard invariant.
+- Every artifact group emits a header; an orphan row must never read as part
+  of the group above it.
+- The artifact list is windowed — only visible rows mount, so render cost is
+  O(viewport), not O(artifacts). While a scan streams, rows hold discovery
+  order; the list re-sorts once on completion so nothing moves mid-cursor.
+- Narrow widths degrade by shedding detail (brand → `◆`, stats → queued only,
+  footer → minimal hints), never by clipping mid-word.

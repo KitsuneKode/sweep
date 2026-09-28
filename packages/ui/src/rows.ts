@@ -16,6 +16,11 @@ export type UiDisplayRow =
   | {
       kind: "item";
       candidateId: string;
+      /**
+       * Label of the owning group header — item rows suppress the per-item
+       * parent path when it would just repeat this.
+       */
+      groupLabel: string;
     };
 
 function itemComparator(sortBy: UiSortBy): (a: ScanCandidate, b: ScanCandidate) => number {
@@ -98,28 +103,25 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
 
     const collapsed = state.collapsedGroups.has(group.key);
     const bytes = groupCandidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
-    // Trees flattenEmptyDirectories / CommandItem: a lone artifact already
-    // carries its parent in the name column, so a heading is just chrome.
-    // While pinned the heading is always drawn — otherwise a group's second
-    // artifact makes one appear above the cursor and shifts the rows below it.
-    const showHeader = order !== null || groupCandidates.length !== 1 || collapsed;
-
-    if (showHeader) {
-      rows.push({
-        kind: "header",
-        groupKey: group.key,
-        label: group.label,
-        itemCount: groupCandidates.length,
-        selectedCount,
-        collapsed,
-        bytes,
-      });
-    }
+    // Every group gets a header — even single-item ones. An orphan row under
+    // the previous group's heading reads as belonging to that group, which is
+    // how a root-level artifact could end up looking like it lived inside the
+    // group above it. While pinned this is doubly required: without it a
+    // group's second artifact would push a heading in above the cursor.
+    rows.push({
+      kind: "header",
+      groupKey: group.key,
+      label: group.label,
+      itemCount: groupCandidates.length,
+      selectedCount,
+      collapsed,
+      bytes,
+    });
 
     if (collapsed) continue;
 
     for (const candidate of groupCandidates) {
-      rows.push({ kind: "item", candidateId: candidate.id });
+      rows.push({ kind: "item", candidateId: candidate.id, groupLabel: group.label });
     }
   }
 

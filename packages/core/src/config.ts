@@ -333,7 +333,10 @@ export function buildRescanConfig(
 ): SweepConfig {
   const disabledSet = new Set(ui.disabledPatterns);
   const enabledCatalog = DEFAULT_PATTERNS.filter((pattern) => !disabledSet.has(pattern));
-  const patterns = [...new Set([...enabledCatalog, ...ui.extraPatterns])];
+  // Custom patterns can be toggled off in the editor too — a disabled extra
+  // must not silently keep matching.
+  const enabledExtras = ui.extraPatterns.filter((pattern) => !disabledSet.has(pattern));
+  const patterns = [...new Set([...enabledCatalog, ...enabledExtras])];
 
   for (const pattern of patterns) assertSafePattern(pattern);
   for (const pattern of ui.disabledPatterns) assertSafePattern(pattern);

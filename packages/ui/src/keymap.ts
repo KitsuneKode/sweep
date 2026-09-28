@@ -1,5 +1,6 @@
 import type { SweepUiState } from "./state.js";
 import {
+  allPatterns,
   applySidebarScope,
   clearSelection,
   escapeStep,
@@ -133,6 +134,8 @@ export interface KeymapActions {
   toggleSort?: () => void;
   /** Dismiss a scan-error modal without retrying. */
   dismissScanError?: () => void;
+  /** Flash a one-line notice for a keypress that deliberately does nothing. */
+  notify?: (message: string) => void;
 }
 
 export interface KeymapContext {
@@ -227,6 +230,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     // Walk back through narrowed views; esc NEVER quits the app.
     const step = escapeStep(state);
     if (step) actions.mutate(() => step);
+    else actions.notify?.("nothing to unwind — ctrl-c quits");
     return;
   }
 
@@ -301,7 +305,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
 
   if (state.focus === "patterns") {
     if (key.name === "space") {
-      const pattern = state.catalogPatterns[listSelectIndex];
+      const pattern = allPatterns(state)[listSelectIndex];
       if (pattern) actions.mutate((s) => togglePattern(s, pattern));
     }
     if (key.name === "up" || key.name === "k") {
@@ -367,10 +371,20 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "space") {
+    // Blocked rows can't be queued — say so instead of silently swallowing
+    // the keypress (the ⊘ mark alone doesn't explain why nothing happened).
+    const row = buildDisplayRows(state)[state.rowIndex];
+    if (row?.kind === "item") {
+      const candidate = state.candidates.find((c) => c.id === row.candidateId);
+      if (candidate?.riskTier === "blocked") {
+        actions.notify?.("⊘ protected path — blocked items can't be queued");
+        return;
+      }
+    }
     actions.mutate((s) => {
       const rows = buildDisplayRows(s);
-      const row = rows[s.rowIndex];
-      if (row?.kind === "header") return toggleGroup(s, row.groupKey);
+      const current = rows[s.rowIndex];
+      if (current?.kind === "header") return toggleGroup(s, current.groupKey);
       return toggleCurrentSelection(s);
     });
     return;

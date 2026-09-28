@@ -76,7 +76,6 @@ describe("presentation formatters", () => {
     expect(line).toContain("●");
     expect(line).toContain("node_modules");
     expect(line).toContain("512 B");
-    expect(line).toContain("✓");
     expect(line.startsWith(" ")).toBe(true);
     expect(line.includes("\n")).toBe(false);
   });

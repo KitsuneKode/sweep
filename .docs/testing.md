@@ -50,6 +50,14 @@ bun run test
 
 Turbo wires this via `test` → `dependsOn: ["^build"]`.
 
+> [!WARNING]
+> Never run bare `tsc -b` in this repo. The package typecheck is `tsc
+--noEmit`; a bare build emits `.js` next to each `.ts` source, Bun resolves
+> the stale `.js` over your edits, and `bun test` double-registers every
+> compiled `*.test.js`. Symptoms: changes "not taking" in tests, or test
+> counts doubling. Clean up by deleting untracked `.js` that have a `.ts`
+> sibling.
+
 ## Engine contract fixtures
 
 Table-driven parity between the JS scanner and (optionally) the Rust binary.
@@ -141,6 +149,29 @@ is not a TTY. Manual check:
 ```bash
 bun run dev -- ui /path/to/project   # in an interactive terminal only
 ```
+
+### Driving the TUI headlessly
+
+`packages/ui` tests render the real `SweepApp` through OpenTUI's `testRender`.
+Three harness gotchas have each cost a false alarm — know them before trusting
+a weird frame:
+
+- **`pressKey("down")` types the literal letters** `d`/`o`/`w`/`n` — which fire
+  `o` (sort) and `w` (collapse all). Use `mockInput.pressArrow("down")` or the
+  raw sequence `"\x1B[B"`. Same for `pressKey("space")` — send `" "`.
+- **`Esc` needs a real-time wait** (~25ms). The input parser holds a bare ESC
+  for `DEFAULT_TIMEOUT_MS` (20ms) to disambiguate from escape sequences, and
+  the fake test clock never fires it. `await` a real `setTimeout` after
+  `pressEscape`.
+- **`flush()` waits for scheduler idle**, which can never settle if anything
+  schedules a delayed render. `renderOnce()` drains React and paints — prefer
+  it in settle loops.
+
+Cursor keys skip group headers: a `down` from a header lands on the first
+item. The footer context line is `✓ <kind> <size> <path>` for an item, or the
+group summary (`<label> · N items · <size>`) when the cursor sits on a header —
+`No matching artifacts.` only appears when the filtered list is genuinely
+empty.
 
 ## CI split
 

@@ -1,5 +1,5 @@
 import { buildRescanConfig } from "@kitsunekode/sweep-core/config";
-import { candidateFromEntry } from "@kitsunekode/sweep-core/planner";
+import { buildPlan, candidateFromEntry } from "@kitsunekode/sweep-core/planner";
 import { scan } from "@kitsunekode/sweep-core/scanner";
 import type {
   ScanCandidate,
@@ -18,14 +18,24 @@ import type { SweepUiInitOptions } from "./state.js";
 export interface UiScanHooks {
   /** Candidates discovered or resized since the last flush. */
   onBatch: (candidates: ScanCandidate[]) => void;
-  onProgress?: (meta: { scannedDirs: number }) => void;
-  onDone: (meta: { scannedDirs: number }) => void;
+  onProgress?: (meta: { scannedDirs: number; skippedDirs: number }) => void;
+  /**
+   * Scan finished. `plan` is the authoritative enriched result — the same
+   * `buildPlan` output a non-streaming run produces, so workspace stubs and
+   * symlink aliases are marked and `selectedCandidateIds` reflects policy.
+   */
+  onDone: (meta: { scannedDirs: number; skippedDirs: number; plan?: ScanPlan }) => void;
   onError: (error: unknown) => void;
 }
 
 /** Live-scan control handed to the app; every call starts a new generation. */
 export interface UiScanControl {
-  start(hooks: UiScanHooks, signal: AbortSignal): void;
+  /**
+   * Runs one scan generation to completion (or abort). Errors funnel to
+   * `hooks.onError` rather than rejecting, but it is async all the same —
+   * callers must not treat the return as "the scan is done".
+   */
+  start(hooks: UiScanHooks, signal: AbortSignal): Promise<void>;
   /** Push pattern-editor changes so the next rescan uses them. */
   syncPatterns(disabledPatterns: string[], extraPatterns: string[]): void;
 }
@@ -98,10 +108,16 @@ export async function runSweepUiStreaming(
 
       try {
         let scannedDirs = 0;
-        const reportProgress = (dirs: number) => {
+        let skippedDirs = 0;
+        const reportProgress = (dirs: number, skipped: number) => {
           scannedDirs = dirs;
-          if (!signal.aborted) hooks.onProgress?.({ scannedDirs: dirs });
+          skippedDirs = skipped;
+          if (!signal.aborted) hooks.onProgress?.({ scannedDirs: dirs, skippedDirs: skipped });
         };
+        // The authoritative enriched plan — cross-candidate insights need the
+        // whole set, so per-entry `candidateFromEntry` stubs are reconciled
+        // against this when the scan ends.
+        let finalPlan: ScanPlan | undefined;
         if (options.engine === "rust") {
           const { scanToPlanViaRust } = await import("@kitsunekode/sweep-core/rust-engine");
           const plan = await scanToPlanViaRust(options.targetDir, {
@@ -110,22 +126,27 @@ export async function runSweepUiStreaming(
             exact: false,
             onEntry: record,
             onEntrySized: record,
-            onProgress: ({ scannedDirs: dirs }) => reportProgress(dirs),
+            onProgress: ({ scannedDirs: dirs, skippedDirs: skipped }) =>
+              reportProgress(dirs, skipped),
             signal,
           });
           scannedDirs = plan.summary.scannedDirs;
+          finalPlan = plan;
         } else {
           const result = await scan(options.targetDir, currentConfig, false, {
             onEntry: record,
             onEntrySized: record,
-            onProgress: ({ scannedDirs: dirs }) => reportProgress(dirs),
+            onProgress: ({ scannedDirs: dirs, skippedDirs: skipped }) =>
+              reportProgress(dirs, skipped),
             signal,
           });
           scannedDirs = result.scannedDirs;
+          skippedDirs = result.skippedDirs;
+          finalPlan = buildPlan(options.targetDir, result, options.selectionPolicy);
         }
 
         flush();
-        if (!signal.aborted) hooks.onDone({ scannedDirs });
+        if (!signal.aborted) hooks.onDone({ scannedDirs, skippedDirs, plan: finalPlan });
       } catch (error) {
         flush();
         if (!signal.aborted) hooks.onError(error);

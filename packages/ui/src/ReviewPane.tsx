@@ -8,6 +8,10 @@ import { formatPatternRow } from "./presentation.js";
 import { DotMatrix, DotStrip } from "./widgets.js";
 import type { UiDisplayRow } from "./rows.js";
 import {
+  allPatterns,
+  isCustomPattern,
+  moveCursor,
+  moveSidebarCursor,
   setFilter,
   setPatternIndex,
   setRowIndex,
@@ -50,12 +54,17 @@ export function ReviewPane({
 }: ReviewPaneProps) {
   const patternOptions = useMemo(
     () =>
-      state.catalogPatterns.map((pattern) => ({
-        name: formatPatternRow(pattern, !state.disabledPatterns.has(pattern)),
+      allPatterns(state).map((pattern) => ({
+        // Custom (--pattern / .sweeprc) entries sit below the built-ins and
+        // carry an inline marker — a per-row description field would cost
+        // every option a second line.
+        name:
+          formatPatternRow(pattern, !state.disabledPatterns.has(pattern)) +
+          (isCustomPattern(state, pattern) ? "  (custom)" : ""),
         value: pattern,
         description: "",
       })),
-    [state.catalogPatterns, state.disabledPatterns],
+    [state.catalogPatterns, state.extraPatterns, state.disabledPatterns],
   );
 
   const dimensions = useTerminalDimensions();
@@ -99,6 +108,7 @@ export function ReviewPane({
               onMutate((s) => setScopeFilter(s, scopeFilter));
               onFocusPanel("list");
             }}
+            onCursorDelta={(delta) => onMutate((s) => moveSidebarCursor(s, delta))}
           />
         </box>
       ) : null}
@@ -135,6 +145,7 @@ export function ReviewPane({
             tokens={tokens}
             found={state.candidates.length}
             scannedDirs={state.scannedDirs}
+            skippedDirs={state.skippedDirs}
             orderPinned={state.orderPinned}
             sortBy={state.sortBy}
           />
@@ -142,9 +153,17 @@ export function ReviewPane({
         {state.focus === "patterns" ? (
           <select
             focused
+            flexGrow={1}
+            minHeight={0}
+            // Every option costs a second line when descriptions are on, even
+            // empty ones — customs are marked inline in the name instead.
             showDescription={false}
             showScrollIndicator
             wrapSelection={false}
+            // The keymap owns arrows/space for this pane — leaving the select's
+            // own bindings live makes shift+arrows diverge (its ±5 fast-scroll
+            // fights the keymap's ±1 patternIndex).
+            keyBindings={[]}
             backgroundColor={tokens.surface}
             textColor={tokens.textSecondary}
             selectedBackgroundColor={tokens.selectionBg}
@@ -194,6 +213,7 @@ export function ReviewPane({
             onToggleSelection={onToggleSelection}
             onToggleGroup={(groupKey) => onMutate((s) => toggleGroup(s, groupKey))}
             onSetCursor={(rowIndex) => onMutate((s) => setRowIndex(s, rowIndex))}
+            onCursorDelta={(delta) => onMutate((s) => moveCursor(s, delta))}
           />
         )}
       </box>
@@ -239,12 +259,14 @@ function ScanningStrip({
   tokens,
   found,
   scannedDirs,
+  skippedDirs,
   orderPinned,
   sortBy,
 }: {
   tokens: ThemeTokens;
   found: number;
   scannedDirs: number;
+  skippedDirs: number;
   orderPinned: boolean;
   sortBy: UiSortBy;
 }) {
@@ -264,11 +286,19 @@ function ScanningStrip({
         content={t`${bold(fg(tokens.accent)("scanning"))}  ${fg(tokens.textSecondary)(`${found} found`)}  ${dim("\u00b7")}  ${fg(tokens.textMuted)(dirs)}`}
         wrapMode="none"
       />
+      {skippedDirs > 0 ? (
+        // Unreadable/cycled dirs mean the result set is partial — that must be
+        // visible, not quietly absorbed into a total.
+        <text
+          content={t` ${dim("\u00b7")}  ${fg(tokens.warning)(`${skippedDirs} skipped`)}`}
+          wrapMode="none"
+        />
+      ) : null}
       {orderPinned ? (
         // Sizes arrive after discovery, so the list is held in discovery order
         // until the scan ends. Say so, or it just looks unsorted.
         <text
-          content={t` ${dim("\u00b7")}  ${fg(tokens.textDim)(`found order \u2192 sorts by ${sortBy} when done`)}`}
+          content={t` ${dim("\u00b7")}  ${fg(tokens.textDim)(`found order \u00b7 sorts when done`)}`}
           wrapMode="none"
         />
       ) : null}

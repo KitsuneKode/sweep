@@ -30,6 +30,7 @@ import {
   applyUiSelection,
   countSelectedDangerous,
   createUiState,
+  finalizeScan,
   getUiSummary,
   resetForRescan,
   rescanConfigFromState,
@@ -38,6 +39,7 @@ import {
   toggleSelectionById,
   toggleSortBy,
   setScannedDirs,
+  setSkippedDirs,
   upsertCandidates,
   type SweepUiInitOptions,
   type SweepUiState,
@@ -119,6 +121,10 @@ function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
         <text content={line("↑↓ / j k", "move cursor (skips headings)")} wrapMode="none" />
         <text content={line("g / G", "jump to first / last")} wrapMode="none" />
         <text content={line("ctrl-u / ctrl-d", "half page up / down")} wrapMode="none" />
+        <text
+          content={line("pgup / pgdn · home / end", "page · first / last row")}
+          wrapMode="none"
+        />
         <text content={line("h · l", "collapse · expand the folder")} wrapMode="none" />
         <text content={line("w · e", "collapse all · expand all")} wrapMode="none" />
         <text content={line("space", "queue / unqueue for deletion")} wrapMode="none" />
@@ -128,8 +134,12 @@ function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
         <text content={line("/ then tab", "filter · cycle panes (⇥ back)")} wrapMode="none" />
         <text content={line("1 – 4", "filter by risk level")} wrapMode="none" />
         <text content={line("p", "pattern editor")} wrapMode="none" />
-        <text content={line("enter", "apply (confirms when risky)")} wrapMode="none" />
+        <text content={line("enter", "apply — always asks to confirm")} wrapMode="none" />
         <text content={line("t", "cycle theme (dark · light · auto)")} wrapMode="none" />
+        <text
+          content={line("mouse", "wheel scrolls · click focuses · click again queues")}
+          wrapMode="none"
+        />
         <text content={line("? · q · ctrl-c", "help · quit · quit")} wrapMode="none" />
       </box>
       <text content="" />
@@ -196,6 +206,10 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   const [showHelp, setShowHelp] = useState(false);
   const [pendingApply, setPendingApply] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  // One-line feedback for keys that deliberately do nothing (esc with nothing
+  // left to unwind, enter on an empty queue, space on a blocked row). Cleared
+  // by the next real state change so it never lingers past its context.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -217,15 +231,19 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
           if (gen !== generationRef.current || controller.signal.aborted) return;
           dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
         },
-        onProgress: ({ scannedDirs }) => {
-          if (gen !== generationRef.current || controller.signal.aborted) return;
-          dispatch({ type: "mutate", fn: (s) => setScannedDirs(s, scannedDirs) });
-        },
-        onDone: ({ scannedDirs }) => {
+        onProgress: ({ scannedDirs, skippedDirs }) => {
           if (gen !== generationRef.current || controller.signal.aborted) return;
           dispatch({
             type: "mutate",
-            fn: (s) => setScanning(setScannedDirs(s, scannedDirs), false),
+            fn: (s) => setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
+          });
+        },
+        onDone: ({ scannedDirs, skippedDirs, plan: finalPlan }) => {
+          if (gen !== generationRef.current || controller.signal.aborted) return;
+          dispatch({
+            type: "mutate",
+            fn: (s) =>
+              finalizeScan(setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs), finalPlan),
           });
         },
         onError: (error) => {
@@ -262,6 +280,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   const showSidebar = dimensions.width >= 72;
 
   const mutate = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
+    setNotice(null);
     dispatch({ type: "mutate", fn });
   }, []);
 
@@ -290,13 +309,15 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   );
 
   const requestApply = useCallback(() => {
-    if (summary.selectedCount === 0) return;
-    if (dangerousSelected > 0) {
-      setPendingApply(true);
+    if (summary.selectedCount === 0) {
+      setNotice("nothing queued — space on a row queues it");
       return;
     }
-    finalize({ type: "apply", plan: applyUiSelection(plan, state) });
-  }, [summary, dangerousSelected, finalize, plan, state]);
+    // Every apply deletes real files — the confirm gate is not reserved for
+    // dangerous tiers. The dialog tones down (no red banner) when nothing
+    // dangerous is queued, but it is always there.
+    setPendingApply(true);
+  }, [summary]);
 
   const focusPanel = useCallback(
     (focus: SweepUiState["focus"]) => {
@@ -333,11 +354,12 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         requestRescan,
         toggleSort: () => dispatch({ type: "mutate", fn: toggleSortBy }),
         dismissScanError: () => setScanError(null),
+        notify: setNotice,
       },
     );
   });
 
-  const headerStats = buildHeaderStats(plan, summary, tokens, dryRun);
+  const headerStats = buildHeaderStats(plan, summary, tokens, dryRun, dimensions.width);
 
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
 
@@ -355,6 +377,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   const footerContent = buildFooterHints(footerContext, tokens, {
     ...(dryRun ? { dryRun: true } : {}),
     ...(state.patternsDirty ? { patternsDirty: true } : {}),
+    ...(dimensions.width < 72 ? { compact: true } : {}),
   });
   const tallyContent = buildRiskTally(summary, tokens);
   // Below this width the tally and the risk/sort chips crowd the key hints out
@@ -381,7 +404,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         flexDirection="row"
         justifyContent="space-between"
       >
-        <text content={buildBrandLine(tokens)} wrapMode="none" />
+        <text content={buildBrandLine(tokens, dimensions.width)} wrapMode="none" />
         <text content={headerStats} wrapMode="none" />
       </box>
 
@@ -410,7 +433,10 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         paddingLeft={1}
         backgroundColor={tokens.bg}
       >
-        <text content={buildContextLine(state, tokens)} wrapMode="none" />
+        <text
+          content={notice ? t`${fg(tokens.warning)(notice)}` : buildContextLine(state, tokens)}
+          wrapMode="none"
+        />
       </box>
 
       <box
@@ -496,6 +522,3 @@ export async function runSweepUi(
   }
   return await session.done;
 }
-
-/** @deprecated Use SweepUiOutcome */
-export type LegacySweepUiResult = ScanPlan | null;

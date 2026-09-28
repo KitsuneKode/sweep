@@ -57,6 +57,17 @@ export interface SweepUiState {
   collapsedGroups: Set<string>;
   /** Folder keys expanded in the scopes tree. */
   expandedScopes: Set<string>;
+  /**
+   * Directories the scanner could not read (permissions, vanished, cycle
+   * repeats). Surfaced so a partial scan never looks complete.
+   */
+  skippedDirs: number;
+  /**
+   * Ids whose queued state the user set by hand (toggle/bulk/clear). The
+   * streaming seed and the end-of-scan policy reconciliation leave these
+   * alone — a user decision always outranks `selectedByDefault`.
+   */
+  selectionTouched: Set<string>;
 }
 
 export interface SweepUiSummary {
@@ -107,6 +118,8 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     orderPinned: false,
     collapsedGroups: new Set<string>(),
     expandedScopes: new Set<string>(),
+    skippedDirs: 0,
+    selectionTouched: new Set<string>(),
   };
 
   const rows = buildDisplayRows(state);
@@ -118,7 +131,23 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
 
 export function activePatterns(state: SweepUiState): string[] {
   const enabled = state.catalogPatterns.filter((pattern) => !state.disabledPatterns.has(pattern));
-  return [...new Set([...enabled, ...state.extraPatterns])];
+  const extras = state.extraPatterns.filter((pattern) => !state.disabledPatterns.has(pattern));
+  return [...new Set([...enabled, ...extras])];
+}
+
+/**
+ * Every row the patterns editor can show: built-in catalog first, then custom
+ * patterns passed via --pattern/.sweeprc. Toggling works on both — a disabled
+ * custom pattern sits in `disabledPatterns` like a catalog one.
+ */
+export function allPatterns(state: SweepUiState): string[] {
+  const catalog = new Set(state.catalogPatterns);
+  const extras = state.extraPatterns.filter((pattern) => !catalog.has(pattern));
+  return [...state.catalogPatterns, ...extras];
+}
+
+export function isCustomPattern(state: SweepUiState, pattern: string): boolean {
+  return !state.catalogPatterns.includes(pattern);
 }
 
 function sidebarRowsFor(state: SweepUiState) {
@@ -202,7 +231,7 @@ export function setFocus(state: SweepUiState, focus: UiFocus): SweepUiState {
     return {
       ...state,
       focus,
-      patternIndex: clamp(state.patternIndex, 0, Math.max(0, state.catalogPatterns.length - 1)),
+      patternIndex: clamp(state.patternIndex, 0, Math.max(0, allPatterns(state).length - 1)),
     };
   }
 
@@ -210,10 +239,11 @@ export function setFocus(state: SweepUiState, focus: UiFocus): SweepUiState {
 }
 
 export function setPatternIndex(state: SweepUiState, patternIndex: number): SweepUiState {
-  if (state.catalogPatterns.length === 0) return { ...state, patternIndex: 0 };
+  const count = allPatterns(state).length;
+  if (count === 0) return { ...state, patternIndex: 0 };
   return {
     ...state,
-    patternIndex: clamp(patternIndex, 0, state.catalogPatterns.length - 1),
+    patternIndex: clamp(patternIndex, 0, count - 1),
     focus: "patterns",
   };
 }
@@ -261,21 +291,38 @@ export function setThemeMode(state: SweepUiState, themeMode: ThemeMode): SweepUi
   return { ...state, themeMode };
 }
 
-/** Merge streaming candidates by id (sized re-upserts replace discovery stubs). */
+/**
+ * Merge streaming candidates by id (sized re-upserts replace discovery stubs).
+ *
+ * Newly discovered ids seed into the queue from `selectedByDefault`, matching
+ * the non-streaming plan's `selectedCandidateIds` — without this every `sweep
+ * ui` session would finish scanning with an empty queue. A sized re-upsert
+ * never re-seeds: once an id exists, its queued state is whatever the user
+ * (or the policy) last left it.
+ */
 export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[]): SweepUiState {
   if (incoming.length === 0) return state;
   invalidateSelectorCache();
 
   const anchoredId = getCurrentCandidate(state)?.id;
   const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
+  const selectedIds = new Set(state.selectedIds);
   for (const candidate of incoming) {
     const existing = byId.get(candidate.id);
     // Never let a sized update clobber a user selection decision — ids are
     // deterministic so sized entries arrive with identical fields except bytes.
     byId.set(candidate.id, existing ? { ...existing, ...candidate } : candidate);
+    if (
+      !existing &&
+      candidate.selectedByDefault &&
+      candidate.riskTier !== "blocked" &&
+      !state.selectionTouched.has(candidate.id)
+    ) {
+      selectedIds.add(candidate.id);
+    }
   }
 
-  return reanchor({ ...state, candidates: [...byId.values()] }, undefined, anchoredId);
+  return reanchor({ ...state, candidates: [...byId.values()], selectedIds }, undefined, anchoredId);
 }
 
 /** Re-run display rows and keep the cursor on `anchoredId` (or nearest item). */
@@ -324,6 +371,45 @@ export function setScanning(state: SweepUiState, scanning: boolean): SweepUiStat
 export function setScannedDirs(state: SweepUiState, scannedDirs: number): SweepUiState {
   if (state.scannedDirs === scannedDirs) return state;
   return { ...state, scannedDirs };
+}
+
+export function setSkippedDirs(state: SweepUiState, skippedDirs: number): SweepUiState {
+  if (state.skippedDirs === skippedDirs) return state;
+  return { ...state, skippedDirs };
+}
+
+/**
+ * Fold the finished scan's authoritative plan back into live state.
+ *
+ * Streaming feeds per-entry stubs through `candidateFromEntry`, which enriches
+ * one candidate at a time — cross-candidate insights (workspace stubs, symlink
+ * aliases) can only run once the whole set exists. When the engine finishes it
+ * hands back a real `buildPlan` result; this swaps the stub candidates for the
+ * enriched ones and reconciles the queue:
+ *
+ * - ids the user touched keep the user's decision, even if the policy now
+ *   disagrees (e.g. enrichment demoted a workspace stub to caution);
+ * - everything else follows the plan's `selectedCandidateIds` policy set.
+ */
+export function finalizeScan(state: SweepUiState, plan: ScanPlan | undefined): SweepUiState {
+  if (!plan) return setScanning(state, false);
+
+  const policyIds = new Set(plan.selectedCandidateIds);
+  const selectedIds = new Set<string>();
+  for (const candidate of plan.candidates) {
+    const keep = state.selectionTouched.has(candidate.id)
+      ? state.selectedIds.has(candidate.id)
+      : policyIds.has(candidate.id);
+    if (keep && candidate.riskTier !== "blocked") selectedIds.add(candidate.id);
+  }
+
+  const merged: SweepUiState = {
+    ...state,
+    candidates: plan.candidates,
+    selectedIds,
+    scannedDirs: plan.summary.scannedDirs > 0 ? plan.summary.scannedDirs : state.scannedDirs,
+  };
+  return setScanning(merged, false);
 }
 
 export function toggleSortBy(state: SweepUiState): SweepUiState {
@@ -396,6 +482,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     ...state,
     candidates: [],
     selectedIds: new Set<string>(),
+    selectionTouched: new Set<string>(),
     rowIndex: 0,
     sidebarIndex: 0,
     scopeFilter: null,
@@ -403,6 +490,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     scanning: true,
     orderPinned: true,
     scannedDirs: 0,
+    skippedDirs: 0,
   };
 }
 
@@ -454,8 +542,10 @@ export function toggleSelectionById(state: SweepUiState, candidateId: string): S
   } else {
     selectedIds.add(candidate.id);
   }
+  const selectionTouched = new Set(state.selectionTouched);
+  selectionTouched.add(candidate.id);
 
-  return { ...state, selectedIds };
+  return { ...state, selectedIds, selectionTouched };
 }
 
 export function countSelectedDangerous(state: SweepUiState): number {
@@ -470,28 +560,37 @@ export function countSelectedDangerous(state: SweepUiState): number {
 
 export function selectSafeOnly(state: SweepUiState): SweepUiState {
   const selectedIds = new Set(state.selectedIds);
+  const selectionTouched = new Set(state.selectionTouched);
   for (const candidate of getVisibleCandidates(state)) {
     if (candidate.riskTier === "safe") {
       selectedIds.add(candidate.id);
     }
+    selectionTouched.add(candidate.id);
   }
 
-  return { ...state, selectedIds };
+  return { ...state, selectedIds, selectionTouched };
 }
 
 export function selectVisible(state: SweepUiState, includeDangerous: boolean): SweepUiState {
   const selectedIds = new Set(state.selectedIds);
+  const selectionTouched = new Set(state.selectionTouched);
   for (const candidate of getVisibleCandidates(state)) {
+    selectionTouched.add(candidate.id);
     if (candidate.riskTier === "blocked") continue;
     if (candidate.riskTier === "dangerous" && !includeDangerous) continue;
     selectedIds.add(candidate.id);
   }
 
-  return { ...state, selectedIds };
+  return { ...state, selectedIds, selectionTouched };
 }
 
 export function clearSelection(state: SweepUiState): SweepUiState {
-  return { ...state, selectedIds: new Set<string>() };
+  // Everything currently known counts as user-handled: a mid-scan `u` means
+  // "queue nothing I can see", and the end-of-scan policy pass must not
+  // silently re-add those same artifacts behind the user's back.
+  const selectionTouched = new Set(state.selectionTouched);
+  for (const candidate of state.candidates) selectionTouched.add(candidate.id);
+  return { ...state, selectedIds: new Set<string>(), selectionTouched };
 }
 
 export function getCurrentCandidate(state: SweepUiState): ScanCandidate | undefined {

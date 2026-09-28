@@ -1,6 +1,6 @@
-import type { ScrollBoxRenderable } from "@opentui/core";
+import type { MouseEvent, ScrollBoxRenderable } from "@opentui/core";
 import { bold, fg, t } from "@opentui/core";
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { SelectableRow, useHoverState } from "./SelectableRow.js";
 import { buildMeter, buildSidebarLine, concatStyled, type ScopeRowState } from "./presentation.js";
 import { isScopeAncestor } from "./scope-tree.js";
@@ -25,6 +25,8 @@ export interface ScopeSidebarProps {
   /** Inner content width of the sidebar pane (already minus borders/padding). */
   paneWidth: number;
   onApplyScope: (scopeFilter: string | null) => void;
+  /** Wheel input moves the sidebar cursor by this many rows. */
+  onCursorDelta?: (delta: number) => void;
 }
 
 export function ScopeSidebar({
@@ -33,6 +35,7 @@ export function ScopeSidebar({
   focused,
   paneWidth,
   onApplyScope,
+  onCursorDelta,
 }: ScopeSidebarProps) {
   const scrollRef = useRef<ScrollBoxRenderable>(null);
   const { isHovered, onHoverChange } = useHoverState<number>();
@@ -67,6 +70,21 @@ export function ScopeSidebar({
 
   const meterWidth = Math.max(10, paneWidth - 4);
 
+  // Wheel must move the cursor, not the viewport — the scrollbox scrolling on
+  // its own left the cursor pointed at a row that was no longer visible, so
+  // `enter` applied a scope the user was not looking at. stopPropagation keeps
+  // the event from ever reaching the scrollbox's own scroll handler.
+  const handleWheel = useCallback(
+    (event: MouseEvent) => {
+      const direction = event.scroll?.direction;
+      if (direction !== "up" && direction !== "down") return;
+      event.stopPropagation();
+      const delta = Math.max(1, Math.abs(event.scroll?.delta ?? 1)) * 3;
+      onCursorDelta?.(direction === "up" ? -delta : delta);
+    },
+    [onCursorDelta],
+  );
+
   return (
     <box width="100%" flexGrow={1} minHeight={0} flexDirection="column">
       <ReclaimPanel
@@ -78,7 +96,10 @@ export function ScopeSidebar({
       />
       <scrollbox
         ref={scrollRef}
-        focused={focused}
+        // Never focused: cursor keys belong to the app keymap alone. Giving
+        // the scrollbox a second set of scroll keys made arrows move the view
+        // and the cursor in different amounts.
+        focusable={false}
         flexGrow={1}
         minHeight={3}
         width="100%"
@@ -86,21 +107,23 @@ export function ScopeSidebar({
         scrollX={false}
         contentOptions={{ flexGrow: 0 }}
       >
-        {rows.map((row, index) => (
-          <ScopeRow
-            key={row.key ?? "__all__"}
-            row={row}
-            guide={guides[index] ?? ""}
-            rowState={scopeRowState(row, state, index, cursorIndex, focused)}
-            isCursor={index === cursorIndex && focused}
-            hovered={isHovered(index)}
-            expanded={row.key !== null && state.expandedScopes.has(row.key)}
-            layout={sidebarColumnLayout(paneWidth, countWidth, bytesWidth, row.depth)}
-            tokens={tokens}
-            onSelect={() => onApplyScope(row.key)}
-            onHoverChange={onHoverChange(index)}
-          />
-        ))}
+        <box width="100%" flexDirection="column" onMouseScroll={handleWheel}>
+          {rows.map((row, index) => (
+            <ScopeRow
+              key={row.key ?? "__all__"}
+              row={row}
+              guide={guides[index] ?? ""}
+              rowState={scopeRowState(row, state, index, cursorIndex, focused)}
+              isCursor={index === cursorIndex && focused}
+              hovered={isHovered(index)}
+              expanded={row.key !== null && state.expandedScopes.has(row.key)}
+              layout={sidebarColumnLayout(paneWidth, countWidth, bytesWidth, row.depth)}
+              tokens={tokens}
+              onSelect={() => onApplyScope(row.key)}
+              onHoverChange={onHoverChange(index)}
+            />
+          ))}
+        </box>
       </scrollbox>
     </box>
   );

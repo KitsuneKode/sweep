@@ -53,6 +53,7 @@ describe("runInteractiveCleanup", () => {
       })),
       estimatedTotalBytes: plan.summary.estimatedTotalBytes,
       scannedDirs: plan.summary.scannedDirs,
+      skippedDirs: 0,
       exact: plan.summary.exact,
     };
 

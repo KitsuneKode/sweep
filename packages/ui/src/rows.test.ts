@@ -29,7 +29,7 @@ function planWith(candidates: ScanPlan["candidates"]): ScanPlan {
 }
 
 describe("buildDisplayRows", () => {
-  test("omits a heading when a parent has only one artifact", () => {
+  test("emits a heading even when a parent has only one artifact", () => {
     const state = createUiState(
       planWith([
         {
@@ -59,9 +59,16 @@ describe("buildDisplayRows", () => {
       ]),
     );
 
+    // A lone item with no heading reads as a member of the group above it —
+    // the heading is what keeps "which scope does this row belong to" stable.
     const rows = buildDisplayRows(state);
-    expect(rows.every((row) => row.kind === "item")).toBe(true);
-    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.kind)).toEqual(["header", "item", "header", "item"]);
+    expect(
+      rows
+        .filter((row) => row.kind === "header")
+        .map((row) => (row.kind === "header" ? row.label : ""))
+        .sort(),
+    ).toEqual(["apps/cli/", "apps/docs/"]);
   });
 
   test("keeps a heading when several artifacts share a parent", () => {
@@ -113,7 +120,7 @@ function header(key: string): UiDisplayRow {
 }
 
 function item(id: string): UiDisplayRow {
-  return { kind: "item", candidateId: id };
+  return { kind: "item", candidateId: id, groupLabel: "" };
 }
 
 describe("moveItemRowIndex", () => {
@@ -255,6 +262,6 @@ describe("pinned ordering during a live scan", () => {
     expect(rows.filter((row) => row.kind === "header")).toHaveLength(3);
     // The first two rows are untouched: heading, then its original artifact.
     expect(rows[0]?.kind).toBe("header");
-    expect(rows[1]).toEqual({ kind: "item", candidateId: "c" });
+    expect(rows[1]).toEqual({ kind: "item", candidateId: "c", groupLabel: "apps/web/" });
   });
 });

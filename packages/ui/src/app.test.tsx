@@ -106,7 +106,7 @@ describe("sweep TUI render", () => {
     expect(outcomes).toEqual([{ type: "abort" }]);
   });
 
-  test("select-all then enter applies all visible candidates", async () => {
+  test("select-all then enter still asks for confirmation before applying", async () => {
     const outcomes: SweepUiOutcome[] = [];
     const setup = await mount((result) => {
       outcomes.push(result);
@@ -120,6 +120,14 @@ describe("sweep TUI render", () => {
       setup.mockInput.pressEnter();
       await setup.flush();
     });
+    // Safe/caution-only queues are deletions too — enter opens the dialog,
+    // nothing is applied until y.
+    expect(outcomes).toEqual([]);
+
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
 
     const outcome = outcomes[0];
     expect(outcome?.type).toBe("apply");
@@ -129,7 +137,7 @@ describe("sweep TUI render", () => {
     }
   });
 
-  test("bulk select then enter applies without confirming merely visible dangerous items", async () => {
+  test("bulk select then enter confirms, and merely visible dangerous items are excluded", async () => {
     const plan = createPlan();
     plan.candidates.push({
       id: "cand_danger",
@@ -155,14 +163,20 @@ describe("sweep TUI render", () => {
       await setup.renderOnce();
     });
 
-    // Bulk select (safe + caution only), then enter. Dangerous items that
-    // are only visible (not queued) do not trip the confirm gate.
+    // Bulk select (safe + caution only), then enter — the confirm dialog
+    // still opens (every apply is destructive), and dangerous items that are
+    // only visible are never queued by `a`.
     await act(async () => {
       setup.mockInput.pressKey("a");
       await setup.flush();
     });
     await act(async () => {
       setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    expect(outcomes).toHaveLength(0);
+    await act(async () => {
+      setup.mockInput.pressKey("y");
       await setup.flush();
     });
     expect(outcomes).toHaveLength(1);
@@ -237,7 +251,7 @@ describe("sweep TUI render", () => {
 
     let hooksRef: Parameters<UiScanControl["start"]>[0] | null = null;
     const scan: UiScanControl = {
-      start(hooks) {
+      async start(hooks) {
         hooksRef = hooks;
       },
       syncPatterns() {},
@@ -298,7 +312,7 @@ describe("sweep TUI render", () => {
     expect(threw).toBe(false);
 
     await act(async () => {
-      hooksRef?.onDone({ scannedDirs: 7 });
+      hooksRef?.onDone({ scannedDirs: 7, skippedDirs: 0 });
       await setup.flush();
     });
     expect(hooksRef).not.toBeNull();
@@ -354,7 +368,7 @@ describe("streaming reorder", () => {
 
     let hooks: Parameters<UiScanControl["start"]>[0] | null = null;
     const control: UiScanControl = {
-      start: (h) => {
+      start: async (h) => {
         hooks = h;
       },
       syncPatterns: () => {},
