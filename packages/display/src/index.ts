@@ -79,12 +79,16 @@ export function printGroupedScanPlan(
   const verbose = options.verbose ?? false;
   const selectedIds = new Set(plan.selectedCandidateIds);
 
-  const header = `Scanned ${plan.summary.scannedDirs} dirs in ${targetDir}`;
+  const skipped =
+    plan.summary.skippedDirs && plan.summary.skippedDirs > 0
+      ? ` (${plan.summary.skippedDirs} skipped)`
+      : "";
+  const header = `Scanned ${plan.summary.scannedDirs} dirs${skipped} in ${targetDir}`;
   if (isTTY()) {
     console.log(pc.dim(header));
     console.log(rule());
   } else {
-    console.log(`sweep: scanned ${plan.summary.scannedDirs} dirs in ${targetDir}`);
+    console.log(`sweep: scanned ${plan.summary.scannedDirs} dirs${skipped} in ${targetDir}`);
   }
 
   if (plan.candidates.length === 0) {

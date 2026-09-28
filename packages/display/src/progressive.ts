@@ -6,6 +6,7 @@ import { formatRiskBadge } from "./risk.js";
 
 export interface ProgressiveScanSummary {
   scannedDirs: number;
+  skippedDirs?: number;
   count: number;
   totalBytes: number;
   exact: boolean;
@@ -77,6 +78,9 @@ export function createProgressiveScanRenderer(
       const sizePrefix = summary.exact ? "" : "~";
       const totalLabel = summary.exact ? "total" : "estimated";
 
+      const skipped =
+        summary.skippedDirs && summary.skippedDirs > 0 ? `, ${summary.skippedDirs} skipped` : "";
+
       if (process.stdout.isTTY) {
         console.log();
         console.log(
@@ -84,14 +88,16 @@ export function createProgressiveScanRenderer(
             `${pc.yellow(`${sizePrefix}${formatBytes(summary.totalBytes)}`)} ${totalLabel}`,
         );
         console.log(
-          pc.dim(`Scanned ${pc.bold(summary.scannedDirs.toString())} dirs`) + pc.dim("."),
+          pc.dim(`Scanned ${pc.bold(summary.scannedDirs.toString())} dirs`) +
+            (skipped ? pc.yellow(skipped) : "") +
+            pc.dim("."),
         );
         console.log();
       } else {
         console.log(
           `sweep: found ${summary.count} items (${sizePrefix}${formatBytes(summary.totalBytes)} ${totalLabel})`,
         );
-        console.log(`sweep: scanned ${summary.scannedDirs} dirs`);
+        console.log(`sweep: scanned ${summary.scannedDirs} dirs${skipped}`);
       }
     },
     stopSpinner() {

@@ -55,6 +55,8 @@ export async function handleScan(
           candidateCount: result.entries.length,
           estimatedTotalBytes: result.estimatedTotalBytes,
           scannedDirs: result.scannedDirs,
+          // Sparse — same convention as ScanPlan.summary.skippedDirs.
+          ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),
         },
       } satisfies ScanEvent);
       exitWith(EXIT.OK);

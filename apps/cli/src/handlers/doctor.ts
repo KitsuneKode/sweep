@@ -55,7 +55,10 @@ export async function collectDoctorChecks(targetDir: string): Promise<DoctorChec
   let scanDetail = "not run";
   try {
     const result = await scan(targetDir, config, false);
-    scanDetail = `${result.entries.length} candidates · ${formatBytes(result.estimatedTotalBytes)} · ${result.scannedDirs} dirs`;
+    scanDetail =
+      `${result.entries.length} candidates · ${formatBytes(result.estimatedTotalBytes)} · ` +
+      `${result.scannedDirs} dirs` +
+      (result.skippedDirs > 0 ? ` (${result.skippedDirs} skipped)` : "");
   } catch (error) {
     scanOk = false;
     scanDetail = error instanceof Error ? error.message : String(error);

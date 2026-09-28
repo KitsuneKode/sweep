@@ -82,6 +82,10 @@
               "minimum": 0
             }
           }
+        },
+        "skippedDirs": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

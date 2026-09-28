@@ -56,6 +56,8 @@ export interface ScanResult {
   entries: ScanEntry[];
   estimatedTotalBytes: number;
   scannedDirs: number;
+  /** Directories the walker could not read or had already visited via another path. */
+  skippedDirs: number;
   exact: boolean;
 }
 
@@ -168,6 +170,8 @@ export interface ScanCompletedEvent {
     candidateCount: number;
     estimatedTotalBytes: number;
     scannedDirs: number;
+    /** Unreadable / deduped directories — absent on older producers. */
+    skippedDirs?: number;
   };
 }
 
@@ -188,6 +192,8 @@ export interface ScanPlan {
     candidateCount: number;
     estimatedTotalBytes: number;
     scannedDirs: number;
+    /** Unreadable / deduped directories — absent on plans written before v1.x. */
+    skippedDirs?: number;
     exact: boolean;
     selectedCount: number;
     riskCounts: Record<RiskTier, number>;

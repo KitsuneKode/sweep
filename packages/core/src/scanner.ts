@@ -15,14 +15,21 @@ export interface ScanHooks {
   onEntry?: (entry: ScanEntry) => void;
   /** Fired after size estimation completes for an entry. */
   onEntrySized?: (entry: ScanEntry) => void;
-  /** Fired periodically with walk progress (dirs visited and matches found). */
-  onProgress?: (info: { scannedDirs: number; found: number }) => void;
+  /** Fired periodically with walk progress (dirs visited, matches found, dirs skipped). */
+  onProgress?: (info: { scannedDirs: number; found: number; skippedDirs: number }) => void;
   /** Optional cancellation signal for long-running scans. */
   signal?: AbortSignal;
 }
 
 /** VCS/metadata dirs — never descend (major win on large trees). */
 const SKIP_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr"]);
+
+// macOS and Windows filesystems are case-insensitive, so `.GIT` is the same
+// protected directory as `.git` — compare lowercase there.
+const skipDirName = (name: string): boolean =>
+  SKIP_DIR_NAMES.has(
+    process.platform === "darwin" || process.platform === "win32" ? name.toLowerCase() : name,
+  );
 
 const TRAVERSAL_CONCURRENCY = 16;
 const SIZE_CONCURRENCY = 8;
@@ -366,12 +373,17 @@ export async function scan(
 ): Promise<ScanResult> {
   const entries: ScanEntry[] = [];
   let scannedDirs = 0;
+  let skippedDirs = 0;
   let progressAt = 0;
   const emitProgress = (force = false) => {
     if (!hooks.onProgress) return;
     if (!force && scannedDirs !== 1 && scannedDirs - progressAt < 8) return;
     progressAt = scannedDirs;
-    hooks.onProgress({ scannedDirs, found: entries.length });
+    hooks.onProgress({ scannedDirs, found: entries.length, skippedDirs });
+  };
+  const skipDir = () => {
+    skippedDirs++;
+    emitProgress(true);
   };
   const matches = compileMatcher(config.patterns);
   // Compiled once per scan — the hot loop must not re-resolve paths per entry.
@@ -389,6 +401,29 @@ export async function scan(
 
   type Frame = { dir: string; depth: number };
 
+  /**
+   * Visited directory inodes (`dev:ino`). A bind mount, loop-mounted subtree,
+   * or a hardlinked dir can make the same filesystem object reachable under
+   * multiple paths; without this the walk would visit it forever (depth=-1) or
+   * duplicate work (depth=n). Windows reports ino=0, so dedupe only applies
+   * where inodes are real — junctions there are already excluded as reparse
+   * points.
+   */
+  const visitedDirs = new Set<string>();
+
+  const markDir = async (dir: string): Promise<boolean> => {
+    try {
+      const stat = await lstat(dir);
+      if (stat.ino === 0) return true; // no inode identity — cannot dedupe
+      const key = `${stat.dev}:${stat.ino}`;
+      if (visitedDirs.has(key)) return false;
+      visitedDirs.add(key);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   async function walkDir(frame: Frame): Promise<void> {
     if (signal?.aborted) {
       return;
@@ -401,7 +436,11 @@ export async function scan(
     let items: import("node:fs").Dirent<string>[];
     try {
       items = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
-    } catch {
+    } catch (error) {
+      // An unreadable scan root must not silently produce an empty result —
+      // that reads as "nothing to clean" when the truth is "couldn't look".
+      if (depth === 0) throw error;
+      skipDir();
       return;
     }
 
@@ -445,8 +484,14 @@ export async function scan(
         continue;
       }
 
-      if (item.isDirectory() && !isLink && !SKIP_DIR_NAMES.has(item.name)) {
-        childDirs.push({ dir: fullPath, depth: depth + 1 });
+      if (item.isDirectory() && !isLink && !skipDirName(item.name)) {
+        // Already visited (bind mount / inode alias), or gone — either way
+        // there is nothing to safely read under this path.
+        if (await markDir(fullPath)) {
+          childDirs.push({ dir: fullPath, depth: depth + 1 });
+        } else {
+          skipDir();
+        }
       }
     }
 
@@ -455,6 +500,7 @@ export async function scan(
     }
   }
 
+  await markDir(targetDir);
   await walkDir({ dir: targetDir, depth: 0 });
   emitProgress(true);
 
@@ -468,6 +514,7 @@ export async function scan(
     entries,
     estimatedTotalBytes: entries.reduce((sum, e) => sum + e.estimatedBytes, 0),
     scannedDirs,
+    skippedDirs,
     exact,
   };
 }

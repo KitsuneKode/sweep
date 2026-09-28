@@ -236,6 +236,9 @@ export function assertPathWithinRoot(
 
 /** True when any path segment is a protected VCS metadata directory. */
 export function pathHasProtectedVcsSegment(entryPath: string): boolean {
+  const insensitive = process.platform === "darwin" || process.platform === "win32";
   const segments = normalize(entryPath).split(sep);
-  return segments.some((segment) => PROTECTED_VCS_DIR_NAMES.has(segment));
+  return segments.some((segment) =>
+    PROTECTED_VCS_DIR_NAMES.has(insensitive ? segment.toLowerCase() : segment),
+  );
 }

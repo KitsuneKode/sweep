@@ -223,12 +223,13 @@ describe("scan — adversarial / security", () => {
     expect(result.scannedDirs).toBeGreaterThanOrEqual(0);
   });
 
-  test("returns empty result for unreadable directory (no throw)", async () => {
-    // Permission-denied directories should be silently skipped
-    // We simulate this by passing a non-existent path
-    const result = await scan(join(tmpdir(), "sweep-nonexistent-dir-xyz-123"), DEFAULT_CONFIG);
-    expect(result.entries).toHaveLength(0);
-    expect(result.scannedDirs).toBe(0);
+  test("throws for a root directory that cannot be read", async () => {
+    // An unreadable root must surface as a scan failure — silently returning
+    // an empty result tells the user "nothing to clean" when the truth is
+    // "nothing could be read".
+    await expect(
+      scan(join(tmpdir(), "sweep-nonexistent-dir-xyz-123"), DEFAULT_CONFIG),
+    ).rejects.toThrow();
   });
 
   test("ignore rule prevents traversal via substring match on injected patterns", async () => {

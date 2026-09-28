@@ -38,6 +38,10 @@ export function buildPlan(
       candidateCount: candidates.length,
       estimatedTotalBytes: result.estimatedTotalBytes,
       scannedDirs: result.scannedDirs,
+      // Sparse field: absent means "nothing skipped" (or a pre-field plan).
+      // Keeping zero implicit also keeps JS and Rust plans byte-identical —
+      // the Rust engine cannot report skips yet.
+      ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),
       exact: result.exact,
       selectedCount: 0,
       riskCounts: countRiskTiers(candidates),

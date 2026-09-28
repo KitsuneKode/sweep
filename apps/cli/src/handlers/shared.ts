@@ -107,6 +107,7 @@ function scanResultFromPlan(plan: ScanPlan): ScanResult {
     })),
     estimatedTotalBytes: plan.summary.estimatedTotalBytes,
     scannedDirs: plan.summary.scannedDirs,
+    skippedDirs: plan.summary.skippedDirs ?? 0,
     exact: plan.summary.exact,
   };
 }
@@ -221,6 +222,7 @@ export async function runScanWithDisplay(
 
     progressive.finish({
       scannedDirs: result.scannedDirs,
+      skippedDirs: result.skippedDirs,
       count: result.entries.length,
       totalBytes: result.estimatedTotalBytes,
       exact: result.exact,

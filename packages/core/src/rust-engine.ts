@@ -276,7 +276,11 @@ export async function scanToPlanViaRust(
       }
 
       if (event.type === "candidate_found") {
-        options.onEntry?.(scanEntryFromCandidate(event.candidate));
+        const entry = scanEntryFromCandidate(event.candidate);
+        // Found-but-never-updated candidates must still reach the final plan;
+        // keying by path means a later candidate_updated replaces this stub.
+        entriesByPath.set(entry.path, entry);
+        options.onEntry?.(entry);
       } else if (event.type === "candidate_updated") {
         const entry = scanEntryFromCandidate(event.candidate);
         entriesByPath.set(entry.path, entry);
@@ -285,6 +289,7 @@ export async function scanToPlanViaRust(
         options.onProgress?.({
           scannedDirs: event.scannedDirs,
           found: event.found,
+          skippedDirs: 0,
         });
       } else if (event.type === "scan_completed") {
         state.summary = event.summary;
@@ -307,6 +312,9 @@ export async function scanToPlanViaRust(
       entries,
       estimatedTotalBytes,
       scannedDirs: completed?.scannedDirs ?? 0,
+      // The Rust engine does not currently report skipped/unreadable dirs;
+      // forward-compatible with a future `skippedDirs` field on the event.
+      skippedDirs: completed?.skippedDirs ?? 0,
       exact,
     },
     options.selectionPolicy ?? DEFAULT_SELECTION_POLICY,

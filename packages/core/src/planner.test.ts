@@ -43,6 +43,7 @@ describe("planner", () => {
       entries: [safeEntry, dangerousEntry],
       estimatedTotalBytes: 15,
       scannedDirs: 3,
+      skippedDirs: 0,
       exact: false,
     };
 
