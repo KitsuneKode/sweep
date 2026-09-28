@@ -7,14 +7,18 @@
 Think [`npkill`](https://github.com/voidcosmos/npkill), but monorepo-aware, risk-tiered, scriptable, and with a live TUI that boots instantly and streams results as it scans.
 
 ```
- ◆ sweep                                    12 found · 8 selected · 2.2 GB
- ╭─ scopes ────────────────╮ ╭─ artifacts ──────────────────────────────╮
- │  RECLAIM                │ │ ▌● node_modules              1.4 GB  ✓  │
- │  ██████████░░░░░░ 68%   │ │  ○ .turbo                     12 MB  ✓  │
- │  2.2GB of 3.2GB         │ │  ! coverage                  240 MB  !  │
- │ › all scopes  12  3.2G  │ │  ⊘ .git                              ⊘  │
- ╰─────────────────────────╯ ╰─ node_modules · directory · /path ───────╯
- NORMAL  j/k move · space toggle · s/a/u select · enter apply · ? help
+ ◆ sweep                              18 found · 10 queued · 5.8 GB
+ ╭─ scopes ───────────────╮ ╭─ artifacts ────────────────────────────────╮
+ │  ████████░░░░░ 62%     │ │      Name                       Size       │
+ │  5.8GB of 9.3GB        │ │ ──────────────────────────────────────     │
+ │ › all scopes    18 9.3G│ │ ▾ apps/web/   3 · 2.4GB · 3 queued       █ │
+ │ ▸ apps/          6 3.6G│ │ ▌ ● node_modules              1.7 GB     █ │
+ │ ▸ .worktrees/    3 858M│ │   ● .next                   610.4 MB     █ │
+ │                        │ │ ▾ vendor/legacy/           1 · 2.1GB     █ │
+ │                        │ │   ○ target                    2.1 GB     ░ │
+ ╰────────────────────────╯ ╰────────────────────────────────────────────╯
+  ✓ node_modules  1.7 GB  /home/user/projects/monorepo/apps/web
+    NORMAL  ↑↓ move · space queue · enter apply · / filter · ? help
 ```
 
 ---
@@ -77,8 +81,12 @@ sweep doctor --json     # config + environment + dry-scan report
 | `--config <path>`        |       | Explicit config file                               |
 | `--engine <backend>`     |       | `js` (default), `rust`, or `auto`                  |
 | `--no-color`             |       | Disable color output                               |
+| `--quiet`                | `-q`  | Suppress non-essential output                      |
+| `--verbose`              |       | Per-candidate scan progress                        |
 
-`scan` adds `--json` and `--json-stream`. `apply` adds `--json`. `doctor` adds `--json`.
+`--json` is global (structured output for `scan`, `apply`, `doctor`, and the
+default `clean` flow). `scan` additionally offers `--json-stream` — newline-
+delimited `ScanEvent`s while the scan runs.
 
 ### Examples
 
@@ -102,9 +110,19 @@ phase. Review, filter, and delete without leaving the terminal.
 
 - **Scope tree** — artifacts grouped by directory; `h`/`l` (or clicking the
   header) collapses/expands groups, `w`/`e` folds/unfolds all
-- **Risk glyphs** — `✓` safe · `!` caution · `✗` dangerous · `⊘` blocked (hard-locked)
+- **Status mark** — one glyph per row: `●` queued / `○` idle / `⊘` blocked
+  (hard-locked). Color carries the risk tier — safe is accent, caution amber,
+  dangerous red
+- **Group headers** — every group is headed `▾ apps/web/ · 3 · 2.4GB`, even
+  single-item ones, so no orphan row reads as part of the group above it. The
+  owning header sticks at the top while its group scrolls past
 - **Reclaim meter** — live selected-vs-total bytes with percentage
-- **Statusline** — mode chip (`SCANNING`, `NORMAL`, …), contextual hints, active filters
+- **Statusline** — mode chip (`SCANNING`, `NORMAL`, …), contextual hints,
+  active filters; dead keys report why they did nothing
+- **Scale** — the list is windowed: only visible rows render, so thousands of
+  artifacts stay at single-digit-ms per keystroke. While a scan runs, rows
+  hold discovery order so nothing moves under the cursor; the list re-sorts
+  once when the scan completes
 
 ### Keys
 
@@ -114,21 +132,21 @@ Arrows work everywhere; letter keys are speed aliases.
 | ---------------------------------- | ---------------------------------- | ----------------------------------------- |
 | `↑↓` / `j k`                       | move cursor                        |                                           |
 | `g` / `G` or `Home/End`            | first / last item                  |                                           |
-| `Ctrl-U` / `Ctrl-D` or `PgUp/PgDn` | half page                          |                                           |
+| `Ctrl-U` / `Ctrl-D` or `PgUp/PgDn` | page up / down                     | moves one viewport                        |
 | `Space`                            | toggle selection                   | blocked items never toggle                |
 | `s` / `a` / `u`                    | select safe · safe+caution · clear | bulk never touches dangerous              |
-| `Enter`                            | apply deletion                     | red confirm when risky items are selected |
+| `Enter`                            | apply deletion                     | **always confirms**; red banner on danger |
 | `h` / `l` (or click header)        | collapse / expand group            | tree-style triage                         |
 | `w` / `e`                          | collapse all · expand all          |                                           |
 | `o`                                | sort size ↔ name                   | size-desc default                         |
-| `/` then type                      | filter artifacts                   | matches name/path/kind/risk               |
+| `/` then type                      | filter artifacts                   | matches name/path/kind/risk; `esc` clears |
 | `Tab` / `Shift+Tab`                | cycle panes                        | artifacts ↔ scopes ↔ filter               |
 | `1–4`                              | risk filter                        | all / safe / caution / dangerous          |
 | `p`                                | pattern editor                     | toggle defaults, add customs — then `r`   |
 | `r`                                | rescan from disk                   | honors pattern edits; safe mid-scan       |
 | `t`                                | theme                              | dark · light · auto                       |
 | `Esc`                              | **walk back one layer**            | never quits — see below                   |
-| `q`                                | quit                               | explicit only                             |
+| `q` / `Ctrl-C`                     | quit                               | `Ctrl-C` works even inside modals/search  |
 
 **Esc philosophy:** pressing `Esc` unwinds exactly one thing per press — closes
 the help modal, leaves the filter, clears the risk filter, clears scope,
@@ -137,8 +155,10 @@ selection to a mis-press.
 
 ### Mouse
 
-Scroll, hover, click-to-focus rows, click again to toggle, click group headers
-to fold/unfold, drag the scrollbar.
+Wheel moves the cursor three rows per notch — the view follows it, so the
+selection is never pointed at a row you can't see. Click focuses a row, click
+again queues it, click a group header to fold it. The scrollbar lane is a
+position indicator, not a drag target.
 
 ---
 
@@ -204,7 +224,9 @@ Layered guarantees:
 5. **Symlinks are removed, never followed.** Path traversal (`..`, null bytes)
    rejected; unsafe patterns rejected at parse time.
 6. **Partial-failure honesty** — the final report lists every path that failed
-   and why; exit code reflects it.
+   and why; exit code reflects it. A scan that couldn't read part of the tree
+   says so (`N skipped` in the TUI, counts in `scan --json`) instead of looking
+   complete.
 
 ---
 
@@ -216,7 +238,7 @@ Layered guarantees:
 | `1`  | User aborted                     |
 | `2`  | Guardrail violation              |
 | `3`  | Config parse or validation error |
-| `4`  | Filesystem error during deletion |
+| `4`  | Operation failed (scan/apply/IO) |
 | `5`  | Doctor warnings                  |
 
 ---
