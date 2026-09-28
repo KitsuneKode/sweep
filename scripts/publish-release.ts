@@ -54,6 +54,11 @@ const skipNative = process.argv.includes("--skip-native");
 const requiresNative = process.env.SWEEP_RELEASE_REQUIRES_NATIVE === "true";
 const version = cliVersion();
 
+// Gate before any publish: a failing check must not strand engine packages on
+// the registry with no matching CLI release.
+console.log("\nrunning prepublishOnly...");
+run("bun", ["run", "prepublishOnly"]);
+
 if (!skipNative) {
   const packed: string[] = [];
   const missing: string[] = [];
@@ -104,9 +109,6 @@ if (!skipNative) {
 } else {
   console.log("skipping native engine publish (--skip-native)");
 }
-
-console.log("\nrunning prepublishOnly...");
-run("bun", ["run", "prepublishOnly"]);
 
 console.log("\npublishing @kitsunekode/sweep...");
 run("bunx", ["changeset", "publish"]);
