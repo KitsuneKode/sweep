@@ -72,7 +72,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.12
+          bun-version: 1.4.2
 
       # Trusted publishing (OIDC) needs setup-node v6: v4/v5 write an
       # `_authToken=` line into .npmrc, and npm reads that as "auth is already

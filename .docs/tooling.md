@@ -8,7 +8,7 @@ packages (`apps/cli`, `packages/*`).
 ### Quality gate (run before merge)
 
 ```bash
-bun run check          # turbo: fmt + lint + test + typecheck (all packages)
+bun run check          # turbo: fmt:check + lint + test + typecheck (all packages)
 bun run build          # turbo: bundle CLI → apps/cli/dist/
 bun run preflight      # turbo: publish smoke tests (after build)
 ```
@@ -29,13 +29,27 @@ bun run preflight      # turbo: publish smoke tests (after build)
 ### Rust (when editing `crates/`)
 
 ```bash
-bun run rust:check     # fmt --check + clippy + test (run before merge)
-bun run rust:fmt       # cargo fmt --all
-bun run rust:lint      # cargo clippy --workspace -- -D warnings
-bun run rust:test      # cargo test --workspace
-cargo build -p sweep-engine-cli   # produces target/debug/sweep-engine
-cargo build --release -p sweep-engine-cli
+bun run rust:check     # fmt:check + strict clippy + test (run before merge)
+bun run rust:fmt       # cargo fmt --all (writes)
+bun run rust:fmt-check # cargo fmt --all --check
+bun run rust:lint      # cargo clippy --workspace --locked -- -D warnings
+bun run rust:test      # cargo test --workspace --locked
+bun run engine:build:debug        # produces target/debug/sweep-engine
+bun run engine:build              # release binary
 ```
+
+These route through Turborepo's **experimental Cargo workspace support**
+(`futureFlags.experimentalCargoWorkspaces` + `experimentalTaskCommand`): each
+crate in `crates/` is a Turbo package named after its Cargo `[package] name`,
+and `[workspace.metadata] name = "sweep-rust"` in `Cargo.toml` creates the
+synthetic workspace package. `sweep-rust#test` is `cargo test --workspace
+--locked`, `sweep-rust#lint` is the strict clippy override (`-D warnings`),
+`sweep-rust#fmt:check` is `cargo fmt --all --check`, and
+`sweep-engine-cli#build` / `sweep-engine-cli#build:release` produce the debug
+and release `sweep-engine` binaries. Cargo dependency edges are real graph
+edges (`sweep-engine-cli#build` waits on `sweep-engine#build` etc.), so Turbo
+caches per crate and inputs track only the crate plus its Cargo deps — a
+`sweep-types` edit no longer busts every Rust task.
 
 Workspace lints in `Cargo.toml` deny `clippy::unwrap_used` and
 `clippy::expect_used`. Formatting uses `rustfmt.toml`; toolchain pins `rustfmt`
@@ -100,17 +114,58 @@ The published npm package is `@kitsunekode/sweep` in `apps/cli`. The private roo
 (`sweep-monorepo`) must **not** be listed in `workspaces.packages` (never add `"."`).
 Root `package.json` scripts are orchestrators (`turbo run build`, etc.).
 
-- `typecheck`, `lint`, `fmt` — depend on `transit`
+- `typecheck`, `lint`, `fmt`, `fmt:check` — depend on `transit`
 - `test` — depends on `transit` and `^build` (CLI bundle for integration tests)
-- `check` — aggregates `fmt`, `lint`, `test`, `typecheck`
+- `check` — aggregates `fmt:check`, `lint`, `test`, `typecheck` (`fmt` writes;
+  `fmt:check` is the read-only `oxfmt --check` variant so `check` fails CI on
+  unformatted files instead of silently rewriting them)
 - `check:affected` — same gate, only packages/tasks affected by git changes
   (`turbo run check --affected`; optional `--affected-base=origin/main` in CI)
-- Rust engine tasks (`//#engine:build`, `//#rust:fmt`, etc.) cache per `crates/**`
-  inputs instead of busting all JS tasks via `globalDependencies`
+- Cargo built-in task names (`build`, `test`, `check`, `lint`, `format`,
+  `clean`, `dev`) collide with the JS task names — `turbo run test` unfiltered
+  would run both Bun tests and `cargo test`, and would fail for contributors
+  without a Rust toolchain. **Convention: root scripts always scope selection**
+  — `--filter "@kitsunekode/*"` on the JS gates, explicit
+  `turbo run "sweep-rust#<task>"` / `"sweep-engine-cli#build"` for Rust. Task
+  `dependsOn` edges still cross languages where declared:
+  `packages/integration-tests`' `test` waits on `sweep-engine-cli#build` so
+  the debug engine binary exists before engine-native contract tests.
+- `//#`-style root tasks are gone — the Cargo workspace packages replaced
+  them. If one is ever reintroduced, remember Turbo resolves `//#name` to a
+  **plain-named** root script (`name`, not `//#name`), and Turbo 2.11's loop
+  detection rejects a script that calls `turbo run` back into the same task
+  suffix.
+
+Local cache eviction is on: `cacheMaxAge: 14d`, `cacheMaxSize: 10GB`. Cached
+task logs are quiet (`outputLogs: "new-only"`).
+
+The Cargo workspace flags are `futureFlags` — experimental and reversible. If
+the feature is ever removed upstream, the fallback is `//#` root tasks or
+direct `cargo` scripts; the `rust:*` script names should stay the public
+surface either way.
+
+**Edge cases this introduces, and how they're handled:**
+
+- **No Rust toolchain → every turbo command fails.** Package discovery runs
+  `cargo metadata` before any task or filter is evaluated, so even
+  `bun run fmt` dies with `failed to run \`cargo metadata\``. The Rust
+toolchain is a hard dev prerequisite (see `getting-started.md`); the
+`--filter "@kitsunekode/*"` convention only scopes *which tasks run\*, not
+  whether cargo must exist.
+- **`devEngines` vs npm-in-repo.** npm 11+ enforces `devEngines` by walking up
+  to the workspace root, so `runtime: bun` would make _every_ `npm` invocation
+  inside the repo fail (`EBADDEVENGINES`) — including `npm pack` and the
+  `npm publish` calls in `scripts/publish-release.ts`. Both fields therefore
+  carry `onFail: "warn"`: npm prints the mismatch as a warning and proceeds,
+  which keeps trusted publishing and `npm pack` working while still telling
+  anyone running `npm install` they're in a Bun workspace.
+- **`bun run clean` never touches `target/`.** Turbo registers no `clean`
+  task on the Cargo workspace package, so `cargo clean` is deliberately
+  unreachable from the JS scripts.
 
 Package-specific overrides live in per-package `turbo.json` files (e.g.
 `apps/cli` for bundle inputs/outputs,
-`packages/integration-tests` for fixture paths and `//#engine:build:debug`).
+`packages/integration-tests` for fixture paths and `sweep-engine-cli#build`).
 
 ### Bun dependency catalog
 
@@ -139,15 +194,17 @@ Use `"catalog:"` only in workspace `dependencies` / `devDependencies`. Published
 packages (e.g. `apps/cli`) must use **literal semver** in `peerDependencies` and
 `optionalDependencies` — npm consumers do not understand `catalog:`.
 
-CI runs:
+CI runs (typescript job):
 
 ```bash
-bunx turbo run check --affected
-bunx turbo run build
-bunx turbo run preflight
+bunx turbo run check build preflight --filter "@kitsunekode/*" --continue
 ```
 
-See `.github/workflows/ci.yml` and `.github/workflows/rust.yml`.
+The rust job runs `turbo run "sweep-rust#fmt:check" "sweep-rust#lint"
+"sweep-rust#test" --continue`, and the cross-platform job typechecks and
+builds the CLI bundle on macOS/Windows.
+
+See `.github/workflows/ci.yml` and `.github/workflows/native-engine-release.yml`.
 
 Test layout, prompts, and engine parity: [.docs/testing.md](testing.md).
 

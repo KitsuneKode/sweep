@@ -20,7 +20,8 @@
     "bench:large-stream": "bun run ./benchmarks/large-stream.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
-    "fmt": "oxfmt src"
+    "fmt": "oxfmt src",
+    "fmt:check": "oxfmt --check src"
   },
   "dependencies": {
     "@kitsunekode/sweep-protocol": "workspace:*",

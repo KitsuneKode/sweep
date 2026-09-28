@@ -9,7 +9,8 @@
     "verify-binary": "bun run ./scripts/verify-binary.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint scripts",
-    "fmt": "oxfmt scripts"
+    "fmt": "oxfmt scripts",
+    "fmt:check": "oxfmt --check scripts"
   },
   "dependencies": {},
   "devDependencies": {

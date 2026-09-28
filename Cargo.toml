@@ -30,6 +30,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 unwrap_used = "deny"
 expect_used = "deny"
 
+# Identity for Turborepo's experimental Cargo workspace support: this
+# synthetic workspace package is `sweep-rust`, so `turbo run "sweep-rust#test"`
+# runs `cargo test --workspace`. Member crates are their own packages.
+[workspace.metadata]
+name = "sweep-rust"
+
 [profile.release]
 lto = true
 codegen-units = 1

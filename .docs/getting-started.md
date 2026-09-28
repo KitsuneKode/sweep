@@ -2,9 +2,12 @@
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) 1.3+ (matches `packageManager` in root `package.json`)
+- [Bun](https://bun.sh) 1.4.2+ (matches `devEngines` in root `package.json`)
 - Node.js ≥ 18 (for preflight smoke tests and `npm link` consumers)
-- Rust toolchain (only if editing `crates/` or using `--engine rust`)
+- Rust toolchain (via rustup — `rust-toolchain.toml` pins stable + rustfmt +
+  clippy). Required, not optional: Turborepo runs `cargo metadata` while
+  discovering the Cargo workspace, so **every** `turbo run …` command — even
+  the JS-only gates — fails without `cargo` on `PATH`.
 
 ## Install
 

@@ -1,30 +1,58 @@
 {
-  "$schema": "https://turbo.build/schema.json",
+  "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
+  "futureFlags": {
+    "experimentalCargoWorkspaces": true,
+    "experimentalTaskCommand": true
+  },
+  "cacheMaxAge": "14d",
+  "cacheMaxSize": "10GB",
+  "globalDependencies": [".oxfmtrc.json"],
   "globalEnv": ["CI", "OS", "RUNNER_OS"],
-  "globalPassThroughEnv": ["HOME", "PATH", "TMPDIR", "SWEEP_ENGINE_PATH", "NO_COLOR"],
+  "globalPassThroughEnv": [
+    "HOME",
+    "PATH",
+    "TMPDIR",
+    "XDG_CONFIG_HOME",
+    "APPDATA",
+    "NO_COLOR",
+    "FORCE_COLOR",
+    "COLORFGBG",
+    "SWEEP_ENGINE_PATH",
+    "SWEEP_ENGINE_FROM_NPM",
+    "CARGO_HOME",
+    "RUSTUP_HOME"
+  ],
   "tasks": {
     "transit": {
       "dependsOn": ["^transit"]
     },
     "build": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "outputLogs": "new-only"
     },
     "typecheck": {
-      "dependsOn": ["transit"]
+      "dependsOn": ["transit"],
+      "outputLogs": "new-only"
     },
     "lint": {
-      "dependsOn": ["transit"]
+      "dependsOn": ["transit"],
+      "outputLogs": "new-only"
     },
     "fmt": {
       "dependsOn": ["transit"],
       "cache": true
     },
+    "fmt:check": {
+      "dependsOn": ["transit"],
+      "outputLogs": "new-only"
+    },
     "test": {
-      "dependsOn": ["transit", "^build"]
+      "dependsOn": ["transit", "^build"],
+      "outputLogs": "new-only"
     },
     "check": {
-      "dependsOn": ["fmt", "lint", "test", "typecheck"],
+      "dependsOn": ["fmt:check", "lint", "test", "typecheck"],
       "cache": false
     },
     "preflight": {
@@ -33,25 +61,35 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "interruptible": true
     },
     "clean": {
       "cache": false
     },
-    "//#engine:build:debug": {
+    "sweep-rust#fmt:check": {
+      "command": ["cargo", "fmt", "--all", "--check"],
+      "cache": true,
+      "inputs": [
+        "$TURBO_ROOT$/crates/**",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/rustfmt.toml"
+      ]
+    },
+    "sweep-rust#lint": {
+      "command": ["cargo", "clippy", "--workspace", "--locked", "--", "-D", "warnings"],
       "cache": true,
       "inputs": [
         "$TURBO_ROOT$/crates/**",
         "$TURBO_ROOT$/Cargo.toml",
         "$TURBO_ROOT$/Cargo.lock",
         "$TURBO_ROOT$/rust-toolchain.toml"
-      ],
-      "outputs": [
-        "$TURBO_ROOT$/target/debug/sweep-engine",
-        "$TURBO_ROOT$/target/debug/sweep-engine.exe"
       ]
     },
-    "//#engine:build": {
+    "sweep-engine-cli#build:release": {
+      "command": ["cargo", "build", "--release", "--package", "sweep-engine-cli", "--locked"],
       "cache": true,
       "inputs": [
         "$TURBO_ROOT$/crates/**",
@@ -62,36 +100,6 @@
       "outputs": [
         "$TURBO_ROOT$/target/release/sweep-engine",
         "$TURBO_ROOT$/target/release/sweep-engine.exe"
-      ]
-    },
-    "//#rust:fmt": {
-      "cache": false,
-      "inputs": [
-        "$TURBO_ROOT$/crates/**",
-        "$TURBO_ROOT$/Cargo.toml",
-        "$TURBO_ROOT$/Cargo.lock",
-        "$TURBO_ROOT$/rust-toolchain.toml"
-      ]
-    },
-    "//#rust:lint": {
-      "dependsOn": ["//#engine:build:debug"],
-      "cache": false,
-      "inputs": [
-        "$TURBO_ROOT$/crates/**",
-        "$TURBO_ROOT$/Cargo.toml",
-        "$TURBO_ROOT$/Cargo.lock",
-        "$TURBO_ROOT$/rust-toolchain.toml"
-      ]
-    },
-    "//#rust:test": {
-      "dependsOn": ["//#engine:build:debug"],
-      "cache": true,
-      "inputs": [
-        "$TURBO_ROOT$/crates/**",
-        "$TURBO_ROOT$/Cargo.toml",
-        "$TURBO_ROOT$/Cargo.lock",
-        "$TURBO_ROOT$/rust-toolchain.toml",
-        "$TURBO_ROOT$/tests/fixtures/**"
       ]
     }
   }

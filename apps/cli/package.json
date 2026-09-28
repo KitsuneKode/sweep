@@ -48,8 +48,9 @@
     "test": "bun test src scripts",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src",
-    "fmt": "oxfmt src"
+    "lint": "oxlint src scripts",
+    "fmt": "oxfmt src scripts",
+    "fmt:check": "oxfmt --check src scripts"
   },
   "dependencies": {
     "@kitsunekode/sweep-core": "workspace:*",
