@@ -1,4 +1,5 @@
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, dim, fg, t } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { useMemo } from "react";
@@ -189,7 +190,7 @@ export function ReviewPane({
               content={
                 hasFilter
                   ? state.filter.length > 0
-                    ? `No artifacts match "${state.filter}".`
+                    ? `No artifacts match "${sanitizeTerminalText(state.filter)}".`
                     : "No artifacts match the current filter."
                   : "No artifacts found."
               }

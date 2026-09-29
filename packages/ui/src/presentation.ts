@@ -1,5 +1,6 @@
 import { relative } from "node:path";
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { bold, dim, fg, StyledText, t } from "@opentui/core";
 import type { TextChunk } from "@opentui/core";
@@ -165,6 +166,10 @@ export function splitNameCell(
   parent: string,
   width: number,
 ): { nameText: string; parentText: string } {
+  // Filenames are attacker-controlled bytes — escape terminal controls before
+  // they reach the cell buffer, or a hostile dirname injects ANSI into the TUI.
+  name = sanitizeTerminalText(name);
+  parent = sanitizeTerminalText(parent);
   if (width <= 0) return { nameText: "", parentText: "" };
   if (parent.length === 0) {
     return { nameText: truncateEnd(name, width), parentText: "" };
@@ -201,6 +206,7 @@ function truncateEnd(value: string, max: number): string {
  */
 export function truncateScopeLabel(label: string, max: number): string {
   if (max <= 0) return "";
+  label = sanitizeTerminalText(label);
   if (label.length <= max) return label.padEnd(max);
 
   const trailingSlash = label.endsWith("/");
@@ -219,7 +225,7 @@ export function truncateScopeLabel(label: string, max: number): string {
 
 export function formatPatternRow(pattern: string, enabled: boolean): string {
   const mark = enabled ? "✓" : "·";
-  return ` ${mark} ${pattern}`;
+  return ` ${mark} ${sanitizeTerminalText(pattern)}`;
 }
 
 function joinStyled(segments: StyledText[]): StyledText {
@@ -293,7 +299,11 @@ export function buildHeaderStats(
       hidden > 0 && w >= 100
         ? `${padCount(summary.selectedCount)} queued (${summary.visibleSelectedCount} shown)`
         : `${padCount(summary.selectedCount)} queued`;
-    parts.push(t`${fg(tokens.accent)(queued)}`);
+    // Under 84 cols the sidebar and statusline tally are both gone — fold the
+    // reclaimable bytes into the queue chip so the number a destructive
+    // keystroke acts on is never invisible.
+    const queuedLabel = w >= 84 ? queued : `${queued} · ${formatBytes(summary.selectedBytes)}`;
+    parts.push(t`${fg(tokens.accent)(queuedLabel)}`);
     if (w >= 84) {
       parts.push(t`${bold(fg(tokens.positive)(formatBytes(summary.selectedBytes)))}`);
     }
@@ -348,7 +358,7 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
         row.selectedCount > 0
           ? `  ${dim("·")}  ${fg(tokens.positive)(`${row.selectedCount} queued`)}`
           : "";
-      return t`${fg(tokens.textMuted)(row.label)}  ${fg(tokens.textDim)(`${row.itemCount} item${row.itemCount === 1 ? "" : "s"} · ${compactBytesLabel(row.bytes)}`)}${queued}  ${fg(tokens.textDim)(row.collapsed ? "· l/space expands" : "· h/space collapses")}`;
+      return t`${fg(tokens.textMuted)(sanitizeTerminalText(row.label))}  ${fg(tokens.textDim)(`${row.itemCount} item${row.itemCount === 1 ? "" : "s"} · ${compactBytesLabel(row.bytes)}`)}${queued}  ${fg(tokens.textDim)(row.collapsed ? "· l/space expands" : "· h/space collapses")}`;
     }
     return t`${fg(tokens.textDim)("No matching artifacts.")}`;
   }
@@ -357,7 +367,7 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
   const glyph = fg(colors[candidate.riskTier])(riskGlyph[candidate.riskTier]);
   const kind = fg(tokens.textMuted)(candidate.kind);
   const size = fg(tokens.textSecondary)(formatBytes(candidate.estimatedBytes));
-  const path = fg(tokens.textSecondary)(truncateMiddle(candidate.path, 64));
+  const path = fg(tokens.textSecondary)(truncateMiddle(sanitizeTerminalText(candidate.path), 64));
   const flag = candidate.isSymlink
     ? fg(tokens.warning)(" symlink")
     : candidate.reasons.includes("workspace-stub")

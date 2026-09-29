@@ -1,6 +1,7 @@
 import { bold, fg, t } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import {
   Component,
@@ -14,6 +15,7 @@ import {
 } from "react";
 import { ReviewPane } from "./ReviewPane.js";
 import { handleKeymap } from "./keymap.js";
+import { darkTheme } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
 import { openUiSession } from "./runtime.js";
 import {
@@ -80,15 +82,23 @@ export interface SweepAppProps {
 }
 
 function styledContentFallback(message: string): ReactNode {
+  // Renders when the app crashed before (or without) theme context — always
+  // uses the dark palette directly rather than resolving a mode.
   return (
-    <box width="100%" height="100%" flexDirection="column" padding={1} backgroundColor="#090b10">
+    <box
+      width="100%"
+      height="100%"
+      flexDirection="column"
+      padding={1}
+      backgroundColor={darkTheme.bg}
+    >
       <text
-        content={t`${bold(fg("#f87171")("◆ sweep"))} ${fg("#64748b")("— the interactive view hit an error")}`}
+        content={t`${bold(fg(darkTheme.danger)("◆ sweep"))} ${fg(darkTheme.textMuted)("— the interactive view hit an error")}`}
       />
       <text content="" />
-      <text content={message} fg="#e2e8f0" />
+      <text content={sanitizeTerminalText(message)} fg={darkTheme.text} />
       <text content="" />
-      <text content="Press q or Ctrl+C to exit, then re-run with --no-ui." fg="#64748b" />
+      <text content="Press q or Ctrl+C to exit, then re-run with --no-ui." fg={darkTheme.textDim} />
     </box>
   );
 }
@@ -362,6 +372,15 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
   const headerStats = buildHeaderStats(plan, summary, tokens, dryRun, dimensions.width);
 
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
+  // The sidebar is the scope filter's control surface, and it hides under 72
+  // cols — without a chip the list is silently filtered with no way to see why
+  // (esc still clears it).
+  const scopeFilterLabel =
+    state.scopeFilter === null
+      ? undefined
+      : state.scopeFilter === ""
+        ? "project root"
+        : state.scopeFilter;
 
   // Overlays cover the panes but not the statusline, so the footer has to
   // describe whatever is actually on top or the user is left with no visible
@@ -460,6 +479,12 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
               wrapMode="none"
             />
           ) : null}
+          {roomForChips && scopeFilterLabel ? (
+            <text
+              content={t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`}
+              wrapMode="none"
+            />
+          ) : null}
           {roomForChips && state.sortBy === "name" ? (
             <text content={t`  ${fg(tokens.info)("· sorted by name")}`} wrapMode="none" />
           ) : null}
@@ -485,7 +510,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
           <text content={t`${fg(tokens.danger)("The scan engine reported an error:")}`} />
           <text content="" />
-          <text content={scanError} fg={tokens.text} />
+          <text content={sanitizeTerminalText(scanError)} fg={tokens.text} />
           <text content="" />
           <text
             content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
