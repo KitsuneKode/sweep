@@ -21,6 +21,8 @@ Think [`npkill`](https://github.com/voidcosmos/npkill), but monorepo-aware, risk
     NORMAL  ↑↓ move · space queue · enter apply · / filter · ? help
 ```
 
+![sweep TUI demo — streaming scan, scope sidebar, queue and apply](assets/demo.gif)
+
 ---
 
 ## Install
