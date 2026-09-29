@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
@@ -9,7 +9,7 @@ import {
   resolveRustEngineBinary,
 } from "@kitsunekode/sweep-core/rust-engine";
 import { scan } from "@kitsunekode/sweep-core/scanner";
-import { formatBytes } from "@kitsunekode/sweep-display";
+import { formatBytes, sanitizeTerminalText } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { applyNoColor, isOpenTuiAvailable, writeJson } from "./shared.js";
 
@@ -34,6 +34,14 @@ function duAvailable(): boolean {
   try {
     execFileSync("du", ["-sk", "."], { stdio: "ignore", timeout: 2000 });
     return true;
+  } catch {
+    return false;
+  }
+}
+
+function targetIsDirectory(targetDir: string): boolean {
+  try {
+    return statSync(targetDir).isDirectory();
   } catch {
     return false;
   }
@@ -66,7 +74,13 @@ export async function collectDoctorChecks(targetDir: string): Promise<DoctorChec
 
   return [
     { name: "protocol", ok: true, detail: PROTOCOL_VERSION },
-    { name: "target", ok: true, detail: targetDir },
+    {
+      name: "target",
+      ok: targetIsDirectory(targetDir),
+      detail: targetIsDirectory(targetDir)
+        ? targetDir
+        : `${targetDir} (missing or not a directory)`,
+    },
     {
       name: "config",
       ok: configValidity.ok,
@@ -125,7 +139,7 @@ export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
       if (quiet && check.ok && !verbose) continue;
 
       const status = check.ok ? "ok" : "warn";
-      console.log(`${status}\t${check.name}\t${check.detail}`);
+      console.log(`${status}\t${check.name}\t${sanitizeTerminalText(check.detail)}`);
     }
 
     exitWith(hasWarnings ? EXIT.WARN : EXIT.OK);

@@ -15,7 +15,9 @@ import type {
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
+import { GuardrailError } from "./guardrails.js";
 import { buildPlan } from "./planner.js";
+import { validateApplyReport } from "./plan.js";
 import type { ScanHooks } from "./scanner.js";
 import type { ScanToPlanOptions } from "./engine.js";
 import { nativePlatformForCurrentProcess } from "./native-platforms.js";
@@ -322,9 +324,20 @@ export async function scanToPlanViaRust(
 }
 
 /** Apply via the Rust `sweep-engine` subprocess. */
-export async function applyPlanViaRust(plan: ScanPlan): Promise<ApplyReport> {
-  const stdout = await runEngineAsync(["apply"], JSON.stringify(plan));
-  return JSON.parse(stdout) as ApplyReport;
+export async function applyPlanViaRust(plan: ScanPlan, signal?: AbortSignal): Promise<ApplyReport> {
+  const stdout = await runEngineAsync(["apply"], JSON.stringify(plan), undefined, { signal });
+  try {
+    return validateApplyReport(JSON.parse(stdout));
+  } catch (error) {
+    if (signal?.aborted) {
+      // The engine was killed mid-run — partial deletions may have landed.
+      throw new GuardrailError(
+        "Apply interrupted — the engine was stopped mid-run; some deletions may have completed.",
+        1,
+      );
+    }
+    throw error;
+  }
 }
 
 export function isRustEngineAvailable(): boolean {

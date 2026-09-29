@@ -1,4 +1,5 @@
 import pc from "picocolors";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "./index.js";
 
 /** Format a deletion progress line for terminal output. */
@@ -9,7 +10,8 @@ export function formatDeletionProgress(
 ): string {
   const prefix = `[${current}/${total}]`;
   if (!currentPath) return prefix;
-  return `${prefix} ${currentPath}`;
+  // Paths come off disk — escape control characters before terminal output.
+  return `${prefix} ${sanitizeTerminalText(currentPath)}`;
 }
 
 /**

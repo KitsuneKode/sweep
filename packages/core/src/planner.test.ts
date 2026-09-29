@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScanEntry, ScanResult } from "@kitsunekode/sweep-protocol";
@@ -78,6 +78,55 @@ describe("planner", () => {
     expect(failedPaths).toHaveLength(1);
     expect(failedPaths[0]?.code).toBe("changed_entry_type");
     expect(failedPaths[0]?.error).toContain("entry type changed");
+  });
+
+  test("revalidateCandidates rejects candidates behind a swapped-in symlinked ancestor", () => {
+    if (process.platform === "win32") return; // symlink perms vary on Windows
+    const outside = mkdtempSync(join(tmpdir(), "sweep-outside-"));
+    mkdirSync(dir("sub", "node_modules"), { recursive: true });
+    const candidate = toCandidate({
+      path: dir("sub", "node_modules"),
+      name: "node_modules",
+      estimatedBytes: 0,
+      isSymlink: false,
+      entryType: "directory",
+    });
+
+    // The candidate passes a lexical root check, but "sub" now resolves
+    // outside the target — rm would recurse through the link.
+    rmSync(dir("sub"), { recursive: true });
+    symlinkSync(outside, dir("sub"));
+    mkdirSync(join(outside, "node_modules"), { recursive: true });
+    try {
+      const { ready, failedPaths } = revalidateCandidates([candidate], tmpDir);
+
+      expect(ready).toHaveLength(0);
+      expect(failedPaths).toHaveLength(1);
+      expect(failedPaths[0]?.code).toBe("outside_target");
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("revalidateCandidates keeps symlink candidates (unlink-only is already safe)", () => {
+    if (process.platform === "win32") return;
+    const outside = mkdtempSync(join(tmpdir(), "sweep-outside-"));
+    symlinkSync(outside, dir("linked-dist"));
+    const candidate = toCandidate({
+      path: dir("linked-dist"),
+      name: "dist",
+      estimatedBytes: 0,
+      isSymlink: true,
+      entryType: "symlink",
+    });
+
+    try {
+      const { ready, failedPaths } = revalidateCandidates([candidate], tmpDir);
+      expect(ready).toHaveLength(1);
+      expect(failedPaths).toHaveLength(0);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   test("compileSelectedCandidateIds respects selection mode and dangerous opt-in", () => {

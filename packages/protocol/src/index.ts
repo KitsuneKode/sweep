@@ -43,6 +43,7 @@ export interface SweepConfig {
 }
 
 export { candidateKindFromName, KNOWN_ARTIFACT_NAMES } from "./candidate.js";
+export { sanitizeTerminalText, sanitizeMultilineTerminalText } from "./text.js";
 
 export interface ScanEntry {
   path: string;
@@ -116,6 +117,7 @@ export const FAILURE_REASON_CODES = [
   "missing",
   "changed_symlink_state",
   "changed_entry_type",
+  "outside_target",
   "permission_denied",
   "busy",
   "filesystem_error",

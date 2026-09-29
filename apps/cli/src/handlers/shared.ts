@@ -1,5 +1,7 @@
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { resolve, sep } from "node:path";
 import type {
   ApplyReport,
   CliOptions,
@@ -15,7 +17,12 @@ import {
   scanToPlan,
   type ScanToPlanOptions,
 } from "@kitsunekode/sweep-core/engine";
-import { GuardrailError, assertSafePattern } from "@kitsunekode/sweep-core/guardrails";
+import {
+  GuardrailError,
+  assertSafeCwd,
+  assertSafePattern,
+  assertTargetDirectory,
+} from "@kitsunekode/sweep-core/guardrails";
 import { toCandidate } from "@kitsunekode/sweep-core/planner";
 import {
   scanToPlanViaRust,
@@ -31,6 +38,32 @@ export function applyNoColor(color: boolean | undefined): void {
   if (!color) {
     process.env.NO_COLOR = "1";
   }
+}
+
+/**
+ * Resolve a CLI path argument to an absolute path. Shells expand a leading `~`
+ * only when unquoted, so a quoted or scripted `"~/x"` would otherwise land on a
+ * literal `~` segment and fail with "directory does not exist".
+ */
+export function resolveTargetPath(pathArg: string): string {
+  const expanded =
+    pathArg === "~"
+      ? homedir()
+      : pathArg.startsWith("~/") || pathArg.startsWith(`~${sep}`)
+        ? resolve(homedir(), pathArg.slice(2))
+        : pathArg;
+  return resolve(expanded);
+}
+
+/**
+ * The standard target preamble shared by every command that takes a path:
+ * expand ~, resolve, then assert it is a safe, existing directory.
+ */
+export function resolveScanTarget(pathArg: string): string {
+  const targetDir = resolveTargetPath(pathArg);
+  assertSafeCwd(targetDir);
+  assertTargetDirectory(targetDir);
+  return targetDir;
 }
 
 export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepConfig {
@@ -286,6 +319,7 @@ export async function executePlanDeletion(
 ): Promise<{
   report: ApplyReport;
   cleanResult: import("@kitsunekode/sweep-protocol").CleanResult;
+  interrupted: boolean;
 }> {
   const selected = plan.candidates.filter((candidate) =>
     plan.selectedCandidateIds.includes(candidate.id),
@@ -297,18 +331,36 @@ export async function executePlanDeletion(
   const { clearDeletionProgress, printDeletionProgress } =
     await import("@kitsunekode/sweep-display");
 
-  const applyOptions = options.quiet
-    ? {}
-    : {
-        onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
-          current++;
-          freedBytes += entry.estimatedBytes;
-          printDeletionProgress(current, total, entry.path, entry.estimatedBytes, freedBytes);
-        },
-      };
+  // Ctrl+C during apply must not vanish the report: stop scheduling new
+  // deletions, let in-flight rm calls finish, then report the partial state.
+  // A second SIGINT (no listener left) force-kills as usual.
+  const controller = new AbortController();
+  const onSigint = () => controller.abort();
+  process.once("SIGINT", onSigint);
 
-  const { report, cleanResult } = await applyPlanWithBackend(plan, engine, applyOptions);
-  clearDeletionProgress();
+  const applyOptions = {
+    isCancelled: () => controller.signal.aborted,
+    signal: controller.signal,
+    ...(options.quiet
+      ? {}
+      : {
+          onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
+            current++;
+            freedBytes += entry.estimatedBytes;
+            printDeletionProgress(current, total, entry.path, entry.estimatedBytes, freedBytes);
+          },
+        }),
+  };
 
-  return { report, cleanResult };
+  try {
+    const { report, cleanResult, interrupted } = await applyPlanWithBackend(
+      plan,
+      engine,
+      applyOptions,
+    );
+    return { report, cleanResult, interrupted: interrupted || controller.signal.aborted };
+  } finally {
+    process.removeListener("SIGINT", onSigint);
+    clearDeletionProgress();
+  }
 }

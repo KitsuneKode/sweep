@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstatSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import type {
   CandidateKind,
   PathFailure,
@@ -130,6 +130,19 @@ export function revalidateCandidates(
   const ready: ScanEntry[] = [];
   const failedPaths: PathFailure[] = [];
 
+  // Resolve the target once: the lexical containment check alone is not enough,
+  // because a directory inside the tree can be swapped for a symlink between
+  // scan and apply — rm would then recurse through it outside the target.
+  let realTarget: string | undefined;
+  if (targetDir) {
+    try {
+      realTarget = realpathSync(targetDir);
+    } catch {
+      // Target itself is unreadable — every candidate will fail lstat anyway.
+      realTarget = undefined;
+    }
+  }
+
   for (const candidate of candidates) {
     if (targetDir && !isPathWithinRoot(candidate.path, targetDir)) {
       failedPaths.push({
@@ -163,12 +176,31 @@ export function revalidateCandidates(
         continue;
       }
 
+      // Symlink candidates are unlinked (the link removed, never followed), so
+      // realpath containment is only meaningful for real entries — and only
+      // when the target could be resolved above.
+      if (!isSymlink && realTarget) {
+        const realCandidate = realpathSync(candidate.path);
+        if (!isPathWithinRoot(realCandidate, realTarget)) {
+          failedPaths.push({
+            path: candidate.path,
+            code: "outside_target",
+            error: "candidate resolves outside the plan target directory",
+          });
+          continue;
+        }
+      }
+
       ready.push(candidate);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       failedPaths.push({
         path: candidate.path,
-        code: error.includes("ENOENT") ? "missing" : "filesystem_error",
+        code: error.includes("ENOENT")
+          ? "missing"
+          : error.includes("EACCES") || error.includes("EPERM")
+            ? "permission_denied"
+            : "filesystem_error",
         error,
       });
     }

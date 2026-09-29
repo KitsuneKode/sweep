@@ -129,11 +129,13 @@ export function makeProgram(): Command {
     .description("Apply a saved scan plan")
     .requiredOption("--plan <path>", "Path to a saved scan plan")
     .option("--engine <backend>", "Apply engine: js (default), rust, or auto", "js")
+    .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
     .option("--json", "Emit JSON apply results", false)
     .action(function (this: Command) {
       const opts = this.optsWithGlobals<{
         plan: string;
         yes: boolean;
+        forceLarge?: boolean;
         json?: boolean;
         color: boolean;
         engine?: import("@kitsunekode/sweep-protocol").EngineBackend;

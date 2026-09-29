@@ -61,4 +61,16 @@ describe("deduplicateNestedEntries", () => {
     const deduplicated = deduplicateNestedEntries(entries);
     expect(deduplicated.length).toBe(2);
   });
+
+  test("removes exact-path duplicates (e.g. a crafted plan with repeated paths)", () => {
+    const entry: ScanEntry = {
+      path: join(root, "node_modules"),
+      name: "node_modules",
+      estimatedBytes: 1000,
+      isSymlink: false,
+      entryType: "directory",
+    };
+    const deduplicated = deduplicateNestedEntries([entry, { ...entry }, { ...entry }]);
+    expect(deduplicated.length).toBe(1);
+  });
 });

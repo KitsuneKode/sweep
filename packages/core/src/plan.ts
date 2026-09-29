@@ -1,8 +1,12 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
-import { existsSync, readFileSync } from "node:fs";
-import type { ScanPlan } from "@kitsunekode/sweep-protocol";
-import { SCAN_PLAN_SCHEMA } from "@kitsunekode/sweep-protocol";
+import { readFileSync, statSync } from "node:fs";
+import type { ApplyReport, ScanPlan } from "@kitsunekode/sweep-protocol";
+import {
+  APPLY_REPORT_SCHEMA,
+  SCAN_PLAN_SCHEMA,
+  sanitizeTerminalText,
+} from "@kitsunekode/sweep-protocol";
 
 export class PlanValidationError extends Error {
   readonly code = 3;
@@ -13,14 +17,29 @@ export class PlanValidationError extends Error {
   }
 }
 
+let ajvInstance: Ajv2020 | undefined;
 let validateScanPlan: ValidateFunction | undefined;
+let validateApplyReportFn: ValidateFunction | undefined;
+
+function getAjv(): Ajv2020 {
+  if (!ajvInstance) {
+    ajvInstance = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
+  }
+  return ajvInstance;
+}
 
 function getValidator(): ValidateFunction {
   if (!validateScanPlan) {
-    const ajv = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
-    validateScanPlan = ajv.compile(SCAN_PLAN_SCHEMA);
+    validateScanPlan = getAjv().compile(SCAN_PLAN_SCHEMA);
   }
   return validateScanPlan;
+}
+
+function getApplyReportValidator(): ValidateFunction {
+  if (!validateApplyReportFn) {
+    validateApplyReportFn = getAjv().compile(APPLY_REPORT_SCHEMA);
+  }
+  return validateApplyReportFn;
 }
 
 function formatValidationErrors(errors: ErrorObject[] | null | undefined): string {
@@ -43,9 +62,44 @@ export function validatePlan(value: unknown): ScanPlan {
   throw new PlanValidationError(`Invalid scan plan: ${formatValidationErrors(validator.errors)}`);
 }
 
+/**
+ * Validate an engine-produced apply report. `SWEEP_ENGINE_PATH` lets the
+ * subprocess binary be user-supplied, so its stdout is untrusted input — a
+ * malformed report must fail loudly instead of silently passing a fake
+ * deletedCount to the caller.
+ */
+export function validateApplyReport(value: unknown): ApplyReport {
+  const validator = getApplyReportValidator();
+  if (validator(value)) {
+    return value as ApplyReport;
+  }
+
+  throw new PlanValidationError(
+    `Invalid apply report from engine: ${formatValidationErrors(validator.errors)}`,
+  );
+}
+
+/**
+ * Plans embed one JSON object per candidate — a few hundred bytes each.
+ * 256 MB is far past any legitimate plan (≈1M candidates) and stops a
+ * hostile or corrupt file from pinning the process in JSON.parse.
+ */
+const MAX_PLAN_FILE_BYTES = 256 * 1024 * 1024;
+
 export function loadPlan(planPath: string): ScanPlan {
-  if (!existsSync(planPath)) {
-    throw new PlanValidationError(`Plan file not found: ${planPath}`);
+  let stat;
+  try {
+    stat = statSync(planPath);
+  } catch {
+    throw new PlanValidationError(`Plan file not found: ${sanitizeTerminalText(planPath)}`);
+  }
+  if (!stat.isFile()) {
+    throw new PlanValidationError(`Plan path is not a file: ${sanitizeTerminalText(planPath)}`);
+  }
+  if (stat.size > MAX_PLAN_FILE_BYTES) {
+    throw new PlanValidationError(
+      `Plan file exceeds the 256 MB limit: ${sanitizeTerminalText(planPath)}`,
+    );
   }
 
   const raw = readFileSync(planPath, "utf8");

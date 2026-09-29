@@ -1,8 +1,19 @@
 import type { ApplyReport } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
-import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
+import {
+  GuardrailError,
+  assertSafeCwd,
+  assertSizeLimit,
+  assertTargetDirectory,
+} from "@kitsunekode/sweep-core/guardrails";
+import { loadConfig } from "@kitsunekode/sweep-core/config";
 import { getSelectedBytes, loadPlan } from "@kitsunekode/sweep-core/plan";
-import { formatBytes, printCleanResult, printDeclined } from "@kitsunekode/sweep-display";
+import {
+  formatBytes,
+  printCleanResult,
+  printDeclined,
+  printInterrupted,
+} from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
@@ -15,6 +26,7 @@ import {
 export type ApplyHandlerOptions = {
   plan: string;
   yes: boolean;
+  forceLarge?: boolean;
   json?: boolean;
   color: boolean;
   engine?: import("@kitsunekode/sweep-protocol").EngineBackend;
@@ -26,6 +38,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
   try {
     const plan = loadPlan(opts.plan);
     assertSafeCwd(plan.targetDir);
+    assertTargetDirectory(plan.targetDir);
 
     const selectedCount = plan.selectedCandidateIds.length;
 
@@ -47,6 +60,17 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       exitWith(EXIT.OK);
     }
 
+    if (opts.forceLarge && !opts.yes) {
+      throw new GuardrailError(
+        "--force-large requires --yes. Large deletes must be non-interactive.",
+      );
+    }
+
+    // The plan path must enforce the same size ceiling as interactive flows —
+    // a saved or shared plan is not a trusted lane around maxSizeGB.
+    const config = loadConfig(plan.targetDir);
+    assertSizeLimit(getSelectedBytes(plan), config.maxSizeGB, opts.forceLarge ?? false);
+
     if (!opts.yes) {
       const totalBytes = getSelectedBytes(plan);
       const confirmed = await promptConfirm(
@@ -60,7 +84,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
 
     const engine = resolveEngineBackend({ engine: opts.engine ?? "js" });
 
-    const { report, cleanResult } = await executePlanDeletion(
+    const { report, cleanResult, interrupted } = await executePlanDeletion(
       plan,
       engine,
       opts.json ? { quiet: true } : {},
@@ -73,9 +97,12 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
         ...cleanResult,
         failedPaths: report.failedPaths,
       });
+      if (interrupted) {
+        printInterrupted(report.deletedCount, selectedCount);
+      }
     }
 
-    exitWith(report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
+    exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
     handleFatalError(err);
   }

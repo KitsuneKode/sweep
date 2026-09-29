@@ -38,8 +38,10 @@ function ensureWorkspaceDeps(): void {
 ensureWorkspaceDeps();
 
 const args = process.argv.slice(2);
-const result = spawnSync("bun", ["run", "./src/bin.ts", ...args], {
-  cwd: join(ROOT, "apps/cli"),
+// Spawn bin.ts by absolute path and keep the user's cwd — running from
+// apps/cli would silently re-root relative path arguments (e.g. `ui ../foo`).
+const result = spawnSync("bun", [join(ROOT, "apps/cli/src/bin.ts"), ...args], {
+  cwd: process.cwd(),
   stdio: "inherit",
 });
 

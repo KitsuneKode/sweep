@@ -7,7 +7,13 @@ import { executePlanDeletion } from "./shared.js";
 export type ApplyReviewedPlanResult =
   | { status: "nothing" }
   | { status: "dry_run" }
-  | { status: "completed"; report: ApplyReport; cleanResult: CleanResult };
+  | {
+      status: "completed";
+      report: ApplyReport;
+      cleanResult: CleanResult;
+      /** SIGINT stopped scheduling mid-apply — report covers what landed. */
+      interrupted: boolean;
+    };
 
 /** Shared post-review apply path for `clean` and interactive flows. */
 export async function applyReviewedPlan(
@@ -31,11 +37,11 @@ export async function applyReviewedPlan(
     return { status: "dry_run" };
   }
 
-  const { report, cleanResult } = await executePlanDeletion(
+  const { report, cleanResult, interrupted } = await executePlanDeletion(
     plan,
     options.engine,
     options.quiet ? { quiet: true } : {},
   );
 
-  return { status: "completed", report, cleanResult };
+  return { status: "completed", report, cleanResult, interrupted };
 }

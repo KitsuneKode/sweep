@@ -1,5 +1,6 @@
 import pc from "picocolors";
 import type { ScanCandidate, ScanEntry } from "@kitsunekode/sweep-protocol";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "./bytes.js";
 import { createSpinner } from "./spinner.js";
 import { formatRiskBadge } from "./risk.js";
@@ -19,11 +20,11 @@ export interface ProgressiveScanRenderer {
 }
 
 function candidateName(candidate: ScanCandidate | ScanEntry): string {
-  return candidate.name;
+  return sanitizeTerminalText(candidate.name);
 }
 
 function candidatePath(candidate: ScanCandidate | ScanEntry): string {
-  return candidate.path;
+  return sanitizeTerminalText(candidate.path);
 }
 
 function candidateBytes(candidate: ScanCandidate | ScanEntry): number {

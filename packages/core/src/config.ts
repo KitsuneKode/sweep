@@ -313,12 +313,24 @@ export function loadConfig(
   for (const p of ignore) assertSafePattern(p);
   for (const p of disabledPatterns) assertSafePattern(p);
 
+  const maxSizeGB =
+    cliOverrides.maxSizeGB ?? project.maxSizeGB ?? global.maxSizeGB ?? DEFAULT_CONFIG.maxSizeGB;
+  const depth = cliOverrides.depth ?? project.depth ?? global.depth ?? DEFAULT_CONFIG.depth;
+
+  // Scalars come from hand-edited config files — validate rather than letting
+  // NaN-adjacent or negative values silently warp scan/delete behavior.
+  if (!Number.isFinite(maxSizeGB) || maxSizeGB < 0) {
+    throw new ConfigParseError(`"maxSizeGB" must be a non-negative number (got ${maxSizeGB})`);
+  }
+  if (!Number.isInteger(depth) || depth < -1) {
+    throw new ConfigParseError(`"depth" must be -1 or a non-negative integer (got ${depth})`);
+  }
+
   return {
     patterns,
     ignore,
-    maxSizeGB:
-      cliOverrides.maxSizeGB ?? project.maxSizeGB ?? global.maxSizeGB ?? DEFAULT_CONFIG.maxSizeGB,
-    depth: cliOverrides.depth ?? project.depth ?? global.depth ?? DEFAULT_CONFIG.depth,
+    maxSizeGB,
+    depth,
     ...(disabledPatterns.length > 0 ? { disabledPatterns } : {}),
   };
 }

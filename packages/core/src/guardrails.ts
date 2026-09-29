@@ -1,5 +1,6 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import {
   basename,
   dirname,
@@ -94,7 +95,7 @@ export function assertSafeCwd(targetPath: string): void {
 
   if (isBlocked) {
     throw new GuardrailError(
-      `Refusing to operate on protected path: ${resolved}\n` +
+      `Refusing to operate on protected path: ${sanitizeTerminalText(resolved)}\n` +
         `  sweep must be run inside a project directory, not at a system root.`,
     );
   }
@@ -104,9 +105,34 @@ export function assertSafeCwd(targetPath: string): void {
   const relativeParts = pathSegmentsBelowRoot(resolved, root);
   if (relativeParts.length < 2) {
     throw new GuardrailError(
-      `Path is too shallow to be a project directory: ${resolved}\n` +
+      `Path is too shallow to be a project directory: ${sanitizeTerminalText(resolved)}\n` +
         `  Expected at least 2 path segments below filesystem root.`,
     );
+  }
+}
+
+/**
+ * Assert that the target exists and is a directory. Kept separate from
+ * assertSafeCwd, which is pure safety policy — tests assert the safety of
+ * hypothetical paths that need not exist. statSync follows symlinks: a
+ * symlinked directory is a valid target, a dangling link reports as missing.
+ * Throws GuardrailError (exit code 2) — a usage error, checked before scanning.
+ */
+export function assertTargetDirectory(targetPath: string): void {
+  const resolved = resolve(targetPath);
+  let stat;
+  try {
+    stat = statSync(resolved);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    const shown = sanitizeTerminalText(resolved);
+    if (code === "EACCES" || code === "EPERM") {
+      throw new GuardrailError(`Permission denied reading directory: ${shown}`);
+    }
+    throw new GuardrailError(`Directory does not exist: ${shown}`);
+  }
+  if (!stat.isDirectory()) {
+    throw new GuardrailError(`Path is not a directory: ${sanitizeTerminalText(resolved)}`);
   }
 }
 
@@ -117,20 +143,21 @@ export function assertSafePattern(pattern: string): void {
   if (!pattern || pattern.trim().length === 0) {
     throw new GuardrailError("Pattern must not be empty.");
   }
+  const shown = sanitizeTerminalText(pattern);
   if (pattern !== pattern.trim()) {
-    throw new GuardrailError(`Pattern must not have leading or trailing whitespace: "${pattern}"`);
+    throw new GuardrailError(`Pattern must not have leading or trailing whitespace: "${shown}"`);
   }
   if (pattern.includes("\x00")) {
     throw new GuardrailError(`Pattern contains null byte: ${JSON.stringify(pattern)}`);
   }
   if (pattern.startsWith("/")) {
     throw new GuardrailError(
-      `Patterns must not start with /: "${pattern}"\n` +
+      `Patterns must not start with /: "${shown}"\n` +
         `  Use directory names or glob patterns like "*.tsbuildinfo".`,
     );
   }
   if (pattern.includes("..")) {
-    throw new GuardrailError(`Patterns must not contain ".." traversal: "${pattern}"`);
+    throw new GuardrailError(`Patterns must not contain ".." traversal: "${shown}"`);
   }
 }
 
@@ -228,8 +255,8 @@ export function assertPathWithinRoot(
   if (!isPathWithinRoot(candidatePath, rootPath)) {
     throw new GuardrailError(
       `${label} is outside the scan target:\n` +
-        `  ${candidatePath}\n` +
-        `  target: ${resolve(rootPath)}`,
+        `  ${sanitizeTerminalText(candidatePath)}\n` +
+        `  target: ${sanitizeTerminalText(resolve(rootPath))}`,
     );
   }
 }

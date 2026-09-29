@@ -1,6 +1,4 @@
-import { resolve } from "node:path";
 import type { CliOptions, ScanEvent } from "@kitsunekode/sweep-protocol";
-import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import { toCandidate } from "@kitsunekode/sweep-core/planner";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
@@ -9,6 +7,7 @@ import {
   resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
+  resolveScanTarget,
   runScanToPlan,
   runScanWithDisplay,
   writeJson,
@@ -21,10 +20,8 @@ export async function handleScan(
 ): Promise<void> {
   applyNoColor(opts.color);
 
-  const targetDir = resolve(pathArg);
-
   try {
-    assertSafeCwd(targetDir);
+    const targetDir = resolveScanTarget(pathArg);
     const config = resolveScanConfig(targetDir, opts);
     const projectConfig = resolveProjectScanConfig(targetDir, opts);
     const selectionPolicy = resolveSelectionPolicy(opts);

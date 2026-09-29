@@ -1,11 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+
 import { fileURLToPath } from "node:url";
 import type { CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_PATTERNS } from "@kitsunekode/sweep-core/config";
-import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
+import { GuardrailError, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
-import { printCleanResult, printDeclined, printDryRunNotice } from "@kitsunekode/sweep-display";
+import {
+  printAborted,
+  printCleanResult,
+  printDryRunNotice,
+  printInterrupted,
+} from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
@@ -14,6 +19,7 @@ import {
   resolveEngineBackend,
   resolveScanConfig,
   resolveSelectionPolicy,
+  resolveScanTarget,
 } from "./shared.js";
 
 function isModuleNotFound(error: unknown): boolean {
@@ -115,10 +121,8 @@ async function loadSweepUi(): Promise<SweepUiModule> {
 export async function handleUi(pathArg: string, opts: CliOptions): Promise<void> {
   applyNoColor(opts.color);
 
-  const targetDir = resolve(pathArg);
-
   try {
-    assertSafeCwd(targetDir);
+    const targetDir = resolveScanTarget(pathArg);
 
     if (!process.stdout.isTTY) {
       throw new GuardrailError("sweep ui requires a TTY terminal.");
@@ -158,13 +162,13 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     });
 
     if (outcome.type === "abort") {
-      printDeclined();
+      printAborted();
       exitWith(EXIT.ABORTED);
     }
 
     if (outcome.type === "rescan") {
       // Streaming mode rescans internally; this outcome is legacy.
-      printDeclined();
+      printAborted();
       exitWith(EXIT.ABORTED);
     }
 
@@ -182,14 +186,17 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       exitWith(EXIT.OK);
     }
 
-    const { report, cleanResult } = await executePlanDeletion(selectedPlan, engine);
+    const { report, cleanResult, interrupted } = await executePlanDeletion(selectedPlan, engine);
 
     printCleanResult({
       ...cleanResult,
       failedPaths: report.failedPaths,
     });
+    if (interrupted) {
+      printInterrupted(report.deletedCount, selectedPlan.selectedCandidateIds.length);
+    }
 
-    exitWith(report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
+    exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
     handleFatalError(err);
   }

@@ -88,6 +88,44 @@ describe("core engine", () => {
     expect(applied.report.failedPaths[0]?.path).toBe(dir("dist"));
   });
 
+  test("applyPlan stops scheduling deletions once cancelled", async () => {
+    // More candidates than the pool's concurrency (4) — after the first delete
+    // resolves, every subsequent pull sees the cancellation and skips work.
+    const names = [
+      "node_modules",
+      "dist",
+      "build",
+      "out",
+      ".next",
+      ".turbo",
+      ".parcel-cache",
+      ".nuxt",
+      "coverage",
+      ".vite",
+    ];
+    for (const name of names) {
+      mkdirSync(dir(name));
+    }
+
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    expect(plan.selectedCandidateIds.length).toBe(names.length);
+
+    let deleted = 0;
+    const applied = await applyPlan(plan, {
+      onDeleted: () => {
+        deleted += 1;
+      },
+      isCancelled: () => deleted > 0,
+    });
+
+    expect(applied.interrupted).toBe(true);
+    // At most the initial pool batch can have been attempted.
+    expect(applied.report.deletedCount + applied.report.failedCount).toBeLessThanOrEqual(4);
+    // Cancelled work is never attempted — most directories survive.
+    const remaining = names.filter((name) => existsSync(dir(name)));
+    expect(remaining.length).toBeGreaterThanOrEqual(names.length - 4);
+  });
+
   test("scanToPlan preserves a mixed workspace scenario as a stable plan shape", async () => {
     mkdirSync(dir("packages", "web", "node_modules"), { recursive: true });
     mkdirSync(dir("packages", "api", "target"), { recursive: true });

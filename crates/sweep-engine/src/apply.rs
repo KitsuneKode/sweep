@@ -34,6 +34,13 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
         return Ok(ApplyReport::empty(plan));
     }
 
+    // Resolve the target once: lexical containment alone is not enough — a
+    // directory inside the tree can be swapped for a symlink between scan and
+    // apply, and rm would then recurse through it outside the target.
+    // If the root itself cannot be canonicalized, every candidate fails
+    // symlink_metadata anyway, so skipping the check loses nothing.
+    let real_root = fs::canonicalize(&plan.target_dir).ok();
+
     let mut ready: Vec<ScanEntry> = Vec::new();
     let mut failed_paths: Vec<PathFailure> = Vec::new();
 
@@ -47,7 +54,7 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
             continue;
         }
 
-        match revalidate_candidate(candidate) {
+        match revalidate_candidate(candidate, real_root.as_deref()) {
             Ok(entry) => ready.push(entry),
             Err(failure) => failed_paths.push(failure),
         }
@@ -78,7 +85,10 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
     })
 }
 
-fn revalidate_candidate(candidate: &ScanCandidate) -> Result<ScanEntry, PathFailure> {
+fn revalidate_candidate(
+    candidate: &ScanCandidate,
+    real_root: Option<&Path>,
+) -> Result<ScanEntry, PathFailure> {
     let path = Path::new(candidate.entry.path.as_str());
     let meta = match fs::symlink_metadata(path) {
         Ok(meta) => meta,
@@ -114,6 +124,32 @@ fn revalidate_candidate(candidate: &ScanCandidate) -> Result<ScanEntry, PathFail
             FailureReasonCode::ChangedEntryType,
             "candidate entry type changed since plan creation".to_owned(),
         ));
+    }
+
+    // Symlink candidates are unlinked (the link removed, never followed), so
+    // real containment only matters for real entries — an ancestor swapped to
+    // a symlink pointing outside the root must not be deleted through.
+    if !is_symlink {
+        if let Some(root) = real_root {
+            match fs::canonicalize(path) {
+                Ok(real_candidate) => {
+                    if real_candidate != root && !real_candidate.starts_with(root) {
+                        return Err(path_failure(
+                            &candidate.entry.path,
+                            FailureReasonCode::OutsideTarget,
+                            "candidate resolves outside the plan target directory".to_owned(),
+                        ));
+                    }
+                }
+                Err(err) => {
+                    return Err(path_failure(
+                        &candidate.entry.path,
+                        classify_io_error(&err),
+                        err.to_string(),
+                    ));
+                }
+            }
+        }
     }
 
     Ok(candidate.entry.clone())
@@ -328,6 +364,58 @@ mod tests {
         );
         assert_eq!(report.failed_paths[0].path, outside_path);
         assert!(!artifact.exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn apply_plan_rejects_candidate_behind_symlinked_ancestor() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let outside = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let root = dir.path().to_string_lossy();
+
+        let sub = dir.path().join("sub");
+        fs::create_dir_all(sub.join("node_modules"))
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        // The candidate passes a lexical root check, but "sub" now resolves
+        // outside the target — removal must not recurse through the link.
+        fs::remove_dir_all(&sub).unwrap_or_else(|err| panic!("rmdir failed: {err}"));
+        std::os::unix::fs::symlink(outside.path(), &sub)
+            .unwrap_or_else(|err| panic!("symlink failed: {err}"));
+        let victim = outside.path().join("node_modules");
+        fs::create_dir_all(&victim).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let candidate_path = sub.join("node_modules").to_string_lossy().into_owned();
+        let plan = ScanPlan {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            target_dir: root.to_string(),
+            selection_policy: SelectionPolicy::default(),
+            candidates: vec![candidate(
+                &candidate_path,
+                "node_modules",
+                EntryType::Directory,
+                false,
+            )],
+            summary: ScanPlanSummary {
+                candidate_count: 1,
+                estimated_total_bytes: 0,
+                scanned_dirs: 1,
+                exact: false,
+                selected_count: 1,
+                risk_counts: Default::default(),
+            },
+            selected_candidate_ids: vec!["cand_node_modules".to_owned()],
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+        };
+
+        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(report.failed_count, 1);
+        assert_eq!(
+            report.failed_paths[0].code,
+            FailureReasonCode::OutsideTarget.as_str()
+        );
+        assert!(victim.exists());
     }
 
     #[test]

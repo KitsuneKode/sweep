@@ -7,8 +7,11 @@ const DELETE_CONCURRENCY = 4;
 
 /**
  * Filter out candidate entries that are contained within an ancestor candidate
- * that is already scheduled for recursive removal. Sort is lexicographic so a
- * parent path is retained before any children that start with that prefix.
+ * that is already scheduled for recursive removal — and exact-path duplicates.
+ * A crafted plan can list the same path under two ids; concurrent rm on the
+ * same target then double-counts deletions in the report.
+ * Sort is lexicographic so a parent path is retained before any children that
+ * start with that prefix.
  */
 export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
   // Sort shallowest paths first
@@ -18,9 +21,10 @@ export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
   for (const entry of sorted) {
     const isInsideRetained = retained.some(
       (parent) =>
-        parent.entryType === "directory" &&
-        !parent.isSymlink &&
-        (entry.path.startsWith(`${parent.path}/`) || entry.path.startsWith(`${parent.path}\\`)),
+        parent.path === entry.path ||
+        (parent.entryType === "directory" &&
+          !parent.isSymlink &&
+          (entry.path.startsWith(`${parent.path}/`) || entry.path.startsWith(`${parent.path}\\`))),
     );
     if (!isInsideRetained) {
       retained.push(entry);
@@ -38,10 +42,14 @@ export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
  * Directories are removed with rm({ recursive: true, force: true }).
  *
  * Returns a CleanResult with stats. Never throws — failed entries are collected.
+ * When `isCancelled` turns true, unprocessed entries are skipped: they appear
+ * in neither `deleted` nor `failedPaths`, so callers can detect interruption
+ * via `deleted.length + failedPaths.length < deduplicated.length`.
  */
 export async function clean(
   entries: ScanEntry[],
   onProgress?: (entry: ScanEntry, index: number, total: number) => void,
+  isCancelled?: () => boolean,
 ): Promise<CleanResult> {
   const startTime = Date.now();
   const deleted: ScanEntry[] = [];
@@ -49,33 +57,38 @@ export async function clean(
 
   const deduplicated = deduplicateNestedEntries(entries);
 
-  await mapPool(deduplicated, DELETE_CONCURRENCY, async (entry, index) => {
-    try {
-      if (
-        entry.isSymlink ||
-        (process.platform === "win32" && isReparsePointOrSymlink(entry.path))
-      ) {
-        try {
-          await unlink(entry.path);
-        } catch {
-          await rmdir(entry.path);
+  await mapPool(
+    deduplicated,
+    DELETE_CONCURRENCY,
+    async (entry, index) => {
+      try {
+        if (
+          entry.isSymlink ||
+          (process.platform === "win32" && isReparsePointOrSymlink(entry.path))
+        ) {
+          try {
+            await unlink(entry.path);
+          } catch {
+            await rmdir(entry.path);
+          }
+        } else {
+          await rm(entry.path, { recursive: true, force: true });
         }
-      } else {
-        await rm(entry.path, { recursive: true, force: true });
+        deleted.push(entry);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        failedPaths.push({
+          path: entry.path,
+          code: classifyFilesystemFailure(error),
+          error,
+        });
       }
-      deleted.push(entry);
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      failedPaths.push({
-        path: entry.path,
-        code: classifyFilesystemFailure(error),
-        error,
-      });
-    }
 
-    onProgress?.(entry, index, deduplicated.length);
-    return entry;
-  });
+      onProgress?.(entry, index, deduplicated.length);
+      return entry;
+    },
+    isCancelled,
+  );
 
   return {
     deleted,

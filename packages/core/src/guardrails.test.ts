@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { GuardrailError, assertSafeCwd, assertSafePattern, assertSizeLimit } from "./guardrails.js";
+import {
+  GuardrailError,
+  assertSafeCwd,
+  assertSafePattern,
+  assertSizeLimit,
+  assertTargetDirectory,
+} from "./guardrails.js";
 
 describe("assertSafeCwd", () => {
   // ── Blocked paths ──────────────────────────────────────────────────────────
@@ -69,6 +76,42 @@ describe("assertSafeCwd", () => {
     } catch (err) {
       expect(err instanceof GuardrailError).toBe(true);
       expect((err as GuardrailError).code).toBe(2);
+    }
+  });
+});
+
+describe("assertTargetDirectory", () => {
+  test("rejects a path that does not exist", () => {
+    const missing = join(tmpdir(), `sweep-missing-${process.pid}`);
+    expect(() => assertTargetDirectory(missing)).toThrow(GuardrailError);
+    expect(() => assertTargetDirectory(missing)).toThrow(/does not exist/);
+  });
+
+  test("rejects a regular file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sweep-td-"));
+    const file = join(dir, "file.txt");
+    writeFileSync(file, "x");
+    try {
+      expect(() => assertTargetDirectory(file)).toThrow(/not a directory/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("accepts an existing directory", () => {
+    expect(() => assertTargetDirectory(tmpdir())).not.toThrow();
+  });
+
+  test("follows a symlink to a directory", () => {
+    if (process.platform === "win32") return; // symlink perms vary on Windows
+    const dir = mkdtempSync(join(tmpdir(), "sweep-td-"));
+    const link = join(tmpdir(), `sweep-td-link-${process.pid}`);
+    symlinkSync(dir, link);
+    try {
+      expect(() => assertTargetDirectory(link)).not.toThrow();
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

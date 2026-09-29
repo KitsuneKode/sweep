@@ -1,5 +1,6 @@
 import pc from "picocolors";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { sanitizeMultilineTerminalText, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "./bytes.js";
 import { groupCandidatesByKind } from "./grouping.js";
 import { formatRiskBadge, riskBadgeLabel } from "./risk.js";
@@ -31,6 +32,7 @@ export {
   type ProgressiveScanRenderer,
   type ProgressiveScanSummary,
 } from "./progressive.js";
+export { sanitizeTerminalText, sanitizeMultilineTerminalText } from "@kitsunekode/sweep-protocol";
 
 // ─── Layout primitives ────────────────────────────────────────────────────────
 //
@@ -83,12 +85,15 @@ export function printGroupedScanPlan(
     plan.summary.skippedDirs && plan.summary.skippedDirs > 0
       ? ` (${plan.summary.skippedDirs} skipped)`
       : "";
-  const header = `Scanned ${plan.summary.scannedDirs} dirs${skipped} in ${targetDir}`;
+  // Paths come off disk — escape control characters before they reach the
+  // terminal or a hostile directory name becomes an ANSI injection vector.
+  const shownTarget = sanitizeTerminalText(targetDir);
+  const header = `Scanned ${plan.summary.scannedDirs} dirs${skipped} in ${shownTarget}`;
   if (isTTY()) {
     console.log(pc.dim(header));
     console.log(rule());
   } else {
-    console.log(`sweep: scanned ${plan.summary.scannedDirs} dirs${skipped} in ${targetDir}`);
+    console.log(`sweep: scanned ${plan.summary.scannedDirs} dirs${skipped} in ${shownTarget}`);
   }
 
   if (plan.candidates.length === 0) {
@@ -211,15 +216,15 @@ function printGroupedCandidates(
 
       if (isTTY()) {
         console.log(
-          `    ${candidateRail(selected, entry)} ${pc.bold(padEnd(entry.name, NAME_COL))}` +
-            `  ${pc.dim(entry.path)}` +
+          `    ${candidateRail(selected, entry)} ${pc.bold(padEnd(sanitizeTerminalText(entry.name), NAME_COL))}` +
+            `  ${pc.dim(sanitizeTerminalText(entry.path))}` +
             `  ${pc.yellow(`${sizePrefix}${size}`)}` +
             badge +
             note,
         );
       } else {
         console.log(
-          `sweep: ${selected ? "selected" : "found"} ${entry.name} (${entry.path}) ${sizePrefix}${size}${badge}${note}`,
+          `sweep: ${selected ? "selected" : "found"} ${sanitizeTerminalText(entry.name)} (${sanitizeTerminalText(entry.path)}) ${sizePrefix}${size}${badge}${note}`,
         );
       }
     }
@@ -256,7 +261,9 @@ export function printCleanResult(result: import("@kitsunekode/sweep-protocol").C
     console.log();
     console.log(pc.yellow(`⚠ ${result.failedPaths.length} item(s) failed to delete:`));
     for (const { path, error } of result.failedPaths) {
-      console.log(`  ${pc.dim(path)}: ${pc.red(error)}`);
+      console.log(
+        `  ${pc.dim(sanitizeTerminalText(path))}: ${pc.red(sanitizeTerminalText(error))}`,
+      );
     }
   }
 }
@@ -265,11 +272,24 @@ export function printAborted(): void {
   console.log(pc.dim("Aborted."));
 }
 
+/** Deletion was interrupted (SIGINT) — some entries were removed, the rest untouched. */
+export function printInterrupted(deleted: number, total: number): void {
+  console.log();
+  console.log(
+    pc.yellow(
+      `⚠ Interrupted — ${deleted} of ${total} item(s) deleted. The rest were left in place.`,
+    ),
+  );
+}
+
 /** Neutral message shown when the user declines a confirmation prompt. */
 export function printDeclined(): void {
   console.log(pc.dim("Declined — nothing deleted."));
 }
 
 export function printError(message: string): void {
-  console.error(`\n  ${pc.red("✗")} ${message}\n`);
+  // Error strings often embed filesystem paths (ENOENT messages quote the
+  // failed path verbatim) — sanitize at the chokepoint so every caller is
+  // covered, not just the ones that remembered to escape their input.
+  console.error(`\n  ${pc.red("✗")} ${sanitizeMultilineTerminalText(message)}\n`);
 }

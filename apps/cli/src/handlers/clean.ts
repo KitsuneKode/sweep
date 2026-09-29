@@ -1,8 +1,12 @@
-import { resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
-import { GuardrailError, assertSafeCwd, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
+import { GuardrailError, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
-import { printCleanResult, printDeclined, printDryRunNotice } from "@kitsunekode/sweep-display";
+import {
+  printCleanResult,
+  printDeclined,
+  printDryRunNotice,
+  printInterrupted,
+} from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { applyReviewedPlan } from "./apply-plan.js";
 import {
@@ -12,6 +16,7 @@ import {
   resolveProjectScanConfig,
   resolveScanConfig,
   resolveSelectionPolicy,
+  resolveScanTarget,
   runScanWithDisplay,
   writeJson,
 } from "./shared.js";
@@ -19,10 +24,8 @@ import {
 export async function handleClean(pathArg: string, opts: CliOptions): Promise<void> {
   applyNoColor(opts.color);
 
-  const targetDir = resolve(pathArg);
-
   try {
-    assertSafeCwd(targetDir);
+    const targetDir = resolveScanTarget(pathArg);
 
     if (opts.forceLarge && !opts.yes) {
       throw new GuardrailError(
@@ -89,7 +92,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       exitWith(EXIT.OK);
     }
 
-    const { report, cleanResult } = applyResult;
+    const { report, cleanResult, interrupted } = applyResult;
 
     if (opts.json) {
       writeJson(report);
@@ -98,9 +101,12 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
         ...cleanResult,
         failedPaths: report.failedPaths,
       });
+      if (interrupted) {
+        printInterrupted(report.deletedCount, plan.selectedCandidateIds.length);
+      }
     }
 
-    exitWith(report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
+    exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
     handleFatalError(err);
   }

@@ -33,6 +33,8 @@ export interface ApplyPlanResult {
   selected: ScanCandidate[];
   ready: ScanEntry[];
   revalidationFailures: PathFailure[];
+  /** True when cancellation stopped scheduling — some candidates were never attempted. */
+  interrupted: boolean;
 }
 
 export function scanToPlan(
@@ -48,6 +50,10 @@ export function scanToPlan(
 
 export interface ApplyPlanOptions {
   onDeleted?: (entry: ScanEntry) => void;
+  /** JS engine: checked before each delete; true stops scheduling new work. */
+  isCancelled?: () => boolean;
+  /** Rust engine: aborting kills the engine subprocess. */
+  signal?: AbortSignal;
 }
 
 export async function applyPlan(
@@ -69,10 +75,16 @@ export async function applyPlan(
     selected,
     plan.targetDir,
   );
-  const cleanResult = await clean(ready, (entry) => {
-    options.onDeleted?.(entry);
-  });
+  const cleanResult = await clean(
+    ready,
+    (entry) => {
+      options.onDeleted?.(entry);
+    },
+    options.isCancelled,
+  );
   const allFailures = [...revalidationFailures, ...cleanResult.failedPaths];
+  // Skipped (unattempted) entries land in neither list — that's the interrupt signal.
+  const interrupted = cleanResult.deleted.length + cleanResult.failedPaths.length < ready.length;
 
   return {
     report: {
@@ -88,6 +100,7 @@ export async function applyPlan(
     selected,
     ready,
     revalidationFailures,
+    interrupted,
   };
 }
 
@@ -111,6 +124,7 @@ function emptyApplyPlanResult(plan: ScanPlan): ApplyPlanResult {
     selected: [],
     ready: [],
     revalidationFailures: [],
+    interrupted: false,
   };
 }
 
@@ -133,7 +147,7 @@ export async function applyPlanWithBackend(
     assertPathWithinRoot(candidate.path, plan.targetDir);
   }
 
-  const report = await applyPlanViaRust(plan);
+  const report = await applyPlanViaRust(plan, options.signal);
   const failedPathSet = new Set(report.failedPaths.map((failure) => failure.path));
   const revalidationCodes = new Set<PathFailure["code"]>([
     "missing",
@@ -165,5 +179,6 @@ export async function applyPlanWithBackend(
     selected,
     ready,
     revalidationFailures,
+    interrupted: options.signal?.aborted ?? false,
   };
 }
