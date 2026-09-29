@@ -193,6 +193,77 @@ describe("handleKeymap", () => {
     expect(rescan.dismissScanError).toHaveBeenCalled();
   });
 
+  test("enter on a group header folds it instead of opening apply", () => {
+    // Mouse clicks park the cursor on headers; the destructive dialog must
+    // never be one stray enter away when the cursor has no artifact on it.
+    const state: SweepUiState = {
+      ...createUiState(mockPlan()),
+      focus: "list",
+      collapsedGroups: new Set([""]), // every row under the cursor is a header
+      rowIndex: 0,
+    };
+    const actions = makeActions();
+    handleKeymap(makeContext({ key: { name: "return" }, state }), actions);
+    expect(actions.requestApply).not.toHaveBeenCalled();
+    expect(actions.mutate).toHaveBeenCalled();
+  });
+
+  test("enter on an item still requests apply", () => {
+    const actions = makeActions();
+    handleKeymap(
+      makeContext({
+        key: { name: "return" },
+        state: { ...createUiState(mockPlan()), focus: "list" },
+      }),
+      actions,
+    );
+    expect(actions.requestApply).toHaveBeenCalled();
+  });
+
+  test("i opens the inspect overlay and the overlay traps keys", () => {
+    const open = makeActions();
+    open.setInspect = mock(() => {});
+    handleKeymap(
+      makeContext({
+        key: { name: "i" },
+        state: { ...createUiState(mockPlan()), focus: "list" },
+      }),
+      open,
+    );
+    expect(open.setInspect).toHaveBeenCalledWith(true);
+
+    // While open, navigation keys are trapped — the modal is the surface.
+    const trapped = makeActions();
+    trapped.setInspect = mock(() => {});
+    handleKeymap(makeContext({ key: { name: "j" }, inspectOpen: true }), trapped);
+    expect(trapped.mutate).not.toHaveBeenCalled();
+    expect(trapped.setInspect).not.toHaveBeenCalled();
+
+    for (const dismiss of ["escape", "i", "q", "return"]) {
+      const actions = makeActions();
+      actions.setInspect = mock(() => {});
+      handleKeymap(makeContext({ key: { name: dismiss }, inspectOpen: true }), actions);
+      expect(actions.setInspect).toHaveBeenCalledWith(false);
+    }
+  });
+
+  test("space on a sidebar row queues the whole scope", () => {
+    const state: SweepUiState = {
+      ...createUiState(mockPlan()),
+      focus: "sidebar",
+      sidebarIndex: 0, // the "all scopes" row
+      selectedIds: new Set(),
+    };
+    const actions = makeActions();
+    handleKeymap(makeContext({ key: { name: "space" }, state }), actions);
+    expect(actions.mutate).toHaveBeenCalled();
+
+    const mutator = (actions.mutate as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]?.[0] as (s: SweepUiState) => SweepUiState;
+    const next = mutator(state);
+    expect(next.selectedIds.has("cand_1")).toBe(true);
+  });
+
   test("Ctrl+U and Ctrl+D page scrolling", () => {
     const ctxCtrlU = makeContext({
       key: { name: "u", ctrl: true },

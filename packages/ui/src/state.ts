@@ -19,6 +19,8 @@ export {
   moveSidebarCursor,
   applySidebarScope,
   toggleScopeExpand,
+  toggleScopeSelection,
+  toggleSidebarScopeSelection,
   collapseScopeFolder,
   rescanConfigFromState,
   selectSafeOnly,

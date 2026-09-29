@@ -1,4 +1,4 @@
-import { bold, fg, t } from "@opentui/core";
+import { bold, fg, StyledText, t } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
@@ -25,6 +25,8 @@ import {
   buildHeaderStats,
   buildRiskTally,
   modeLabel,
+  relativePath,
+  riskGlyph,
   type FooterContext,
 } from "./presentation.js";
 import { buildDisplayRows } from "./rows.js";
@@ -33,6 +35,7 @@ import {
   countSelectedDangerous,
   createUiState,
   finalizeScan,
+  getCurrentCandidate,
   getUiSummary,
   resetForRescan,
   rescanConfigFromState,
@@ -57,6 +60,8 @@ export type { SweepUiStreamingOptions } from "./streaming.js";
 export interface SweepUiOptions {
   yes?: boolean;
   dryRun?: boolean;
+  /** Trash mode: the apply dialog must say "move", not "permanently delete". */
+  trash?: boolean;
   init?: SweepUiInitOptions;
 }
 
@@ -74,6 +79,8 @@ function uiReducer(state: SweepUiState, action: UiAction): SweepUiState {
 export interface SweepAppProps {
   plan: ScanPlan;
   dryRun?: boolean;
+  /** Trash mode — changes confirm copy and adds a TRASH header chip. */
+  trash?: boolean;
   onDone: (outcome: SweepUiOutcome) => void;
   init?: SweepUiInitOptions;
   /** When present, the app boots into a live scan and fills in as results stream. */
@@ -144,7 +151,12 @@ function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
         <text content={line("/ then tab", "filter · cycle panes (⇥ back)")} wrapMode="none" />
         <text content={line("1 – 4", "filter by risk level")} wrapMode="none" />
         <text content={line("p", "pattern editor")} wrapMode="none" />
+        <text content={line("i", "inspect artifact — kind, path, reasons")} wrapMode="none" />
         <text content={line("enter", "apply — always asks to confirm")} wrapMode="none" />
+        <text
+          content={line("scopes (tab)", "enter scopes · space queues the whole scope")}
+          wrapMode="none"
+        />
         <text content={line("t", "cycle theme (dark · light · auto)")} wrapMode="none" />
         <text
           content={line("mouse", "wheel scrolls · click focuses · click again queues")}
@@ -170,24 +182,34 @@ function ConfirmOverlay({
   selectedCount,
   selectedBytes,
   dangerousCount,
+  previewPaths,
   dryRun,
+  trash,
 }: {
   tokens: ThemeTokens;
   selectedCount: number;
   selectedBytes: number;
   dangerousCount: number;
+  /** Largest queued candidates by bytes — the last gate should name names. */
+  previewPaths: string[];
   dryRun?: boolean;
+  trash?: boolean;
 }) {
-  const action = dryRun ? "Preview deletion of" : "Permanently delete";
+  // The verb has to match what executePlanDeletion will actually do —
+  // "permanently delete" while moving to trash understates nothing, and
+  // "move" while deleting would be a lie the other way.
+  const action = dryRun ? "Preview removal of" : trash ? "Move to trash" : "Permanently delete";
   const dangerous = dangerousCount > 0;
-  const accent = dangerous ? tokens.danger : tokens.accent;
+  const accent = dangerous && !trash ? tokens.danger : tokens.accent;
+  const shown = previewPaths.slice(0, 3);
+  const hidden = previewPaths.length - shown.length;
 
   return (
     <Modal
       tokens={tokens}
       title={dangerous ? " ⚠ apply " : " apply "}
       titleColor={accent}
-      width={52}
+      width={56}
     >
       <text
         content={t`${bold(fg(accent)(`${action} ${selectedCount} item${selectedCount === 1 ? "" : "s"}`))}`}
@@ -196,9 +218,28 @@ function ConfirmOverlay({
         content={t`${fg(tokens.positive)(formatBytes(selectedBytes))} ${fg(tokens.textMuted)("will be freed")}`}
       />
       <text content="" />
+      {shown.map((path) => (
+        <text
+          key={path}
+          content={t`${fg(tokens.textDim)("·")} ${fg(tokens.textSecondary)(path)}`}
+          wrapMode="none"
+        />
+      ))}
+      {hidden > 0 ? (
+        <text content={t`${fg(tokens.textDim)(`  …and ${hidden} more`)}`} wrapMode="none" />
+      ) : null}
+      <text content="" />
       {dangerous ? (
         <text
-          content={t`${fg(tokens.danger)(`⚠ ${dangerousCount} dangerous item${dangerousCount === 1 ? "" : "s"} selected — this cannot be undone.`)}`}
+          content={t`${fg(trash ? tokens.warning : tokens.danger)(
+            trash
+              ? `⚠ ${dangerousCount} dangerous item${dangerousCount === 1 ? "" : "s"} leave the working tree.`
+              : `⚠ ${dangerousCount} dangerous item${dangerousCount === 1 ? "" : "s"} selected — this cannot be undone.`,
+          )}`}
+        />
+      ) : trash ? (
+        <text
+          content={t`${fg(tokens.textDim)("Moves into .sweep-trash-* under the target — reversible.")}`}
         />
       ) : (
         <text content={t`${fg(tokens.textDim)("No dangerous items in this selection.")}`} />
@@ -211,10 +252,97 @@ function ConfirmOverlay({
   );
 }
 
-export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }: SweepAppProps) {
+/**
+ * Per-candidate detail — the "why" behind a row. Reasons, entry type and the
+ * full (sanitized) path never fit the list row; the list is for triage, this
+ * is for trust.
+ */
+function InspectOverlay({
+  tokens,
+  candidate,
+  queued,
+  targetDir,
+}: {
+  tokens: ThemeTokens;
+  candidate: ScanCandidate;
+  queued: boolean;
+  targetDir: string;
+}) {
+  const rel = relativePath(targetDir, candidate.path).replaceAll("\\", "/");
+  const riskGlyphColor = {
+    safe: tokens.positive,
+    caution: tokens.warning,
+    dangerous: tokens.danger,
+    blocked: tokens.blocked,
+  }[candidate.riskTier];
+
+  const field = (label: string, value: string | StyledText) => (
+    <box flexDirection="row" height={1} flexShrink={0}>
+      <text content={t`${fg(tokens.textDim)(label.padEnd(9))} `} wrapMode="none" />
+      {typeof value === "string" ? (
+        <text content={t`${fg(tokens.text)(value)}`} wrapMode="none" />
+      ) : (
+        <text content={value} wrapMode="none" />
+      )}
+    </box>
+  );
+
+  return (
+    <Modal tokens={tokens} title=" artifact " width={64}>
+      <box flexDirection="column">
+        <text
+          content={t`${fg(riskGlyphColor)(riskGlyph[candidate.riskTier])} ${bold(fg(tokens.text)(sanitizeTerminalText(candidate.name)))} ${fg(tokens.textMuted)(candidate.kind)}`}
+          wrapMode="none"
+        />
+        <text content="" />
+        {field("path", sanitizeTerminalText(rel.length > 0 ? rel : candidate.name))}
+        {field("size", formatBytes(candidate.estimatedBytes))}
+        {field(
+          "risk",
+          t`${fg(riskGlyphColor)(candidate.riskTier)}${queued ? fg(tokens.accent)("  · queued") : ""}`,
+        )}
+        {field(
+          "type",
+          candidate.isSymlink
+            ? `${candidate.entryType} (link only — target never scanned)`
+            : candidate.entryType,
+        )}
+        {candidate.reasons.length > 0 ? (
+          <>
+            <text content="" />
+            <text content={t`${fg(tokens.textDim)("why it was flagged:")}`} wrapMode="none" />
+            {candidate.reasons.map((reason) => (
+              <text
+                key={reason}
+                content={t`  ${fg(tokens.textDim)("·")} ${fg(tokens.textSecondary)(sanitizeTerminalText(reason))}`}
+                wrapMode="none"
+              />
+            ))}
+          </>
+        ) : null}
+        <text content="" />
+        <text
+          content={t`${bold(fg(tokens.text)("i"))} ${fg(tokens.textMuted)(" / esc close")}`}
+          wrapMode="none"
+        />
+      </box>
+    </Modal>
+  );
+}
+
+export function SweepApp({
+  plan,
+  dryRun,
+  trash,
+  onDone,
+  init,
+  scan,
+  initiallyScanning,
+}: SweepAppProps) {
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) => createUiState(p, init));
   const [showHelp, setShowHelp] = useState(false);
   const [pendingApply, setPendingApply] = useState(false);
+  const [showInspect, setShowInspect] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   // One-line feedback for keys that deliberately do nothing (esc with nothing
   // left to unwind, enter on an empty queue, space on a blocked row). Cleared
@@ -255,6 +383,14 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
             fn: (s) =>
               finalizeScan(setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs), finalPlan),
           });
+          // The scan chip quietly flipping to NORMAL is the only signal today —
+          // say what landed so the end of a long scan is legible at a glance.
+          const found = finalPlan?.candidates.length;
+          setNotice(
+            found !== undefined
+              ? `scan complete — ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
+              : `scan complete — ${scannedDirs.toLocaleString()} dirs`,
+          );
         },
         onError: (error) => {
           if (gen !== generationRef.current || controller.signal.aborted) return;
@@ -350,6 +486,7 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         showSidebar,
         listSelectIndex,
         scanError,
+        inspectOpen: showInspect,
         // Approximate visible list rows: full height minus header/status chrome.
         pageRows: Math.max(6, dimensions.height - 10),
       },
@@ -364,12 +501,32 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
         requestRescan,
         toggleSort: () => dispatch({ type: "mutate", fn: toggleSortBy }),
         dismissScanError: () => setScanError(null),
+        setInspect: setShowInspect,
         notify: setNotice,
       },
     );
   });
 
-  const headerStats = buildHeaderStats(plan, summary, tokens, dryRun, dimensions.width);
+  const inspectCandidate = useMemo(
+    () => (showInspect ? getCurrentCandidate(state) : undefined),
+    [showInspect, state],
+  );
+
+  const confirmPreview = useMemo(
+    () =>
+      state.candidates
+        .filter(
+          (candidate) => state.selectedIds.has(candidate.id) && candidate.riskTier !== "blocked",
+        )
+        .sort((a, b) => b.estimatedBytes - a.estimatedBytes)
+        .slice(0, 3)
+        .map((candidate) =>
+          sanitizeTerminalText(relativePath(state.targetDir, candidate.path).replaceAll("\\", "/")),
+        ),
+    [state.candidates, state.selectedIds, state.targetDir],
+  );
+
+  const headerStats = buildHeaderStats(plan, summary, tokens, dryRun, dimensions.width, trash);
 
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
   // The sidebar is the scope filter's control surface, and it hides under 72
@@ -389,9 +546,11 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
     ? { kind: "scanError" }
     : pendingApply
       ? { kind: "confirm" }
-      : showHelp
-        ? { kind: "help" }
-        : { kind: "pane", focus: state.focus };
+      : showInspect
+        ? { kind: "inspect" }
+        : showHelp
+          ? { kind: "help" }
+          : { kind: "pane", focus: state.focus };
 
   const footerContent = buildFooterHints(footerContext, tokens, {
     ...(dryRun ? { dryRun: true } : {}),
@@ -503,7 +662,17 @@ export function SweepApp({ plan, dryRun, onDone, init, scan, initiallyScanning }
           selectedCount={summary.selectedCount}
           selectedBytes={summary.selectedBytes}
           dangerousCount={dangerousSelected}
+          previewPaths={confirmPreview}
           {...(dryRun ? { dryRun: true } : {})}
+          {...(trash ? { trash: true } : {})}
+        />
+      ) : null}
+      {showInspect && inspectCandidate ? (
+        <InspectOverlay
+          tokens={tokens}
+          candidate={inspectCandidate}
+          queued={state.selectedIds.has(inspectCandidate.id)}
+          targetDir={state.targetDir}
         />
       ) : null}
       {scanError ? (
@@ -536,6 +705,7 @@ export async function runSweepUi(
         <SweepApp
           plan={plan}
           {...(options.dryRun ? { dryRun: true } : {})}
+          {...(options.trash ? { trash: true } : {})}
           {...(options.init ? { init: options.init } : {})}
           onDone={session.finish}
         />

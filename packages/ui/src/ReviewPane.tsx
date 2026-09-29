@@ -83,6 +83,18 @@ export function ReviewPane({
   const listFocused = state.focus === "list" || state.focus === "patterns";
   const emptyScan = state.scanning && state.candidates.length === 0;
 
+  // The pane title is the one indicator that survives every terminal width —
+  // sidebar and footer chips both hide on narrow layouts. An active scope or
+  // risk filter must always be legible somewhere the user is already looking.
+  const titleParts = ["artifacts"];
+  if (state.scopeFilter !== null) {
+    titleParts.push(
+      state.scopeFilter === "" ? "project root" : sanitizeTerminalText(state.scopeFilter),
+    );
+  }
+  if (state.riskFilter !== "all") titleParts.push(state.riskFilter);
+  const paneTitle = searchFocused ? " › filter " : ` ${titleParts.join(" · ")} `;
+
   return (
     <box width="100%" flexGrow={1} minHeight={0} flexDirection="row" gap={1}>
       {showSidebar ? (
@@ -121,7 +133,7 @@ export function ReviewPane({
         borderStyle="rounded"
         border
         borderColor={listFocused || searchFocused ? tokens.borderFocus : tokens.borderSoft}
-        title={searchFocused ? " › filter " : " artifacts "}
+        title={paneTitle}
         backgroundColor={tokens.surface}
         overflow="hidden"
         paddingX={1}

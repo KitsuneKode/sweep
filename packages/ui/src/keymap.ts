@@ -19,6 +19,7 @@ import {
   collapseScopeFolder,
   setPatternIndex,
   setFilter,
+  toggleSidebarScopeSelection,
   type UiFocus,
 } from "./state.js";
 import {
@@ -134,6 +135,8 @@ export interface KeymapActions {
   toggleSort?: () => void;
   /** Dismiss a scan-error modal without retrying. */
   dismissScanError?: () => void;
+  /** Open/close the per-candidate inspect overlay. */
+  setInspect?: (open: boolean) => void;
   /** Flash a one-line notice for a keypress that deliberately does nothing. */
   notify?: (message: string) => void;
 }
@@ -149,11 +152,22 @@ export interface KeymapContext {
   pageRows?: number;
   /** Full scan failure shown as a modal; traps keys until dismissed. */
   scanError?: string | null;
+  /** Candidate-inspect overlay is open; traps keys until dismissed. */
+  inspectOpen?: boolean;
 }
 
 /** Dispatch keyboard input by modal state and focused panel. */
 export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
-  const { key, state, showHelp, pendingApply, showSidebar, listSelectIndex, scanError } = ctx;
+  const {
+    key,
+    state,
+    showHelp,
+    pendingApply,
+    showSidebar,
+    listSelectIndex,
+    scanError,
+    inspectOpen,
+  } = ctx;
 
   // Quit is checked before every other branch. The terminal is in raw mode, so
   // no SIGINT is generated for us: if a modal or the filter input swallows this
@@ -201,6 +215,13 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   if (showHelp) {
     if (key.name === "?" || key.name === "escape" || key.name === "q") {
       actions.setShowHelp(false);
+    }
+    return;
+  }
+
+  if (inspectOpen) {
+    if (key.name === "i" || key.name === "escape" || key.name === "q" || key.name === "return") {
+      actions.setInspect?.(false);
     }
     return;
   }
@@ -300,6 +321,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.mutate((s) => collapseScopeFolder(s));
       return;
     }
+    if (key.name === "space") {
+      // Queue/dequeue the whole scope — the tree row is a checkbox group, not
+      // just a filter. Blocked entries stay locked inside it.
+      actions.mutate((s) => toggleSidebarScopeSelection(s));
+      return;
+    }
     return;
   }
 
@@ -365,7 +392,19 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     }
 
     if (key.name === "return") {
-      actions.requestApply();
+      // Mouse clicks can park the cursor on a group header — enter there means
+      // "fold this group" (same as space/l), never the destructive dialog.
+      const row = buildDisplayRows(state)[state.rowIndex];
+      if (row?.kind === "header") {
+        actions.mutate((s) => toggleGroup(s, row.groupKey));
+      } else {
+        actions.requestApply();
+      }
+      return;
+    }
+
+    if (key.name === "i") {
+      actions.setInspect?.(true);
       return;
     }
   }

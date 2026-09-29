@@ -78,6 +78,7 @@ export interface SweepUiModule {
     selectionPolicy: import("@kitsunekode/sweep-protocol").SelectionPolicy;
     engine: "js" | "rust";
     dryRun?: boolean;
+    trash?: boolean;
     yes?: boolean;
     init?: {
       catalogPatterns?: string[];
@@ -152,6 +153,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       selectionPolicy,
       engine,
       ...(opts.dryRun ? { dryRun: true } : {}),
+      ...(opts.trash ? { trash: true } : {}),
       init: {
         catalogPatterns: [...DEFAULT_PATTERNS],
         disabledPatterns: scanConfig.disabledPatterns ?? [],

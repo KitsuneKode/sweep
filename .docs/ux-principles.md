@@ -27,14 +27,24 @@ destroy review context or exit the process.
   to delete.
 - Bulk select (`a`) covers safe + caution only. Dangerous-tier items enter a
   selection only through deliberate per-item toggles.
+- Scope rows in the sidebar are checkbox groups: `Space` on a scope queues or
+  dequeues its whole subtree. Entering a scope only narrows the view.
+- `Enter` fires the apply dialog only when the cursor is on an artifact. On a
+  group header (reachable by mouse) it folds the group, same as `Space`.
 - Blocked items (VCS internals, protected roots) cannot be selected in any
-  mode.
+  mode — including inside a scope-level bulk queue.
 
 ## 4. The screen answers three questions at all times
 
-1. What am I looking at? (mode chip + pane titles)
-2. What happens if I press Enter? (selection tally + confirm gate)
+1. What am I looking at? (mode chip + pane titles — the artifact pane title
+   carries the active scope and risk filter at every terminal width)
+2. What happens if I press Enter? (selection tally + confirm gate; the dialog
+   names the real verb — delete vs trash — and previews the largest targets)
 3. How do I get out of here? (footer hints; `?` for the full map)
+
+The list is for triage, `i` is for trust: the inspect overlay shows the full
+path, kind, entry type, queued state, and every reason the scanner flagged
+the artifact — the "why" that does not fit a row.
 
 ## 5. Streaming, not blocking
 

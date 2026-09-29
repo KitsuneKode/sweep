@@ -22,6 +22,8 @@ import {
   toggleCurrentSelection,
   toggleGroup,
   togglePattern,
+  toggleScopeSelection,
+  toggleSidebarScopeSelection,
   toggleSelectionById,
   toggleSortBy,
   upsertCandidates,
@@ -635,6 +637,43 @@ describe("sweep ui state", () => {
       const state = resetForRescan(setScanning(streamed(), false));
       expect(state.orderPinned).toBe(true);
       expect(state.scanning).toBe(true);
+    });
+  });
+
+  describe("toggleScopeSelection", () => {
+    test("null scope queues every queueable artifact", () => {
+      const state = clearSelection(createUiState(createPlan()));
+      const toggled = toggleScopeSelection(state, null);
+
+      // cand_blocked is hard-locked — the all-scopes row must not reach it.
+      expect([...toggled.selectedIds].sort()).toEqual(["cand_dangerous", "cand_safe"]);
+    });
+
+    test("a scope key queues the subtree, including nested parents", () => {
+      const base = clearSelection(createUiState(createPlan()));
+      // ".git" holds only the blocked candidate — the toggle is a no-op there.
+      expect(toggleScopeSelection(base, ".git")).toBe(base);
+
+      const rootScoped = toggleScopeSelection(base, "");
+      expect([...rootScoped.selectedIds].sort()).toEqual(["cand_dangerous", "cand_safe"]);
+    });
+
+    test("a fully-queued scope toggles back off", () => {
+      const on = toggleScopeSelection(createUiState(createPlan()), "");
+      expect(on.selectedIds.has("cand_dangerous")).toBe(true);
+
+      const off = toggleScopeSelection(on, "");
+      expect(off.selectedIds.has("cand_dangerous")).toBe(false);
+      expect(off.selectedIds.has("cand_safe")).toBe(false);
+      // The user's choice now outranks re-seeding on stream upserts.
+      expect(off.selectionTouched.has("cand_dangerous")).toBe(true);
+    });
+
+    test("toggleSidebarScopeSelection drives the same toggle from the cursor row", () => {
+      const state = clearSelection(createUiState(createPlan()));
+      // sidebarIndex 0 is the "all scopes" row — a scope-level toggle of everything.
+      const toggled = toggleSidebarScopeSelection({ ...state, sidebarIndex: 0 });
+      expect([...toggled.selectedIds].sort()).toEqual(["cand_dangerous", "cand_safe"]);
     });
   });
 });

@@ -47,6 +47,8 @@ export interface SweepUiStreamingOptions {
   selectionPolicy: SelectionPolicy;
   engine: "js" | "rust";
   dryRun?: boolean;
+  /** Trash mode — the apply dialog says "move" and a TRASH chip shows. */
+  trash?: boolean;
   init?: SweepUiInitOptions;
 }
 
@@ -166,6 +168,7 @@ export async function runSweepUiStreaming(
         <SweepApp
           plan={emptyPlan(options.targetDir, options.selectionPolicy)}
           {...(options.dryRun ? { dryRun: true } : {})}
+          {...(options.trash ? { trash: true } : {})}
           {...(options.init ? { init: options.init } : {})}
           initiallyScanning
           scan={makeControl()}

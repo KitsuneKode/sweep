@@ -12,6 +12,7 @@ import {
   rowCandidateId,
   snapRowIndexToItem,
 } from "../rows.js";
+import { artifactScopeKey, candidateMatchesScope } from "../scope-tree.js";
 import type { ThemeMode } from "../theme.js";
 import { ancestorKeysOf } from "../tree-line.js";
 import { getVisibleCandidates, invalidateSelectorCache } from "./selectors.js";
@@ -582,6 +583,41 @@ export function selectVisible(state: SweepUiState, includeDangerous: boolean): S
   }
 
   return { ...state, selectedIds, selectionTouched };
+}
+
+/**
+ * Queue or dequeue every queueable artifact under a sidebar scope.
+ *
+ * If all non-blocked candidates in the scope are already queued, the toggle
+ * reverses into a dequeue (like a checkbox row). `scopeKey === null` means the
+ * root row — every candidate. Blocked entries are hard-locked either way.
+ */
+export function toggleScopeSelection(state: SweepUiState, scopeKey: string | null): SweepUiState {
+  const eligible = state.candidates.filter(
+    (candidate) =>
+      candidate.riskTier !== "blocked" &&
+      (scopeKey === null ||
+        candidateMatchesScope(artifactScopeKey(state.targetDir, candidate.path), scopeKey)),
+  );
+  if (eligible.length === 0) return state;
+
+  const selectedIds = new Set(state.selectedIds);
+  const allSelected = eligible.every((candidate) => selectedIds.has(candidate.id));
+  const selectionTouched = new Set(state.selectionTouched);
+  for (const candidate of eligible) {
+    selectionTouched.add(candidate.id);
+    if (allSelected) selectedIds.delete(candidate.id);
+    else selectedIds.add(candidate.id);
+  }
+  return { ...state, selectedIds, selectionTouched };
+}
+
+/** Same toggle, addressed by the sidebar cursor row instead of a scope key. */
+export function toggleSidebarScopeSelection(state: SweepUiState): SweepUiState {
+  const rows = sidebarRowsFor(state);
+  const row = rows[state.sidebarIndex];
+  if (!row) return state;
+  return toggleScopeSelection(state, row.key);
 }
 
 export function clearSelection(state: SweepUiState): SweepUiState {

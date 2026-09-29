@@ -280,6 +280,7 @@ export function buildHeaderStats(
   tokens: ThemeTokens,
   dryRun?: boolean,
   width?: number,
+  trash?: boolean,
 ): StyledText {
   const w = width ?? Number.POSITIVE_INFINITY;
   const parts: StyledText[] = [];
@@ -309,6 +310,11 @@ export function buildHeaderStats(
     }
   }
 
+  if (trash) {
+    // Reversible mode changes what apply does — it must be visible before the
+    // confirm dialog, not discovered after it.
+    parts.push(t`${bold(fg(tokens.info)("TRASH"))}`);
+  }
   if (dryRun) {
     parts.push(t`${bold(fg(tokens.warning)("DRY RUN"))}`);
   }
@@ -381,6 +387,7 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
 export type FooterContext =
   | { kind: "confirm" }
   | { kind: "help" }
+  | { kind: "inspect" }
   | { kind: "scanError" }
   | { kind: "pane"; focus: UiFocus };
 
@@ -411,7 +418,11 @@ export function buildFooterHints(
   }
 
   if (context.kind === "help") {
-    return t`${key("?")} ${hint("close")}${sep}${key("esc")} ${hint("close")}${sep}${key("q")} ${hint("quit")}`;
+    return t`${key("?")} ${hint("close")}${sep}${key("esc")} ${hint("close")}${sep}${key("q")} ${hint("close")}`;
+  }
+
+  if (context.kind === "inspect") {
+    return t`${key("i")} ${hint("close")}${sep}${key("esc")} ${hint("close")}${sep}${key("q")} ${hint("close")}`;
   }
 
   if (context.kind === "scanError") {
@@ -424,14 +435,14 @@ export function buildFooterHints(
   }
 
   if (context.focus === "sidebar") {
-    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("open/close")}${sep}${key("enter")} ${hint("scope")}${sep}${key("tab")} ${hint("panes")}${sep}${key("?")} ${hint("help")}`;
+    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("open/close")}${sep}${key("enter")} ${hint("scope")}${sep}${key("space")} ${hint("queue")}${sep}${key("tab")} ${hint("panes")}${sep}${key("?")} ${hint("help")}`;
   }
 
   if (context.focus === "search") {
     return t`${key("enter")} ${hint("list")}${sep}${key("esc")} ${hint("clear")}${sep}${key("tab")} ${hint("panes")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
-  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("enter")} ${hint(options.dryRun ? "done" : "apply")}${sep}${key("/")} ${hint("filter")}${sep}${key("?")} ${hint("help")}`;
+  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("enter")} ${hint(options.dryRun ? "done" : "apply")}${sep}${key("i")} ${hint("inspect")}${sep}${key("/")} ${hint("filter")}${sep}${key("?")} ${hint("help")}`;
 }
 
 /** Statusline mode segment label for the focused panel. */
