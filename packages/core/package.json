@@ -12,6 +12,7 @@
     "./scanner": "./src/scanner.ts",
     "./cleaner": "./src/cleaner.ts",
     "./rust-engine": "./src/rust-engine.ts",
+    "./history": "./src/history.ts",
     "./native-platforms": "./src/native-platforms.ts"
   },
   "scripts": {

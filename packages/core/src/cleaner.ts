@@ -1,9 +1,32 @@
-import { rm, rmdir, unlink } from "node:fs/promises";
+import { mkdirSync } from "node:fs";
+import { rename, rm, rmdir, unlink } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
 import { mapPool } from "./async-pool.js";
 import { isReparsePointOrSymlink } from "./guardrails.js";
 
 const DELETE_CONCURRENCY = 4;
+
+export interface CleanOptions {
+  onProgress?: ((entry: ScanEntry, index: number, total: number) => void) | undefined;
+  /**
+   * JS engine: checked before each delete; true stops scheduling new work.
+   * Unprocessed entries appear in neither `deleted` nor `failedPaths`.
+   */
+  isCancelled?: (() => boolean) | undefined;
+  /**
+   * When set, entries are moved into this directory instead of deleted.
+   * `trashDir` must live on the same filesystem as the entries — moves are
+   * atomic renames, never copy-and-delete.
+   */
+  trashDir?: string | undefined;
+  /**
+   * Root that entry paths are relativized against for the trash layout.
+   * Required when `trashDir` is set; entries outside it are failed rather
+   * than moved.
+   */
+  trashRoot?: string | undefined;
+}
 
 /**
  * Filter out candidate entries that are contained within an ancestor candidate
@@ -35,7 +58,24 @@ export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
 }
 
 /**
- * Delete all entries in the list with bounded concurrency.
+ * Move an entry into the trash dir, preserving its path relative to
+ * `trashRoot`. `rename` on a symlink moves the link itself, never the target.
+ * A path outside `trashRoot` or an absolute relative result is refused —
+ * the trash layout must stay inside `trashDir`.
+ */
+async function moveToTrash(entry: ScanEntry, trashDir: string, trashRoot: string): Promise<void> {
+  const rel = relative(trashRoot, entry.path);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`trash destination escapes root for ${entry.path}`);
+  }
+  const destination = join(trashDir, rel);
+  mkdirSync(dirname(destination), { recursive: true });
+  await rename(entry.path, destination);
+}
+
+/**
+ * Delete all entries in the list with bounded concurrency — or move them to
+ * `options.trashDir` when trash mode is requested.
  *
  * Symlinks are removed with unlink (removes the link entry, not the target).
  * Reparse points / NTFS junctions on Windows are unlinked/removed safely without recursion.
@@ -48,8 +88,7 @@ export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
  */
 export async function clean(
   entries: ScanEntry[],
-  onProgress?: (entry: ScanEntry, index: number, total: number) => void,
-  isCancelled?: () => boolean,
+  options: CleanOptions = {},
 ): Promise<CleanResult> {
   const startTime = Date.now();
   const deleted: ScanEntry[] = [];
@@ -62,7 +101,9 @@ export async function clean(
     DELETE_CONCURRENCY,
     async (entry, index) => {
       try {
-        if (
+        if (options.trashDir && options.trashRoot) {
+          await moveToTrash(entry, options.trashDir, options.trashRoot);
+        } else if (
           entry.isSymlink ||
           (process.platform === "win32" && isReparsePointOrSymlink(entry.path))
         ) {
@@ -84,10 +125,10 @@ export async function clean(
         });
       }
 
-      onProgress?.(entry, index, deduplicated.length);
+      options.onProgress?.(entry, index, deduplicated.length);
       return entry;
     },
-    isCancelled,
+    options.isCancelled,
   );
 
   return {

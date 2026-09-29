@@ -39,7 +39,7 @@ describe("loadConfig — defaults", () => {
     expect(config.patterns).toEqual(DEFAULT_CONFIG.patterns);
     expect(config.maxSizeGB).toBe(10);
     expect(config.depth).toBe(-1);
-    expect(config.ignore).toEqual([]);
+    expect(config.ignore).toEqual(DEFAULT_CONFIG.ignore);
   });
 
   test("default patterns include node_modules, dist, .next, etc.", () => {
@@ -246,7 +246,7 @@ describe("buildRescanConfig", () => {
     expect(next.patterns).toContain("dist");
     expect(next.patterns).toContain(".cache");
     expect(next.disabledPatterns).toBeUndefined();
-    expect(next.ignore).toEqual(["vendor"]);
+    expect(next.ignore).toEqual([...DEFAULT_CONFIG.ignore, "vendor"]);
     expect(next.depth).toBe(3);
     expect(next.maxSizeGB).toBe(4);
   });

@@ -186,14 +186,23 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       exitWith(EXIT.OK);
     }
 
-    const { report, cleanResult, interrupted } = await executePlanDeletion(selectedPlan, engine);
+    const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(
+      selectedPlan,
+      engine,
+      opts.trash ? { trash: true } : {},
+    );
 
-    printCleanResult({
-      ...cleanResult,
-      failedPaths: report.failedPaths,
-    });
+    printCleanResult(
+      {
+        ...cleanResult,
+        failedPaths: report.failedPaths,
+      },
+      trashDir ? { trashDir } : {},
+    );
     if (interrupted) {
-      printInterrupted(report.deletedCount, selectedPlan.selectedCandidateIds.length);
+      printInterrupted(report.deletedCount, selectedPlan.selectedCandidateIds.length, {
+        verb: trashDir ? "moved" : "deleted",
+      });
     }
 
     exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);

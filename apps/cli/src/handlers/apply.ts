@@ -27,6 +27,7 @@ export type ApplyHandlerOptions = {
   plan: string;
   yes: boolean;
   forceLarge?: boolean;
+  trash?: boolean;
   json?: boolean;
   color: boolean;
   engine?: import("@kitsunekode/sweep-protocol").EngineBackend;
@@ -84,21 +85,25 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
 
     const engine = resolveEngineBackend({ engine: opts.engine ?? "js" });
 
-    const { report, cleanResult, interrupted } = await executePlanDeletion(
-      plan,
-      engine,
-      opts.json ? { quiet: true } : {},
-    );
+    const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(plan, engine, {
+      ...(opts.json ? { quiet: true } : {}),
+      ...(opts.trash ? { trash: true } : {}),
+    });
 
     if (opts.json) {
       writeJson(report);
     } else {
-      printCleanResult({
-        ...cleanResult,
-        failedPaths: report.failedPaths,
-      });
+      printCleanResult(
+        {
+          ...cleanResult,
+          failedPaths: report.failedPaths,
+        },
+        trashDir ? { trashDir } : {},
+      );
       if (interrupted) {
-        printInterrupted(report.deletedCount, selectedCount);
+        printInterrupted(report.deletedCount, selectedCount, {
+          verb: trashDir ? "moved" : "deleted",
+        });
       }
     }
 

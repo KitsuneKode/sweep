@@ -42,6 +42,10 @@ CLI flags / config
 - `sweep scan` — scan only; `--json` and `--json-stream` for automation
 - `sweep apply --plan` — apply a saved plan with revalidation
 - `sweep ui` — OpenTUI interactive selection (TTY required)
+- `sweep inspect --plan` — read-only plan provenance and totals
+- `sweep stats` — cleanup history and lifetime reclaimed total
+- `sweep completions` — static bash/zsh/fish completion scripts
+- `sweep init` / `sweep doctor` — scaffolding and environment checks
 
 ## Intended direction
 
@@ -142,6 +146,30 @@ Both engines re-validate before deleting:
 - **Nested + duplicate candidates** — `deduplicateNestedEntries` drops any
   entry inside a retained parent (and exact-path repeats from crafted
   plans) so one path is never deleted or counted twice.
+
+### Trash mode
+
+`--trash` turns apply into a move: `clean()` renames each entry into
+`<target>/.sweep-trash-<iso-timestamp>/` preserving the target-relative
+path. Renames are same-filesystem and atomic; `rename` on a symlink moves
+the link, never the target, so trashing a symlink stays unlink-equivalent
+in safety terms. Nested dedupe still applies — a retained parent's move
+carries its children. The trash root is rmdir'd if every move fails (no
+bare husks). Trash dirs are default-ignored (`ignore: [".sweep-trash-*"]`)
+so they can't be re-selected; the user purges by deleting the dir. Trash
+is JS-engine only — the CLI falls back from `--engine rust` with a warning.
+`relative()` refuses entries outside `trashRoot` (defense in depth under
+the apply-time containment checks).
+
+### History
+
+`executePlanDeletion` appends one JSONL line per apply to
+`<configDir>/history.jsonl` (ts, targetDir, engine, deleted, bytesFreed,
+failed, interrupted, trashDir). Best-effort: a failed write never fails the
+apply. `sweepConfigDir()` resolves `$XDG_CONFIG_HOME/sweep` (or
+`%APPDATA%/sweep`, else `~/.config/sweep`) — `SWEEP_CONFIG_DIR` overrides
+it entirely, which is how tests and `bun run dev` keep user state clean.
+`readHistory` tail-slices past 8 MB and skips malformed lines.
 
 ### Terminal-output safety
 

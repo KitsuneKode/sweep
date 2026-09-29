@@ -9,6 +9,9 @@ As of the current code:
 - explicit config path: `--config <path>`
 - global config path: `~/.config/sweep/config.json`
   (honors `XDG_CONFIG_HOME`; `%APPDATA%\sweep\config.json` on Windows)
+- `SWEEP_CONFIG_DIR` overrides the config dir entirely — tests and
+  `bun run dev` set it so runs never touch real user state (config +
+  `history.jsonl` live under the same dir).
 
 Config resolution order (scalars — highest priority wins):
 
@@ -26,13 +29,13 @@ Array merge behavior:
 
 ## Fields
 
-| Field              | Purpose                                                         | Default |
-| ------------------ | --------------------------------------------------------------- | ------- |
-| `patterns`         | Extra artifact names/globs to add to defaults                   | `[]`    |
-| `disabledPatterns` | Default or merged patterns to disable for this project          | `[]`    |
-| `ignore`           | Skip matches by name, glob (`*.cache`), or relative path prefix | `[]`    |
-| `maxSizeGB`        | Size guardrail threshold                                        | `10`    |
-| `depth`            | Max scan depth (-1 = unlimited)                                 | `-1`    |
+| Field              | Purpose                                                         | Default              |
+| ------------------ | --------------------------------------------------------------- | -------------------- |
+| `patterns`         | Extra artifact names/globs to add to defaults                   | `[]`                 |
+| `disabledPatterns` | Default or merged patterns to disable for this project          | `[]`                 |
+| `ignore`           | Skip matches by name, glob (`*.cache`), or relative path prefix | `[".sweep-trash-*"]` |
+| `maxSizeGB`        | Size guardrail threshold                                        | `10`                 |
+| `depth`            | Max scan depth (-1 = unlimited)                                 | `-1`                 |
 
 Example `.sweeprc`:
 

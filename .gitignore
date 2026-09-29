@@ -12,3 +12,4 @@ coverage/
 target/
 native-packages/*/bin/
 package.json.prepack-backup
+.dev-state/

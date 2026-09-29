@@ -241,20 +241,33 @@ export function printDryRunNotice(): void {
   console.log();
 }
 
-export function printCleanResult(result: import("@kitsunekode/sweep-protocol").CleanResult): void {
+export function printCleanResult(
+  result: import("@kitsunekode/sweep-protocol").CleanResult,
+  options: { trashDir?: string } = {},
+): void {
   const duration =
     result.durationMs < 1000
       ? `${result.durationMs}ms`
       : `${(result.durationMs / 1000).toFixed(1)}s`;
+  const verb = options.trashDir ? "Moved" : "Cleaned";
 
   if (process.stdout.isTTY) {
     console.log(
-      `${pc.green("✓")} Cleaned ${pc.bold(result.deleted.length.toString())} items, ` +
+      `${pc.green("✓")} ${verb} ${pc.bold(result.deleted.length.toString())} items, ` +
         `${pc.bold(pc.green(formatBytes(result.totalBytesFreed)))} freed ` +
         pc.dim(`(${duration})`),
     );
   } else {
     console.log(`sweep: done — ${formatBytes(result.totalBytesFreed)} freed in ${duration}`);
+  }
+
+  if (options.trashDir) {
+    console.log(
+      pc.dim(
+        `  restore: entries moved to ${sanitizeTerminalText(options.trashDir)} — ` +
+          `delete that directory to reclaim the space.`,
+      ),
+    );
   }
 
   if (result.failedPaths.length > 0) {
@@ -273,11 +286,16 @@ export function printAborted(): void {
 }
 
 /** Deletion was interrupted (SIGINT) — some entries were removed, the rest untouched. */
-export function printInterrupted(deleted: number, total: number): void {
+export function printInterrupted(
+  deleted: number,
+  total: number,
+  options: { verb?: string } = {},
+): void {
   console.log();
   console.log(
     pc.yellow(
-      `⚠ Interrupted — ${deleted} of ${total} item(s) deleted. The rest were left in place.`,
+      `⚠ Interrupted — ${deleted} of ${total} item(s) ${options.verb ?? "deleted"}. ` +
+        `The rest were left in place.`,
     ),
   );
 }
@@ -285,6 +303,107 @@ export function printInterrupted(deleted: number, total: number): void {
 /** Neutral message shown when the user declines a confirmation prompt. */
 export function printDeclined(): void {
   console.log(pc.dim("Declined — nothing deleted."));
+}
+
+export interface PlanInfoSummary {
+  protocolVersion: string;
+  createdAt: string;
+  targetDir: string;
+  candidateCount: number;
+  selectedCount: number;
+  selectedBytes: number;
+  estimatedTotalBytes: number;
+  scannedDirs: number;
+  skippedDirs: number;
+  exact: boolean;
+  kinds: Record<string, number>;
+  risks: Record<string, number>;
+}
+
+/** `sweep inspect` — provenance + totals for a saved plan, no apply. */
+export function printPlanInfo(planPath: string, summary: PlanInfoSummary): void {
+  console.log(`  ${pc.bold("plan")}      ${sanitizeTerminalText(planPath)}`);
+  console.log(`    target      ${sanitizeTerminalText(summary.targetDir)}`);
+  console.log(`    created     ${summary.createdAt}`);
+  console.log(`    protocol    v${summary.protocolVersion}`);
+  console.log(
+    `    candidates  ${summary.candidateCount} ` +
+      pc.dim(
+        `(${Object.entries(summary.kinds)
+          .map(([kind, n]) => `${n} ${kind}`)
+          .join(", ")})`,
+      ),
+  );
+  console.log(
+    `    risk        ${Object.entries(summary.risks)
+      .map(([tier, n]) => `${n} ${tier}`)
+      .join(", ")}`,
+  );
+  console.log(
+    `    selected    ${summary.selectedCount} items · ${formatBytes(summary.selectedBytes)}`,
+  );
+  console.log(
+    `    scanned     ${summary.scannedDirs} dirs · ~${formatBytes(summary.estimatedTotalBytes)}` +
+      (summary.skippedDirs > 0 ? pc.yellow(` · ${summary.skippedDirs} skipped (unreadable)`) : ""),
+  );
+  console.log(`    exact sizes ${summary.exact ? pc.green("yes") : pc.dim("no")}`);
+  console.log();
+  console.log(pc.dim(`  apply with: sweep apply --plan ${sanitizeTerminalText(planPath)}`));
+}
+
+export interface StatsSession {
+  ts: string;
+  targetDir: string;
+  deleted: number;
+  bytesFreed: number;
+  failed: number;
+  interrupted: boolean;
+  trashDir?: string;
+}
+
+export interface StatsTotals {
+  sessions: number;
+  totalDeleted: number;
+  totalBytesFreed: number;
+  totalFailed: number;
+}
+
+/** `sweep stats` — lifetime reclaimed space plus recent sessions. */
+export function printStatsSummary(
+  totals: StatsTotals,
+  recent: StatsSession[],
+  historyFile: string,
+  totalSessionCount: number,
+): void {
+  if (totalSessionCount === 0) {
+    console.log(pc.dim("No cleanup history yet — run sweep clean to start the counter."));
+    return;
+  }
+
+  console.log(
+    `  ${pc.bold(pc.green(formatBytes(totals.totalBytesFreed)))} reclaimed ` +
+      pc.dim(`across ${totals.sessions} cleanup${totals.sessions === 1 ? "" : "s"}`),
+  );
+  if (totals.totalFailed > 0) {
+    console.log(pc.dim(`  ${totals.totalFailed} item(s) failed to delete over all sessions`));
+  }
+  console.log();
+
+  for (const entry of recent) {
+    const stamp = entry.ts.slice(0, 19).replace("T", " ");
+    const flags = [entry.trashDir ? "trash" : null, entry.interrupted ? "interrupted" : null]
+      .filter(Boolean)
+      .join(", ");
+    console.log(
+      `  ${pc.dim(stamp)}  ${formatBytes(entry.bytesFreed).padStart(9)}  ` +
+        `${entry.deleted} item(s)  ${pc.dim(sanitizeTerminalText(entry.targetDir))}` +
+        (flags ? pc.yellow(`  (${flags})`) : ""),
+    );
+  }
+  if (totalSessionCount > recent.length) {
+    console.log(pc.dim(`  … ${totalSessionCount - recent.length} older session(s)`));
+  }
+  console.log(pc.dim(`  log: ${sanitizeTerminalText(historyFile)}`));
 }
 
 export function printError(message: string): void {

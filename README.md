@@ -32,10 +32,21 @@ bun add -g @kitsunekode/sweep
 # One-shot
 npx @kitsunekode/sweep .
 bunx @kitsunekode/sweep .
+
+# Standalone binary (no Node/Bun needed)
+curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
 ```
 
-**Platforms:** Linux, macOS, Windows (Node.js ≥ 18 or Bun). Standalone binaries are
-attached to GitHub releases for systems without a Node runtime.
+**Platforms:** Linux (x64, arm64), macOS (x64, arm64), Windows (x64) — Node.js ≥ 18
+or Bun. Standalone binaries are attached to GitHub releases.
+
+**Shell completions:**
+
+```bash
+sweep completions zsh  > ~/.zsh/completions/_sweep        # dir must be in $fpath
+sweep completions bash > ~/.local/share/bash-completion/completions/sweep
+sweep completions fish > ~/.config/fish/completions/sweep.fish
+```
 
 ---
 
@@ -53,15 +64,18 @@ sweep doctor --json     # config + environment + dry-scan report
 
 ## Commands
 
-| Command                     | Description                                      |
-| --------------------------- | ------------------------------------------------ |
-| `sweep` / `sweep clean`     | Default cleanup flow with prompt and guardrails  |
-| `sweep scan`                | Scan only — list candidates, no deletion         |
-| `sweep plan`                | Emit a saved-plan JSON document                  |
-| `sweep ui`                  | OpenTUI interactive picker (TTY required)        |
-| `sweep apply --plan <path>` | Apply a saved JSON plan                          |
-| `sweep init`                | Create a starter `.sweeprc`                      |
-| `sweep doctor`              | Validate config, check tooling, dry-scan preview |
+| Command                       | Description                                      |
+| ----------------------------- | ------------------------------------------------ |
+| `sweep` / `sweep clean`       | Default cleanup flow with prompt and guardrails  |
+| `sweep scan`                  | Scan only — list candidates, no deletion         |
+| `sweep plan`                  | Emit a saved-plan JSON document                  |
+| `sweep ui`                    | OpenTUI interactive picker (TTY required)        |
+| `sweep apply --plan <path>`   | Apply a saved JSON plan                          |
+| `sweep inspect --plan <path>` | Show a plan's provenance and totals — no apply   |
+| `sweep stats`                 | Cleanup history + total reclaimed space          |
+| `sweep init`                  | Create a starter `.sweeprc`                      |
+| `sweep doctor`                | Validate config, check tooling, dry-scan preview |
+| `sweep completions <shell>`   | Print completion script for bash, zsh, or fish   |
 
 `path` defaults to `.` on all path-taking commands.
 
@@ -70,6 +84,7 @@ sweep doctor --json     # config + environment + dry-scan report
 | Flag                     | Short | Description                                        |
 | ------------------------ | ----- | -------------------------------------------------- |
 | `--dry-run`              | `-n`  | Preview deletions — no changes                     |
+| `--trash`                |       | Move to `.sweep-trash-<ts>/` instead of deleting   |
 | `--yes`                  | `-y`  | Skip confirmation (CI / scripts)                   |
 | `--force-large`          |       | Allow deletion over `maxSizeGB` (requires `--yes`) |
 | `--pattern <p>`          | `-p`  | Add extra pattern (repeatable)                     |
@@ -227,6 +242,24 @@ Layered guarantees:
    and why; exit code reflects it. A scan that couldn't read part of the tree
    says so (`N skipped` in the TUI, counts in `scan --json`) instead of looking
    complete.
+7. **Ctrl+C is safe** mid-apply — sweep stops scheduling new deletions, lets
+   in-flight work finish, then reports exactly what was removed.
+
+### Reversible cleanup (`--trash`)
+
+```bash
+sweep --trash                 # clean, but move instead of delete
+sweep clean . --trash -y      # same, non-interactive
+```
+
+Instead of deleting, candidates are moved into `.sweep-trash-<timestamp>/`
+inside the target — atomic renames on the same filesystem, with each entry's
+original relative path preserved. Nothing is unrecoverable until you delete
+the trash dir yourself (or run `sweep` on it). Trash dirs are excluded from
+future scans automatically.
+
+**History:** every apply appends to `~/.config/sweep/history.jsonl`
+(`SWEEP_CONFIG_DIR` to override). `sweep stats` shows the lifetime total.
 
 ---
 

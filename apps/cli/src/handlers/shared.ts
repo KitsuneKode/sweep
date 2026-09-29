@@ -1,7 +1,8 @@
+import { existsSync, mkdirSync, rmdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { resolve, sep } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type {
   ApplyReport,
   CliOptions,
@@ -24,6 +25,7 @@ import {
   assertTargetDirectory,
 } from "@kitsunekode/sweep-core/guardrails";
 import { toCandidate } from "@kitsunekode/sweep-core/planner";
+import { appendHistory } from "@kitsunekode/sweep-core/history";
 import {
   scanToPlanViaRust,
   isRustEngineAvailable,
@@ -312,14 +314,29 @@ export async function confirmPlanDeletion(
   );
 }
 
+/**
+ * Timestamped trash dir inside the target — keeps moves on the same
+ * filesystem so they are atomic renames. Suffix bump on collision.
+ */
+function freshTrashDir(targetDir: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  let trashDir = join(targetDir, `.sweep-trash-${stamp}`);
+  for (let suffix = 2; existsSync(trashDir); suffix++) {
+    trashDir = join(targetDir, `.sweep-trash-${stamp}-${suffix}`);
+  }
+  return trashDir;
+}
+
 export async function executePlanDeletion(
   plan: ScanPlan,
   engine: EngineBackend,
-  options: { quiet?: boolean } = {},
+  options: { quiet?: boolean; trash?: boolean } = {},
 ): Promise<{
   report: ApplyReport;
   cleanResult: import("@kitsunekode/sweep-protocol").CleanResult;
   interrupted: boolean;
+  /** Absolute trash dir when `--trash` moved entries instead of deleting. */
+  trashDir?: string;
 }> {
   const selected = plan.candidates.filter((candidate) =>
     plan.selectedCandidateIds.includes(candidate.id),
@@ -331,6 +348,17 @@ export async function executePlanDeletion(
   const { clearDeletionProgress, printDeletionProgress } =
     await import("@kitsunekode/sweep-display");
 
+  let effectiveEngine = engine;
+  let trashDir: string | undefined;
+  if (options.trash) {
+    if (engine === "rust") {
+      console.error("warning: --trash is not supported by the Rust engine; using JS engine");
+      effectiveEngine = "js";
+    }
+    trashDir = freshTrashDir(plan.targetDir);
+    mkdirSync(trashDir, { recursive: true });
+  }
+
   // Ctrl+C during apply must not vanish the report: stop scheduling new
   // deletions, let in-flight rm calls finish, then report the partial state.
   // A second SIGINT (no listener left) force-kills as usual.
@@ -341,13 +369,16 @@ export async function executePlanDeletion(
   const applyOptions = {
     isCancelled: () => controller.signal.aborted,
     signal: controller.signal,
+    ...(trashDir ? { trashDir, trashRoot: plan.targetDir } : {}),
     ...(options.quiet
       ? {}
       : {
           onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
             current++;
             freedBytes += entry.estimatedBytes;
-            printDeletionProgress(current, total, entry.path, entry.estimatedBytes, freedBytes);
+            printDeletionProgress(current, total, entry.path, entry.estimatedBytes, freedBytes, {
+              verb: trashDir ? "moving" : "deleting",
+            });
           },
         }),
   };
@@ -355,12 +386,37 @@ export async function executePlanDeletion(
   try {
     const { report, cleanResult, interrupted } = await applyPlanWithBackend(
       plan,
-      engine,
+      effectiveEngine,
       applyOptions,
     );
-    return { report, cleanResult, interrupted: interrupted || controller.signal.aborted };
+    // Best-effort — a stats write must never fail an apply.
+    appendHistory({
+      ts: new Date().toISOString(),
+      targetDir: plan.targetDir,
+      engine: effectiveEngine,
+      deleted: report.deletedCount,
+      bytesFreed: report.totalBytesFreed,
+      failed: report.failedCount,
+      interrupted: interrupted || controller.signal.aborted,
+      ...(trashDir ? { trashDir } : {}),
+    });
+    return {
+      report,
+      cleanResult,
+      interrupted: interrupted || controller.signal.aborted,
+      ...(trashDir ? { trashDir } : {}),
+    };
   } finally {
     process.removeListener("SIGINT", onSigint);
     clearDeletionProgress();
+    if (trashDir) {
+      // rmdir only removes an empty dir — when every move failed the trash
+      // root is a bare husk; when moves landed it stays.
+      try {
+        rmdirSync(trashDir);
+      } catch {
+        // Non-empty or transient error — leave it.
+      }
+    }
   }
 }

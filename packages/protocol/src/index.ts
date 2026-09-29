@@ -93,6 +93,8 @@ export interface CliOptions {
   quiet?: boolean;
   verbose?: boolean;
   json?: boolean;
+  /** Move candidates to .sweep-trash-<ts>/ under the target instead of deleting. */
+  trash?: boolean;
 }
 
 export interface ScanCandidate extends ScanEntry {

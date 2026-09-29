@@ -32,7 +32,9 @@ export const DEFAULT_PATTERNS: string[] = [
 
 export const DEFAULT_CONFIG: SweepConfig = {
   patterns: DEFAULT_PATTERNS,
-  ignore: [],
+  // Trash dirs created by `sweep --trash` must never be re-selected —
+  // they hold live restore data until the user purges them.
+  ignore: [".sweep-trash-*"],
   maxSizeGB: 10,
   depth: -1,
 };
@@ -163,14 +165,24 @@ export function writeInitSweeprc(configPath: string, force = false): "created" |
   return "created";
 }
 
-function getGlobalConfig(): Partial<SweepConfig> | null {
-  const configDir =
+/**
+ * Platform-resolved sweep config dir: $XDG_CONFIG_HOME/sweep,
+ * %APPDATA%/sweep on Windows, else ~/.config/sweep.
+ * `SWEEP_CONFIG_DIR` overrides everything — used by tests and dev runs so
+ * they never touch the user's real config/history files.
+ */
+export function sweepConfigDir(): string {
+  if (process.env.SWEEP_CONFIG_DIR) return process.env.SWEEP_CONFIG_DIR;
+  const base =
     process.env.XDG_CONFIG_HOME ||
     (process.platform === "win32" && process.env.APPDATA
       ? process.env.APPDATA
       : join(homedir(), ".config"));
-  const globalPath = join(configDir, "sweep", "config.json");
-  return readJsonConfig(globalPath);
+  return join(base, "sweep");
+}
+
+function getGlobalConfig(): Partial<SweepConfig> | null {
+  return readJsonConfig(join(sweepConfigDir(), "config.json"));
 }
 
 // ─── Merge helpers ────────────────────────────────────────────────────────────

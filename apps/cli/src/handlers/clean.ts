@@ -45,8 +45,9 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       projectConfig,
       spinnerLabel: opts.dryRun ? "Scanning (dry-run)..." : "Scanning...",
       output: {
-        ...(opts.quiet ? { quiet: true } : {}),
-        ...(opts.verbose ? { verbose: true } : {}),
+        // --json output must stay machine-readable — no banner/plan text on stdout.
+        ...(opts.quiet || opts.json ? { quiet: true } : {}),
+        ...(opts.verbose && !opts.json ? { verbose: true } : {}),
       },
     });
 
@@ -85,6 +86,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       maxSizeGB: config.maxSizeGB,
       forceLarge: opts.forceLarge,
       engine,
+      ...(opts.trash ? { trash: true } : {}),
       ...(opts.json || opts.quiet ? { quiet: true } : {}),
     });
 
@@ -92,17 +94,22 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       exitWith(EXIT.OK);
     }
 
-    const { report, cleanResult, interrupted } = applyResult;
+    const { report, cleanResult, interrupted, trashDir } = applyResult;
 
     if (opts.json) {
       writeJson(report);
     } else {
-      printCleanResult({
-        ...cleanResult,
-        failedPaths: report.failedPaths,
-      });
+      printCleanResult(
+        {
+          ...cleanResult,
+          failedPaths: report.failedPaths,
+        },
+        trashDir ? { trashDir } : {},
+      );
       if (interrupted) {
-        printInterrupted(report.deletedCount, plan.selectedCandidateIds.length);
+        printInterrupted(report.deletedCount, plan.selectedCandidateIds.length, {
+          verb: trashDir ? "moved" : "deleted",
+        });
       }
     }
 

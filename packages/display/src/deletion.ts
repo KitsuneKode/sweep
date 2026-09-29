@@ -25,6 +25,7 @@ export function printDeletionProgress(
   currentPath?: string,
   itemBytes = 0,
   runningBytes = 0,
+  options: { verb?: string } = {},
 ): void {
   const line = formatDeletionProgress(current, total, currentPath);
   const sizeTag = itemBytes > 0 ? `  ${pc.yellow(formatBytes(itemBytes))}` : "";
@@ -39,7 +40,7 @@ export function printDeletionProgress(
     return;
   }
 
-  console.log(`sweep: deleting ${line}${suffix}`);
+  console.log(`sweep: ${options.verb ?? "deleting"} ${line}${suffix}`);
 }
 
 /** Clear the active deletion progress line in TTY mode. */

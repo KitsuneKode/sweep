@@ -14,7 +14,7 @@ import { clean } from "./cleaner.js";
 import type { ScanHooks } from "./scanner.js";
 import { scan } from "./scanner.js";
 import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./planner.js";
-import { assertPathWithinRoot, assertSafeCwd } from "./guardrails.js";
+import { GuardrailError, assertPathWithinRoot, assertSafeCwd } from "./guardrails.js";
 import { applyPlanViaRust, type EngineBackend } from "./rust-engine.js";
 
 export interface ScanToPlanOptions extends ScanHooks {
@@ -54,6 +54,10 @@ export interface ApplyPlanOptions {
   isCancelled?: () => boolean;
   /** Rust engine: aborting kills the engine subprocess. */
   signal?: AbortSignal;
+  /** Move candidates into this dir instead of deleting (JS engine only). */
+  trashDir?: string;
+  /** Scan root used to lay out `trashDir`; required with `trashDir`. */
+  trashRoot?: string;
 }
 
 export async function applyPlan(
@@ -75,13 +79,14 @@ export async function applyPlan(
     selected,
     plan.targetDir,
   );
-  const cleanResult = await clean(
-    ready,
-    (entry) => {
+  const cleanResult = await clean(ready, {
+    onProgress: (entry) => {
       options.onDeleted?.(entry);
     },
-    options.isCancelled,
-  );
+    isCancelled: options.isCancelled,
+    trashDir: options.trashDir,
+    trashRoot: options.trashRoot,
+  });
   const allFailures = [...revalidationFailures, ...cleanResult.failedPaths];
   // Skipped (unattempted) entries land in neither list — that's the interrupt signal.
   const interrupted = cleanResult.deleted.length + cleanResult.failedPaths.length < ready.length;
@@ -137,6 +142,12 @@ export async function applyPlanWithBackend(
     return applyPlan(plan, options);
   }
 
+  // Trash is JS-only — a rust call that silently ignored trashDir would
+  // delete permanently when the caller asked for a move. Fail loudly.
+  if (options.trashDir || options.trashRoot) {
+    throw new GuardrailError("trash mode is not supported by the Rust engine");
+  }
+
   assertSafeCwd(plan.targetDir);
   const selected = resolveSelectedCandidates(plan);
   if (selected.length === 0) {
@@ -153,6 +164,7 @@ export async function applyPlanWithBackend(
     "missing",
     "changed_symlink_state",
     "changed_entry_type",
+    "outside_target",
   ]);
   const revalidationFailures = report.failedPaths.filter((failure) =>
     revalidationCodes.has(failure.code),

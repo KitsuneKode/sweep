@@ -2,10 +2,13 @@ import { Command } from "commander";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { handleApply } from "./handlers/apply.js";
 import { handleClean } from "./handlers/clean.js";
+import { handleCompletions } from "./handlers/completions.js";
 import { handleDoctor } from "./handlers/doctor.js";
 import { handleInit } from "./handlers/init.js";
+import { handleInspect } from "./handlers/inspect.js";
 import { handlePlan } from "./handlers/plan.js";
 import { handleScan } from "./handlers/scan.js";
+import { handleStats } from "./handlers/stats.js";
 import { handleUi } from "./handlers/ui.js";
 
 // Injected at build time by apps/cli/scripts/build.ts via Bun.build define.
@@ -18,11 +21,14 @@ Examples:
   $ sweep                         Clean current directory (prompts before delete)
   $ sweep clean ~/projects/app    Same as default — explicit clean command
   $ sweep --dry-run               Preview deletions without changes
+  $ sweep --trash                 Move candidates to .sweep-trash-<ts>/ (reversible)
   $ sweep init                    Scaffold .sweeprc in the current directory
   $ sweep scan . --json           Emit a machine-readable cleanup plan
   $ sweep ui .                    Interactive TUI for monorepo review
   $ sweep doctor --json           Environment + config + dry-scan report
   $ sweep apply --plan plan.json --yes
+  $ sweep inspect --plan plan.json
+  $ sweep stats                   Show total reclaimed space
 `;
 
 function addOutputOptions<T extends Command>(command: T): T {
@@ -69,6 +75,7 @@ function addCleanAction(command: Command): Command {
   return command
     .argument("[path]", "Directory to sweep", ".")
     .option("-n, --dry-run", "Preview deletions without making changes", false)
+    .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
     .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
     .action(function (this: Command, pathArg: string) {
       void handleClean(pathArg, this.optsWithGlobals<CliOptions>());
@@ -120,6 +127,7 @@ export function makeProgram(): Command {
     .command("ui")
     .description("Interactive cleanup UI")
     .argument("[path]", "Directory to scan interactively", ".")
+    .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
     .action(function (this: Command, pathArg: string) {
       void handleUi(pathArg, this.optsWithGlobals<CliOptions>());
     });
@@ -129,6 +137,7 @@ export function makeProgram(): Command {
     .description("Apply a saved scan plan")
     .requiredOption("--plan <path>", "Path to a saved scan plan")
     .option("--engine <backend>", "Apply engine: js (default), rust, or auto", "js")
+    .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
     .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
     .option("--json", "Emit JSON apply results", false)
     .action(function (this: Command) {
@@ -136,11 +145,44 @@ export function makeProgram(): Command {
         plan: string;
         yes: boolean;
         forceLarge?: boolean;
+        trash?: boolean;
         json?: boolean;
         color: boolean;
         engine?: import("@kitsunekode/sweep-protocol").EngineBackend;
       }>();
       void handleApply(opts);
+    });
+
+  program
+    .command("inspect")
+    .description("Inspect a saved scan plan without applying it")
+    .requiredOption("--plan <path>", "Path to a saved scan plan")
+    .option("--json", "Emit the plan summary as JSON", false)
+    .action(function (this: Command) {
+      const opts = this.optsWithGlobals<{
+        plan: string;
+        json?: boolean;
+        color: boolean;
+      }>();
+      void handleInspect(opts);
+    });
+
+  program
+    .command("stats")
+    .description("Show cleanup history and total reclaimed space")
+    .option("--json", "Emit history as JSON", false)
+    .action(function (this: Command) {
+      const opts = this.optsWithGlobals<{ json?: boolean; color: boolean }>();
+      void handleStats(opts);
+    });
+
+  program
+    .command("completions")
+    .description("Print shell completion script (bash, zsh, or fish)")
+    .argument("<shell>", "Shell to generate completions for: bash, zsh, or fish")
+    .action(function (this: Command, shell: string) {
+      const opts = this.optsWithGlobals<{ color: boolean }>();
+      void handleCompletions(shell, opts);
     });
 
   program

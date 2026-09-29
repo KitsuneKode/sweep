@@ -13,6 +13,8 @@ export type ApplyReviewedPlanResult =
       cleanResult: CleanResult;
       /** SIGINT stopped scheduling mid-apply — report covers what landed. */
       interrupted: boolean;
+      /** Set when entries were moved instead of deleted. */
+      trashDir?: string;
     };
 
 /** Shared post-review apply path for `clean` and interactive flows. */
@@ -24,6 +26,7 @@ export async function applyReviewedPlan(
     dryRun?: boolean;
     engine: EngineBackend;
     quiet?: boolean;
+    trash?: boolean;
   },
 ): Promise<ApplyReviewedPlanResult> {
   const selectedBytes = getSelectedBytes(plan);
@@ -37,11 +40,20 @@ export async function applyReviewedPlan(
     return { status: "dry_run" };
   }
 
-  const { report, cleanResult, interrupted } = await executePlanDeletion(
+  const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(
     plan,
     options.engine,
-    options.quiet ? { quiet: true } : {},
+    {
+      ...(options.quiet ? { quiet: true } : {}),
+      ...(options.trash ? { trash: true } : {}),
+    },
   );
 
-  return { status: "completed", report, cleanResult, interrupted };
+  return {
+    status: "completed",
+    report,
+    cleanResult,
+    interrupted,
+    ...(trashDir ? { trashDir } : {}),
+  };
 }

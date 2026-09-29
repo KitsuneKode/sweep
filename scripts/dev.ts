@@ -40,9 +40,15 @@ ensureWorkspaceDeps();
 const args = process.argv.slice(2);
 // Spawn bin.ts by absolute path and keep the user's cwd — running from
 // apps/cli would silently re-root relative path arguments (e.g. `ui ../foo`).
+// SWEEP_CONFIG_DIR keeps dev runs' history/config writes out of the real
+// user config dir; an explicit user-set value still wins.
 const result = spawnSync("bun", [join(ROOT, "apps/cli/src/bin.ts"), ...args], {
   cwd: process.cwd(),
   stdio: "inherit",
+  env: {
+    ...process.env,
+    SWEEP_CONFIG_DIR: process.env.SWEEP_CONFIG_DIR ?? join(ROOT, ".dev-state/sweep"),
+  },
 });
 
 process.exit(result.status ?? 1);
