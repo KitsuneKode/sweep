@@ -293,7 +293,7 @@ export async function runScanWithDisplay(
 
 export async function confirmPlanDeletion(
   plan: ScanPlan,
-  options: { yes?: boolean },
+  options: { yes?: boolean; trash?: boolean },
 ): Promise<boolean> {
   if (options.yes) return true;
 
@@ -309,9 +309,10 @@ export async function confirmPlanDeletion(
   ).length;
 
   const dangerNote = dangerousCount > 0 ? ` · ${dangerousCount} dangerous` : "";
-  return promptConfirm(
-    `Delete ${plan.selectedCandidateIds.length} selected items (~${formatBytes(selectedBytes)})${dangerNote}?`,
-  );
+  const action = options.trash
+    ? `Move ${plan.selectedCandidateIds.length} selected items to .sweep-trash`
+    : `Delete ${plan.selectedCandidateIds.length} selected items`;
+  return promptConfirm(`${action} (~${formatBytes(selectedBytes)})${dangerNote}?`);
 }
 
 /**
@@ -341,6 +342,15 @@ export async function executePlanDeletion(
   const selected = plan.candidates.filter((candidate) =>
     plan.selectedCandidateIds.includes(candidate.id),
   );
+  // Schema-valid doesn't mean semantically sound — a hand-edited or stale
+  // plan can list ids that match no candidate. Surface it instead of
+  // silently dropping them.
+  const droppedIds = plan.selectedCandidateIds.length - selected.length;
+  if (droppedIds > 0 && !options.quiet) {
+    console.error(
+      `warning: plan lists ${droppedIds} selected id(s) that match no candidate — skipping them`,
+    );
+  }
   const total = selected.length;
   let current = 0;
   let freedBytes = 0;

@@ -77,7 +77,12 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       exitWith(EXIT.OK);
     }
 
-    if (!(await confirmPlanDeletion(plan, { yes: opts.yes }))) {
+    if (
+      !(await confirmPlanDeletion(plan, {
+        yes: opts.yes,
+        ...(opts.trash ? { trash: true } : {}),
+      }))
+    ) {
       printDeclined();
       exitWith(EXIT.ABORTED);
     }

@@ -74,9 +74,10 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
 
     if (!opts.yes) {
       const totalBytes = getSelectedBytes(plan);
-      const confirmed = await promptConfirm(
-        `Apply plan with ${selectedCount} items (~${formatBytes(totalBytes)})?`,
-      );
+      const action = opts.trash
+        ? `Move ${selectedCount} plan items to .sweep-trash`
+        : `Apply plan with ${selectedCount} items`;
+      const confirmed = await promptConfirm(`${action} (~${formatBytes(totalBytes)})?`);
       if (!confirmed) {
         printDeclined();
         exitWith(EXIT.ABORTED);
