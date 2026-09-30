@@ -1,7 +1,7 @@
 import pc from "picocolors";
 import type { ScanCandidate, ScanEntry } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
-import { formatBytes } from "./bytes.js";
+import { formatBytes, formatScanElapsed } from "./bytes.js";
 import { createSpinner } from "./spinner.js";
 import { formatRiskBadge } from "./risk.js";
 
@@ -13,6 +13,8 @@ export interface ProgressiveScanSummary {
   exact: boolean;
   /** Scan backend that produced the result - diagnostics under --verbose. */
   engine?: string;
+  /** Wall-clock scan time, ms. */
+  elapsedMs?: number;
 }
 
 export interface ProgressiveScanRenderer {
@@ -84,6 +86,8 @@ export function createProgressiveScanRenderer(
       const skipped =
         summary.skippedDirs && summary.skippedDirs > 0 ? `, ${summary.skippedDirs} skipped` : "";
       const engine = summary.engine ? pc.dim(` · engine ${summary.engine}`) : "";
+      const elapsed =
+        summary.elapsedMs !== undefined ? pc.dim(` · ${formatScanElapsed(summary.elapsedMs)}`) : "";
 
       if (process.stdout.isTTY) {
         console.log();
@@ -95,6 +99,7 @@ export function createProgressiveScanRenderer(
           pc.dim(`Scanned ${pc.bold(summary.scannedDirs.toString())} dirs`) +
             (skipped ? pc.yellow(skipped) : "") +
             engine +
+            elapsed +
             pc.dim("."),
         );
         console.log();
@@ -103,7 +108,7 @@ export function createProgressiveScanRenderer(
           `sweep: found ${summary.count} items (${sizePrefix}${formatBytes(summary.totalBytes)} ${totalLabel})`,
         );
         console.log(
-          `sweep: scanned ${summary.scannedDirs} dirs${skipped}${summary.engine ? `, engine=${summary.engine}` : ""}`,
+          `sweep: scanned ${summary.scannedDirs} dirs${skipped}${summary.engine ? `, engine=${summary.engine}` : ""}${summary.elapsedMs !== undefined ? `, ${formatScanElapsed(summary.elapsedMs)}` : ""}`,
         );
       }
     },

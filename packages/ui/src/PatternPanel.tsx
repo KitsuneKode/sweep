@@ -89,7 +89,9 @@ const PatternRow = memo(function PatternRow({
   const mouseProps = {
     selectable: true,
     onMouseMove: () => onHover(selectableIndex, true),
-    onMouseLeave: () => onHover(selectableIndex, false),
+    // `out` clears hover - `onMouseLeave` is not a real OpenTUI event name, so
+    // the stale hover tint never cleared when the pointer left the row.
+    onMouseOut: () => onHover(selectableIndex, false),
     // First click moves the cursor; clicking the cursor row toggles. Same
     // idiom as the artifact list, so the two panes feel identical.
     onMouseDown: () => {

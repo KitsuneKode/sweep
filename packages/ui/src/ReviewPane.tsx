@@ -37,6 +37,8 @@ export interface ReviewPaneProps {
   onSubmitPatternDraft: () => void;
   /** Measured artifact-pane viewport height for real page steps. */
   onViewportRows?: (rows: number) => void;
+  /** Live elapsed for the running scan, ms - ticks at 4Hz from the app. */
+  scanElapsedMs?: number;
 }
 
 export function ReviewPane({
@@ -52,6 +54,7 @@ export function ReviewPane({
   onToggleSelection,
   onSubmitPatternDraft,
   onViewportRows,
+  scanElapsedMs,
 }: ReviewPaneProps) {
   const dimensions = useTerminalDimensions();
   // Artifact pane inner width: total terminal width minus sidebar (if shown),
@@ -150,6 +153,8 @@ export function ReviewPane({
             found={state.candidates.length}
             scannedDirs={state.scannedDirs}
             skippedDirs={state.skippedDirs}
+            currentDir={state.scanCurrentDir}
+            elapsedMs={scanElapsedMs}
             orderPinned={state.orderPinned}
           />
         ) : null}
@@ -162,7 +167,11 @@ export function ReviewPane({
             onSubmitDraft={onSubmitPatternDraft}
           />
         ) : emptyScan ? (
-          <ScanningPanel tokens={tokens} scannedDirs={state.scannedDirs} />
+          <ScanningPanel
+            tokens={tokens}
+            scannedDirs={state.scannedDirs}
+            currentDir={state.scanCurrentDir}
+          />
         ) : scopeEmpty ? (
           <box flexGrow={1} justifyContent="center" alignItems="center" padding={2} gap={1}>
             <text content="No artifacts in this scope." fg={tokens.textMuted} wrapMode="none" />
@@ -208,12 +217,35 @@ export function ReviewPane({
   );
 }
 
+/** Live elapsed readout - coarse enough not to flicker: 0.5s, 12s, 2m 4s. */
+function formatElapsed(ms: number): string {
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  return `${minutes}m ${Math.round((ms - minutes * 60_000) / 1000)}s`;
+}
+
+/** Keep the tail of a path - the deep dir is the informative part. */
+function tailPath(dir: string, max: number): string {
+  const clean = sanitizeTerminalText(dir);
+  if (clean.length <= max) return clean;
+  return "\u2026" + clean.slice(clean.length - (max - 1));
+}
+
 /**
  * Empty-but-scanning state. The dot matrix is the only thing on screen that
  * proves the process is alive before the first artifact lands, so it gets the
  * centre of the pane rather than a line of ellipses.
  */
-function ScanningPanel({ tokens, scannedDirs }: { tokens: ThemeTokens; scannedDirs: number }) {
+function ScanningPanel({
+  tokens,
+  scannedDirs,
+  currentDir,
+}: {
+  tokens: ThemeTokens;
+  scannedDirs: number;
+  currentDir: string | null;
+}) {
   return (
     <box flexGrow={1} justifyContent="center" alignItems="center" padding={2} gap={1}>
       <DotMatrix tokens={tokens} pattern="pulseRings" />
@@ -221,9 +253,11 @@ function ScanningPanel({ tokens, scannedDirs }: { tokens: ThemeTokens; scannedDi
       <text content="Scanning for artifacts" fg={tokens.text} wrapMode="none" />
       <text
         content={
-          scannedDirs > 0
-            ? `${scannedDirs.toLocaleString()} directories walked`
-            : "Walking the project tree…"
+          currentDir !== null
+            ? tailPath(currentDir, 40)
+            : scannedDirs > 0
+              ? `${scannedDirs.toLocaleString()} directories walked`
+              : "Walking the project tree…"
         }
         fg={tokens.textMuted}
         wrapMode="none"
@@ -247,12 +281,16 @@ function ScanningStrip({
   found,
   scannedDirs,
   skippedDirs,
+  currentDir,
+  elapsedMs,
   orderPinned,
 }: {
   tokens: ThemeTokens;
   found: number;
   scannedDirs: number;
   skippedDirs: number;
+  currentDir: string | null;
+  elapsedMs: number | undefined;
   orderPinned: boolean;
 }) {
   const dirs = scannedDirs > 0 ? `${scannedDirs.toLocaleString()} dirs` : "walking\u2026";
@@ -271,6 +309,20 @@ function ScanningStrip({
         content={t`${bold(fg(tokens.accent)("scanning"))}  ${fg(tokens.textSecondary)(`${found} found`)}  ${dim("\u00b7")}  ${fg(tokens.textMuted)(dirs)}`}
         wrapMode="none"
       />
+      {currentDir !== null ? (
+        // ncdu's "current item" idiom - the path keeps moving even when the
+        // counters stall, which is the proof-of-life a big tree needs.
+        <text
+          content={t` ${dim("\u00b7")}  ${fg(tokens.textDim)(tailPath(currentDir, 24))}`}
+          wrapMode="none"
+        />
+      ) : null}
+      {elapsedMs !== undefined && elapsedMs >= 250 ? (
+        <text
+          content={t` ${dim("\u00b7")}  ${fg(tokens.textDim)(formatElapsed(elapsedMs))}`}
+          wrapMode="none"
+        />
+      ) : null}
       {skippedDirs > 0 ? (
         // Unreadable/cycled dirs mean the result set is partial - that must be
         // visible, not quietly absorbed into a total.

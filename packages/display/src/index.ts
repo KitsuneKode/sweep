@@ -1,19 +1,23 @@
 import pc from "picocolors";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { sanitizeMultilineTerminalText, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
-import { formatBytes } from "./bytes.js";
+import { formatBytes, formatScanElapsed } from "./bytes.js";
 import { groupCandidatesByKind } from "./grouping.js";
 import { formatRiskBadge, riskBadgeLabel } from "./risk.js";
 import { createSpinner } from "./spinner.js";
 
 export interface PrintGroupedScanPlanOptions {
   verbose?: boolean;
+  /** Wall-clock scan time - printed in the header when provided. */
+  elapsedMs?: number;
+  /** Backend that produced the plan - printed in the header when provided. */
+  engine?: string;
 }
 
 const WORKSPACE_STUB_REASON = "workspace-stub";
 const SYMLINK_ALIAS_REASON = "symlink-alias";
 
-export { formatBytes } from "./bytes.js";
+export { formatBytes, formatScanElapsed } from "./bytes.js";
 export { createSpinner, type Spinner } from "./spinner.js";
 export { formatRiskBadge, riskBadgeLabel, type RiskBadgeLabel } from "./risk.js";
 export {
@@ -88,12 +92,15 @@ export function printGroupedScanPlan(
   // Paths come off disk - escape control characters before they reach the
   // terminal or a hostile directory name becomes an ANSI injection vector.
   const shownTarget = sanitizeTerminalText(targetDir);
-  const header = `Scanned ${plan.summary.scannedDirs} dirs${skipped} in ${shownTarget}`;
+  const elapsed =
+    options.elapsedMs !== undefined ? ` · ${formatScanElapsed(options.elapsedMs)}` : "";
+  const engine = options.engine ? ` · ${options.engine}` : "";
+  const header = `Scanned ${plan.summary.scannedDirs} dirs${skipped} in ${shownTarget}${elapsed}${engine}`;
   if (isTTY()) {
     console.log(pc.dim(header));
     console.log(rule());
   } else {
-    console.log(`sweep: scanned ${plan.summary.scannedDirs} dirs${skipped} in ${shownTarget}`);
+    console.log(`sweep: ${header.charAt(0).toLowerCase()}${header.slice(1)}`);
   }
 
   if (plan.candidates.length === 0) {

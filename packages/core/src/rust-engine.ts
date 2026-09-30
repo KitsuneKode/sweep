@@ -17,7 +17,7 @@ import type {
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { GuardrailError } from "./guardrails.js";
 import { buildPlan } from "./planner.js";
-import { PlanValidationError, validateApplyReport } from "./plan.js";
+import { PlanValidationError, validateApplyReport, validatePlan } from "./plan.js";
 import type { ScanHooks } from "./scanner.js";
 import type { ScanToPlanOptions } from "./engine.js";
 import { nativePlatformForCurrentProcess } from "./native-platforms.js";
@@ -312,12 +312,27 @@ export async function scanToPlanViaRust(
   options: RustScanOptions,
 ): Promise<ScanPlan> {
   const absoluteTarget = resolve(targetDir);
+  const wantsStream =
+    options.onEntry !== undefined ||
+    options.onEntrySized !== undefined ||
+    options.onProgress !== undefined;
   const stdin = JSON.stringify({
     config: options.config,
     selectionPolicy: options.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
     exact: options.exact ?? false,
-    jsonStream: true,
+    // No live hooks means nobody is watching candidates arrive - the engine
+    // emits the whole plan in one write instead of serializing an event per
+    // candidate. On big trees per-entry JSON was the dominant cost, not the
+    // filesystem walk.
+    jsonStream: wantsStream,
   });
+
+  if (!wantsStream) {
+    const stdout = await runEngineAsync(["scan", absoluteTarget], stdin, undefined, {
+      signal: options.signal,
+    });
+    return validatePlan(JSON.parse(stdout));
+  }
 
   const entriesByPath = new Map<string, ScanEntry>();
   // Holder object: TS narrows plain `let` captures even when callbacks assign them.
@@ -350,6 +365,7 @@ export async function scanToPlanViaRust(
           scannedDirs: event.scannedDirs,
           found: event.found,
           skippedDirs: event.skippedDirs ?? 0,
+          ...(event.currentDir === undefined ? {} : { currentDir: event.currentDir }),
         });
       } else if (event.type === "scan_completed") {
         state.summary = event.summary;

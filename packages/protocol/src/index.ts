@@ -173,6 +173,11 @@ export interface ScanProgressEvent {
   found: number;
   /** Unreadable / deduped directories - absent on older producers. */
   skippedDirs?: number;
+  /**
+   * Directory being walked, relative to the target - powers "scanning x/"
+   * lines in progress surfaces. Absent on older producers.
+   */
+  currentDir?: string;
 }
 
 export interface WarningEvent {
@@ -191,6 +196,11 @@ export interface ScanCompletedEvent {
     skippedDirs?: number;
     /** True when byte estimates are exact - absent on older producers. */
     exact?: boolean;
+    /**
+     * Wall-clock scan time in milliseconds - absent on older producers and on
+     * non-streaming paths that don't time the walk.
+     */
+    elapsedMs?: number;
   };
 }
 

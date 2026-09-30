@@ -102,6 +102,7 @@ describe("sweep TUI render", () => {
     const pendingScan: UiScanControl = {
       start: () => Promise.resolve(),
       syncPatterns: () => {},
+      setEngine: () => true,
     };
     const setup = await testRender(
       <SweepApp
@@ -294,6 +295,7 @@ describe("sweep TUI render", () => {
         hooksRef = hooks;
       },
       syncPatterns() {},
+      setEngine: () => true,
     };
 
     // Empty seed plan - exactly what runSweepUiStreaming boots with.
@@ -411,6 +413,7 @@ describe("streaming reorder", () => {
         hooks = h;
       },
       syncPatterns: () => {},
+      setEngine: () => true,
     };
 
     const warnings: string[] = [];

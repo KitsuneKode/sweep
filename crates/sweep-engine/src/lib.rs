@@ -22,6 +22,11 @@ pub struct ScanOptions<'a> {
     pub hooks: ScanHooks<'a>,
 }
 
+/// `(scanned_dirs, found, skipped_dirs, current_dir)` - aligned with the
+/// JS `onProgress({ scannedDirs, found, skippedDirs, currentDir })`
+/// payload; `current_dir` is the path being walked.
+pub type OnProgress<'a> = dyn Fn(u32, u32, u32, &Utf8Path) + Sync + 'a;
+
 /// Progressive scan callbacks aligned with the JS scanner hooks.
 ///
 /// Callbacks are `Fn + Sync` so the rayon walk can emit matches from worker threads.
@@ -29,9 +34,7 @@ pub struct ScanOptions<'a> {
 pub struct ScanHooks<'a> {
     pub on_entry: Option<&'a (dyn Fn(ScanCandidate) + Sync)>,
     pub on_entry_sized: Option<&'a (dyn Fn(ScanCandidate) + Sync)>,
-    /// `(scanned_dirs, found, skipped_dirs)` - aligned with the JS
-    /// `onProgress({ scannedDirs, found, skippedDirs })` payload.
-    pub on_progress: Option<&'a (dyn Fn(u32, u32, u32) + Sync)>,
+    pub on_progress: Option<&'a OnProgress<'a>>,
 }
 
 /// Scan `target_dir` with default patterns and produce a protocol-aligned [`ScanPlan`].
@@ -69,12 +72,13 @@ pub fn scan_to_plan_with_config(
             cb(to_candidate(entry, 0));
         }
     };
-    let on_dir = |dirs: u32, skipped_dirs: u32| {
+    let on_dir = |dirs: u32, skipped_dirs: u32, dir: &Utf8Path| {
         if let Some(cb) = on_progress {
             cb(
                 dirs,
                 found.load(std::sync::atomic::Ordering::Relaxed),
                 skipped_dirs,
+                dir,
             );
         }
     };

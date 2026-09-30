@@ -1,5 +1,6 @@
 import { buildRescanConfig } from "@kitsunekode/sweep-core/config";
 import { buildPlan, candidateFromEntry } from "@kitsunekode/sweep-core/planner";
+import { isRustEngineAvailable } from "@kitsunekode/sweep-core/rust-engine";
 import { scan } from "@kitsunekode/sweep-core/scanner";
 import type {
   ScanCandidate,
@@ -18,7 +19,12 @@ import type { SweepUiInitOptions } from "./state.js";
 export interface UiScanHooks {
   /** Candidates discovered or resized since the last flush. */
   onBatch: (candidates: ScanCandidate[]) => void;
-  onProgress?: (meta: { scannedDirs: number; skippedDirs: number }) => void;
+  onProgress?: (meta: {
+    scannedDirs: number;
+    skippedDirs: number;
+    /** Directory being walked, relative to the target - for "scanning x/". */
+    currentDir?: string;
+  }) => void;
   /**
    * Scan finished. `plan` is the authoritative enriched result - the same
    * `buildPlan` output a non-streaming run produces, so workspace stubs and
@@ -38,6 +44,13 @@ export interface UiScanControl {
   start(hooks: UiScanHooks, signal: AbortSignal): Promise<void>;
   /** Push pattern-editor changes so the next rescan uses them. */
   syncPatterns(disabledPatterns: string[], extraPatterns: string[]): void;
+  /**
+   * Switch the backend the next `start` uses (E in the TUI - flip between
+   * `js` and `rust` to compare engines on the same tree). Returns false when
+   * the requested engine isn't runnable (rust binary missing), leaving the
+   * current selection untouched.
+   */
+  setEngine(engine: "js" | "rust"): boolean;
 }
 
 export interface SweepUiStreamingOptions {
@@ -53,6 +66,11 @@ export interface SweepUiStreamingOptions {
 }
 
 const BATCH_FLUSH_MS = 60;
+// A burst walk (rust on a warm tree can find hundreds of matches inside one
+// window) must not wait out the timer - flush at the cap and keep the paint
+// pipeline fed. Sits between opencode's 16ms transport window and ncdu's
+// 100ms draw cap on purpose.
+const BATCH_FLUSH_CAP = 200;
 
 function emptyPlan(targetDir: string, selectionPolicy: SelectionPolicy): ScanPlan {
   return {
@@ -84,6 +102,9 @@ export async function runSweepUiStreaming(
 ): Promise<SweepUiOutcome> {
   const session = await openUiSession();
   let currentConfig = options.config;
+  // Mutable so `E` can flip backends between generations; `start` reads it
+  // fresh each run so an in-flight scan is never disturbed mid-flight.
+  let activeEngine = options.engine;
 
   const makeControl = (): UiScanControl => ({
     async start(hooks, signal) {
@@ -91,7 +112,11 @@ export async function runSweepUiStreaming(
       const buffer = new Map<string, ScanCandidate>();
       let timer: ReturnType<typeof setTimeout> | null = null;
 
-      let pendingProgress: { scannedDirs: number; skippedDirs: number } | null = null;
+      let pendingProgress: {
+        scannedDirs: number;
+        skippedDirs: number;
+        currentDir?: string;
+      } | null = null;
 
       const flush = () => {
         timer = null;
@@ -117,23 +142,39 @@ export async function runSweepUiStreaming(
         if (signal.aborted) return;
         const candidate = candidateFromEntry(entry);
         buffer.set(candidate.id, candidate); // sized upserts replace stubs
-        schedule();
+        // First arrival of a generation flushes now - time-to-first-row is
+        // scanner latency, not scanner + a flush tick (opencode bypasses its
+        // batch window for hot deltas for the same reason). Bursts flush at
+        // the cap instead of queueing the whole window's worth.
+        if (buffer.size === 1 || buffer.size >= BATCH_FLUSH_CAP) {
+          if (timer !== null) {
+            clearTimeout(timer);
+            timer = null;
+          }
+          flush();
+        } else {
+          schedule();
+        }
       };
 
       try {
         let scannedDirs = 0;
         let skippedDirs = 0;
-        const reportProgress = (dirs: number, skipped: number) => {
+        const reportProgress = (dirs: number, skipped: number, currentDir?: string) => {
           scannedDirs = dirs;
           skippedDirs = skipped;
-          pendingProgress = { scannedDirs: dirs, skippedDirs: skipped };
+          pendingProgress = {
+            scannedDirs: dirs,
+            skippedDirs: skipped,
+            ...(currentDir === undefined ? {} : { currentDir }),
+          };
           schedule();
         };
         // The authoritative enriched plan - cross-candidate insights need the
         // whole set, so per-entry `candidateFromEntry` stubs are reconciled
         // against this when the scan ends.
         let finalPlan: ScanPlan | undefined;
-        if (options.engine === "rust") {
+        if (activeEngine === "rust") {
           const { scanToPlanViaRust } = await import("@kitsunekode/sweep-core/rust-engine");
           const plan = await scanToPlanViaRust(options.targetDir, {
             config: currentConfig,
@@ -141,8 +182,8 @@ export async function runSweepUiStreaming(
             exact: false,
             onEntry: record,
             onEntrySized: record,
-            onProgress: ({ scannedDirs: dirs, skippedDirs: skipped }) =>
-              reportProgress(dirs, skipped),
+            onProgress: ({ scannedDirs: dirs, skippedDirs: skipped, currentDir }) =>
+              reportProgress(dirs, skipped, currentDir),
             signal,
           });
           scannedDirs = plan.summary.scannedDirs;
@@ -151,8 +192,8 @@ export async function runSweepUiStreaming(
           const result = await scan(options.targetDir, currentConfig, false, {
             onEntry: record,
             onEntrySized: record,
-            onProgress: ({ scannedDirs: dirs, skippedDirs: skipped }) =>
-              reportProgress(dirs, skipped),
+            onProgress: ({ scannedDirs: dirs, skippedDirs: skipped, currentDir }) =>
+              reportProgress(dirs, skipped, currentDir),
             signal,
           });
           scannedDirs = result.scannedDirs;
@@ -172,6 +213,12 @@ export async function runSweepUiStreaming(
         disabledPatterns,
         extraPatterns,
       });
+    },
+    setEngine(engine) {
+      // Flip must not rescan with a dead backend and surface as a scan error.
+      if (engine === "rust" && !isRustEngineAvailable()) return false;
+      activeEngine = engine;
+      return true;
     },
   });
 

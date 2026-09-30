@@ -67,9 +67,15 @@ a bug, not a loading state.
 ## 6. Mouse is a peer, not a fallback
 
 Rows scroll, hover, click-to-focus, and toggle on click. Headers collapse on
-click. The scrollbar is a real track: click or drag it to seek the list - the
-pointer's position maps linearly onto the row index and the cursor follows.
+click. The scrollbar is a real track: click or drag it to seek the list.
 Keyboard remains sufficient for every action.
+
+Scrollbar seek uses OpenTUI's SliderRenderable model: a track press maps the
+pointer linearly onto the row index, while a thumb drag preserves the grab
+offset and maps the thumb's top over its travel range (`height - thumbHeight`,
+not `height - 1` - mapping over the full track leaves the last rows
+unreachable). `preventDefault` on press keeps a scrub from starting a text
+selection.
 
 ## 7. Feedback beats silence
 

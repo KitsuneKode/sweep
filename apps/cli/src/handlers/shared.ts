@@ -281,6 +281,7 @@ export async function runScanWithDisplay(
   const { output, spinnerLabel, ...scanOptions } = options;
   const quiet = output?.quiet ?? false;
   const verbose = output?.verbose ?? false;
+  const startedAt = performance.now();
 
   if (!quiet) {
     const { printBanner } = await import("@kitsunekode/sweep-display");
@@ -316,6 +317,7 @@ export async function runScanWithDisplay(
       totalBytes: result.estimatedTotalBytes,
       exact: result.exact,
       engine: engineUsed,
+      elapsedMs: Math.round(performance.now() - startedAt),
     });
 
     return { result, plan };
@@ -325,7 +327,7 @@ export async function runScanWithDisplay(
   const spinner = quiet ? null : createSpinner(spinnerLabel ?? "Scanning...");
 
   try {
-    const { result, plan } = await runScanToPlan(targetDir, config, {
+    const { result, plan, engineUsed } = await runScanToPlan(targetDir, config, {
       ...scanOptions,
       onEntry: () => {
         spinner?.stop();
@@ -337,7 +339,11 @@ export async function runScanWithDisplay(
 
     if (!quiet) {
       const { printGroupedScanPlan } = await import("@kitsunekode/sweep-display");
-      printGroupedScanPlan(plan, targetDir, output?.verbose ? { verbose: true } : {});
+      printGroupedScanPlan(plan, targetDir, {
+        ...(output?.verbose ? { verbose: true } : {}),
+        elapsedMs: Math.round(performance.now() - startedAt),
+        engine: engineUsed,
+      });
     }
 
     return { result, plan };

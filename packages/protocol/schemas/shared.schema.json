@@ -144,6 +144,10 @@
         },
         "exact": {
           "type": "boolean"
+        },
+        "elapsedMs": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

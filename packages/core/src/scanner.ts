@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { ScanEntry, ScanResult, SweepConfig } from "@kitsunekode/sweep-protocol";
 import { mapPool } from "./async-pool.js";
@@ -16,7 +16,13 @@ export interface ScanHooks {
   /** Fired after size estimation completes for an entry. */
   onEntrySized?: (entry: ScanEntry) => void;
   /** Fired periodically with walk progress (dirs visited, matches found, dirs skipped). */
-  onProgress?: (info: { scannedDirs: number; found: number; skippedDirs: number }) => void;
+  onProgress?: (info: {
+    scannedDirs: number;
+    found: number;
+    skippedDirs: number;
+    /** Directory being walked, relative to the scan target ("." for the root). */
+    currentDir?: string;
+  }) => void;
   /** Optional cancellation signal for long-running scans. */
   signal?: AbortSignal;
 }
@@ -392,15 +398,20 @@ export async function scan(
   let scannedDirs = 0;
   let skippedDirs = 0;
   let progressAt = 0;
-  const emitProgress = (force = false) => {
+  const emitProgress = (currentDir?: string, force = false) => {
     if (!hooks.onProgress) return;
     if (!force && scannedDirs !== 1 && scannedDirs - progressAt < 8) return;
     progressAt = scannedDirs;
-    hooks.onProgress({ scannedDirs, found: entries.length, skippedDirs });
+    hooks.onProgress({
+      scannedDirs,
+      found: entries.length,
+      skippedDirs,
+      ...(currentDir === undefined ? {} : { currentDir }),
+    });
   };
   const skipDir = () => {
     skippedDirs++;
-    emitProgress(true);
+    emitProgress(undefined, true);
   };
   const matches = compileMatcher(config.patterns);
   // Compiled once per scan - the hot loop must not re-resolve paths per entry.
@@ -466,7 +477,7 @@ export async function scan(
     }
 
     scannedDirs++;
-    emitProgress();
+    emitProgress(relative(targetDir, dir) || ".");
     const childDirs: Frame[] = [];
 
     for (const item of items) {
@@ -525,7 +536,7 @@ export async function scan(
 
   await markDir(targetDir);
   await walkDir({ dir: targetDir, depth: 0 });
-  emitProgress(true);
+  emitProgress(".", true);
 
   if (sizer) {
     await sizer.finish();

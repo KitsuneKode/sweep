@@ -130,6 +130,11 @@ export interface KeymapActions {
   applyPlan: () => void;
   /** Restart the scan in place (streaming mode). Falls back to legacy rescan outcome. */
   requestRescan?: () => void;
+  /**
+   * Swap the scan backend (js ↔ rust) and rescan the same tree - developer
+   * A/B surface for engine speed/parity comparisons. Streaming mode only.
+   */
+  toggleEngine?: () => void;
   /** Cycle artifact ordering: size, name, age. */
   toggleSort?: () => void;
   /** Dismiss a scan-error modal without retrying. */
@@ -339,6 +344,17 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     }
     const { disabledPatterns, extraPatterns } = rescanConfigFromState(state);
     actions.finalize({ type: "rescan", disabledPatterns, extraPatterns });
+    return;
+  }
+
+  if (key.name === "E" || (key.name === "e" && key.shift)) {
+    // Lowercase e is collapse-all in list focus - E is intentionally global so
+    // engine A/B works from any pane. Non-streaming mode has nothing to flip.
+    if (actions.toggleEngine) {
+      actions.toggleEngine();
+    } else {
+      actions.notify?.("engine switch needs a live scan - run `sweep ui`");
+    }
     return;
   }
 

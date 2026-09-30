@@ -188,11 +188,15 @@ fn is_skip_dir_name(name: &str) -> bool {
     }
 }
 
+/// `(scanned_dirs, skipped_dirs, dir)` - throttled, not every directory.
+/// `dir` is the path being walked, so progress surfaces can show
+/// "scanning x/" instead of only counts.
+pub type OnDir<'a> = dyn Fn(u32, u32, &Utf8Path) + Sync + 'a;
+
 /// Callbacks fired during a directory walk so callers can stream matches live.
 pub struct WalkHooks<'a> {
     pub on_match: Option<&'a (dyn Fn(&WalkEntry) + Sync)>,
-    /// `(scanned_dirs, skipped_dirs)` - throttled, not every directory.
-    pub on_dir: Option<&'a (dyn Fn(u32, u32) + Sync)>,
+    pub on_dir: Option<&'a OnDir<'a>>,
 }
 
 /// Recursively walk `root`, collecting entries whose names match `config.patterns`.
@@ -332,7 +336,7 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
         if n == 1 || n % 8 == 0 {
             if let Some(on_dir) = ctx.hooks.and_then(|h| h.on_dir) {
                 let skipped = ctx.skipped.map(|c| c.load(Ordering::Relaxed)).unwrap_or(0);
-                on_dir(n, skipped);
+                on_dir(n, skipped, dir);
             }
         }
     }
@@ -582,7 +586,13 @@ pub fn estimate_bytes(path: &Utf8Path) -> u64 {
         .unwrap_or_else(|| stat_fallback(path))
 }
 
-/// Batch `du` estimates for many paths (single subprocess per chunk of 50).
+/// Maximum `du` subprocesses in flight at once; matches the JS scanner's
+/// `DU_MAX_INFLIGHT`. `du` is I/O-bound - past a handful of concurrent
+/// processes the disk is the wall and extra spawns only add contention.
+const DU_MAX_INFLIGHT: usize = 4;
+
+/// Batch `du` estimates for many paths (single subprocess per chunk of 50,
+/// chunks in flight concurrently like the JS `ProgressiveSizer`).
 pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
     let mut result = HashMap::new();
     if paths.is_empty() {
@@ -595,10 +605,26 @@ pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
         _ => return result,
     };
 
-    for chunk in chunk_paths_for_du(paths) {
-        let Some(chunk_map) = du_estimate_chunk(flag, multiplier, chunk) else {
-            continue;
-        };
+    let chunks = chunk_paths_for_du(paths);
+    // A dedicated small pool bounds concurrency at DU_MAX_INFLIGHT instead of
+    // the global rayon pool's thread count - parallel `du` on the same volume
+    // thrashes disks long before cores are the limit.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(DU_MAX_INFLIGHT)
+        .build();
+    let chunk_results: Vec<HashMap<String, u64>> = match pool {
+        Ok(pool) => pool.install(|| {
+            chunks
+                .par_iter()
+                .map(|chunk| du_estimate_chunk(flag, multiplier, chunk).unwrap_or_default())
+                .collect()
+        }),
+        Err(_) => chunks
+            .iter()
+            .map(|chunk| du_estimate_chunk(flag, multiplier, chunk).unwrap_or_default())
+            .collect(),
+    };
+    for chunk_map in chunk_results {
         result.extend(chunk_map);
     }
 
@@ -1166,7 +1192,7 @@ mod tests {
                     names.push(entry.name.clone());
                 }
             }),
-            on_dir: Some(&|count: u32, _skipped: u32| {
+            on_dir: Some(&|count: u32, _skipped: u32, _dir: &Utf8Path| {
                 dirs.store(count, Ordering::Relaxed);
             }),
         };

@@ -98,6 +98,34 @@ bun run dev -- scan . --engine rust
 
 Set `SWEEP_ENGINE_PATH` to point at a custom binary.
 
+### Engine A/B comparison
+
+Inside `sweep ui`, `E` swaps the scan engine and rescans the same tree in place.
+The completion notice reports the new engine's time against the previous run
+(`rust 273ms vs js 311ms`), and the header chip keeps the active engine's last
+duration (`rust·263ms`). `E` is global but never fires while a text field owns
+the keyboard.
+
+For repeatable numbers outside the TUI:
+
+```bash
+bun run bench                                    # every tests/fixtures/ tree
+bun run bench -- path/to/tree --runs 9           # a specific tree
+bun run bench -- --synth /tmp/big                # synthesize a deep tree first
+bun run bench -- --json                          # machine-readable rows
+```
+
+Runs are interleaved after one warmup each so page-cache bias lands evenly;
+the verdict line compares medians and the parity column hashes the sorted
+candidate-path set on both engines (a count match alone can hide swapped or
+duplicated candidates).
+
+The no-hook fast path matters for honest numbers: `scanToPlanViaRust` only
+streams NDJSON when `onEntry`/`onEntrySized`/`onProgress` are provided. With
+no hooks the engine writes one plan JSON, which is what `clean`/`plan`/`apply`
+and this bench exercise. The TUI path streams, so its timings include
+per-candidate serialization.
+
 ## Interactive prompts
 
 ### Default `sweep` (clean)

@@ -63,6 +63,12 @@ export interface SweepUiState {
   scanning: boolean;
   /** Directories visited by the current/last scan (0 until the engine reports). */
   scannedDirs: number;
+  /**
+   * Directory the engine is walking right now (relative to the target), so
+   * the scanning strip can say "scanning apps/web/" instead of only counts.
+   * Null when no scan is running or the engine doesn't report it.
+   */
+  scanCurrentDir: string | null;
   /** Artifact ordering inside groups. */
   sortBy: UiSortBy;
   /**
@@ -151,6 +157,7 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     patternsDirty: false,
     scanning: false,
     scannedDirs: plan.summary.scannedDirs,
+    scanCurrentDir: null,
     sortBy: "size",
     orderPinned: false,
     collapsedGroups: new Set<string>(),
@@ -584,10 +591,17 @@ function snapToNearestItem(state: SweepUiState): SweepUiState {
 
 export function setScanning(state: SweepUiState, scanning: boolean): SweepUiState {
   if (state.scanning === scanning) return state;
-  if (scanning) return { ...state, scanning: true, orderPinned: true };
+  if (scanning) {
+    return { ...state, scanning: true, orderPinned: true, scanCurrentDir: null };
+  }
 
   // The scan is over (finished or failed): unpin and sort once.
-  const settled: SweepUiState = { ...state, scanning: false, orderPinned: false };
+  const settled: SweepUiState = {
+    ...state,
+    scanning: false,
+    orderPinned: false,
+    scanCurrentDir: null,
+  };
 
   // If the cursor is still parked where it was auto-placed, the user never
   // chose it - land them on the biggest win instead of wherever the first
@@ -605,6 +619,14 @@ export function setScanning(state: SweepUiState, scanning: boolean): SweepUiStat
 export function setScannedDirs(state: SweepUiState, scannedDirs: number): SweepUiState {
   if (state.scannedDirs === scannedDirs) return state;
   return { ...state, scannedDirs };
+}
+
+export function setScanCurrentDir(
+  state: SweepUiState,
+  scanCurrentDir: string | null,
+): SweepUiState {
+  if (state.scanCurrentDir === scanCurrentDir) return state;
+  return { ...state, scanCurrentDir };
 }
 
 export function setSkippedDirs(state: SweepUiState, skippedDirs: number): SweepUiState {
@@ -741,6 +763,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     scanning: true,
     orderPinned: true,
     scannedDirs: 0,
+    scanCurrentDir: null,
     skippedDirs: 0,
   };
 }

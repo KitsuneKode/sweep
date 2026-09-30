@@ -219,6 +219,47 @@ describe("handleKeymap", () => {
     expect(actions.requestApply).toHaveBeenCalled();
   });
 
+  test("E swaps the scan engine from any pane", () => {
+    for (const key of [{ name: "E" }, { name: "e", shift: true }]) {
+      for (const focus of ["list", "sidebar", "patterns"] as const) {
+        const actions = makeActions();
+        actions.toggleEngine = mock(() => {});
+        handleKeymap(
+          makeContext({
+            key,
+            state: { ...createUiState(mockPlan()), focus },
+          }),
+          actions,
+        );
+        expect(actions.toggleEngine).toHaveBeenCalledTimes(1);
+      }
+    }
+  });
+
+  test("E without a live scan notifies instead of crashing", () => {
+    const actions = makeActions();
+    actions.notify = mock(() => {});
+    handleKeymap(makeContext({ key: { name: "E" } }), actions);
+    expect(actions.notify).toHaveBeenCalled();
+  });
+
+  test("E never fires while a text field owns the keyboard", () => {
+    // Typing an uppercase E into the search box or the pattern input must not
+    // trigger an engine rescan - the input modes return before the binding.
+    for (const focus of ["search", "patternInput"] as const) {
+      const actions = makeActions();
+      actions.toggleEngine = mock(() => {});
+      handleKeymap(
+        makeContext({
+          key: { name: "E" },
+          state: { ...createUiState(mockPlan()), focus },
+        }),
+        actions,
+      );
+      expect(actions.toggleEngine).not.toHaveBeenCalled();
+    }
+  });
+
   test("shift+s exports the plan and never falls through to safe-only queueing", () => {
     for (const key of [{ name: "S" }, { name: "s", shift: true }]) {
       const actions = makeActions();

@@ -114,6 +114,8 @@ enum ScanStreamEvent {
         found: u32,
         #[serde(rename = "skippedDirs")]
         skipped_dirs: u32,
+        #[serde(rename = "currentDir", skip_serializing_if = "Option::is_none")]
+        current_dir: Option<String>,
     },
     #[serde(rename = "scan_completed")]
     ScanCompleted { summary: ScanCompletedSummary },
@@ -127,6 +129,7 @@ struct ScanCompletedSummary {
     scanned_dirs: u32,
     skipped_dirs: u32,
     exact: bool,
+    elapsed_ms: u64,
 }
 
 fn run_scan() -> Result<(), CliFailure> {
@@ -167,8 +170,21 @@ fn run_scan() -> Result<(), CliFailure> {
         let emitter = StreamEmitter::default();
         let on_entry = |candidate: ScanCandidate| emitter.emit_found(candidate);
         let on_entry_sized = |candidate: ScanCandidate| emitter.emit_updated(candidate);
-        let on_progress = |scanned_dirs: u32, found: u32, skipped_dirs: u32| {
-            emitter.emit_progress(scanned_dirs, found, skipped_dirs);
+        let on_progress = |scanned_dirs: u32, found: u32, skipped_dirs: u32, dir: &Utf8Path| {
+            // Report the dir relative to the scan root ("." for the root
+            // itself) so consumers show "scanning x/" not an absolute path.
+            let current_dir = dir
+                .strip_prefix(target_utf8)
+                .ok()
+                .map(|rel| {
+                    if rel.as_str().is_empty() {
+                        "."
+                    } else {
+                        rel.as_str()
+                    }
+                })
+                .map(str::to_owned);
+            emitter.emit_progress(scanned_dirs, found, skipped_dirs, current_dir);
         };
 
         let hooks = ScanHooks {
@@ -177,6 +193,7 @@ fn run_scan() -> Result<(), CliFailure> {
             on_progress: Some(&on_progress),
         };
 
+        let scan_started_at = std::time::Instant::now();
         let plan = scan_to_plan_with_sweep_config(
             target_utf8,
             &config,
@@ -191,6 +208,7 @@ fn run_scan() -> Result<(), CliFailure> {
 
         write_json_line(&ScanStreamEvent::ScanCompleted {
             summary: ScanCompletedSummary {
+                elapsed_ms: scan_started_at.elapsed().as_millis() as u64,
                 candidate_count: plan.summary.candidate_count,
                 estimated_total_bytes: plan.summary.estimated_total_bytes,
                 scanned_dirs: plan.summary.scanned_dirs,
@@ -247,7 +265,13 @@ impl StreamEmitter {
         }
     }
 
-    fn emit_progress(&self, scanned_dirs: u32, found: u32, skipped_dirs: u32) {
+    fn emit_progress(
+        &self,
+        scanned_dirs: u32,
+        found: u32,
+        skipped_dirs: u32,
+        current_dir: Option<String>,
+    ) {
         if self.has_error() {
             return;
         }
@@ -255,6 +279,7 @@ impl StreamEmitter {
             scanned_dirs,
             found,
             skipped_dirs,
+            current_dir,
         }) {
             self.set_error(err);
         }

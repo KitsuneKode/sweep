@@ -43,6 +43,7 @@ export async function handleScan(
       const startedEvent: ScanEvent = { type: "scan_started", targetDir };
       writeJsonLine(startedEvent);
 
+      const scanStartedAt = performance.now();
       const { result } = await runScanToPlan(targetDir, config, {
         exact: false,
         selectionPolicy,
@@ -69,6 +70,9 @@ export async function handleScan(
           scannedDirs: result.scannedDirs,
           // Sparse - same convention as ScanPlan.summary.skippedDirs.
           ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),
+          // Wall time for the whole scan call - engine comparison without
+          // instrumenting the consumer.
+          elapsedMs: Math.round(performance.now() - scanStartedAt),
         },
       } satisfies ScanEvent);
       exitWith(EXIT.OK);

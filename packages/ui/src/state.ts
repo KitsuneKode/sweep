@@ -52,6 +52,7 @@ export {
   countSelectedDangerous,
   upsertCandidates,
   setScanning,
+  setScanCurrentDir,
   setScannedDirs,
   setSkippedDirs,
   toggleSortBy,

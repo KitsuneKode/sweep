@@ -344,7 +344,8 @@ export function buildHeaderStats(
   dryRun?: boolean,
   width?: number,
   trash?: boolean,
-  engine?: "js" | "rust",
+  /** e.g. `rust 263ms vs js 241ms` - plain engine name before any run times. */
+  engine?: string,
 ): StyledText {
   const w = width ?? Number.POSITIVE_INFINITY;
   const parts: StyledText[] = [];

@@ -360,4 +360,18 @@ describe("scroll stability", () => {
     const landed = setup.captureCharFrame().match(/▌\s+○ node_modules\s+([0-9.]+) MB/);
     expect(Number(landed![1])).toBeLessThan(10);
   });
+
+  test("a thumb drag to the track bottom reaches the last item", async () => {
+    const setup = await mountBig();
+    const frame = setup.captureCharFrame();
+    const { x, top, bottom } = scrollbarGeometry(frame);
+    // The thumb sits at the track top before any scroll; grabbing its top
+    // cell gives grab=0, so the last *hittable* cell (the very last row sits
+    // on the test renderer's hit-grid boundary) lands the thumb top exactly
+    // at its travel end. Mapping that drag over the full track height -
+    // the old behavior - stops ~thumbHeight rows short of the last item.
+    await mouse(setup, (m) => m.drag(x, top, x, bottom - 1));
+    // Sorted desc by size: the last item is the 1.0 MB row.
+    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+1\.0 MB/);
+  });
 });

@@ -48,6 +48,7 @@ import {
   setFocus,
   setPatternInput,
   setScanning,
+  setScanCurrentDir,
   sweeprcPayload,
   toggleSelectionById,
   toggleSidebarScopeSelection,
@@ -185,6 +186,7 @@ const HELP_APP: ReadonlyArray<HelpRow> = [
   [null, "app"],
   ["tab", "scopes - space queues scope"],
   ["t", "theme dark · light · auto"],
+  ["E", "swap scan engine js · rust"],
   ["q · ctrl-c", "quit · quit now"],
 ];
 
@@ -201,6 +203,42 @@ const HELP_SINGLE: ReadonlyArray<HelpRow> = [
 ];
 
 const HELP_FILTER_SYNTAX = "kind:x  risk:y  path:z  >100MB  older:30d  is:queued  !term";
+
+/** Compact duration for scan timing chips/notices: 96ms, 1.2s, 2m 4s. */
+function formatScanMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  return `${minutes}m ${Math.round((ms - minutes * 60_000) / 1000)}s`;
+}
+
+/**
+ * Scan-timing fragment for the completion notice: `rust 96ms` alone, or
+ * `rust 96ms vs js 214ms (2.2× faster)` once both engines have timed a run
+ * on this tree.
+ */
+function engineTimingLabel(
+  engine: "js" | "rust",
+  durations: Partial<Record<"js" | "rust", number>>,
+): string {
+  const current = durations[engine];
+  if (current === undefined) return engine;
+  const otherEngine = engine === "rust" ? "js" : "rust";
+  const other = durations[otherEngine];
+  if (other === undefined) return `${engine} ${formatScanMs(current)}`;
+  const ratio = other > 0 ? current / other : 1;
+  const verdict =
+    ratio < 0.95
+      ? `${formatRatio(1 / ratio)} faster`
+      : ratio > 1.05
+        ? `${formatRatio(ratio)} slower`
+        : "about equal";
+  return `${engine} ${formatScanMs(current)} vs ${otherEngine} ${formatScanMs(other)} (${verdict})`;
+}
+
+function formatRatio(ratio: number): string {
+  return ratio >= 10 ? `${Math.round(ratio)}×` : `${ratio.toFixed(1)}×`;
+}
 
 function helpColumn(rows: ReadonlyArray<HelpRow>, keyWidth: number, tokens: ThemeTokens) {
   return (
@@ -457,6 +495,23 @@ export function SweepApp({
 
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  // Engine the next scan generation runs (E flips it); the `engine` prop only
+  // seeds the first generation. Timing per engine lives in scanDurationsRef
+  // so the notice can compare backends on the same tree.
+  const [activeEngine, setActiveEngine] = useState<"js" | "rust">(engine ?? "js");
+  // Mirror in a ref - startScan is a useCallback and reads the engine at
+  // start() time, so the E-toggle's setState must not race the closure.
+  const activeEngineRef = useRef(activeEngine);
+  const scanStartRef = useRef(0);
+  // Ref carries the authoritative map (readable mid-callback); state mirrors
+  // it so the header chip re-renders when a run's duration lands.
+  const scanDurationsRef = useRef<Partial<Record<"js" | "rust", number>>>({});
+  const [scanDurations, setScanDurations] = useState(scanDurationsRef.current);
+  // Coarse ticker - the scanning strip's elapsed readout ticks at 4Hz while a
+  // scan runs, independent of progress-event cadence (a slow dir would
+  // otherwise freeze the readout).
+  const [, setScanTick] = useState(0);
+  const scanningNow = state.scanning;
   const stateRef = useRef(state);
   // The measured artifact-pane height, reported by the list's layout event.
   // Pageup/pagedown step real pages once known; the estimate below seeds it.
@@ -470,6 +525,9 @@ export function SweepApp({
     const controller = new AbortController();
     abortRef.current = controller;
     const gen = ++generationRef.current;
+    const engineForRun = activeEngineRef.current;
+    const startedAt = performance.now();
+    scanStartRef.current = startedAt;
     setScanError(null);
     dispatch({ type: "mutate", fn: (s) => setScanning(s, true) });
     scan.start(
@@ -478,28 +536,38 @@ export function SweepApp({
           if (gen !== generationRef.current || controller.signal.aborted) return;
           dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
         },
-        onProgress: ({ scannedDirs, skippedDirs }) => {
+        onProgress: ({ scannedDirs, skippedDirs, currentDir }) => {
           if (gen !== generationRef.current || controller.signal.aborted) return;
           dispatch({
             type: "mutate",
-            fn: (s) => setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
+            fn: (s) =>
+              setScanCurrentDir(
+                setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
+                currentDir ?? null,
+              ),
           });
         },
         onDone: ({ scannedDirs, skippedDirs, plan: finalPlan }) => {
           if (gen !== generationRef.current || controller.signal.aborted) return;
+          // Monotonic elapsed for this generation - excludes UI idle time and
+          // any earlier aborted run, so js-vs-rust comparisons stay honest.
+          const elapsedMs = Math.max(0, performance.now() - startedAt);
+          scanDurationsRef.current = { ...scanDurationsRef.current, [engineForRun]: elapsedMs };
+          setScanDurations(scanDurationsRef.current);
+          // The scan chip quietly flipping to NORMAL is the only signal today
+          // - say what landed so the end of a long scan is legible at a
+          // glance, with the engine comparison the E-toggle is for.
+          const found = finalPlan?.candidates.length;
+          const base =
+            found !== undefined
+              ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
+              : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
+          setNotice(`${base} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}`);
           dispatch({
             type: "mutate",
             fn: (s) =>
               finalizeScan(setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs), finalPlan),
           });
-          // The scan chip quietly flipping to NORMAL is the only signal today -
-          // say what landed so the end of a long scan is legible at a glance.
-          const found = finalPlan?.candidates.length;
-          setNotice(
-            found !== undefined
-              ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
-              : `scan complete: ${scannedDirs.toLocaleString()} dirs`,
-          );
         },
         onError: (error) => {
           if (gen !== generationRef.current || controller.signal.aborted) return;
@@ -509,7 +577,7 @@ export function SweepApp({
       },
       controller.signal,
     );
-  }, [scan]);
+  }, [scan, activeEngine]);
 
   useEffect(() => {
     if (scan && initiallyScanning) startScan();
@@ -519,6 +587,14 @@ export function SweepApp({
     // Boot-only effect; rescans are triggered explicitly via r.
   }, []);
 
+  // 4Hz elapsed ticker, live only while a scan runs - progress events already
+  // re-render the strip, this keeps the readout honest through a slow dir.
+  useEffect(() => {
+    if (!scanningNow) return;
+    const id = setInterval(() => setScanTick((n) => n + 1), 250);
+    return () => clearInterval(id);
+  }, [scanningNow]);
+
   const requestRescan = useCallback(() => {
     if (!scan) return;
     const { disabledPatterns, extraPatterns } = rescanConfigFromState(stateRef.current);
@@ -526,6 +602,29 @@ export function SweepApp({
     dispatch({ type: "mutate", fn: resetForRescan });
     startScan();
   }, [scan, startScan]);
+
+  // E: swap scan engines and rescan the same tree - the completion notice
+  // reports the new engine's time against any prior run so the faster backend
+  // is legible at a glance, no benchmark harness required.
+  const toggleEngine = useCallback(() => {
+    if (!scan) {
+      setNotice("engine switch needs a live scan - run `sweep ui`");
+      return;
+    }
+    const next = activeEngine === "rust" ? "js" : "rust";
+    if (!scan.setEngine(next)) {
+      setNotice(`${next} engine unavailable - no sweep-engine binary resolved`);
+      return;
+    }
+    // Ref first - startScan reads it synchronously; the setState is render
+    // scheduling only.
+    activeEngineRef.current = next;
+    setActiveEngine(next);
+    const { disabledPatterns, extraPatterns } = rescanConfigFromState(stateRef.current);
+    scan.syncPatterns(disabledPatterns, extraPatterns);
+    dispatch({ type: "mutate", fn: resetForRescan });
+    startScan();
+  }, [scan, activeEngine, startScan]);
 
   const tokens = useMemo(() => resolveTheme(state.themeMode), [state.themeMode]);
   const summary = useMemo(() => getUiSummary(state), [state]);
@@ -714,6 +813,7 @@ export function SweepApp({
         requestApply,
         applyPlan,
         requestRescan,
+        toggleEngine,
         toggleSort: () => dispatch({ type: "mutate", fn: toggleSortBy }),
         dismissScanError: () => setScanError(null),
         setInspect: setShowInspect,
@@ -768,7 +868,11 @@ export function SweepApp({
     dryRun,
     dimensions.width,
     trashMode,
-    engine,
+    // Compact chip: `rust·263ms` once timed; the full js-vs-rust verdict lives
+    // in the completion notice, the header just needs the current backend.
+    scanDurations[activeEngine] !== undefined
+      ? `${activeEngine}·${formatScanMs(scanDurations[activeEngine]!)}`
+      : activeEngine,
   );
 
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
@@ -850,6 +954,9 @@ export function SweepApp({
           onViewportRows={(rows) => {
             viewportRowsRef.current = rows;
           }}
+          {...(state.scanning
+            ? { scanElapsedMs: Math.max(0, performance.now() - scanStartRef.current) }
+            : {})}
         />
       </box>
 
