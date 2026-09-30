@@ -57,6 +57,20 @@ describe("plan validation", () => {
     expect(plan.candidates).toHaveLength(1);
   });
 
+  test("validatePlan accepts the optional modifiedMs on a candidate", () => {
+    const plan = validPlan();
+    plan.candidates[0] = { ...plan.candidates[0]!, modifiedMs: 1_760_000_000_000 };
+    expect(validatePlan(plan).candidates[0]?.modifiedMs).toBe(1_760_000_000_000);
+  });
+
+  test("validatePlan rejects a negative or fractional modifiedMs", () => {
+    for (const modifiedMs of [-1, 1.5]) {
+      const plan = validPlan();
+      plan.candidates[0] = { ...plan.candidates[0]!, modifiedMs };
+      expect(() => validatePlan(plan)).toThrow();
+    }
+  });
+
   test("validatePlan rejects plans with wrong protocol version", () => {
     const invalid = { ...validPlan(), protocolVersion: "2" };
     expect(() => validatePlan(invalid)).toThrow(PlanValidationError);
@@ -84,7 +98,7 @@ describe("plan validation", () => {
   });
 
   test("loadPlan rejects a directory path instead of reporting bad JSON", () => {
-    // existsSync passes for directories — a dir argument must fail as
+    // existsSync passes for directories - a dir argument must fail as
     // "not a file", not as an unparseable document.
     expect(() => loadPlan(tmpdir())).toThrow(/not a file/);
   });
@@ -126,7 +140,7 @@ describe("apply report validation", () => {
   });
 
   test("validateApplyReport rejects malformed engine output", () => {
-    // SWEEP_ENGINE_PATH is user-overridable — engine stdout is untrusted and
+    // SWEEP_ENGINE_PATH is user-overridable - engine stdout is untrusted and
     // a wrong-shaped report must fail loudly, not propagate as truth.
     expect(() => validateApplyReport({ deletedCount: "lots" })).toThrow(PlanValidationError);
     expect(() => validateApplyReport("null")).toThrow(PlanValidationError);

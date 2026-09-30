@@ -16,6 +16,16 @@ pub const DU_CHUNK_SIZE: usize = 50;
 /// Stay well under ARG_MAX even with deep monorepo paths (aligned with JS `DU_ARGV_BUDGET`).
 pub const DU_ARGV_BUDGET: usize = 96 * 1024;
 
+/// mtime of the path itself in epoch milliseconds, or `None` if it cannot be read.
+fn modified_ms(path: &Utf8Path) -> Option<u64> {
+    let modified = fs::symlink_metadata(path.as_std_path())
+        .ok()?
+        .modified()
+        .ok()?;
+    let since_epoch = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    u64::try_from(since_epoch.as_millis()).ok()
+}
+
 /// Describes a filesystem entry discovered during a scan walk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalkEntry {
@@ -24,6 +34,8 @@ pub struct WalkEntry {
     pub is_symlink: bool,
     pub entry_type: WalkEntryType,
     pub estimated_bytes: u64,
+    /// Own mtime in epoch milliseconds (`lstat`, so a symlink reports itself).
+    pub modified_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,12 +223,14 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
                 WalkEntryType::File
             };
 
+            let modified_ms = modified_ms(&full_path);
             let entry = WalkEntry {
                 path: full_path,
                 name: file_name,
                 is_symlink,
                 entry_type,
                 estimated_bytes: 0,
+                modified_ms,
             };
             if let Some(on_match) = ctx.hooks.and_then(|h| h.on_match) {
                 on_match(&entry);
@@ -653,6 +667,28 @@ mod tests {
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].name, "node_modules");
         assert_eq!(result.scanned_dirs, 2);
+    }
+
+    #[test]
+    fn walk_reports_the_artifacts_own_mtime() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        fs::create_dir_all(root.join("node_modules").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let result = walk_matched_entries(root, &WalkConfig::default());
+        let modified = result.entries[0]
+            .modified_ms
+            .unwrap_or_else(|| panic!("expected an mtime for a freshly created directory"));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_else(|err| panic!("clock before epoch: {err}"))
+            .as_millis();
+
+        assert!(u128::from(modified) <= now, "mtime is in the future");
+        assert!(now - u128::from(modified) < 60_000, "mtime is not recent");
     }
 
     #[test]

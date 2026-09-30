@@ -38,14 +38,14 @@ CLI flags / config
 
 ### Commands (implemented)
 
-- `sweep` — default cleanup flow with prompt and guardrails
-- `sweep scan` — scan only; `--json` and `--json-stream` for automation
-- `sweep apply --plan` — apply a saved plan with revalidation
-- `sweep ui` — OpenTUI interactive selection (TTY required)
-- `sweep inspect --plan` — read-only plan provenance and totals
-- `sweep stats` — cleanup history and lifetime reclaimed total
-- `sweep completions` — static bash/zsh/fish completion scripts
-- `sweep init` / `sweep doctor` — scaffolding and environment checks
+- `sweep` - default cleanup flow with prompt and guardrails
+- `sweep scan` - scan only; `--json` and `--json-stream` for automation
+- `sweep apply --plan` - apply a saved plan with revalidation
+- `sweep ui` - OpenTUI interactive selection (TTY required)
+- `sweep inspect --plan` - read-only plan provenance and totals
+- `sweep stats` - cleanup history and lifetime reclaimed total
+- `sweep completions` - static bash/zsh/fish completion scripts
+- `sweep init` / `sweep doctor` - scaffolding and environment checks
 
 ## Intended direction
 
@@ -89,6 +89,11 @@ See [.docs/workspace-layout.md](workspace-layout.md) for the directory map and
   artifacts so the full non-interactive contract is explicit.
 - Seeded fixture scenarios should cover both small targeted failures and larger
   mixed workspace trees so engine parity can be checked at multiple scales.
+- Optional fields let both engines grow the contract without a protocol bump.
+  `modifiedMs` is the first: the artifact's own mtime in epoch milliseconds, one
+  `lstat` per match. Both engines fill it, the schemas allow it, and the parity
+  normalizers drop it because timestamps differ per checkout. Anything that
+  reads it must treat "absent" as unknown, never as zero.
 - Artifact matching should evolve from flat patterns toward artifact definitions
   with richer semantics.
 - Saved plans should carry candidate lists, default selections, and aggregate
@@ -121,29 +126,29 @@ See [.docs/workspace-layout.md](workspace-layout.md) for the directory map and
 
 ## Apply-time safety model
 
-The gap between scan and apply is a trust boundary — the tree may have changed.
+The gap between scan and apply is a trust boundary - the tree may have changed.
 Both engines re-validate before deleting:
 
-- **Lexical containment** — every candidate path must resolve inside the plan
+- **Lexical containment** - every candidate path must resolve inside the plan
   target (`assertPathWithinRoot` / `is_path_within_root`).
-- **Type drift** — symlink-state or entry-type changes since the plan are
+- **Type drift** - symlink-state or entry-type changes since the plan are
   rejected (`changed_symlink_state` / `changed_entry_type`).
-- **Realpath containment** — a lexical check alone misses an ancestor swapped
+- **Realpath containment** - a lexical check alone misses an ancestor swapped
   to a symlink after scanning (`proj/sub` → `/etc` would make `rm` recurse
   outside the target). Both engines canonicalize the target root and each
   non-symlink candidate and require real containment. Symlink candidates are
   exempt: they are unlinked, never followed.
-- **Size ceiling** — `sweep apply --plan` enforces `maxSizeGB` just like the
+- **Size ceiling** - `sweep apply --plan` enforces `maxSizeGB` just like the
   interactive flows; a saved plan is not a trusted lane around the cap
   (`--force-large --yes` to bypass, matching `clean`).
-- **Interrupted deletes** — SIGINT during apply stops scheduling new work,
+- **Interrupted deletes** - SIGINT during apply stops scheduling new work,
   lets in-flight removals finish, and reports exactly what was deleted
   (exit 1). The Rust subprocess is terminated the same way.
-- **Plan files are untrusted** — `loadPlan` requires a regular file under
+- **Plan files are untrusted** - `loadPlan` requires a regular file under
   256 MB, then validates against the ScanPlan schema. Engine apply reports
   are validated against the ApplyReport schema for the same reason:
   `SWEEP_ENGINE_PATH` can point the subprocess at any binary.
-- **Nested + duplicate candidates** — `deduplicateNestedEntries` drops any
+- **Nested + duplicate candidates** - `deduplicateNestedEntries` drops any
   entry inside a retained parent (and exact-path repeats from crafted
   plans) so one path is never deleted or counted twice.
 
@@ -153,11 +158,11 @@ Both engines re-validate before deleting:
 `<target>/.sweep-trash-<iso-timestamp>/` preserving the target-relative
 path. Renames are same-filesystem and atomic; `rename` on a symlink moves
 the link, never the target, so trashing a symlink stays unlink-equivalent
-in safety terms. Nested dedupe still applies — a retained parent's move
+in safety terms. Nested dedupe still applies - a retained parent's move
 carries its children. The trash root is rmdir'd if every move fails (no
 bare husks). Trash dirs are default-ignored (`ignore: [".sweep-trash-*"]`)
 so they can't be re-selected; the user purges by deleting the dir. Trash
-is JS-engine only — the CLI falls back from `--engine rust` with a warning.
+is JS-engine only - the CLI falls back from `--engine rust` with a warning.
 `relative()` refuses entries outside `trashRoot` (defense in depth under
 the apply-time containment checks).
 
@@ -167,7 +172,7 @@ the apply-time containment checks).
 `<configDir>/history.jsonl` (ts, targetDir, engine, deleted, bytesFreed,
 failed, interrupted, trashDir). Best-effort: a failed write never fails the
 apply. `sweepConfigDir()` resolves `$XDG_CONFIG_HOME/sweep` (or
-`%APPDATA%/sweep`, else `~/.config/sweep`) — `SWEEP_CONFIG_DIR` overrides
+`%APPDATA%/sweep`, else `~/.config/sweep`) - `SWEEP_CONFIG_DIR` overrides
 it entirely, which is how tests and `bun run dev` keep user state clean.
 `readHistory` tail-slices past 8 MB and skips malformed lines.
 
@@ -176,7 +181,7 @@ it entirely, which is how tests and `bun run dev` keep user state clean.
 Filenames are attacker-controlled bytes. POSIX names may contain ESC and
 other control characters, so every path/name that reaches a terminal is
 escaped `ls -b`-style (`\xNN`, `\uNNNN`) by `sanitizeTerminalText` in
-`packages/protocol` — applied in the display layer, the TUI row/line
+`packages/protocol` - applied in the display layer, the TUI row/line
 builders, and guardrail/error messages (`printError` sanitizes centrally,
 keeping `\n`/`\t` for composed messages). A hostile `node_modules`-matching
 directory cannot inject ANSI into scan output, the TUI, or error text.

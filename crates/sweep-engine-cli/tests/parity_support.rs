@@ -101,6 +101,10 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
                 }
             }
             candidate["estimatedBytes"] = Value::Number(0.into());
+            // Filesystem timestamps differ per checkout, so goldens never carry them.
+            if let Some(object) = candidate.as_object_mut() {
+                object.remove("modifiedMs");
+            }
         }
     }
 

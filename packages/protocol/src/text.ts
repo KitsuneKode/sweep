@@ -1,7 +1,7 @@
 /**
  * Make a filesystem-derived or config-derived string safe to render in a
  * terminal. POSIX filenames can legally contain ESC, other C0/C1 controls,
- * DEL, and Unicode bidi/zero-width characters — printing one raw lets a
+ * DEL, and Unicode bidi/zero-width characters - printing one raw lets a
  * hostile directory name inject ANSI sequences (clear the screen, move the
  * cursor, spoof a confirmation dialog) into scan output or the TUI.
  *
@@ -13,7 +13,7 @@ export function sanitizeTerminalText(value: string): string {
 }
 
 /**
- * Same escaping as sanitizeTerminalText but keeps `\n` and `\t` — for
+ * Same escaping as sanitizeTerminalText but keeps `\n` and `\t` - for
  * composed error/log text where the message itself uses whitespace for
  * layout. A hostile newline embedded in a path can still fake a second
  * message line (cosmetic), but escape injection stays impossible.
@@ -46,7 +46,7 @@ function escapeUnsafe(value: string, keepWhitespace: boolean): string {
 
 /**
  * Codepoints that must never reach a terminal raw:
- * - C0 controls (incl. ESC — the ANSI introducer) and DEL
+ * - C0 controls (incl. ESC - the ANSI introducer) and DEL
  * - C1 controls (0x80–0x9F), the less famous escape-capable range
  * - Unicode Cf spoofers: zero-width chars + joiners, LRM/RLM, bidi
  *   embeddings/overrides/isolates (can reorder displayed text or hide it)

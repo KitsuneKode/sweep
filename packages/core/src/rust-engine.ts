@@ -238,6 +238,7 @@ function scanEntryFromCandidate(candidate: ScanCandidate): ScanEntry {
     path: candidate.path,
     name: candidate.name,
     estimatedBytes: candidate.estimatedBytes,
+    ...(candidate.modifiedMs !== undefined ? { modifiedMs: candidate.modifiedMs } : {}),
     isSymlink: candidate.isSymlink,
     entryType: candidate.entryType,
   };
@@ -330,9 +331,9 @@ export async function applyPlanViaRust(plan: ScanPlan, signal?: AbortSignal): Pr
     return validateApplyReport(JSON.parse(stdout));
   } catch (error) {
     if (signal?.aborted) {
-      // The engine was killed mid-run — partial deletions may have landed.
+      // The engine was killed mid-run - partial deletions may have landed.
       throw new GuardrailError(
-        "Apply interrupted — the engine was stopped mid-run; some deletions may have completed.",
+        "Apply interrupted. The engine was stopped mid-run; some deletions may have completed.",
         1,
       );
     }

@@ -137,6 +137,7 @@ function scanResultFromPlan(plan: ScanPlan): ScanResult {
       path: candidate.path,
       name: candidate.name,
       estimatedBytes: candidate.estimatedBytes,
+      ...(candidate.modifiedMs !== undefined ? { modifiedMs: candidate.modifiedMs } : {}),
       isSymlink: candidate.isSymlink,
       entryType: candidate.entryType,
     })),
@@ -316,7 +317,7 @@ export async function confirmPlanDeletion(
 }
 
 /**
- * Timestamped trash dir inside the target — keeps moves on the same
+ * Timestamped trash dir inside the target - keeps moves on the same
  * filesystem so they are atomic renames. Suffix bump on collision.
  */
 function freshTrashDir(targetDir: string): string {
@@ -342,13 +343,13 @@ export async function executePlanDeletion(
   const selected = plan.candidates.filter((candidate) =>
     plan.selectedCandidateIds.includes(candidate.id),
   );
-  // Schema-valid doesn't mean semantically sound — a hand-edited or stale
+  // Schema-valid doesn't mean semantically sound - a hand-edited or stale
   // plan can list ids that match no candidate. Surface it instead of
   // silently dropping them.
   const droppedIds = plan.selectedCandidateIds.length - selected.length;
   if (droppedIds > 0 && !options.quiet) {
     console.error(
-      `warning: plan lists ${droppedIds} selected id(s) that match no candidate — skipping them`,
+      `warning: plan lists ${droppedIds} selected id(s) that match no candidate; skipping them`,
     );
   }
   const total = selected.length;
@@ -399,7 +400,7 @@ export async function executePlanDeletion(
       effectiveEngine,
       applyOptions,
     );
-    // Best-effort — a stats write must never fail an apply.
+    // Best-effort - a stats write must never fail an apply.
     appendHistory({
       ts: new Date().toISOString(),
       targetDir: plan.targetDir,
@@ -420,12 +421,12 @@ export async function executePlanDeletion(
     process.removeListener("SIGINT", onSigint);
     clearDeletionProgress();
     if (trashDir) {
-      // rmdir only removes an empty dir — when every move failed the trash
+      // rmdir only removes an empty dir - when every move failed the trash
       // root is a bare husk; when moves landed it stays.
       try {
         rmdirSync(trashDir);
       } catch {
-        // Non-empty or transient error — leave it.
+        // Non-empty or transient error - leave it.
       }
     }
   }

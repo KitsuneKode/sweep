@@ -34,7 +34,7 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
         return Ok(ApplyReport::empty(plan));
     }
 
-    // Resolve the target once: lexical containment alone is not enough — a
+    // Resolve the target once: lexical containment alone is not enough - a
     // directory inside the tree can be swapped for a symlink between scan and
     // apply, and rm would then recurse through it outside the target.
     // If the root itself cannot be canonicalized, every candidate fails
@@ -127,7 +127,7 @@ fn revalidate_candidate(
     }
 
     // Symlink candidates are unlinked (the link removed, never followed), so
-    // real containment only matters for real entries — an ancestor swapped to
+    // real containment only matters for real entries - an ancestor swapped to
     // a symlink pointing outside the root must not be deleted through.
     if !is_symlink {
         if let Some(root) = real_root {
@@ -266,6 +266,7 @@ mod tests {
                 path: path.to_owned(),
                 name: name.to_owned(),
                 estimated_bytes: 0,
+                modified_ms: None,
                 is_symlink,
                 entry_type,
             },
@@ -333,6 +334,7 @@ mod tests {
                         path: outside_path.clone(),
                         name: "node_modules".to_owned(),
                         estimated_bytes: 0,
+                        modified_ms: None,
                         is_symlink: false,
                         entry_type: EntryType::Directory,
                     },
@@ -378,7 +380,7 @@ mod tests {
             .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
 
         // The candidate passes a lexical root check, but "sub" now resolves
-        // outside the target — removal must not recurse through the link.
+        // outside the target - removal must not recurse through the link.
         fs::remove_dir_all(&sub).unwrap_or_else(|err| panic!("rmdir failed: {err}"));
         std::os::unix::fs::symlink(outside.path(), &sub)
             .unwrap_or_else(|err| panic!("symlink failed: {err}"));

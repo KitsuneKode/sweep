@@ -47,7 +47,7 @@ export function normalizePlan(plan: ScanPlan, fixtureRoot: string): ScanPlan {
       ...plan,
       targetDir: FIXTURE_ROOT_PLACEHOLDER,
       createdAt: "1970-01-01T00:00:00.000Z",
-      candidates: plan.candidates.map((candidate) => ({
+      candidates: plan.candidates.map(({ modifiedMs: _modifiedMs, ...candidate }) => ({
         ...candidate,
         path: replaceRoot(candidate.path),
         estimatedBytes: 0,

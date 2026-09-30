@@ -170,6 +170,7 @@ fn to_candidate(entry: &WalkEntry, estimated_bytes: u64) -> ScanCandidate {
             path,
             name: entry.name.clone(),
             estimated_bytes,
+            modified_ms: entry.modified_ms,
             is_symlink: entry.is_symlink,
             entry_type: match entry.entry_type {
                 sweep_fs::WalkEntryType::File => EntryType::File,

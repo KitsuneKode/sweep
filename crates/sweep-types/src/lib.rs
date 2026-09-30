@@ -59,6 +59,10 @@ pub struct ScanEntry {
     pub path: String,
     pub name: String,
     pub estimated_bytes: u64,
+    /// Last-modified time of the artifact itself, in epoch milliseconds.
+    /// Omitted from JSON when the stat failed, matching the TS protocol.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified_ms: Option<u64>,
     pub is_symlink: bool,
     pub entry_type: EntryType,
 }

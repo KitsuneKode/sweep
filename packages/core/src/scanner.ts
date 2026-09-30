@@ -21,11 +21,11 @@ export interface ScanHooks {
   signal?: AbortSignal;
 }
 
-/** VCS/metadata dirs — never descend (major win on large trees). */
+/** VCS/metadata dirs - never descend (major win on large trees). */
 const SKIP_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr"]);
 
 // macOS and Windows filesystems are case-insensitive, so `.GIT` is the same
-// protected directory as `.git` — compare lowercase there.
+// protected directory as `.git` - compare lowercase there.
 const skipDirName = (name: string): boolean =>
   SKIP_DIR_NAMES.has(
     process.platform === "darwin" || process.platform === "win32" ? name.toLowerCase() : name,
@@ -67,6 +67,16 @@ const platform = process.platform;
 const DU_CHUNK_SIZE = 50;
 /** Stay well under ARG_MAX even with deep monorepo paths. */
 const DU_ARGV_BUDGET = 96 * 1024;
+
+/** mtime of the path itself (not its target), or undefined when it cannot be read. */
+async function modifiedTimeMs(path: string): Promise<number | undefined> {
+  try {
+    const { mtimeMs } = await lstat(path);
+    return Number.isFinite(mtimeMs) && mtimeMs >= 0 ? Math.trunc(mtimeMs) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function argvCost(paths: string[]): number {
   let bytes = 3; // "du" + flag
@@ -151,7 +161,7 @@ function statFallback(entryPath: string): number {
   }
 }
 
-/** Exact recursive size by walking all files under a path. Synchronous — tests and tiny helpers. */
+/** Exact recursive size by walking all files under a path. Synchronous - tests and tiny helpers. */
 export function exactSize(entryPath: string): number {
   let total = 0;
 
@@ -386,7 +396,7 @@ export async function scan(
     emitProgress(true);
   };
   const matches = compileMatcher(config.patterns);
-  // Compiled once per scan — the hot loop must not re-resolve paths per entry.
+  // Compiled once per scan - the hot loop must not re-resolve paths per entry.
   const isIgnored = compileIgnoreMatcher(targetDir, config.ignore);
   const signal = hooks.signal;
   // Reparse-point/junction detection is a Windows-only concern; Dirent already
@@ -406,7 +416,7 @@ export async function scan(
    * or a hardlinked dir can make the same filesystem object reachable under
    * multiple paths; without this the walk would visit it forever (depth=-1) or
    * duplicate work (depth=n). Windows reports ino=0, so dedupe only applies
-   * where inodes are real — junctions there are already excluded as reparse
+   * where inodes are real - junctions there are already excluded as reparse
    * points.
    */
   const visitedDirs = new Set<string>();
@@ -414,7 +424,7 @@ export async function scan(
   const markDir = async (dir: string): Promise<boolean> => {
     try {
       const stat = await lstat(dir);
-      if (stat.ino === 0) return true; // no inode identity — cannot dedupe
+      if (stat.ino === 0) return true; // no inode identity, cannot dedupe
       const key = `${stat.dev}:${stat.ino}`;
       if (visitedDirs.has(key)) return false;
       visitedDirs.add(key);
@@ -437,7 +447,7 @@ export async function scan(
     try {
       items = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
     } catch (error) {
-      // An unreadable scan root must not silently produce an empty result —
+      // An unreadable scan root must not silently produce an empty result -
       // that reads as "nothing to clean" when the truth is "couldn't look".
       if (depth === 0) throw error;
       skipDir();
@@ -471,10 +481,12 @@ export async function scan(
       }
 
       if (matches(item.name)) {
+        const modifiedMs = await modifiedTimeMs(fullPath);
         const entry: ScanEntry = {
           path: fullPath,
           name: item.name,
           estimatedBytes: 0,
+          ...(modifiedMs !== undefined ? { modifiedMs } : {}),
           isSymlink: isLink,
           entryType: isLink ? "symlink" : item.isDirectory() ? "directory" : "file",
         };
@@ -485,7 +497,7 @@ export async function scan(
       }
 
       if (item.isDirectory() && !isLink && !skipDirName(item.name)) {
-        // Already visited (bind mount / inode alias), or gone — either way
+        // Already visited (bind mount / inode alias), or gone - either way
         // there is nothing to safely read under this path.
         if (await markDir(fullPath)) {
           childDirs.push({ dir: fullPath, depth: depth + 1 });

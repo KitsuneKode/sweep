@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "./config.js";
@@ -36,7 +36,7 @@ const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe("scan — basic matching", () => {
+describe("scan: basic matching", () => {
   test("finds node_modules at the root level", async () => {
     mkdirSync(dir("node_modules"));
     const result = await scan(tmpDir, DEFAULT_CONFIG);
@@ -70,7 +70,30 @@ describe("scan — basic matching", () => {
   });
 });
 
-describe("scan — recursion", () => {
+describe("scan: modified time", () => {
+  test("reports the artifact's own mtime in epoch milliseconds", async () => {
+    mkdirSync(dir("node_modules"));
+    const stamp = new Date("2024-03-05T10:20:30.000Z");
+    utimesSync(dir("node_modules"), stamp, stamp);
+
+    const result = await scan(tmpDir, DEFAULT_CONFIG);
+
+    expect(result.entries[0]?.modifiedMs).toBe(stamp.getTime());
+  });
+
+  test("reports a symlink's own mtime, not its target's", async () => {
+    mkdirSync(dir("real"));
+    const old = new Date("2020-01-01T00:00:00.000Z");
+    utimesSync(dir("real"), old, old);
+    safeSymlink(dir("real"), dir("node_modules"));
+    const result = await scan(tmpDir, DEFAULT_CONFIG);
+    const link = result.entries.find((entry) => entry.name === "node_modules");
+    if (!link?.isSymlink) return; // unprivileged Windows: symlink could not be created
+    expect(link.modifiedMs).toBeGreaterThan(old.getTime());
+  });
+});
+
+describe("scan: recursion", () => {
   test("finds node_modules recursively in a monorepo", async () => {
     mkdirSync(dir("packages", "web"), { recursive: true });
     mkdirSync(dir("packages", "api"), { recursive: true });
@@ -90,7 +113,7 @@ describe("scan — recursion", () => {
 
   test("respects depth: 0 (only root level)", async () => {
     mkdirSync(dir("a", "node_modules"), { recursive: true });
-    mkdirSync(dir("node_modules")); // root level — should be found at depth 0
+    mkdirSync(dir("node_modules")); // root level, should be found at depth 0
     const config: SweepConfig = { ...DEFAULT_CONFIG, depth: 0 };
     const result = await scan(tmpDir, config);
     expect(result.entries).toHaveLength(1);
@@ -98,8 +121,8 @@ describe("scan — recursion", () => {
   });
 
   test("respects depth: 1 (one level deep)", async () => {
-    mkdirSync(dir("a", "b", "node_modules"), { recursive: true }); // depth 2 — excluded
-    mkdirSync(dir("a", "node_modules"), { recursive: true }); // depth 1 — included
+    mkdirSync(dir("a", "b", "node_modules"), { recursive: true }); // depth 2, excluded
+    mkdirSync(dir("a", "node_modules"), { recursive: true }); // depth 1, included
     const config: SweepConfig = { ...DEFAULT_CONFIG, depth: 1 };
     const result = await scan(tmpDir, config);
     expect(result.entries).toHaveLength(1);
@@ -107,7 +130,7 @@ describe("scan — recursion", () => {
   });
 });
 
-describe("scan — symlinks", () => {
+describe("scan: symlinks", () => {
   test("marks symlinks as isSymlink: true", async () => {
     mkdirSync(dir("real-dir"));
     safeSymlink(dir("real-dir"), dir("node_modules"), "dir");
@@ -127,7 +150,7 @@ describe("scan — symlinks", () => {
   });
 });
 
-describe("scan — ignore rules", () => {
+describe("scan: ignore rules", () => {
   test("skips entries matching ignore list", async () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("dist"));
@@ -160,7 +183,7 @@ describe("scan — ignore rules", () => {
   });
 });
 
-describe("scan — adversarial / security", () => {
+describe("scan: adversarial / security", () => {
   test("handles directory names with shell metacharacters safely", async () => {
     // If size estimation used execSync with string interpolation, this would be exploitable.
     // Windows NTFS forbids semicolon and redirection operators in filenames.
@@ -224,7 +247,7 @@ describe("scan — adversarial / security", () => {
   });
 
   test("throws for a root directory that cannot be read", async () => {
-    // An unreadable root must surface as a scan failure — silently returning
+    // An unreadable root must surface as a scan failure - silently returning
     // an empty result tells the user "nothing to clean" when the truth is
     // "nothing could be read".
     await expect(
@@ -243,7 +266,7 @@ describe("scan — adversarial / security", () => {
   });
 });
 
-describe("scan — streaming hooks", () => {
+describe("scan: streaming hooks", () => {
   test("onEntry fires during walk before onEntrySized", async () => {
     mkdirSync(dir("node_modules"));
     const order: string[] = [];
@@ -269,7 +292,7 @@ describe("scan — streaming hooks", () => {
   });
 });
 
-describe("scan — result metadata", () => {
+describe("scan: result metadata", () => {
   test("counts scanned directories", async () => {
     mkdirSync(dir("a"));
     mkdirSync(dir("b"));
@@ -287,7 +310,7 @@ describe("scan — result metadata", () => {
   });
 });
 
-describe("scanner — size estimation", () => {
+describe("scanner: size estimation", () => {
   test("exactSize calculates recursive size of a directory excluding symlinks", async () => {
     mkdirSync(dir("node_modules"));
     writeFileSync(dir("node_modules", "file1.txt"), "hello"); // 5 bytes

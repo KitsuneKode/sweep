@@ -49,6 +49,14 @@ export interface ScanEntry {
   path: string;
   name: string;
   estimatedBytes: number;
+  /**
+   * Last-modified time of the artifact itself (epoch ms), from a single
+   * `lstat` on the matched path. It is the directory's own mtime, so it moves
+   * when direct children are added or removed (an install, a rebuild) and
+   * answers "when did this last change". Absent when the stat failed or the
+   * plan came from an engine that predates the field.
+   */
+  modifiedMs?: number;
   isSymlink: boolean;
   entryType: "file" | "directory" | "symlink";
 }
@@ -174,7 +182,7 @@ export interface ScanCompletedEvent {
     candidateCount: number;
     estimatedTotalBytes: number;
     scannedDirs: number;
-    /** Unreadable / deduped directories — absent on older producers. */
+    /** Unreadable / deduped directories - absent on older producers. */
     skippedDirs?: number;
   };
 }
@@ -196,7 +204,7 @@ export interface ScanPlan {
     candidateCount: number;
     estimatedTotalBytes: number;
     scannedDirs: number;
-    /** Unreadable / deduped directories — absent on plans written before v1.x. */
+    /** Unreadable / deduped directories - absent on plans written before v1.x. */
     skippedDirs?: number;
     exact: boolean;
     selectedCount: number;
