@@ -91,9 +91,21 @@ export async function runSweepUiStreaming(
       const buffer = new Map<string, ScanCandidate>();
       let timer: ReturnType<typeof setTimeout> | null = null;
 
+      let pendingProgress: { scannedDirs: number; skippedDirs: number } | null = null;
+
       const flush = () => {
         timer = null;
-        if (signal.aborted || buffer.size === 0) return;
+        if (signal.aborted) return;
+        // Progress rides the same 60ms window as discoveries - a hot scan emits
+        // a progress tick per directory batch, and each one is a dispatch +
+        // re-render, so without coalescing the strip alone can dominate the
+        // render budget on big trees.
+        if (pendingProgress) {
+          const progress = pendingProgress;
+          pendingProgress = null;
+          hooks.onProgress?.(progress);
+        }
+        if (buffer.size === 0) return;
         const batch = [...buffer.values()];
         buffer.clear();
         hooks.onBatch(batch);
@@ -114,7 +126,8 @@ export async function runSweepUiStreaming(
         const reportProgress = (dirs: number, skipped: number) => {
           scannedDirs = dirs;
           skippedDirs = skipped;
-          if (!signal.aborted) hooks.onProgress?.({ scannedDirs: dirs, skippedDirs: skipped });
+          pendingProgress = { scannedDirs: dirs, skippedDirs: skipped };
+          schedule();
         };
         // The authoritative enriched plan - cross-candidate insights need the
         // whole set, so per-entry `candidateFromEntry` stubs are reconciled

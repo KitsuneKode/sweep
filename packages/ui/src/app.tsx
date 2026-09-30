@@ -145,13 +145,16 @@ export class UiErrorBoundary extends Component<{ children: ReactNode }, { error:
 /** A help row: keycap + what it does. Sections break on `keys === null`. */
 type HelpRow = readonly [keys: string | null, description: string];
 
-const HELP_LEFT: ReadonlyArray<HelpRow> = [
+const HELP_MOVE: ReadonlyArray<HelpRow> = [
   [null, "move"],
   ["↑↓ / j k", "cursor · wheel scrolls"],
   ["g / G", "first / last row"],
   ["ctrl-u/d", "page up · down"],
   ["h · l", "collapse · expand group"],
   ["w · e", "collapse all · expand all"],
+];
+
+const HELP_QUEUE: ReadonlyArray<HelpRow> = [
   [null, "queue"],
   ["space", "queue / unqueue row"],
   ["v", "visual range - space queues"],
@@ -159,7 +162,7 @@ const HELP_LEFT: ReadonlyArray<HelpRow> = [
   ["enter", "apply (always confirms)"],
 ];
 
-const HELP_RIGHT: ReadonlyArray<HelpRow> = [
+const HELP_VIEW: ReadonlyArray<HelpRow> = [
   [null, "view"],
   ["/", "filter list · tab cycles panes"],
   ["1 - 4", "risk filter"],
@@ -167,16 +170,34 @@ const HELP_RIGHT: ReadonlyArray<HelpRow> = [
   ["i", "inspect row"],
   ["y", "copy row path"],
   ["S", "save queue as a plan"],
+];
+
+const HELP_PATTERNS: ReadonlyArray<HelpRow> = [
   [null, "patterns (p)"],
   ["space", "toggle pattern"],
   ["/", "filter the catalog"],
   ["a · d", "add · remove custom"],
   ["w / W", "write .sweeprc (W force)"],
   ["r", "rescan with new set"],
+];
+
+const HELP_APP: ReadonlyArray<HelpRow> = [
   [null, "app"],
   ["tab", "scopes - space queues scope"],
   ["t", "theme dark · light · auto"],
   ["q · ctrl-c", "quit · quit now"],
+];
+
+// Two columns split as move+queue+app | view+patterns so both land near the
+// same height; a narrow terminal folds into a single column in reading order.
+const HELP_LEFT: ReadonlyArray<HelpRow> = [...HELP_MOVE, ...HELP_QUEUE, ...HELP_APP];
+const HELP_RIGHT: ReadonlyArray<HelpRow> = [...HELP_VIEW, ...HELP_PATTERNS];
+const HELP_SINGLE: ReadonlyArray<HelpRow> = [
+  ...HELP_MOVE,
+  ...HELP_QUEUE,
+  ...HELP_VIEW,
+  ...HELP_PATTERNS,
+  ...HELP_APP,
 ];
 
 const HELP_FILTER_SYNTAX = "kind:x  risk:y  path:z  >100MB  older:30d  is:queued  !term";
@@ -219,11 +240,17 @@ function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: number }) 
   const rightWidth = keyWidth + Math.max(...HELP_RIGHT.map(([, d]) => d.length));
   const twoColWidth = leftWidth + rightWidth + 4; // column gap
 
+  // Modal chrome: 2 border + 6 paddingX + 2 scrollbox reserve. Budget for all
+  // of it or the widest row clips against the right edge.
+  const CHROME = 10;
+
   // Narrow terminals collapse to one column and drop the syntax sample -
   // better absent than wrapped mid-token.
   const singleWidth = Math.max(leftWidth, rightWidth);
-  const twoCol = width >= twoColWidth + 6;
-  const modalWidth = twoCol ? twoColWidth + 6 : Math.min(singleWidth + 6, Math.max(28, width - 4));
+  const twoCol = width >= twoColWidth + CHROME;
+  const modalWidth = twoCol
+    ? twoColWidth + CHROME
+    : Math.min(singleWidth + CHROME, Math.max(28, width - 4));
 
   return (
     <Modal tokens={tokens} title=" keys " width={modalWidth}>
@@ -233,10 +260,10 @@ function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: number }) 
           {helpColumn(HELP_RIGHT, keyWidth, tokens)}
         </box>
       ) : (
-        helpColumn([...HELP_LEFT, ...HELP_RIGHT], keyWidth, tokens)
+        helpColumn(HELP_SINGLE, keyWidth, tokens)
       )}
       <text content="" />
-      {twoCol || modalWidth > HELP_FILTER_SYNTAX.length + 12 ? (
+      {HELP_FILTER_SYNTAX.length + 8 <= modalWidth - CHROME ? (
         <text
           content={t`${fg(tokens.textDim)("filter")}  ${fg(tokens.textSecondary)(HELP_FILTER_SYNTAX)}`}
           wrapMode="none"
