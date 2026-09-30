@@ -59,6 +59,51 @@ describe("planner", () => {
     ).toBe(false);
   });
 
+  test("opt-in catalog names are dangerous and never pre-selected", () => {
+    // A curated name like `dist` can hold authored files - that is exactly why
+    // it ships disabled. Enabling the pattern consents to scanning for it,
+    // not to selecting it: tier + reasons must say so on both engines.
+    const optInNames = ["dist", "build", "out", "coverage", "pkg.egg-info"];
+    const result: ScanResult = {
+      entries: optInNames.map((name) => ({
+        path: dir(name),
+        name,
+        estimatedBytes: 1,
+        isSymlink: false,
+        entryType: "directory",
+      })),
+      estimatedTotalBytes: 5,
+      scannedDirs: 1,
+      skippedDirs: 0,
+      exact: false,
+    };
+
+    const plan = buildPlan(tmpDir, result);
+
+    expect(plan.selectedCandidateIds).toHaveLength(0);
+    for (const candidate of plan.candidates) {
+      expect(candidate.riskTier).toBe("dangerous");
+      expect(candidate.selectedByDefault).toBe(false);
+      expect(candidate.reasons).toContain("opt-in-pattern");
+    }
+  });
+
+  test("a default-catalog name found via any pattern keeps the safe tier", () => {
+    // Trust follows the matched name, not which pattern fired: a `node_modules`
+    // dir is dependency output even when a custom `*` glob surfaced it.
+    const candidate = toCandidate({
+      path: dir("node_modules"),
+      name: "node_modules",
+      estimatedBytes: 1,
+      isSymlink: false,
+      entryType: "directory",
+    });
+
+    expect(candidate.riskTier).toBe("safe");
+    expect(candidate.reasons).toContain("default-pattern");
+    expect(candidate.selectedByDefault).toBe(true);
+  });
+
   test("revalidateCandidates rejects entry type drift", () => {
     mkdirSync(dir("node_modules"));
     const candidate = toCandidate({

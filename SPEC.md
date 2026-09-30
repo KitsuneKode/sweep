@@ -99,8 +99,9 @@ on `scan --json-stream` and consumed by the TUI.
 
 - No `/` at start, no `..`, no NUL, no whitespace; ≤256 chars per pattern.
 - Merged pattern lists cap at 512 entries.
-- Custom patterns land the `dangerous` risk tier — they can never be
-  bulk-selected.
+- Only names covered by a shipping-default pattern land the `safe` tier.
+  Opt-in catalog names (`dist`, `build`, `out`, `coverage`, …) and custom
+  patterns land `dangerous` - they can never be bulk-selected or pre-selected.
 
 ### Config safety
 

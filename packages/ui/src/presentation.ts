@@ -9,7 +9,12 @@ import type { UiDisplayRow } from "./rows.js";
 import { buildDisplayRows } from "./rows.js";
 import { compactBytesLabel } from "./sidebar.js";
 import type { SweepUiState, SweepUiSummary, UiFocus } from "./state.js";
-import { activePatterns, getCurrentCandidate } from "./state.js";
+import {
+  activePatterns,
+  getCurrentCandidate,
+  patternAtCursor,
+  visiblePatternRows,
+} from "./state.js";
 import { type ThemeTokens, riskColor } from "./theme.js";
 
 function padCount(value: number, width = 2): string {
@@ -413,10 +418,18 @@ function truncateMiddle(value: string, max: number): string {
 }
 
 export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): StyledText {
-  if (state.focus === "patterns") {
+  if (state.focus === "patterns" || state.focus === "patternInput") {
     const enabled = activePatterns(state).length;
-    const dirty = state.patternsDirty ? fg(tokens.warning)("*") : "";
-    return t`${fg(tokens.textMuted)(`${enabled} patterns active`)}  ${dim("·")}  ${fg(tokens.accent)("r")} ${dim("rescan")}${dirty}`;
+    const dirty = state.patternsDirty ? "*" : "";
+    // The cursor row's note is the teaching surface - "bundler output -
+    // generic name" explains the toggle better than a bare count ever could.
+    const cursor = patternAtCursor(state);
+    const detail = cursor
+      ? `  ${dim("·")}  ${sanitizeTerminalText(cursor)}`
+      : state.patternFilter.length > 0
+        ? `  ${dim("·")}  no matches`
+        : "";
+    return t`${fg(tokens.textMuted)(`${enabled} on · ${visiblePatternRows(state).length} shown`)}${fg(tokens.warning)(dirty)}${fg(tokens.textDim)(detail)}`;
   }
 
   const candidate = getCurrentCandidate(state);
@@ -506,7 +519,11 @@ export function buildFooterHints(
 
   if (context.focus === "patterns") {
     const rescan = options.patternsDirty ? "rescan*" : "rescan";
-    return t`${key("space")} ${hint("toggle")}${sep}${key("p")} ${hint("list")}${sep}${key("r")} ${hint(rescan)}${sep}${key("esc")} ${hint("back")}`;
+    return t`${key("space")} ${hint("toggle")}${sep}${key("/")} ${hint("find")}${sep}${key("a")} ${hint("add")}${sep}${key("d")} ${hint("del custom")}${sep}${key("w")} ${hint("save .sweeprc")}${sep}${key("r")} ${hint(rescan)}${sep}${key("esc")} ${hint("back")}`;
+  }
+
+  if (context.focus === "patternInput") {
+    return t`${key("enter")} ${hint("done")}${sep}${key("esc")} ${hint("back")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
   if (context.focus === "sidebar") {
@@ -531,6 +548,8 @@ export function modeLabel(focus: UiFocus, scanning = false, visual = false): str
       return "SCOPES";
     case "patterns":
       return "PATTERNS";
+    case "patternInput":
+      return "PATTERNS·EDIT";
     default:
       return "NORMAL";
   }

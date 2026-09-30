@@ -1,6 +1,5 @@
 import type { SweepUiState } from "./state.js";
 import {
-  allPatterns,
   applySidebarScope,
   cancelVisual,
   clearSelection,
@@ -8,9 +7,12 @@ import {
   expandAllGroups,
   moveCursor,
   moveSidebarCursor,
+  patternAtCursor,
+  removeCustomPattern,
   rescanConfigFromState,
   selectSafeOnly,
   selectVisible,
+  setPatternInput,
   setRiskFilter,
   setThemeMode,
   toggleCurrentSelection,
@@ -53,7 +55,8 @@ function pageRows(ctx: KeymapContext): number {
 function nextFocus(current: UiFocus, showSidebar: boolean, reverse: boolean): UiFocus {
   const order = focusOrder(showSidebar);
   // The patterns editor is opened/closed with p, not part of the main cycle.
-  const effective: UiFocus = current === "patterns" ? "list" : current;
+  const effective: UiFocus =
+    current === "patterns" || current === "patternInput" ? "list" : current;
   const idx = order.indexOf(effective);
   const delta = reverse ? -1 : 1;
   return order[(idx + delta + order.length) % order.length] ?? "list";
@@ -143,6 +146,10 @@ export interface KeymapActions {
   applyVisual?: () => void;
   /** Queue or unqueue the scope under the sidebar cursor, then report skips. */
   applyScopeToggle?: () => void;
+  /** Persist the pattern pane's edits as a project .sweeprc (w key). */
+  writeSweeprc?: (overwrite: boolean) => void;
+  /** Commit the add-pattern draft (enter on the pattern input in add mode). */
+  submitPatternDraft?: () => void;
   /** Flash a one-line notice for a keypress that deliberately does nothing. */
   notify?: (message: string) => void;
 }
@@ -153,7 +160,6 @@ export interface KeymapContext {
   showHelp: boolean;
   pendingApply: boolean;
   showSidebar: boolean;
-  listSelectIndex: number;
   /** Visible rows in the artifact pane, for half-page scrolling. */
   pageRows?: number;
   /** Full scan failure shown as a modal; traps keys until dismissed. */
@@ -164,16 +170,7 @@ export interface KeymapContext {
 
 /** Dispatch keyboard input by modal state and focused panel. */
 export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
-  const {
-    key,
-    state,
-    showHelp,
-    pendingApply,
-    showSidebar,
-    listSelectIndex,
-    scanError,
-    inspectOpen,
-  } = ctx;
+  const { key, state, showHelp, pendingApply, showSidebar, scanError, inspectOpen } = ctx;
 
   // Quit is checked before every other branch. The terminal is in raw mode, so
   // no SIGINT is generated for us: if a modal or the filter input swallows this
@@ -257,6 +254,28 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     return;
   }
 
+  // The pattern pane's text line owns printable keys while focused - same as
+  // the search box, keystrokes must never reach the artifact actions below.
+  if (state.focus === "patternInput") {
+    if (key.name === "escape") {
+      actions.mutate((s) => escapeStep(s) ?? s);
+      return;
+    }
+    if (key.name === "return") {
+      if (state.patternInputMode === "add") {
+        actions.submitPatternDraft?.();
+      } else {
+        actions.mutate((s) => setPatternInput(s, null));
+      }
+      return;
+    }
+    if (isTab || isShiftTab) {
+      actions.mutate((s) => setPatternInput(s, null));
+      actions.focusPanel(nextFocus("patterns", showSidebar, isShiftTab));
+    }
+    return;
+  }
+
   if (key.name === "escape") {
     // Walk back through narrowed views; esc NEVER quits the app.
     const step = escapeStep(state);
@@ -286,6 +305,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "p") {
+    // patternInput returned earlier; reaching here means list/sidebar/patterns.
     actions.focusPanel(state.focus === "patterns" ? "list" : "patterns");
     return;
   }
@@ -312,7 +332,13 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "/") {
-    actions.focusPanel("search");
+    // Inside the patterns pane, / narrows the catalog - the artifact filter
+    // is the other pane's job. (patternInput never reaches this line.)
+    if (state.focus === "patterns") {
+      actions.mutate((s) => setPatternInput(s, "filter"));
+    } else {
+      actions.focusPanel("search");
+    }
     return;
   }
 
@@ -347,15 +373,62 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (state.focus === "patterns") {
-    if (key.name === "space") {
-      const pattern = allPatterns(state)[listSelectIndex];
-      if (pattern) actions.mutate((s) => togglePattern(s, pattern));
+    if (isCtrlU) {
+      actions.mutate((s) => setPatternIndex(s, s.patternIndex - pageRows(ctx)));
+      return;
+    }
+    if (isCtrlD) {
+      actions.mutate((s) => setPatternIndex(s, s.patternIndex + pageRows(ctx)));
+      return;
+    }
+    if (isShiftG || key.name === "end") {
+      actions.mutate((s) => setPatternIndex(s, Number.MAX_SAFE_INTEGER));
+      return;
+    }
+    if (key.name === "g" || key.name === "home") {
+      actions.mutate((s) => setPatternIndex(s, 0));
+      return;
     }
     if (key.name === "up" || key.name === "k") {
       actions.mutate((s) => setPatternIndex(s, s.patternIndex - 1));
-    } else if (key.name === "down" || key.name === "j") {
-      actions.mutate((s) => setPatternIndex(s, s.patternIndex + 1));
+      return;
     }
+    if (key.name === "down" || key.name === "j") {
+      actions.mutate((s) => setPatternIndex(s, s.patternIndex + 1));
+      return;
+    }
+    if (key.name === "space" || key.name === "return") {
+      const pattern = patternAtCursor(state);
+      if (pattern) actions.mutate((s) => togglePattern(s, pattern));
+      return;
+    }
+    if (key.name === "a") {
+      actions.mutate((s) => setPatternInput(s, "add"));
+      return;
+    }
+    if (key.name === "d" || key.name === "x") {
+      const pattern = patternAtCursor(state);
+      if (!pattern) return;
+      if (state.catalogPatterns.includes(pattern)) {
+        // Catalog rows toggle off instead of deleting - say so rather than
+        // letting d look like a no-op.
+        actions.notify?.("catalog entries toggle with space - d removes customs only");
+        return;
+      }
+      actions.mutate((s) => removeCustomPattern(s, pattern));
+      return;
+    }
+    // Shift+W is checked before plain w (same convention as S/s above).
+    if (key.name === "W" || (key.name === "w" && key.shift)) {
+      actions.writeSweeprc?.(true);
+      return;
+    }
+    if (key.name === "w") {
+      actions.writeSweeprc?.(false);
+      return;
+    }
+    // Anything else is swallowed: pane-local focus means artifact keys must
+    // not fire while the user is editing the scan definition.
     return;
   }
 

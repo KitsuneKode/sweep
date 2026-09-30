@@ -63,6 +63,12 @@ function buildBlockedRoots(): Set<string> {
 
 const BLOCKED_ROOTS = buildBlockedRoots();
 
+// Case-insensitive filesystems (macOS APFS default, Windows NTFS) make
+// /USERS/name the same directory as /Users/name - the blocked-root check must
+// fold both sides or a case-variant spelling walks straight past it.
+const CASE_FOLD_BLOCKED = process.platform === "win32" || process.platform === "darwin";
+const BLOCKED_ROOTS_LOWER = new Set([...BLOCKED_ROOTS].map((root) => root.toLowerCase()));
+
 // ─── Error type ───────────────────────────────────────────────────────────────
 
 export class GuardrailError extends Error {
@@ -91,7 +97,7 @@ export function assertSafeCwd(targetPath: string): void {
   const resolved = normalize(resolve(targetPath));
   const isBlocked =
     BLOCKED_ROOTS.has(resolved) ||
-    (process.platform === "win32" && BLOCKED_ROOTS.has(resolved.toLowerCase()));
+    (CASE_FOLD_BLOCKED && BLOCKED_ROOTS_LOWER.has(resolved.toLowerCase()));
 
   if (isBlocked) {
     throw new GuardrailError(

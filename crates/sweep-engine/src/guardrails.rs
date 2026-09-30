@@ -15,16 +15,25 @@ pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
         .into());
     }
 
-    if target_path.contains("..") {
-        return Err(GuardrailError::ProtectedPath {
-            path: format!("Path traversal detected: {target_path}"),
-        }
-        .into());
-    }
-
+    // `..` is not rejected here: normalization collapses it first, then the
+    // blocked-root and depth checks judge the result - same order as the JS
+    // `resolve()` path, so `scan foo/../bar` behaves identically on both.
     let resolved = normalize_path(target_path);
 
-    if blocked_roots().contains(&resolved) {
+    let is_blocked = if blocked_roots().contains(&resolved) {
+        true
+    } else if cfg!(windows) || cfg!(target_os = "macos") {
+        // Case-insensitive filesystems make /USERS/name the same directory as
+        // /Users/name - fold both sides or the case-variant walks past.
+        let folded = resolved.to_string_lossy().to_lowercase();
+        blocked_roots()
+            .iter()
+            .any(|root| root.to_string_lossy().to_lowercase() == folded)
+    } else {
+        false
+    };
+
+    if is_blocked {
         return Err(GuardrailError::ProtectedPath {
             path: format!(
                 "Refusing to operate on protected path: {}\n  \

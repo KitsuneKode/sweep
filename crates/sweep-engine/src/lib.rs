@@ -171,8 +171,8 @@ fn to_candidate(entry: &WalkEntry, estimated_bytes: u64) -> ScanCandidate {
     let path = entry.path.as_str().to_owned();
     let id = format!("cand_{}", hash_string(&format!("{}:{}", path, entry.name)));
     let kind = candidate_kind_from_name(&entry.name);
-    let risk_tier = infer_risk_tier(&path, entry.is_symlink, &kind);
-    let reasons = infer_reasons(&path, entry.is_symlink, &kind);
+    let risk_tier = infer_risk_tier(&path, entry.is_symlink, &entry.name);
+    let reasons = infer_reasons(&path, entry.is_symlink, &entry.name);
     let selected_by_default = risk_tier == RiskTier::Safe;
 
     ScanCandidate {
@@ -247,19 +247,23 @@ fn candidate_kind_from_name(name: &str) -> String {
     }
 }
 
-fn infer_risk_tier(path: &str, is_symlink: bool, kind: &str) -> RiskTier {
+fn infer_risk_tier(path: &str, is_symlink: bool, name: &str) -> RiskTier {
     if guardrails::path_has_protected_vcs_segment(path) {
         RiskTier::Blocked
     } else if is_symlink {
         RiskTier::Caution
-    } else if kind == "custom" {
-        RiskTier::Dangerous
-    } else {
+    } else if sweep_fs::catalog_match_for(name) == Some(sweep_fs::CatalogMatch::Default) {
+        // Only names a shipping-default pattern covers earn the safe tier.
+        // Opt-in catalog names (dist, build, out, coverage, ...) are dangerous
+        // for the same reason they are opt-in - the name can hold authored
+        // files. Enabling a pattern consents to scanning, never selection.
         RiskTier::Safe
+    } else {
+        RiskTier::Dangerous
     }
 }
 
-fn infer_reasons(path: &str, is_symlink: bool, kind: &str) -> Vec<String> {
+fn infer_reasons(path: &str, is_symlink: bool, name: &str) -> Vec<String> {
     let mut reasons = Vec::new();
     if guardrails::path_has_protected_vcs_segment(path) {
         reasons.push("protected-vcs-path".to_owned());
@@ -267,10 +271,10 @@ fn infer_reasons(path: &str, is_symlink: bool, kind: &str) -> Vec<String> {
     if is_symlink {
         reasons.push("symlink".to_owned());
     }
-    if kind == "custom" {
-        reasons.push("custom-pattern".to_owned());
-    } else {
-        reasons.push("default-pattern".to_owned());
+    match sweep_fs::catalog_match_for(name) {
+        Some(sweep_fs::CatalogMatch::Default) => reasons.push("default-pattern".to_owned()),
+        Some(sweep_fs::CatalogMatch::OptIn) => reasons.push("opt-in-pattern".to_owned()),
+        None => reasons.push("custom-pattern".to_owned()),
     }
     reasons
 }
@@ -319,6 +323,38 @@ mod tests {
             hash_string(&format!("{}:node_modules", nm_path.as_str()))
         );
         assert_eq!(plan.candidates[0].id, expected_id);
+    }
+
+    #[test]
+    fn opt_in_catalog_names_are_dangerous_never_preselected() {
+        // A curated name like `dist` can hold authored files - that is exactly
+        // why it ships disabled. Enabling the pattern consents to scanning for
+        // it, not to selecting it (JS `inferRiskTier` parity).
+        for name in ["dist", "build", "out", "coverage", "pkg.egg-info"] {
+            let tier = infer_risk_tier("/tmp/proj/x", false, name);
+            assert_eq!(tier, RiskTier::Dangerous, "{name} should be dangerous");
+            let reasons = infer_reasons("/tmp/proj/x", false, name);
+            assert!(
+                reasons.iter().any(|reason| reason == "opt-in-pattern"),
+                "{name} should carry opt-in-pattern reason, got {reasons:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn default_catalog_name_keeps_safe_tier_regardless_of_match_source() {
+        let tier = infer_risk_tier("/tmp/proj/x", false, "node_modules");
+        assert_eq!(tier, RiskTier::Safe);
+        let reasons = infer_reasons("/tmp/proj/x", false, "node_modules");
+        assert!(reasons.iter().any(|reason| reason == "default-pattern"));
+    }
+
+    #[test]
+    fn unknown_names_stay_dangerous_with_custom_reason() {
+        let tier = infer_risk_tier("/tmp/proj/x", false, "my-cache");
+        assert_eq!(tier, RiskTier::Dangerous);
+        let reasons = infer_reasons("/tmp/proj/x", false, "my-cache");
+        assert!(reasons.iter().any(|reason| reason == "custom-pattern"));
     }
 
     #[test]

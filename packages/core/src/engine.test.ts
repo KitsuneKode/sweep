@@ -23,7 +23,7 @@ const dir = (...parts: string[]) => join(tmpDir, ...parts);
 describe("core engine", () => {
   test("scanToPlan returns both scan summary and a selected plan", async () => {
     mkdirSync(dir("node_modules"));
-    mkdirSync(dir("dist"));
+    mkdirSync(dir(".vite"));
 
     const { result, plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
 
@@ -35,7 +35,7 @@ describe("core engine", () => {
 
   test("applyPlan merges revalidation failures into the final report", async () => {
     mkdirSync(dir("node_modules"));
-    mkdirSync(dir("dist"));
+    mkdirSync(dir(".vite"));
 
     const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
 
@@ -74,17 +74,17 @@ describe("core engine", () => {
 
   test("applyPlan reports missing candidates with a stable failure code", async () => {
     mkdirSync(dir("node_modules"));
-    mkdirSync(dir("dist"));
+    mkdirSync(dir(".vite"));
 
     const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
 
-    rmSync(dir("dist"), { recursive: true, force: true });
+    rmSync(dir(".vite"), { recursive: true, force: true });
 
     const applied = await applyPlan(plan);
 
     expect(applied.report.failedCount).toBe(1);
     expect(applied.report.failedPaths[0]?.code).toBe("missing");
-    expect(applied.report.failedPaths[0]?.path).toBe(dir("dist"));
+    expect(applied.report.failedPaths[0]?.path).toBe(dir(".vite"));
   });
 
   test("applyPlan stops scheduling deletions once cancelled", async () => {
@@ -92,15 +92,15 @@ describe("core engine", () => {
     // resolves, every subsequent pull sees the cancellation and skips work.
     const names = [
       "node_modules",
-      "dist",
-      "build",
-      "out",
       ".next",
       ".turbo",
       ".parcel-cache",
       ".nuxt",
-      "coverage",
       ".vite",
+      ".nyc_output",
+      ".svelte-kit",
+      "target",
+      "x.tsbuildinfo",
     ];
     for (const name of names) {
       mkdirSync(dir(name));

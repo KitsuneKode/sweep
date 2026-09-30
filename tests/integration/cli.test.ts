@@ -52,7 +52,7 @@ function runCli(
 describe("CLI scan/apply", () => {
   test("scan --json emits a plan-shaped document with candidates", () => {
     mkdirSync(dir("node_modules"));
-    mkdirSync(dir("dist"));
+    mkdirSync(dir("target"));
 
     const result = runCli(["scan", tmpDir, "--json"]);
 
@@ -89,7 +89,7 @@ describe("CLI scan/apply", () => {
 
   test("apply --plan deletes planned candidates and reports JSON results", () => {
     mkdirSync(dir("node_modules"));
-    mkdirSync(dir("dist"));
+    mkdirSync(dir("target"));
 
     const scanResult = runCli(["scan", tmpDir, "--json"]);
     expect(scanResult.exitCode).toBe(0);
@@ -110,7 +110,7 @@ describe("CLI scan/apply", () => {
     expect(report.failedCount).toBe(0);
     expect(report.totalBytesFreed).toBeGreaterThanOrEqual(0);
     expect(existsSync(dir("node_modules"))).toBe(false);
-    expect(existsSync(dir("dist"))).toBe(false);
+    expect(existsSync(dir("target"))).toBe(false);
   });
 
   test("scan excludes dangerous custom-pattern candidates from default selection", () => {
@@ -166,7 +166,7 @@ describe("CLI scan/apply", () => {
 
   test("apply reports a revalidation failure when a candidate changes type", () => {
     mkdirSync(dir("node_modules"));
-    mkdirSync(dir("dist"));
+    mkdirSync(dir("target"));
 
     const scanResult = runCli(["scan", tmpDir, "--json"]);
     expect(scanResult.exitCode).toBe(0);

@@ -87,23 +87,80 @@ impl From<&sweep_types::SweepConfig> for WalkConfig {
 }
 
 /// Default artifact patterns aligned with the JS reference engine.
+/// Only machine-created, ecosystem-canonical names ship enabled - generic
+/// names like `dist`/`build`/`out`/`coverage` are opt-in catalog entries
+/// (they can hold user-authored files). Keep in sync with
+/// `packages/core/src/catalog.ts` (byDefault entries).
 pub fn default_patterns() -> Vec<String> {
     vec![
         "node_modules".to_owned(),
-        "dist".to_owned(),
-        "build".to_owned(),
-        "out".to_owned(),
         ".next".to_owned(),
         ".turbo".to_owned(),
         ".parcel-cache".to_owned(),
         ".nuxt".to_owned(),
         ".svelte-kit".to_owned(),
         "target".to_owned(),
-        "coverage".to_owned(),
         ".nyc_output".to_owned(),
         ".vite".to_owned(),
         "*.tsbuildinfo".to_owned(),
     ]
+}
+
+/// Opt-in catalog names - curated but ambiguous enough that enabling them is
+/// a user decision (the name can hold authored files). Keep in sync with
+/// `packages/core/src/catalog.ts` (`byDefault: false` entries).
+pub fn opt_in_patterns() -> Vec<String> {
+    vec![
+        "dist".to_owned(),
+        "coverage".to_owned(),
+        ".output".to_owned(),
+        "bower_components".to_owned(),
+        "__pycache__".to_owned(),
+        ".venv".to_owned(),
+        "venv".to_owned(),
+        ".pytest_cache".to_owned(),
+        ".mypy_cache".to_owned(),
+        ".ruff_cache".to_owned(),
+        "*.egg-info".to_owned(),
+        ".gradle".to_owned(),
+        "obj".to_owned(),
+        "Pods".to_owned(),
+        "cmake-build-*".to_owned(),
+        ".dart_tool".to_owned(),
+        "build".to_owned(),
+        "out".to_owned(),
+    ]
+}
+
+/// Trust level the pattern catalog assigns to a scanned entry name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogMatch {
+    /// The name is covered by a shipping-default pattern.
+    Default,
+    /// The name is curated but opt-in - ambiguous enough to hold authored files.
+    OptIn,
+}
+
+/// Classify an entry name against the catalog (JS `catalogMatchFor` parity):
+/// `Default` for shipping-default coverage, `OptIn` for curated opt-in names,
+/// `None` for names the catalog does not know. The matched *name* - not which
+/// pattern fired - carries the trust level.
+pub fn catalog_match_for(name: &str) -> Option<CatalogMatch> {
+    static DEFAULT_MATCHER: std::sync::OnceLock<PatternMatcher> = std::sync::OnceLock::new();
+    static OPT_IN_MATCHER: std::sync::OnceLock<PatternMatcher> = std::sync::OnceLock::new();
+    if DEFAULT_MATCHER
+        .get_or_init(|| PatternMatcher::compile(&default_patterns()))
+        .matches(name)
+    {
+        Some(CatalogMatch::Default)
+    } else if OPT_IN_MATCHER
+        .get_or_init(|| PatternMatcher::compile(&opt_in_patterns()))
+        .matches(name)
+    {
+        Some(CatalogMatch::OptIn)
+    } else {
+        None
+    }
 }
 
 /// Result of a scan walk before size estimation.
@@ -896,6 +953,8 @@ mod tests {
             .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
 
         let config = WalkConfig {
+            // Explicit patterns - the test covers `ignore`, not the default set.
+            patterns: vec!["dist".to_owned()],
             ignore: vec!["packages/vendor".to_owned()],
             ..WalkConfig::default()
         };
@@ -1084,7 +1143,12 @@ mod tests {
             }),
         };
 
-        let result = walk_matched_entries_with_hooks(root, &WalkConfig::default(), Some(&hooks));
+        // Explicit patterns - the test covers hooks, not the default set.
+        let config = WalkConfig {
+            patterns: vec!["node_modules".to_owned(), "dist".to_owned()],
+            ..WalkConfig::default()
+        };
+        let result = walk_matched_entries_with_hooks(root, &config, Some(&hooks));
         let names = seen.lock().unwrap_or_else(|err| err.into_inner()).clone();
         assert_eq!(names.len(), result.entries.len());
         assert!(names.contains(&"node_modules".to_owned()));

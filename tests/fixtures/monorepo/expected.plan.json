@@ -19,18 +19,6 @@
       "selectedByDefault": true
     },
     {
-      "path": "__FIXTURE_ROOT__/packages/api/dist",
-      "name": "dist",
-      "estimatedBytes": 0,
-      "isSymlink": false,
-      "entryType": "directory",
-      "id": "cand_1289efc54c0b9b7e",
-      "kind": "dist",
-      "riskTier": "safe",
-      "reasons": ["default-pattern"],
-      "selectedByDefault": true
-    },
-    {
       "path": "__FIXTURE_ROOT__/packages/web/node_modules",
       "name": "node_modules",
       "estimatedBytes": 0,
@@ -44,22 +32,18 @@
     }
   ],
   "summary": {
-    "candidateCount": 3,
+    "candidateCount": 2,
     "estimatedTotalBytes": 0,
-    "scannedDirs": 6,
+    "scannedDirs": 7,
     "exact": false,
-    "selectedCount": 3,
+    "selectedCount": 2,
     "riskCounts": {
-      "safe": 3,
+      "safe": 2,
       "caution": 0,
       "dangerous": 0,
       "blocked": 0
     }
   },
-  "selectedCandidateIds": [
-    "cand_a7288b1b2a18dedd",
-    "cand_1289efc54c0b9b7e",
-    "cand_2a2d8f17594bd811"
-  ],
+  "selectedCandidateIds": ["cand_a7288b1b2a18dedd", "cand_2a2d8f17594bd811"],
   "createdAt": "1970-01-01T00:00:00.000Z"
 }

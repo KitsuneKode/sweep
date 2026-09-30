@@ -2,23 +2,18 @@ import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, dim, fg, t } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
-import { useMemo } from "react";
 import { ArtifactList } from "./ArtifactList.js";
+import { PatternPanel } from "./PatternPanel.js";
 import { ScopeSidebar } from "./ScopeSidebar.js";
-import { formatPatternRow } from "./presentation.js";
 import { DotMatrix, DotStrip } from "./widgets.js";
 import type { UiDisplayRow } from "./rows.js";
 import {
-  allPatterns,
-  isCustomPattern,
   moveCursor,
   moveSidebarCursor,
   setFilter,
-  setPatternIndex,
   setRowIndex,
   setScopeFilter,
   toggleGroup,
-  togglePattern,
   visualRange,
   type SweepUiState,
   type UiFocus,
@@ -35,10 +30,11 @@ export interface ReviewPaneProps {
   displayRows: UiDisplayRow[];
   visibleItems: ScanCandidate[];
   candidatesById: Map<string, ScanCandidate>;
-  listSelectIndex: number;
   onMutate: (fn: (s: SweepUiState) => SweepUiState) => void;
   onFocusPanel: (focus: UiFocus) => void;
   onToggleSelection: (candidateId: string) => void;
+  /** Enter on the pattern pane's add line. */
+  onSubmitPatternDraft: () => void;
   /** Measured artifact-pane viewport height for real page steps. */
   onViewportRows?: (rows: number) => void;
 }
@@ -51,27 +47,12 @@ export function ReviewPane({
   displayRows,
   visibleItems,
   candidatesById,
-  listSelectIndex,
   onMutate,
   onFocusPanel,
   onToggleSelection,
+  onSubmitPatternDraft,
   onViewportRows,
 }: ReviewPaneProps) {
-  const patternOptions = useMemo(
-    () =>
-      allPatterns(state).map((pattern) => ({
-        // Custom (--pattern / .sweeprc) entries sit below the built-ins and
-        // carry an inline marker - a per-row description field would cost
-        // every option a second line.
-        name:
-          formatPatternRow(pattern, !state.disabledPatterns.has(pattern)) +
-          (isCustomPattern(state, pattern) ? "  (custom)" : ""),
-        value: pattern,
-        description: "",
-      })),
-    [state.catalogPatterns, state.extraPatterns, state.disabledPatterns],
-  );
-
   const dimensions = useTerminalDimensions();
   // Artifact pane inner width: total terminal width minus sidebar (if shown),
   // outer padding (2), pane border+padding (4). The panes touch: no gap.
@@ -85,7 +66,8 @@ export function ReviewPane({
   const scopeEmpty = state.scopeFilter !== null && visibleItems.length === 0;
   const nothingFound = visibleItems.length === 0 && !scopeEmpty && !state.scanning;
   const searchFocused = state.focus === "search";
-  const listFocused = state.focus === "list" || state.focus === "patterns";
+  const patternsPane = state.focus === "patterns" || state.focus === "patternInput";
+  const listFocused = state.focus === "list" || patternsPane;
   const emptyScan = state.scanning && state.candidates.length === 0;
 
   // The pane title is the one indicator that survives every terminal width -
@@ -98,7 +80,11 @@ export function ReviewPane({
     );
   }
   if (state.riskFilter !== "all") titleParts.push(state.riskFilter);
-  const paneTitle = searchFocused ? " › filter " : ` ${titleParts.join(" · ")} `;
+  const paneTitle = patternsPane
+    ? " › patterns "
+    : searchFocused
+      ? " › filter "
+      : ` ${titleParts.join(" · ")} `;
 
   return (
     <box width="100%" flexGrow={1} minHeight={0} flexDirection="row">
@@ -143,19 +129,21 @@ export function ReviewPane({
         paddingX={1}
         paddingBottom={0}
       >
-        <box width="100%" height={1} flexShrink={0}>
-          <input
-            focused={searchFocused}
-            value={state.filter}
-            placeholder={`Filter… ${FILTER_HINT}`}
-            backgroundColor={tokens.surfaceInset}
-            focusedBackgroundColor={tokens.surfaceInset}
-            textColor={tokens.text}
-            cursorColor={tokens.accent}
-            onInput={(value: string) => onMutate((s) => setFilter(s, value))}
-            onSubmit={() => onFocusPanel("list")}
-          />
-        </box>
+        {patternsPane ? null : (
+          <box width="100%" height={1} flexShrink={0}>
+            <input
+              focused={searchFocused}
+              value={state.filter}
+              placeholder={`Filter… ${FILTER_HINT}`}
+              backgroundColor={tokens.surfaceInset}
+              focusedBackgroundColor={tokens.surfaceInset}
+              textColor={tokens.text}
+              cursorColor={tokens.accent}
+              onInput={(value: string) => onMutate((s) => setFilter(s, value))}
+              onSubmit={() => onFocusPanel("list")}
+            />
+          </box>
+        )}
         {state.scanning && state.candidates.length > 0 ? (
           <ScanningStrip
             tokens={tokens}
@@ -165,31 +153,13 @@ export function ReviewPane({
             orderPinned={state.orderPinned}
           />
         ) : null}
-        {state.focus === "patterns" ? (
-          <select
-            focused
-            flexGrow={1}
-            minHeight={0}
-            // Every option costs a second line when descriptions are on, even
-            // empty ones - customs are marked inline in the name instead.
-            showDescription={false}
-            showScrollIndicator
-            wrapSelection={false}
-            // The keymap owns arrows/space for this pane - leaving the select's
-            // own bindings live makes shift+arrows diverge (its ±5 fast-scroll
-            // fights the keymap's ±1 patternIndex).
-            keyBindings={[]}
-            backgroundColor={tokens.surface}
-            textColor={tokens.textSecondary}
-            selectedBackgroundColor={tokens.selectionBg}
-            selectedTextColor={tokens.accent}
-            selectedIndex={listSelectIndex}
-            options={patternOptions}
-            onChange={(index: number) => onMutate((s) => setPatternIndex(s, index))}
-            onSelect={(_: number, option: { value?: string } | null) => {
-              const value = option?.value;
-              if (value) onMutate((s) => togglePattern(s, value));
-            }}
+        {patternsPane ? (
+          <PatternPanel
+            state={state}
+            tokens={tokens}
+            paneWidth={artifactPaneInnerWidth}
+            onMutate={onMutate}
+            onSubmitDraft={onSubmitPatternDraft}
           />
         ) : emptyScan ? (
           <ScanningPanel tokens={tokens} scannedDirs={state.scannedDirs} />

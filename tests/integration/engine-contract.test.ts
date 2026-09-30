@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync }
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
+import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
 import {
   isRustEngineAvailable,
@@ -20,6 +21,20 @@ const LOCAL_BINARY = join(REPO_ROOT, "target/debug/sweep-engine");
 interface FixtureRequest {
   exact?: boolean;
   selectionPolicy?: SelectionPolicy;
+  /** Patterns merged on top of the defaults (opt-in/custom scan coverage). */
+  extraPatterns?: string[];
+}
+
+/**
+ * `SweepConfig.patterns` is the fully resolved list, so a fixture opts into
+ * catalog/custom names by appending to `DEFAULT_CONFIG.patterns`.
+ */
+function fixtureConfig(request: FixtureRequest): SweepConfig {
+  if (!request.extraPatterns?.length) return DEFAULT_CONFIG;
+  return {
+    ...DEFAULT_CONFIG,
+    patterns: [...DEFAULT_CONFIG.patterns, ...request.extraPatterns],
+  };
 }
 
 function loadFixtureCases(): Array<{ name: string; root: string; request: FixtureRequest }> {
@@ -86,7 +101,7 @@ describe("engine contract fixtures", () => {
         options.selectionPolicy = fixture.request.selectionPolicy;
       }
 
-      const { plan } = await scanToPlan(fixture.root, DEFAULT_CONFIG, options);
+      const { plan } = await scanToPlan(fixture.root, fixtureConfig(fixture.request), options);
       assertMatchesGolden(plan, fixture.root);
     });
 
@@ -99,7 +114,7 @@ describe("engine contract fixtures", () => {
       expect(resolveRustEngineBinary()).toBe(LOCAL_BINARY);
 
       const plan = await scanToPlanViaRust(fixture.root, {
-        config: DEFAULT_CONFIG,
+        config: fixtureConfig(fixture.request),
         selectionPolicy: fixture.request.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
         exact: fixture.request.exact ?? false,
       });
@@ -119,9 +134,13 @@ describe("engine contract fixtures", () => {
         selectionPolicy: fixture.request.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
       };
 
-      const { plan: jsPlan } = await scanToPlan(fixture.root, DEFAULT_CONFIG, options);
+      const { plan: jsPlan } = await scanToPlan(
+        fixture.root,
+        fixtureConfig(fixture.request),
+        options,
+      );
       const rustPlan = await scanToPlanViaRust(fixture.root, {
-        config: DEFAULT_CONFIG,
+        config: fixtureConfig(fixture.request),
         ...options,
       });
 

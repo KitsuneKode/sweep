@@ -41,14 +41,60 @@ pub fn load_golden_plan(name: &str) -> Value {
 }
 
 pub fn run_rust_scan_normalized(name: &str) -> Value {
+    run_rust_scan_normalized_with(name, &[])
+}
+
+/// `request.json` may append patterns on top of the defaults (opt-in coverage).
+pub fn run_rust_scan_normalized_with(name: &str, extra_patterns: &[&str]) -> Value {
     let fixture = fixture_dir(name);
     let fixture_utf8 = Utf8PathBuf::from_path_buf(fixture.clone()).unwrap_or_else(|_| {
         panic!("fixture path is not valid UTF-8: {}", fixture.display());
     });
 
-    let plan = scan_to_plan(&fixture_utf8)
-        .unwrap_or_else(|err| panic!("rust scan failed for {}: {err}", name));
+    let plan = if extra_patterns.is_empty() {
+        scan_to_plan(&fixture_utf8)
+    } else {
+        let mut patterns = sweep_fs::default_patterns();
+        patterns.extend(extra_patterns.iter().map(|p| p.to_string()));
+        let config = sweep_types::SweepConfig {
+            patterns,
+            disabled_patterns: Vec::new(),
+            ignore: vec![".sweep-trash-*".to_owned()],
+            max_size_gb: 10.0,
+            depth: -1,
+        };
+        sweep_engine::scan_to_plan_with_sweep_config(
+            &fixture_utf8,
+            &config,
+            &sweep_types::SelectionPolicy::default(),
+            sweep_engine::ScanOptions {
+                exact: false,
+                hooks: sweep_engine::ScanHooks::default(),
+            },
+        )
+    }
+    .unwrap_or_else(|err| panic!("rust scan failed for {}: {err}", name));
     normalize_plan_value(&plan, &fixture)
+}
+
+/// Extra patterns declared by a fixture's `request.json` (`extraPatterns`).
+pub fn fixture_extra_patterns(name: &str) -> Vec<String> {
+    let path = fixture_dir(name).join("request.json");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+    let value: Value = serde_json::from_str(&raw)
+        .unwrap_or_else(|err| panic!("request at {} is invalid JSON: {err}", path.display()));
+    value
+        .get("extraPatterns")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {

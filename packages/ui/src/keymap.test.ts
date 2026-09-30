@@ -43,7 +43,6 @@ describe("handleKeymap", () => {
       showHelp: false,
       pendingApply: false,
       showSidebar: true,
-      listSelectIndex: 0,
       pageRows: 10,
       ...overrides,
     };

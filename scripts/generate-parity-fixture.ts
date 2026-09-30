@@ -6,7 +6,7 @@
  *   bun run scripts/generate-parity-fixture.ts -- tests/fixtures/node_modules-only
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
@@ -28,10 +28,16 @@ async function main(): Promise<void> {
   }
 
   const fixtureRoot = resolve(fixtureArg);
-  const { plan } = await scanToPlan(fixtureRoot, DEFAULT_CONFIG);
+  const requestPath = join(fixtureRoot, "request.json");
+  const request: { exact?: boolean; extraPatterns?: string[] } = existsSync(requestPath)
+    ? JSON.parse(readFileSync(requestPath, "utf8"))
+    : {};
+  const config = request.extraPatterns?.length
+    ? { ...DEFAULT_CONFIG, patterns: [...DEFAULT_CONFIG.patterns, ...request.extraPatterns] }
+    : DEFAULT_CONFIG;
+  const { plan } = await scanToPlan(fixtureRoot, config, { exact: request.exact ?? false });
   const normalized = normalizePlan(plan, fixtureRoot);
   const outPath = join(fixtureRoot, "expected.plan.json");
-  const requestPath = join(fixtureRoot, "request.json");
 
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");

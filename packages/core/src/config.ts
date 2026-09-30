@@ -1,4 +1,11 @@
-import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, relative, resolve } from "node:path";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
@@ -13,22 +20,11 @@ export class ConfigParseError extends Error {
   }
 }
 
-export const DEFAULT_PATTERNS: string[] = [
-  "node_modules",
-  "dist",
-  "build",
-  "out",
-  ".next",
-  ".turbo",
-  ".parcel-cache",
-  ".nuxt",
-  ".svelte-kit",
-  "target",
-  "coverage",
-  ".nyc_output",
-  ".vite",
-  "*.tsbuildinfo",
-];
+// The default pattern set lives in the curated catalog - only machine-created,
+// ecosystem-canonical names ship enabled (node_modules, .next, target).
+// Generic names like build/dist/out stay opt-in: they can hold authored files.
+export { DEFAULT_PATTERN_SET, DEFAULT_PATTERNS } from "./catalog.js";
+import { DEFAULT_PATTERNS } from "./catalog.js";
 
 export const DEFAULT_CONFIG: SweepConfig = {
   patterns: DEFAULT_PATTERNS,
@@ -203,6 +199,88 @@ export function writeInitSweeprc(configPath: string, force = false): "created" |
 
   writeFileSync(configPath, `${JSON.stringify(INIT_SWEEPRC_TEMPLATE, null, 2)}\n`, "utf-8");
   return "created";
+}
+
+/**
+ * What the TUI pattern pane writes into a project `.sweeprc`: the delta from
+ * built-in defaults, not the whole resolved config. Extra (opt-in + custom)
+ * patterns go under `patterns`; defaults the user switched off go under
+ * `disabledPatterns`. Scalar fields are left to `sweep init` - the pane only
+ * owns the pattern list it edited.
+ */
+export interface ProjectSweeprcDelta {
+  patterns: string[];
+  disabledPatterns: string[];
+}
+
+/**
+ * Write a project `.sweeprc` holding only the pattern delta.
+ *
+ * Safety contract - same as writeInitSweeprc, plus no-clobber by default:
+ * - refuses to write through a symlink (dangling included),
+ * - returns "exists" unless `force` is passed (the TUI asks first),
+ * - writes to a sibling temp file then renames, so a crash mid-write never
+ *   leaves a torn config.
+ */
+export function writeProjectSweeprc(
+  configPath: string,
+  delta: ProjectSweeprcDelta,
+  force = false,
+): "created" | "exists" | "updated" {
+  let existed = false;
+  try {
+    const stat = lstatSync(configPath);
+    if (stat.isSymbolicLink()) {
+      throw new ConfigParseError(
+        `${configPath} is a symlink - refusing to write through it. Remove it first.`,
+      );
+    }
+    existed = true;
+    if (!force) return "exists";
+  } catch (err) {
+    if (err instanceof ConfigParseError) throw err;
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    // ENOENT - nothing there, safe to create.
+  }
+
+  // Delta-only document: omit empty keys so the file stays minimal and the
+  // reader merges it over defaults like any other .sweeprc.
+  const doc: Record<string, string[]> = {};
+  if (delta.patterns.length > 0) doc.patterns = [...new Set(delta.patterns)].sort();
+  if (delta.disabledPatterns.length > 0) {
+    doc.disabledPatterns = [...new Set(delta.disabledPatterns)].sort();
+  }
+
+  // O_EXCL ("wx") on the temp path: a planted `.sweeprc.tmp-*` symlink fails
+  // EEXIST instead of being written through. Retried suffixes keep a stray
+  // leftover tmp file from wedging the write.
+  let tmpPath = "";
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const candidatePath = `${configPath}.tmp-${process.pid}-${attempt}`;
+    try {
+      writeFileSync(candidatePath, `${JSON.stringify(doc, null, 2)}\n`, {
+        encoding: "utf-8",
+        flag: "wx",
+      });
+      tmpPath = candidatePath;
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+  }
+  if (!tmpPath) {
+    throw new ConfigParseError(`could not create a temp file next to ${configPath}`);
+  }
+  try {
+    renameSync(tmpPath, configPath);
+  } finally {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // Already renamed - nothing to clean.
+    }
+  }
+  return existed ? "updated" : "created";
 }
 
 /**

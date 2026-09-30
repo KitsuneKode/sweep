@@ -1,5 +1,9 @@
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { DEFAULT_PATTERNS } from "@kitsunekode/sweep-core/config";
+import {
+  CATALOG_PATTERNS,
+  DEFAULT_PATTERN_SET,
+  catalogEntryFor,
+} from "@kitsunekode/sweep-core/catalog";
 import {
   buildScopeSidebarRows,
   scopeFilterToSidebarIndex,
@@ -17,7 +21,10 @@ import type { ThemeMode } from "../theme.js";
 import { ancestorKeysOf } from "../tree-line.js";
 import { getVisibleCandidates, invalidateSelectorCache } from "./selectors.js";
 
-export type UiFocus = "search" | "sidebar" | "list" | "patterns";
+export type UiFocus = "search" | "sidebar" | "list" | "patterns" | "patternInput";
+
+/** What the pattern pane's input line is doing while focused. */
+export type PatternInputMode = "filter" | "add";
 
 export type UiSortBy = "size" | "name" | "age";
 
@@ -42,6 +49,12 @@ export interface SweepUiState {
   sidebarIndex: number;
   /** Cursor in the pattern editor; independent of artifact `rowIndex`. */
   patternIndex: number;
+  /** Pattern-pane filter text - narrows the catalog list while typing. */
+  patternFilter: string;
+  /** In-progress custom pattern text while `focus=patternInput` + mode "add". */
+  patternDraft: string;
+  /** Which job the pattern pane's input line has while `focus=patternInput`. */
+  patternInputMode: PatternInputMode;
   selectedIds: Set<string>;
   focus: UiFocus;
   themeMode: ThemeMode;
@@ -108,7 +121,9 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
   const state: SweepUiState = {
     targetDir: plan.targetDir,
     candidates,
-    catalogPatterns: init.catalogPatterns ?? [...DEFAULT_PATTERNS],
+    // The menu lists the whole curated catalog - defaults and opt-ins - so a
+    // non-default ecosystem entry is one space-press away, not a config edit.
+    catalogPatterns: init.catalogPatterns ?? [...CATALOG_PATTERNS],
     disabledPatterns: new Set(init.disabledPatterns ?? []),
     extraPatterns: init.extraPatterns ?? [],
     filter: "",
@@ -118,6 +133,9 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     visualAnchorId: null,
     sidebarIndex: 0,
     patternIndex: 0,
+    patternFilter: "",
+    patternDraft: "",
+    patternInputMode: "filter",
     selectedIds,
     focus: "list",
     themeMode: "auto",
@@ -213,15 +231,80 @@ export function setRiskFilter(state: SweepUiState, riskFilter: RiskTier | "all")
   };
 }
 
+/**
+ * Whether a pattern will match on the next rescan, from its source:
+ * default catalog → enabled unless disabled; opt-in catalog → enabled only
+ * when listed in extraPatterns; custom → enabled unless disabled.
+ */
+export function isPatternEnabled(state: SweepUiState, pattern: string): boolean {
+  if (state.disabledPatterns.has(pattern)) return false;
+  if (DEFAULT_PATTERN_SET.has(pattern)) return true;
+  if (state.catalogPatterns.includes(pattern)) return state.extraPatterns.includes(pattern);
+  return state.extraPatterns.includes(pattern);
+}
+
 export function togglePattern(state: SweepUiState, pattern: string): SweepUiState {
   const disabledPatterns = new Set(state.disabledPatterns);
-  if (disabledPatterns.has(pattern)) {
+  const extraPatterns = [...state.extraPatterns];
+  const catalogEntry = state.catalogPatterns.includes(pattern);
+  const isDefault = DEFAULT_PATTERN_SET.has(pattern);
+
+  if (catalogEntry && !isDefault) {
+    // Opt-in catalog entries live in extraPatterns when on - toggling adds or
+    // removes the row rather than writing a disable for a non-default.
+    const index = extraPatterns.indexOf(pattern);
+    if (index >= 0) {
+      extraPatterns.splice(index, 1);
+    } else {
+      extraPatterns.push(pattern);
+      disabledPatterns.delete(pattern);
+    }
+  } else if (disabledPatterns.has(pattern)) {
     disabledPatterns.delete(pattern);
   } else {
+    // A disabled custom stays listed - it's still user-authored input.
     disabledPatterns.add(pattern);
   }
   return {
     ...state,
+    disabledPatterns,
+    extraPatterns,
+    patternsDirty: true,
+    focus: "patterns",
+  };
+}
+
+/**
+ * Adds a freeform custom pattern (validated by the caller). Re-enables it if
+ * it was previously disabled, and dedupes against catalog + extras.
+ */
+export function addCustomPattern(state: SweepUiState, pattern: string): SweepUiState {
+  const extraPatterns = state.extraPatterns.includes(pattern)
+    ? state.extraPatterns
+    : [...state.extraPatterns, pattern];
+  const disabledPatterns = new Set(state.disabledPatterns);
+  disabledPatterns.delete(pattern);
+  return {
+    ...state,
+    extraPatterns,
+    disabledPatterns,
+    patternDraft: "",
+    patternsDirty: true,
+    focus: "patterns",
+  };
+}
+
+/**
+ * Drops a user-added custom pattern entirely. Catalog entries are never
+ * removable - they toggle off instead - so this is a no-op for them.
+ */
+export function removeCustomPattern(state: SweepUiState, pattern: string): SweepUiState {
+  if (!isCustomPattern(state, pattern)) return state;
+  const disabledPatterns = new Set(state.disabledPatterns);
+  disabledPatterns.delete(pattern);
+  return {
+    ...state,
+    extraPatterns: state.extraPatterns.filter((p) => p !== pattern),
     disabledPatterns,
     patternsDirty: true,
     focus: "patterns",
@@ -245,7 +328,7 @@ export function setFocus(input: SweepUiState, focus: UiFocus): SweepUiState {
     return {
       ...state,
       focus,
-      patternIndex: clamp(state.patternIndex, 0, Math.max(0, allPatterns(state).length - 1)),
+      patternIndex: clamp(state.patternIndex, 0, Math.max(0, visiblePatternRows(state).length - 1)),
     };
   }
 
@@ -253,13 +336,133 @@ export function setFocus(input: SweepUiState, focus: UiFocus): SweepUiState {
 }
 
 export function setPatternIndex(state: SweepUiState, patternIndex: number): SweepUiState {
-  const count = allPatterns(state).length;
+  const count = visiblePatternRows(state).length;
   if (count === 0) return { ...state, patternIndex: 0 };
   return {
     ...state,
     patternIndex: clamp(patternIndex, 0, count - 1),
     focus: "patterns",
   };
+}
+
+/** One renderable row in the patterns pane: a group header or a toggleable pattern. */
+export interface PatternPanelRow {
+  kind: "group" | "pattern";
+  /** Ecosystem label on group rows. */
+  label?: string;
+  pattern?: string;
+  enabled?: boolean;
+  /** "default" ships on, "opt-in" catalog entry, "custom" user-added. */
+  source?: "default" | "opt-in" | "custom";
+  note?: string;
+}
+
+/**
+ * Catalog rows grouped by ecosystem, then customs - filtered by the pane's
+ * search text (matches pattern, ecosystem, or the note). Only "pattern" rows
+ * are selectable; patternIndex addresses into that filtered subset.
+ */
+export function patternPanelRows(state: SweepUiState): PatternPanelRow[] {
+  const filter = state.patternFilter.trim().toLowerCase();
+  const matches = (pattern: string, note: string, ecosystem: string) =>
+    !filter ||
+    pattern.toLowerCase().includes(filter) ||
+    note.toLowerCase().includes(filter) ||
+    ecosystem.toLowerCase().includes(filter);
+
+  const rows: PatternPanelRow[] = [];
+  const byEcosystem = new Map<string, CatalogEntryLike[]>();
+  for (const pattern of state.catalogPatterns) {
+    const entry = catalogEntryFor(pattern);
+    const ecosystem = entry?.ecosystem ?? "custom";
+    const note = entry?.note ?? "";
+    if (!matches(pattern, note, ecosystem)) continue;
+    const list = byEcosystem.get(ecosystem) ?? [];
+    list.push({ pattern, ecosystem, note });
+    byEcosystem.set(ecosystem, list);
+  }
+
+  for (const [ecosystem, entries] of byEcosystem) {
+    rows.push({ kind: "group", label: ecosystem });
+    for (const { pattern, note } of entries) {
+      rows.push({
+        kind: "pattern",
+        pattern,
+        enabled: isPatternEnabled(state, pattern),
+        source: DEFAULT_PATTERN_SET.has(pattern) ? "default" : "opt-in",
+        note,
+      });
+    }
+  }
+
+  const catalog = new Set(state.catalogPatterns);
+  const customs = state.extraPatterns.filter((p) => !catalog.has(p));
+  const filteredCustoms = customs.filter((p) => matches(p, "custom pattern", "custom"));
+  if (filteredCustoms.length > 0) {
+    rows.push({ kind: "group", label: "custom" });
+    for (const pattern of filteredCustoms) {
+      rows.push({
+        kind: "pattern",
+        pattern,
+        enabled: isPatternEnabled(state, pattern),
+        source: "custom",
+        note: "added via --pattern, .sweeprc, or this menu",
+      });
+    }
+  }
+
+  return rows;
+}
+
+interface CatalogEntryLike {
+  pattern: string;
+  ecosystem: string;
+  note: string;
+}
+
+/** The selectable (non-header) pattern rows, in display order. */
+export function visiblePatternRows(state: SweepUiState): PatternPanelRow[] {
+  return patternPanelRows(state).filter((row) => row.kind === "pattern");
+}
+
+/** Pattern the panel cursor currently sits on, if any. */
+export function patternAtCursor(state: SweepUiState): string | null {
+  return visiblePatternRows(state)[state.patternIndex]?.pattern ?? null;
+}
+
+/**
+ * The `.sweeprc` delta the pattern pane writes: enabled non-default patterns
+ * go under `patterns`, defaults the user turned off go under `disabledPatterns`.
+ * Custom patterns disabled in the pane are simply omitted.
+ */
+export function sweeprcPayload(state: SweepUiState): {
+  patterns: string[];
+  disabledPatterns: string[];
+} {
+  const enabledExtras = state.extraPatterns.filter((p) => !state.disabledPatterns.has(p));
+  const disabledDefaults = [...state.disabledPatterns].filter((p) => DEFAULT_PATTERN_SET.has(p));
+  return { patterns: enabledExtras, disabledPatterns: disabledDefaults };
+}
+
+export function setPatternFilter(state: SweepUiState, patternFilter: string): SweepUiState {
+  return { ...state, patternFilter, patternIndex: 0 };
+}
+
+export function setPatternInput(state: SweepUiState, mode: PatternInputMode | null): SweepUiState {
+  if (mode === null) {
+    return { ...state, focus: "patterns", patternDraft: "" };
+  }
+  return {
+    ...state,
+    focus: "patternInput",
+    patternInputMode: mode,
+    // The add line starts empty; the filter line keeps whatever was typed.
+    patternDraft: mode === "add" ? "" : state.patternDraft,
+  };
+}
+
+export function setPatternDraft(state: SweepUiState, patternDraft: string): SweepUiState {
+  return { ...state, patternDraft };
 }
 
 export function moveSidebarCursor(state: SweepUiState, delta: number): SweepUiState {
@@ -462,7 +665,16 @@ export function expandAllGroups(state: SweepUiState): SweepUiState {
 export function escapeStep(state: SweepUiState): SweepUiState | null {
   // A half-made range is the innermost layer: esc drops it and nothing else.
   if (state.visualAnchorId !== null) return cancelVisual(state);
+  if (state.focus === "patternInput") {
+    // Input line backs out to the pane; typed filter text survives - same
+    // rule as the artifact filter surviving esc on the list.
+    return setFocus(state, "patterns");
+  }
   if (state.focus === "patterns") {
+    // A narrowed catalog is a view layer: peel it before leaving the pane.
+    if (state.patternFilter.length > 0) {
+      return { ...state, patternFilter: "", patternIndex: 0 };
+    }
     return setFocus(state, "list");
   }
   if (state.focus === "sidebar") {
@@ -498,6 +710,9 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
   return {
     ...state,
     candidates: [],
+    // The rescan applies the current toggle set - the dirty marker clears with
+    // it (a `.sweeprc` write is persistence, not a rescan, so `w` does not).
+    patternsDirty: false,
     selectedIds: new Set<string>(),
     selectionTouched: new Set<string>(),
     rowIndex: 0,

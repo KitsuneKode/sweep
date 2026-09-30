@@ -1,0 +1,87 @@
+---
+source: crates/sweep-engine-cli/tests/parity.rs
+expression: "&actual"
+---
+{
+  "candidates": [
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_621f8b69e4fcb0e6",
+      "isSymlink": false,
+      "kind": "build",
+      "name": "build",
+      "path": "__FIXTURE_ROOT__/build",
+      "reasons": [
+        "opt-in-pattern"
+      ],
+      "riskTier": "dangerous",
+      "selectedByDefault": false
+    },
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_2486f23ba12f32b3",
+      "isSymlink": false,
+      "kind": "dist",
+      "name": "dist",
+      "path": "__FIXTURE_ROOT__/dist",
+      "reasons": [
+        "opt-in-pattern"
+      ],
+      "riskTier": "dangerous",
+      "selectedByDefault": false
+    },
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_83aa32d09099fa4d",
+      "isSymlink": false,
+      "kind": "node_modules",
+      "name": "node_modules",
+      "path": "__FIXTURE_ROOT__/node_modules",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_da0d847cc3bed8b3",
+      "isSymlink": false,
+      "kind": "custom",
+      "name": "pkg.egg-info",
+      "path": "__FIXTURE_ROOT__/pkg.egg-info",
+      "reasons": [
+        "opt-in-pattern"
+      ],
+      "riskTier": "dangerous",
+      "selectedByDefault": false
+    }
+  ],
+  "createdAt": "1970-01-01T00:00:00.000Z",
+  "protocolVersion": "1",
+  "selectedCandidateIds": [
+    "cand_83aa32d09099fa4d"
+  ],
+  "selectionPolicy": {
+    "includeDangerous": false,
+    "mode": "default"
+  },
+  "summary": {
+    "candidateCount": 4,
+    "estimatedTotalBytes": 0,
+    "exact": false,
+    "riskCounts": {
+      "blocked": 0,
+      "caution": 0,
+      "dangerous": 3,
+      "safe": 1
+    },
+    "scannedDirs": 2,
+    "selectedCount": 1
+  },
+  "targetDir": "__FIXTURE_ROOT__"
+}

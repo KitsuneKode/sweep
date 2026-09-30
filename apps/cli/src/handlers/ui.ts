@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 
 import { fileURLToPath } from "node:url";
 import type { CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { DEFAULT_PATTERNS } from "@kitsunekode/sweep-core/config";
+import { CATALOG_PATTERNS, DEFAULT_PATTERN_SET } from "@kitsunekode/sweep-core/catalog";
 import { GuardrailError, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
 import {
@@ -155,11 +155,11 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       ...(opts.dryRun ? { dryRun: true } : {}),
       ...(opts.trash ? { trash: true } : {}),
       init: {
-        catalogPatterns: [...DEFAULT_PATTERNS],
+        // The pane lists the whole curated catalog; extraPatterns carries what
+        // is enabled beyond defaults (opt-in catalog picks + customs alike).
+        catalogPatterns: [...CATALOG_PATTERNS],
         disabledPatterns: scanConfig.disabledPatterns ?? [],
-        extraPatterns: scanConfig.patterns.filter(
-          (pattern) => !new Set<string>(DEFAULT_PATTERNS).has(pattern),
-        ),
+        extraPatterns: scanConfig.patterns.filter((pattern) => !DEFAULT_PATTERN_SET.has(pattern)),
       },
     });
 

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type {
-  CandidateKind,
   PathFailure,
   RiskTier,
   ScanCandidate,
@@ -21,6 +20,7 @@ import {
   SYMLINK_ALIAS_REASON,
   WORKSPACE_STUB_REASON,
 } from "./candidate-insights.js";
+import { catalogMatchFor } from "./catalog.js";
 import { isPathWithinRoot, pathHasProtectedVcsSegment } from "./guardrails.js";
 
 export function buildPlan(
@@ -93,8 +93,8 @@ export function compileSelectedCandidateIds(
 export function toCandidate(entry: ScanEntry): ScanCandidate {
   const id = `cand_${hashString(`${entry.path}:${entry.name}`)}`;
   const kind = candidateKindFromName(entry.name);
-  const riskTier = inferRiskTier(entry, kind);
-  const reasons = inferReasons(entry, kind);
+  const riskTier = inferRiskTier(entry);
+  const reasons = inferReasons(entry);
 
   return {
     ...entry,
@@ -277,23 +277,29 @@ export function countRiskTiers(candidates: ScanCandidate[]): Record<RiskTier, nu
 
 export { candidateKindFromName } from "@kitsunekode/sweep-protocol";
 
-export function inferRiskTier(entry: ScanEntry, kind: CandidateKind): RiskTier {
+export function inferRiskTier(entry: ScanEntry): RiskTier {
   if (pathHasProtectedVcsSegment(entry.path)) return "blocked";
   if (entry.isSymlink) return "caution";
-  if (kind === "custom") return "dangerous";
-  return "safe";
+  // Only names a shipping-default pattern covers earn the safe tier. Opt-in
+  // catalog names (dist, build, out, coverage, ...) are dangerous for the same
+  // reason they are opt-in - the name can hold authored files. Enabling a
+  // pattern consents to scanning, never to pre-selection.
+  return catalogMatchFor(entry.name) === "default" ? "safe" : "dangerous";
 }
 
-export function inferReasons(entry: ScanEntry, kind: CandidateKind): string[] {
+export function inferReasons(entry: ScanEntry): string[] {
   const reasons: string[] = [];
   if (pathHasProtectedVcsSegment(entry.path)) {
     reasons.push("protected-vcs-path");
   }
   if (entry.isSymlink) reasons.push("symlink");
-  if (kind === "custom") {
-    reasons.push("custom-pattern");
-  } else {
+  const match = catalogMatchFor(entry.name);
+  if (match === "default") {
     reasons.push("default-pattern");
+  } else if (match === "opt-in") {
+    reasons.push("opt-in-pattern");
+  } else {
+    reasons.push("custom-pattern");
   }
   return reasons;
 }

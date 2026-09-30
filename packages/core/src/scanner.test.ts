@@ -47,10 +47,21 @@ describe("scan: basic matching", () => {
 
   test("finds multiple matching patterns", async () => {
     mkdirSync(dir("node_modules"));
-    mkdirSync(dir("dist"));
+    mkdirSync(dir(".turbo"));
     mkdirSync(dir(".next"));
     const result = await scan(tmpDir, DEFAULT_CONFIG);
     expect(result.entries).toHaveLength(3);
+  });
+
+  test("generic names like dist stay out of defaults but are one config away", async () => {
+    mkdirSync(dir("dist"));
+    mkdirSync(dir("build"));
+    // dist/build are opt-in catalog entries - a bare run must not touch them.
+    const defaults = await scan(tmpDir, DEFAULT_CONFIG);
+    expect(defaults.entries).toHaveLength(0);
+
+    const optedIn = await scan(tmpDir, { ...DEFAULT_CONFIG, patterns: ["dist", "build"] });
+    expect(optedIn.entries).toHaveLength(2);
   });
 
   test("ignores directories that don't match any pattern", async () => {

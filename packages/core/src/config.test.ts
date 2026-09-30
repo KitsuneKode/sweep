@@ -10,6 +10,7 @@ import {
   ConfigParseError,
   validateProjectConfigFile,
   writeInitSweeprc,
+  writeProjectSweeprc,
   isIgnoredEntry,
 } from "./config.js";
 
@@ -42,12 +43,17 @@ describe("loadConfig: defaults", () => {
     expect(config.ignore).toEqual(DEFAULT_CONFIG.ignore);
   });
 
-  test("default patterns include node_modules, dist, .next, etc.", () => {
+  test("default patterns are the unambiguous machine-created names only", () => {
     const config = loadConfig(dir("nonexistent"));
     expect(config.patterns).toContain("node_modules");
-    expect(config.patterns).toContain("dist");
     expect(config.patterns).toContain(".next");
-    expect(config.patterns).toContain("coverage");
+    expect(config.patterns).toContain("target");
+    // Generic names a human could author are opt-in, never shipped on:
+    // enabling them is the user's call, not ours.
+    expect(config.patterns).not.toContain("dist");
+    expect(config.patterns).not.toContain("build");
+    expect(config.patterns).not.toContain("out");
+    expect(config.patterns).not.toContain("coverage");
   });
 
   test(".cache is NOT in default patterns", () => {
@@ -160,6 +166,63 @@ describe("writeInitSweeprc", () => {
   });
 });
 
+describe("writeProjectSweeprc", () => {
+  const delta = { patterns: ["dist", "*.bak"], disabledPatterns: ["coverage"] };
+
+  test("writes a delta-only .sweeprc that loads back", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    const configPath = dir("project", ".sweeprc");
+    expect(writeProjectSweeprc(configPath, delta)).toBe("created");
+
+    const written = JSON.parse(readFileSync(configPath, "utf-8"));
+    expect(written.patterns).toEqual(["*.bak", "dist"]); // sorted, deduped
+    expect(written.disabledPatterns).toEqual(["coverage"]);
+    // Delta-only: scalar fields are not the pane's to write.
+    expect(written.maxSizeGB).toBeUndefined();
+    expect(written.depth).toBeUndefined();
+    expect(written.ignore).toBeUndefined();
+
+    // And it round-trips through the real loader.
+    const loaded = loadConfig(dir("project"));
+    expect(loaded.patterns).toContain("dist");
+    expect(loaded.patterns).toContain("*.bak");
+    expect(loaded.patterns).not.toContain("coverage");
+  });
+
+  test("refuses to clobber an existing file without force; force updates", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    writeConfig(dir("project"), { maxSizeGB: 3 });
+    const configPath = dir("project", ".sweeprc");
+
+    expect(writeProjectSweeprc(configPath, delta)).toBe("exists");
+    // Untouched - the pane's w must never silently overwrite a hand config.
+    expect(loadConfig(dir("project")).maxSizeGB).toBe(3);
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).patterns).toBeUndefined();
+
+    expect(writeProjectSweeprc(configPath, delta, true)).toBe("updated");
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).patterns).toContain("dist");
+  });
+
+  test("refuses to write through a symlinked .sweeprc", () => {
+    if (process.platform === "win32") return; // symlink perms vary
+    mkdirSync(dir("project"), { recursive: true });
+    writeFileSync(dir("outside.txt"), "keep me");
+    symlinkSync(dir("outside.txt"), dir("project", ".sweeprc"));
+
+    expect(() => writeProjectSweeprc(dir("project", ".sweeprc"), delta, true)).toThrow(
+      ConfigParseError,
+    );
+    expect(readFileSync(dir("outside.txt"), "utf-8")).toBe("keep me");
+  });
+
+  test("omits empty keys so an all-defaults pane writes a minimal file", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    const configPath = dir("project", ".sweeprc");
+    expect(writeProjectSweeprc(configPath, { patterns: [], disabledPatterns: [] })).toBe("created");
+    expect(JSON.parse(readFileSync(configPath, "utf-8"))).toEqual({});
+  });
+});
+
 describe("isIgnoredEntry: globs", () => {
   test("matches basename globs like *.cache", () => {
     mkdirSync(dir("project", "foo.cache"), { recursive: true });
@@ -233,10 +296,11 @@ describe("loadConfig: CLI overrides", () => {
 
   test("CLI disabledPatterns merge with project disabledPatterns", () => {
     mkdirSync(dir("project"), { recursive: true });
-    writeConfig(dir("project"), { disabledPatterns: ["dist"] });
+    writeConfig(dir("project"), { disabledPatterns: ["node_modules"] });
     const config = loadConfig(dir("project"), undefined, { disabledPatterns: ["target"] });
-    expect(config.patterns).not.toContain("dist");
+    expect(config.patterns).not.toContain("node_modules");
     expect(config.patterns).not.toContain("target");
+    expect(config.patterns).toContain(".next");
   });
 });
 
@@ -252,11 +316,14 @@ describe("buildRescanConfig", () => {
 
     const next = buildRescanConfig(current, {
       disabledPatterns: [],
-      extraPatterns: [".cache"],
+      extraPatterns: [".cache", "dist"],
     });
 
-    expect(next.patterns).toContain("dist");
+    // A project-disabled default re-enables through the UI, and an opt-in
+    // catalog name like dist survives only as an explicit extra.
+    expect(next.patterns).toContain("node_modules");
     expect(next.patterns).toContain(".cache");
+    expect(next.patterns).toContain("dist");
     expect(next.disabledPatterns).toBeUndefined();
     expect(next.ignore).toEqual([...DEFAULT_CONFIG.ignore, "vendor"]);
     expect(next.depth).toBe(3);

@@ -1,9 +1,11 @@
 import { bold, fg, StyledText, t } from "@opentui/core";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
+import { writeProjectSweeprc } from "@kitsunekode/sweep-core/config";
+import { assertSafePattern } from "@kitsunekode/sweep-core/guardrails";
 import {
   Component,
   type ReactNode,
@@ -33,6 +35,7 @@ import {
 } from "./presentation.js";
 import { buildDisplayRows } from "./rows.js";
 import {
+  addCustomPattern,
   applyUiSelection,
   applyVisualRange,
   countSelectedDangerous,
@@ -43,7 +46,9 @@ import {
   resetForRescan,
   rescanConfigFromState,
   setFocus,
+  setPatternInput,
   setScanning,
+  sweeprcPayload,
   toggleSelectionById,
   toggleSidebarScopeSelection,
   toggleSortBy,
@@ -137,33 +142,43 @@ export class UiErrorBoundary extends Component<{ children: ReactNode }, { error:
   }
 }
 
-const HELP_ROWS: ReadonlyArray<readonly [keys: string, description: string]> = [
-  ["↑↓ / j k", "move cursor (skips headings)"],
-  ["g / G", "jump to first / last"],
-  ["ctrl-u / ctrl-d", "half page up / down"],
-  ["pgup / pgdn · home / end", "page · first / last row"],
-  ["h · l", "collapse · expand the folder"],
+/** A help row, or a section break when `keys` is null. */
+const HELP_ROWS: ReadonlyArray<readonly [keys: string | null, description: string]> = [
+  [null, "move"],
+  ["↑↓ / j k", "cursor (wheel scrolls too)"],
+  ["g / G · home / end", "first / last row"],
+  ["ctrl-u/d · pgup/dn", "page up · down"],
+  ["h · l", "collapse · expand group"],
   ["w · e", "collapse all · expand all"],
-  ["space", "queue / unqueue for deletion"],
+  [null, "queue"],
+  ["space", "queue / unqueue row"],
+  ["v", "visual range - space queues it"],
   ["a · s · u", "safe+caution · safe only · clear"],
-  ["o", "sort by size · name · age (stalest first)"],
-  ["r", "rescan from disk"],
-  ["/ then tab", "filter · cycle panes (⇥ back)"],
-  ["/ syntax", "kind:target  risk:caution  >100MB  older:30d  is:queued  !term"],
-  ["1 – 4", "filter by risk level"],
-  ["p", "pattern editor"],
-  ["i", "inspect: kind, path, reasons"],
-  ["v", "visual range: extend with ↑↓, space queues it, esc cancels"],
-  ["y", "copy the row's path to the clipboard"],
-  ["S", "save the queue as a plan file (sweep apply --plan)"],
   ["enter", "apply (always asks to confirm)"],
-  ["scopes (tab)", "enter scopes · space queues the whole scope"],
-  ["t", "cycle theme (dark · light · auto)"],
-  ["mouse", "wheel scrolls · click focuses · click again queues"],
-  ["? · q · ctrl-c", "help · quit · quit"],
+  [null, "filter & view"],
+  ["/", "filter - tab cycles panes"],
+  ["kind:x risk:y >100MB older:30d", "filter syntax (+ is:queued, !term)"],
+  ["1 - 4", "risk filter"],
+  ["o", "sort size · name · age"],
+  ["i", "inspect row"],
+  ["tab", "scopes - space queues the scope"],
+  ["y", "copy row path"],
+  ["S", "save queue as a plan file"],
+  [null, "patterns (p)"],
+  ["space", "toggle pattern"],
+  ["/", "filter the catalog"],
+  ["a", "add a custom pattern"],
+  ["d", "remove a custom pattern"],
+  ["w / W", "write .sweeprc (W overwrites)"],
+  ["r", "rescan with the new set"],
+  [null, "app"],
+  ["t", "theme dark · light · auto"],
+  ["?", "this panel"],
+  ["q · ctrl-c", "quit · quit now"],
 ];
 
-const HELP_KEY_WIDTH = Math.max(...HELP_ROWS.map(([keys]) => keys.length)) + 2;
+const HELP_KEY_WIDTH =
+  Math.max(...HELP_ROWS.map(([keys]) => (keys === null ? 0 : keys.length))) + 2;
 /** Border (2) + horizontal padding (6) around the widest row. */
 const HELP_WIDTH =
   HELP_KEY_WIDTH + Math.max(...HELP_ROWS.map(([, description]) => description.length)) + 8;
@@ -174,13 +189,21 @@ function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
   return (
     <Modal tokens={tokens} title=" keyboard " width={HELP_WIDTH}>
       <box flexDirection="column" gap={0}>
-        {HELP_ROWS.map(([keys, description]) => (
-          <text
-            key={keys}
-            content={t`${fg(tokens.text)(keys.padEnd(HELP_KEY_WIDTH))}${fg(tokens.textMuted)(description)}`}
-            wrapMode="word"
-          />
-        ))}
+        {HELP_ROWS.map(([keys, description]) =>
+          keys === null ? (
+            <text
+              key={`section-${description}`}
+              content={t`${bold(fg(tokens.accent)(description))}`}
+              wrapMode="none"
+            />
+          ) : (
+            <text
+              key={keys}
+              content={t`${fg(tokens.text)(keys.padEnd(HELP_KEY_WIDTH))}${fg(tokens.textMuted)(description)}`}
+              wrapMode="word"
+            />
+          ),
+        )}
       </box>
       <text content="" />
       <text
@@ -464,14 +487,6 @@ export function SweepApp({
     [state.candidates],
   );
 
-  const listSelectIndex = useMemo(() => {
-    if (state.focus === "patterns") return state.patternIndex;
-    const currentId = displayRows[state.rowIndex];
-    if (!currentId || currentId.kind !== "item") return 0;
-    const idx = visibleItems.findIndex((c: ScanCandidate) => c.id === currentId.candidateId);
-    return idx >= 0 ? idx : 0;
-  }, [state, displayRows, visibleItems]);
-
   const finalize = useCallback(
     (outcome: SweepUiOutcome) => {
       abortRef.current?.abort();
@@ -559,6 +574,58 @@ export function SweepApp({
     else setNotice(`nothing queueable in that scope${skipped}`);
   }, []);
 
+  /**
+   * Enter on the pattern pane's add line. Validates through the same
+   * assertSafePattern the config file loader uses - a pattern the file would
+   * reject never enters state from the editor either.
+   */
+  const submitPatternDraft = useCallback(() => {
+    const draft = stateRef.current.patternDraft.trim();
+    if (!draft) {
+      dispatch({ type: "mutate", fn: (s) => setPatternInput(s, null) });
+      return;
+    }
+    try {
+      assertSafePattern(draft);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setNotice(`invalid pattern: ${sanitizeTerminalText(reason)}`);
+      return;
+    }
+    if (stateRef.current.catalogPatterns.includes(draft)) {
+      // Already catalogued - enabling it is a toggle, not a duplicate row.
+      dispatch({ type: "mutate", fn: (s) => setPatternInput(s, null) });
+      setNotice(`"${sanitizeTerminalText(draft)}" is in the catalog - space toggles it`);
+      return;
+    }
+    dispatch({
+      type: "mutate",
+      fn: (s) => addCustomPattern(setPatternInput(s, null), draft),
+    });
+    setNotice(`added "${sanitizeTerminalText(draft)}" - r rescans with it`);
+  }, []);
+
+  /**
+   * `w` in the pattern pane persists the current toggle set as a project
+   * .sweeprc. An existing file is never clobbered silently - plain w reports
+   * it, shift-W overwrites deliberately.
+   */
+  const writeSweeprc = useCallback((overwrite: boolean) => {
+    const s = stateRef.current;
+    const configPath = join(s.targetDir, ".sweeprc");
+    try {
+      const result = writeProjectSweeprc(configPath, sweeprcPayload(s), overwrite);
+      if (result === "exists") {
+        setNotice(".sweeprc already exists - shift-W overwrites it");
+      } else {
+        setNotice(`${result === "updated" ? "updated" : "wrote"} .sweeprc`);
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setNotice(`couldn't write .sweeprc: ${sanitizeTerminalText(reason)}`);
+    }
+  }, []);
+
   useKeyboard((key) => {
     handleKeymap(
       {
@@ -567,7 +634,6 @@ export function SweepApp({
         showHelp,
         pendingApply,
         showSidebar,
-        listSelectIndex,
         scanError,
         inspectOpen: showInspect,
         // Measured list rows once the pane has laid out; the height-minus-
@@ -591,6 +657,8 @@ export function SweepApp({
         yankPath,
         applyVisual,
         applyScopeToggle,
+        writeSweeprc,
+        submitPatternDraft,
         notify: setNotice,
       },
     );
@@ -697,10 +765,10 @@ export function SweepApp({
           displayRows={displayRows}
           visibleItems={visibleItems}
           candidatesById={candidatesById}
-          listSelectIndex={listSelectIndex}
           onMutate={mutate}
           onFocusPanel={focusPanel}
           onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
+          onSubmitPatternDraft={submitPatternDraft}
           onViewportRows={(rows) => {
             viewportRowsRef.current = rows;
           }}

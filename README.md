@@ -158,29 +158,29 @@ phase. Review, filter, and delete without leaving the terminal.
 
 Arrows work everywhere; letter keys are speed aliases.
 
-| Key                                | Action                             | Notes                                        |
-| ---------------------------------- | ---------------------------------- | -------------------------------------------- |
-| `↑↓` / `j k`                       | move cursor                        |                                              |
-| `g` / `G` or `Home/End`            | first / last item                  |                                              |
-| `Ctrl-U` / `Ctrl-D` or `PgUp/PgDn` | page up / down                     | moves one viewport                           |
-| `Space`                            | toggle selection                   | blocked items never toggle                   |
-| `s` / `a` / `u`                    | select safe · safe+caution · clear | bulk never touches dangerous                 |
-| `Enter`                            | apply deletion                     | **always confirms**; red banner on danger    |
-| `h` / `l` (or click header)        | collapse / expand group            | tree-style triage                            |
-| `w` / `e`                          | collapse all · expand all          |                                              |
-| `o`                                | sort size · name · age             | size-desc default; age is stalest first      |
-| `/` then type                      | filter artifacts                   | text or operators (below); `esc` clears      |
-| `i`                                | inspect the row                    | kind, path, reasons                          |
-| `v`                                | visual range                       | extend with `↑↓`, `Space` queues the span    |
-| `y`                                | copy the row's path                | via OSC 52, works over SSH                   |
-| `S`                                | save the queue as a plan file      | `sweep-plan-<time>.json`, for `apply --plan` |
-| `Tab` / `Shift+Tab`                | cycle panes                        | artifacts ↔ scopes ↔ filter                  |
-| `1–4`                              | risk filter                        | all / safe / caution / dangerous             |
-| `p`                                | pattern editor                     | toggle defaults, add customs - then `r`      |
-| `r`                                | rescan from disk                   | honors pattern edits; safe mid-scan          |
-| `t`                                | theme                              | dark · light · auto                          |
-| `Esc`                              | **walk back one layer**            | never quits - see below                      |
-| `q` / `Ctrl-C`                     | quit                               | `Ctrl-C` works even inside modals/search     |
+| Key                                | Action                             | Notes                                                       |
+| ---------------------------------- | ---------------------------------- | ----------------------------------------------------------- |
+| `↑↓` / `j k`                       | move cursor                        |                                                             |
+| `g` / `G` or `Home/End`            | first / last item                  |                                                             |
+| `Ctrl-U` / `Ctrl-D` or `PgUp/PgDn` | page up / down                     | moves one viewport                                          |
+| `Space`                            | toggle selection                   | blocked items never toggle                                  |
+| `s` / `a` / `u`                    | select safe · safe+caution · clear | bulk never touches dangerous                                |
+| `Enter`                            | apply deletion                     | **always confirms**; red banner on danger                   |
+| `h` / `l` (or click header)        | collapse / expand group            | tree-style triage                                           |
+| `w` / `e`                          | collapse all · expand all          |                                                             |
+| `o`                                | sort size · name · age             | size-desc default; age is stalest first                     |
+| `/` then type                      | filter artifacts                   | text or operators (below); `esc` clears                     |
+| `i`                                | inspect the row                    | kind, path, reasons                                         |
+| `v`                                | visual range                       | extend with `↑↓`, `Space` queues the span                   |
+| `y`                                | copy the row's path                | via OSC 52, works over SSH                                  |
+| `S`                                | save the queue as a plan file      | `sweep-plan-<time>.json`, for `apply --plan`                |
+| `Tab` / `Shift+Tab`                | cycle panes                        | artifacts ↔ scopes ↔ filter                                 |
+| `1–4`                              | risk filter                        | all / safe / caution / dangerous                            |
+| `p`                                | pattern editor                     | grouped catalog; `/` finds, `a` adds, `w` writes `.sweeprc` |
+| `r`                                | rescan from disk                   | honors pattern edits; safe mid-scan                         |
+| `t`                                | theme                              | dark · light · auto                                         |
+| `Esc`                              | **walk back one layer**            | never quits - see below                                     |
+| `q` / `Ctrl-C`                     | quit                               | `Ctrl-C` works even inside modals/search                    |
 
 In the confirm dialog, `t` switches between deleting and moving to trash, so the
 reversible option is one key away at the last moment.
@@ -223,7 +223,10 @@ position indicator, not a drag target.
 
 ## Config (`.sweeprc`)
 
-Run `sweep init` to scaffold a starter file, or create `.sweeprc` manually (JSON):
+The easiest way to get one is the TUI: `p` opens the pattern catalog, toggle
+what you want, `w` writes `.sweeprc` into the scanned directory (an existing
+file is never clobbered - `W` overwrites on a second look). Or `sweep init`
+scaffolds a starter file, or create `.sweeprc` manually (JSON):
 
 ```json
 {
@@ -240,26 +243,34 @@ Globs support `*` (any run of characters) and `?` (exactly one character); both 
 Disable a default pattern:
 
 ```json
-{ "disabledPatterns": ["dist"] }
+{ "disabledPatterns": ["node_modules"] }
 ```
 
-**Lookup order:** CLI flags → `.sweeprc` (walks up from target) → `~/.config/sweep/config.json` → built-in defaults.
+**Lookup order:** CLI flags → `.sweeprc` (walks up from target) → global config → built-in defaults. The global config is `config.json` inside the sweep config dir: `$XDG_CONFIG_HOME/sweep`, or `%APPDATA%\sweep` on Windows, or `~/.config/sweep` otherwise. `SWEEP_CONFIG_DIR` overrides everything.
 
 ---
 
-## Default patterns
+## Patterns: defaults vs the catalog
+
+`sweep` ships a curated pattern catalog, grouped by ecosystem in the `p` pane.
+The only entries enabled by default are **machine-created, canonical names** -
+directories nobody authors by hand:
 
 | Pattern                            | What it is                     |
 | ---------------------------------- | ------------------------------ |
 | `node_modules`                     | npm/yarn/pnpm/bun dependencies |
-| `dist`, `build`, `out`             | compiled output                |
 | `.next`, `.nuxt`, `.svelte-kit`    | framework build dirs           |
 | `.turbo`, `.vite`, `.parcel-cache` | tool caches                    |
-| `target`                           | Rust / Java / Maven output     |
-| `coverage`, `.nyc_output`          | test coverage                  |
+| `.nyc_output`                      | nyc coverage cache             |
+| `target`                           | cargo build output             |
 | `*.tsbuildinfo`                    | TypeScript incremental info    |
 
-`.cache` is intentionally excluded - too broad for home directories.
+Everything else in the catalog - `dist`, `build`, `out`, `coverage`,
+`__pycache__`, `.venv`, `Pods`, `.gradle`, `.dart_tool`, `cmake-build-*` and
+more - is **opt-in**. Generic names can hold files you wrote yourself, and a
+cleanup tool must never presume otherwise. Turn them on with `p` + `space`,
+`.sweeprc` `patterns`, or `--pattern`. Opt-ins scan in as the `dangerous` tier:
+they are never pre-selected and always need a deliberate queue + confirm.
 
 ---
 
@@ -303,8 +314,9 @@ original relative path preserved. Nothing is unrecoverable until you delete
 the trash dir yourself (or run `sweep` on it). Trash dirs are excluded from
 future scans automatically.
 
-**History:** every apply appends to `~/.config/sweep/history.jsonl`
-(`SWEEP_CONFIG_DIR` to override). `sweep stats` shows the lifetime total.
+**History:** every apply appends to `history.jsonl` in the sweep config dir
+(`~/.config/sweep`, `%APPDATA%\sweep` on Windows; `SWEEP_CONFIG_DIR` overrides).
+`sweep stats` shows the lifetime total.
 
 ---
 

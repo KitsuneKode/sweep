@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./catalog": "./src/catalog.ts",
     "./config": "./src/config.ts",
     "./engine": "./src/engine.ts",
     "./guardrails": "./src/guardrails.ts",

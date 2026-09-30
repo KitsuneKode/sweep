@@ -1,0 +1,8 @@
+{
+  "exact": false,
+  "extraPatterns": ["dist", "build", "*.egg-info"],
+  "selectionPolicy": {
+    "mode": "default",
+    "includeDangerous": false
+  }
+}

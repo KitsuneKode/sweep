@@ -41,16 +41,18 @@ Example `.sweeprc`:
 
 ```json
 {
-  "patterns": [".custom-output"],
-  "disabledPatterns": ["dist"],
+  "patterns": ["dist"],
+  "disabledPatterns": [".turbo"],
   "ignore": ["packages/vendor-patched"],
   "maxSizeGB": 10,
   "depth": -1
 }
 ```
 
-Use `disabledPatterns` to turn off a default like `dist`. Use `ignore` to skip specific
-matches (by artifact name, glob such as `*.cache`, or path prefix such as `packages/vendor`). A trailing
+Use `patterns` to opt into a catalog name like `dist` (opt-ins scan in as the
+`dangerous` tier - never pre-selected). Use `disabledPatterns` to turn off a
+default like `.turbo`. Use `ignore` to skip specific matches (by artifact name,
+glob such as `*.cache`, or path prefix such as `packages/vendor`). A trailing
 slash is normalized, so `ignore: ["dist/"]` also skips a top-level `dist` entry.
 
 Globs support two wildcards: `*` matches any run of characters (including
@@ -68,10 +70,16 @@ The file is `.sweeprc` - plain JSON, no extension. This is deliberate:
 
 ### Patterns that are safe to trust
 
-Defaults cover common build outputs only (`node_modules`, `dist`, `build`, `out`,
-`.next`, `.turbo`, `target`, `coverage`, …). Sweep will never invent targets: anything
-not matched by the merged pattern set is invisible to the tool. To widen scope, add
-explicit patterns in `.sweeprc`; to narrow, use `disabledPatterns`.
+Defaults cover only machine-created, ecosystem-canonical names (`node_modules`,
+`.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.vite`, `.parcel-cache`, `.nyc_output`,
+`target`, `*.tsbuildinfo`) - directories nobody authors by hand. Generic names
+(`dist`, `build`, `out`, `coverage`, `.venv`, `__pycache__`, …) are curated in the
+catalog but ship **opt-in**: they can hold authored files, so enabling one is a
+per-project decision and its matches land in the `dangerous` tier (never
+pre-selected, never bulk-selectable). Sweep will never invent targets: anything
+not matched by the merged pattern set is invisible to the tool. To widen scope,
+add explicit patterns in `.sweeprc` or toggle catalog entries in the TUI `p`
+pane; to narrow, use `disabledPatterns`.
 
 ## Safety model (applies to every command)
 

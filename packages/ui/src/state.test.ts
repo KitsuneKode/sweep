@@ -34,7 +34,15 @@ import {
   upsertCandidates,
   visualRange,
   setPatternIndex,
+  setPatternFilter,
   setScanning,
+  addCustomPattern,
+  removeCustomPattern,
+  isPatternEnabled,
+  patternAtCursor,
+  patternPanelRows,
+  visiblePatternRows,
+  sweeprcPayload,
   type SweepUiState,
 } from "./state.js";
 import { buildDisplayRows, firstItemRowIndex } from "./rows.js";
@@ -261,9 +269,75 @@ describe("sweep ui state", () => {
   });
 
   test("togglePattern marks patterns dirty and toggles disabled set", () => {
-    const state = togglePattern(createUiState(createPlan()), "dist");
-    expect(state.disabledPatterns.has("dist")).toBe(true);
+    const state = togglePattern(createUiState(createPlan()), "node_modules");
+    expect(state.disabledPatterns.has("node_modules")).toBe(true);
     expect(state.patternsDirty).toBe(true);
+  });
+
+  test("togglePattern on an opt-in catalog entry rides extraPatterns, not disabled", () => {
+    // Opt-ins are off by omission, not by disable - toggling "dist" on must add
+    // it to extras; toggling again removes it. It must never be written into
+    // disabledPatterns (that list is for turning OFF shipping defaults).
+    let state = togglePattern(createUiState(createPlan()), "dist");
+    expect(state.extraPatterns).toContain("dist");
+    expect(state.disabledPatterns.has("dist")).toBe(false);
+    expect(isPatternEnabled(state, "dist")).toBe(true);
+
+    state = togglePattern(state, "dist");
+    expect(state.extraPatterns).not.toContain("dist");
+    expect(isPatternEnabled(state, "dist")).toBe(false);
+  });
+
+  test("patternPanelRows groups the catalog and filters on name, ecosystem, or note", () => {
+    let state = createUiState(createPlan());
+    const rows = patternPanelRows(state);
+    // Group headers interleave with pattern rows.
+    expect(rows.some((r) => r.kind === "group" && r.label === "javascript")).toBe(true);
+    expect(rows.some((r) => r.kind === "group" && r.label === "rust")).toBe(true);
+    expect(rows.every((r) => r.kind !== "group" || typeof r.label === "string")).toBe(true);
+    // Only pattern rows are selectable; headers never reach the cursor.
+    expect(visiblePatternRows(state).every((r) => r.kind === "pattern")).toBe(true);
+
+    state = setPatternFilter(state, "python");
+    const filtered = visiblePatternRows(state);
+    expect(filtered.length).toBeGreaterThan(0);
+    // Every python catalog entry is opt-in - none ships enabled.
+    expect(filtered.every((r) => r.source === "opt-in")).toBe(true);
+    expect(patternAtCursor({ ...state, patternIndex: 0 })).toBe(filtered[0]?.pattern ?? null);
+  });
+
+  test("addCustomPattern dedupes, re-enables, and clears the draft", () => {
+    let state = createUiState(createPlan());
+    state = addCustomPattern({ ...state, patternDraft: "*.log" }, "*.log");
+    expect(state.extraPatterns).toContain("*.log");
+    expect(state.patternDraft).toBe("");
+    expect(isPatternEnabled(state, "*.log")).toBe(true);
+
+    // Adding again is a no-op, not a duplicate.
+    state = addCustomPattern(state, "*.log");
+    expect(state.extraPatterns.filter((p) => p === "*.log")).toHaveLength(1);
+  });
+
+  test("removeCustomPattern drops customs but never catalog entries", () => {
+    let state = createUiState(createPlan(), { extraPatterns: ["*.bak"] });
+    state = removeCustomPattern(state, "*.bak");
+    expect(state.extraPatterns).not.toContain("*.bak");
+    // Catalog rows can only be toggled off - removal is a no-op for them.
+    const untouched = removeCustomPattern(state, "node_modules");
+    expect(untouched.catalogPatterns).toContain("node_modules");
+  });
+
+  test("sweeprcPayload writes enabled extras to patterns and disabled defaults out", () => {
+    let state = createUiState(createPlan(), { extraPatterns: ["*.bak"] });
+    state = togglePattern(state, "node_modules"); // default off
+    state = togglePattern(state, "dist"); // opt-in on
+    state = togglePattern(state, "*.bak"); // custom off -> stays listed, lands nowhere
+
+    const payload = sweeprcPayload(state);
+    expect(payload.patterns).toContain("dist");
+    expect(payload.patterns).not.toContain("*.bak"); // disabled custom is omitted
+    expect(payload.disabledPatterns).toContain("node_modules");
+    expect(payload.disabledPatterns).not.toContain("dist");
   });
 
   test("setScopeFilter limits visible candidates to a scope", () => {
@@ -370,7 +444,7 @@ describe("sweep ui state", () => {
 
   test("resetForRescan clears artifacts and selections but keeps view config", () => {
     let state = createUiState(createPlan());
-    state = togglePattern(state, "dist");
+    state = togglePattern(state, "node_modules");
 
     const reset = resetForRescan(state);
 
@@ -378,7 +452,7 @@ describe("sweep ui state", () => {
     expect(reset.selectedIds.size).toBe(0);
     expect(reset.scanning).toBe(true);
     expect(reset.scannedDirs).toBe(0);
-    expect(reset.disabledPatterns.has("dist")).toBe(true);
+    expect(reset.disabledPatterns.has("node_modules")).toBe(true);
   });
 
   test("toggleGroup hides group items but keeps the header row", () => {
