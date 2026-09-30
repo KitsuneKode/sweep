@@ -1,9 +1,9 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, realpathSync } from "node:fs";
 import { rename, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
 import { mapPool } from "./async-pool.js";
-import { isReparsePointOrSymlink } from "./guardrails.js";
+import { isPathWithinRoot, isReparsePointOrSymlink } from "./guardrails.js";
 
 const DELETE_CONCURRENCY = 4;
 
@@ -70,6 +70,13 @@ async function moveToTrash(entry: ScanEntry, trashDir: string, trashRoot: string
   }
   const destination = join(trashDir, rel);
   mkdirSync(dirname(destination), { recursive: true });
+  // A symlink planted inside the trash layout would redirect the rename -
+  // verify the real parent still lands under the real trash dir.
+  const realParent = realpathSync(dirname(destination));
+  const realTrash = realpathSync(trashDir);
+  if (!isPathWithinRoot(realParent, realTrash) && realParent !== realTrash) {
+    throw new Error(`trash destination escapes ${trashDir} for ${entry.path}`);
+  }
   await rename(entry.path, destination);
 }
 

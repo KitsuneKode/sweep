@@ -151,4 +151,43 @@ describe("clean with trashDir", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("refuses to move when a symlink inside the trash layout redirects outside", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-trash-escape-"));
+    try {
+      const targetDir = join(root, "project");
+      const outside = join(root, "outside");
+      mkdirSync(join(targetDir, "apps", "web", "node_modules"), { recursive: true });
+      mkdirSync(outside, { recursive: true });
+      writeFileSync(join(targetDir, "apps", "web", "node_modules", "index.js"), "x");
+
+      // Attacker (or a raced earlier run) planted trashDir/apps -> outside.
+      const trashDir = join(targetDir, ".sweep-trash-2025-01-01");
+      mkdirSync(trashDir, { recursive: true });
+      const { symlinkSync } = await import("node:fs");
+      symlinkSync(outside, join(trashDir, "apps"));
+
+      const entries: ScanEntry[] = [
+        {
+          path: join(targetDir, "apps", "web", "node_modules"),
+          name: "node_modules",
+          estimatedBytes: 1,
+          isSymlink: false,
+          entryType: "directory",
+        },
+      ];
+
+      const result = await clean(entries, { trashDir, trashRoot: targetDir });
+
+      // The move is refused and the source is left in place - nothing escaped.
+      expect(result.deleted.length).toBe(0);
+      expect(result.failedPaths.length).toBe(1);
+      expect(existsSync(join(targetDir, "apps", "web", "node_modules", "index.js"))).toBe(true);
+      // mkdir may create the empty "web" dir via the symlink; the artifact
+      // itself must never land outside the trash root.
+      expect(existsSync(join(outside, "web", "node_modules"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

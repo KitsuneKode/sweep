@@ -280,3 +280,32 @@ describe("DEFAULT_PATTERNS sanity checks", () => {
     expect(DEFAULT_PATTERNS.every((p) => !p.includes(".."))).toBe(true);
   });
 });
+
+describe("config hardening", () => {
+  test("rejects a non-regular .sweeprc (FIFO would hang readFileSync)", () => {
+    // A directory is the portable stand-in for "not a regular file".
+    mkdirSync(dir("fifo-project", ".sweeprc"), { recursive: true });
+    expect(() => loadConfig(dir("fifo-project"))).toThrow(ConfigParseError);
+    expect(() => loadConfig(dir("fifo-project"))).toThrow(/not a regular file/);
+  });
+
+  test("rejects an oversized .sweeprc", () => {
+    mkdirSync(dir("big-project"), { recursive: true });
+    writeFileSync(dir("big-project", ".sweeprc"), " ".repeat(1024 * 1024 + 1));
+    expect(() => loadConfig(dir("big-project"))).toThrow(/exceeds 1024 KB/);
+  });
+
+  test("rejects a pattern longer than the bound", () => {
+    mkdirSync(dir("long-pattern"), { recursive: true });
+    writeConfig(dir("long-pattern"), { patterns: ["x".repeat(300)] });
+    expect(() => loadConfig(dir("long-pattern"))).toThrow(/exceeds 256 characters/);
+  });
+
+  test("rejects a merged pattern list past the bound", () => {
+    mkdirSync(dir("many-patterns"), { recursive: true });
+    writeConfig(dir("many-patterns"), {
+      ignore: Array.from({ length: 513 }, (_, i) => `dir-${i}`),
+    });
+    expect(() => loadConfig(dir("many-patterns"))).toThrow(/max 512/);
+  });
+});

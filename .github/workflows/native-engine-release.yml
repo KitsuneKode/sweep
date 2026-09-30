@@ -18,6 +18,10 @@ concurrency:
   group: native-engine-release
   cancel-in-progress: true
 
+# Build + artifact upload only - nothing here writes to the repo or releases.
+permissions:
+  contents: read
+
 jobs:
   build:
     name: build ${{ matrix.id }}

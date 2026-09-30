@@ -136,6 +136,9 @@ export function assertTargetDirectory(targetPath: string): void {
   }
 }
 
+/** Patterns are filenames, not essays - beyond this they only burn CPU. */
+const MAX_PATTERN_LENGTH = 256;
+
 /**
  * Assert that a pattern string is safe (won't escape the target directory).
  */
@@ -144,6 +147,11 @@ export function assertSafePattern(pattern: string): void {
     throw new GuardrailError("Pattern must not be empty.");
   }
   const shown = sanitizeTerminalText(pattern);
+  if (pattern.length > MAX_PATTERN_LENGTH) {
+    throw new GuardrailError(
+      `Pattern exceeds ${MAX_PATTERN_LENGTH} characters: "${shown.slice(0, 64)}…"`,
+    );
+  }
   if (pattern !== pattern.trim()) {
     throw new GuardrailError(`Pattern must not have leading or trailing whitespace: "${shown}"`);
   }

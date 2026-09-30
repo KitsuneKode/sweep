@@ -123,7 +123,7 @@ async function batchEstimateAsync(
   const multiplier = platform === "linux" ? 1 : 1024;
 
   try {
-    const { stdout } = await execFileAsync("du", [flag, ...paths], {
+    const { stdout } = await execFileAsync("du", [flag, "--", ...paths], {
       timeout: 30_000,
       encoding: "utf8",
       signal,

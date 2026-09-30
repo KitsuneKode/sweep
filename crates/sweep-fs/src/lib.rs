@@ -580,6 +580,8 @@ fn du_estimate_chunk(
 
     let mut command = Command::new("du");
     command.arg(flag);
+    // A path that begins with "-" must not be parsed as a du option.
+    command.arg("--");
     for path in paths {
         command.arg(path.as_str());
     }

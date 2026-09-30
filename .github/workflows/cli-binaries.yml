@@ -65,11 +65,23 @@ jobs:
           "./$OUT" --ui-probe
           "./$OUT" --version
 
+      - name: Generate checksum
+        shell: bash
+        run: |
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$OUT" > "$OUT.sha256"
+          else
+            shasum -a 256 "$OUT" > "$OUT.sha256"
+          fi
+          cat "$OUT.sha256"
+
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sweep-${{ matrix.id }}
-          path: ${{ env.OUT }}
+          path: |
+            ${{ env.OUT }}
+            ${{ env.OUT }}.sha256
 
   attach:
     name: attach binaries to release

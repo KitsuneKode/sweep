@@ -45,6 +45,23 @@ trap 'rm -rf "$tmp"' EXIT
 info "downloading $asset ${SWEEP_VERSION:-latest}"
 curl -fsSL "$url" -o "$tmp/sweep" || fail "download failed: $url (release asset missing?)"
 
+# Verify the binary against the checksum published alongside the asset. A
+# missing checksum file means the release predates checksums or the download
+# was tampered with - either way we stop rather than run it blind.
+curl -fsSL "$url.sha256" -o "$tmp/sweep.sha256" \
+  || fail "checksum download failed: $url.sha256"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(sha256sum "$tmp/sweep" | cut -d' ' -f1)"
+else
+  need shasum
+  actual="$(shasum -a 256 "$tmp/sweep" | cut -d' ' -f1)"
+fi
+expected="$(cut -d' ' -f1 < "$tmp/sweep.sha256")"
+[ -n "$expected" ] || fail "empty checksum file"
+[ "$actual" = "$expected" ] || fail "checksum mismatch: expected $expected, got $actual"
+info "checksum verified"
+
 mkdir -p "$INSTALL_DIR"
 mv "$tmp/sweep" "$INSTALL_DIR/sweep"
 chmod +x "$INSTALL_DIR/sweep"
@@ -55,6 +72,8 @@ case ":$PATH:" in
   *) info "note: $INSTALL_DIR is not on your PATH" ;;
 esac
 
-"$INSTALL_DIR/sweep" --version >/dev/null 2>&1 \
-  && info "ok: $("$INSTALL_DIR/sweep" --version)" \
-  || info "note: binary installed but did not run - check platform support"
+if "$INSTALL_DIR/sweep" --version >/dev/null 2>&1; then
+  info "ok: $("$INSTALL_DIR/sweep" --version)"
+else
+  info "note: binary installed but did not run - check platform support"
+fi

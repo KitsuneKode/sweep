@@ -38,8 +38,12 @@ export function historyFilePath(): string {
 export function appendHistory(entry: CleanupHistoryEntry): boolean {
   try {
     const dir = sweepConfigDir();
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, HISTORY_FILE), `${JSON.stringify(entry)}\n`, "utf-8");
+    // History records real directory names - keep it user-private.
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    appendFileSync(join(dir, HISTORY_FILE), `${JSON.stringify(entry)}\n`, {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
     return true;
   } catch {
     return false;

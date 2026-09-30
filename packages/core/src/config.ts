@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, relative, resolve } from "node:path";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
@@ -63,8 +63,35 @@ function isStringArray(value: unknown): value is string[] {
 
 // ─── Config file reading ──────────────────────────────────────────────────────
 
+/**
+ * Config files are single-purpose JSON, so a sane bound is far below anything
+ * legitimate. The lstat check keeps a hostile FIFO/device named `.sweeprc`
+ * from blocking readFileSync forever or feeding an endless stream to JSON.parse.
+ */
+const MAX_CONFIG_BYTES = 1024 * 1024;
+
+/** Throws a ConfigParseError when the path is not a bounded regular file. */
+function assertReadableConfigFile(filePath: string): void {
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(filePath);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new ConfigParseError(`Failed to read config at ${filePath}: ${msg}`, { cause: err });
+  }
+  if (!stat.isFile()) {
+    throw new ConfigParseError(`Config at ${filePath} is not a regular file`);
+  }
+  if (stat.size > MAX_CONFIG_BYTES) {
+    throw new ConfigParseError(
+      `Config at ${filePath} exceeds ${MAX_CONFIG_BYTES / 1024} KB (${stat.size} bytes)`,
+    );
+  }
+}
+
 function readJsonConfig(filePath: string): Partial<SweepConfig> | null {
   if (!existsSync(filePath)) return null;
+  assertReadableConfigFile(filePath);
   try {
     const raw = readFileSync(filePath, "utf-8");
     return JSON.parse(raw) as Partial<SweepConfig>;
@@ -116,6 +143,7 @@ export function validateProjectConfigFile(configPath: string, cwd: string): Conf
 
   let raw: unknown;
   try {
+    assertReadableConfigFile(configPath);
     raw = JSON.parse(readFileSync(configPath, "utf-8"));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -321,6 +349,20 @@ export function loadConfig(
     cliOverrides.ignore,
   );
 
+  // A hostile or hand-mangled config could carry thousands of patterns; each
+  // compiles to a regex tested against every walked entry.
+  const MAX_MERGED_PATTERNS = 512;
+  for (const [field, list] of [
+    ["patterns", patterns],
+    ["ignore", ignore],
+    ["disabledPatterns", disabledPatterns],
+  ] as const) {
+    if (list.length > MAX_MERGED_PATTERNS) {
+      throw new ConfigParseError(
+        `"${field}" has ${list.length} entries (max ${MAX_MERGED_PATTERNS})`,
+      );
+    }
+  }
   for (const p of patterns) assertSafePattern(p);
   for (const p of ignore) assertSafePattern(p);
   for (const p of disabledPatterns) assertSafePattern(p);

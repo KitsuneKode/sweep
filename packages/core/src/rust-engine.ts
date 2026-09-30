@@ -119,6 +119,13 @@ interface RunEngineOptions {
   signal?: AbortSignal | undefined;
 }
 
+/** A plan with 100k candidates is ~20 MB; this bound leaves generous room. */
+const MAX_ENGINE_STDOUT = 256 * 1024 * 1024;
+/** stderr only matters for the error message - the tail is what we print. */
+const MAX_ENGINE_STDERR = 64 * 1024;
+/** Streamed scan events are one JSON object per line; this is generous. */
+const MAX_EVENT_LINE = 4 * 1024 * 1024;
+
 /**
  * SIGTERM first so the engine can flush; SIGKILL if it ignores the signal.
  * Leaving a live `sweep-engine` child after Ctrl+C is what hangs `sweep ui`.
@@ -180,16 +187,36 @@ async function runEngineAsync(
     if (onLine) {
       lines = createInterface({ input: proc.stdout });
       lines.on("line", (line) => {
+        // One event is a candidate or a summary - a far longer line is not a
+        // legitimate payload, and bounding it keeps a broken engine from
+        // filling the readline buffer.
+        if (line.length > MAX_EVENT_LINE) {
+          terminateEngine(proc);
+          settle(() =>
+            rejectPromise(new Error(`rust engine event exceeded ${MAX_EVENT_LINE} bytes`)),
+          );
+          return;
+        }
         if (line.length > 0) onLine(line);
       });
     } else {
       proc.stdout.on("data", (chunk: string) => {
         stdout += chunk;
+        // A misbehaving engine binary must not pin the host process - the
+        // largest legitimate payload is a plan JSON, far under this bound.
+        if (stdout.length > MAX_ENGINE_STDOUT) {
+          terminateEngine(proc);
+          settle(() =>
+            rejectPromise(new Error(`rust engine output exceeded ${MAX_ENGINE_STDOUT} bytes`)),
+          );
+        }
       });
     }
 
     proc.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
+      if (stderr.length < MAX_ENGINE_STDERR) {
+        stderr += chunk;
+      }
     });
 
     proc.on("error", (error) => {
