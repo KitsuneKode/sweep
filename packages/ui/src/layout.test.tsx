@@ -97,6 +97,9 @@ async function mount(
   teardown = () => setup.renderer.destroy();
   await act(async () => {
     await setup.renderOnce();
+    // renderOnce paints whatever has committed at this instant; a deferred
+    // commit lands a tick later on some CI schedulers, so drain pending work.
+    await setup.flush();
   });
   return setup;
 }
