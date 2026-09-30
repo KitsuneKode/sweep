@@ -296,13 +296,13 @@ describe("sweep TUI render", () => {
     // Batch arrives → app must accept it without throwing and settle cleanly.
     // (Painted-frame assertions after mount depend on the renderer's own draw
     // loop, which the test harness does not drive; state transitions are
-    // covered by state.test.ts.)
-    expect(() =>
-      act(async () => {
-        hooksRef?.onBatch([candidate]);
-        await setup.flush();
-      }),
-    ).not.toThrow();
+    // covered by state.test.ts.) This act must be awaited - a dangling async
+    // act leaves the shared act queue scoped open, which swallows renders
+    // from whichever test file runs next on the runner's scheduling.
+    await act(async () => {
+      hooksRef?.onBatch([candidate]);
+      await setup.flush();
+    });
 
     let threw = false;
     await act(async () => {

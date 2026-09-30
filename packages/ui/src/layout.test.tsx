@@ -101,17 +101,6 @@ async function mount(
     // commit lands a tick later on some CI schedulers, so drain pending work.
     await setup.flush();
   });
-  // DIAG: temporary CI instrumentation - remove once the blank-frame cause is found.
-  const frame = setup.captureCharFrame();
-  if (frame.trim().length === 0) {
-    const root = setup.renderer.root as unknown as { getChildren?: () => unknown[] };
-    const scheduler = (
-      setup.renderer as unknown as { getSchedulerState?: () => unknown }
-    ).getSchedulerState?.();
-    console.error(
-      `[diag] blank frame: rootChildren=${root.getChildren?.().length ?? "?"} scheduler=${JSON.stringify(scheduler)}`,
-    );
-  }
   return setup;
 }
 
