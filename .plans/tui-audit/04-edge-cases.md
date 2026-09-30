@@ -1,6 +1,6 @@
 # 04 — Engine parity, guardrails, and edge cases
 
-Status: mostly done
+Status: done
 Scope: engine, ui, cli
 Created: 2026-09-29
 Updated: 2026-09-29
@@ -10,12 +10,13 @@ Parent: [README.md](./README.md)
 Landed: 4a (rust-engine stores `candidate_found`), 4b (`finalizeScan`
 reconciles the enriched whole plan at scan end), 4c (case-insensitive VCS
 guard on darwin/win32), 4d (`skippedDirs` in `ScanResult` + strip; Rust
-protocol still reports 0 — needs a protocol bump to expose), 4e (dev:ino
-traversal set), 4f (`start` typed `Promise<void>`, select `keyBindings={[]}`
-sole keymap ownership, pageup/pagedown/home/end + mouse documented in `?`,
-dead exports pruned, dead-key notices landed via 03f). Open: `pageRows`
-approximation (needs list-height plumbing — now available via ArtifactList's
-onSizeChange), `?` glob-char semantics in patterns (document or escape).
+protocol now emits it on `scan_progress`/`scan_completed`/`ScanPlan.summary`),
+4e (dev:ino traversal set on both engines - Rust `walk_dir` dedupes via a
+shared `(dev, ino)` set), 4f (`start` typed `Promise<void>`, select
+`keyBindings={[]}` sole keymap ownership, pageup/pagedown/home/end + mouse
+documented in `?`, dead exports pruned, dead-key notices landed via 03f).
+Closed: `pageRows` now uses the measured list viewport height via
+`onViewportRows`, `?` glob semantics documented in config.md/README.
 
 Correctness hardening found during the line-level pass over `packages/core`,
 `packages/ui`, and `apps/cli`. Ordered by user impact.

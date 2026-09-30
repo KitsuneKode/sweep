@@ -3,11 +3,12 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use rayon::prelude::*;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -110,6 +111,10 @@ pub fn default_patterns() -> Vec<String> {
 pub struct WalkResult {
     pub entries: Vec<WalkEntry>,
     pub scanned_dirs: u32,
+    /// Directories that could not be read or were already visited under
+    /// another path (bind mounts, inode aliases). Aligned with the JS
+    /// scanner's `skippedDirs` - both failure and dedupe count here.
+    pub skipped_dirs: u32,
 }
 
 const SKIP_DIR_NAMES: &[&str] = &[".git", ".svn", ".hg", ".bzr"];
@@ -117,7 +122,8 @@ const SKIP_DIR_NAMES: &[&str] = &[".git", ".svn", ".hg", ".bzr"];
 /// Callbacks fired during a directory walk so callers can stream matches live.
 pub struct WalkHooks<'a> {
     pub on_match: Option<&'a (dyn Fn(&WalkEntry) + Sync)>,
-    pub on_dir: Option<&'a (dyn Fn(u32) + Sync)>,
+    /// `(scanned_dirs, skipped_dirs)` - throttled, not every directory.
+    pub on_dir: Option<&'a (dyn Fn(u32, u32) + Sync)>,
 }
 
 /// Recursively walk `root`, collecting entries whose names match `config.patterns`.
@@ -135,6 +141,42 @@ struct WalkCtx<'a> {
     ignore: Option<&'a IgnoreMatcher>,
     hooks: Option<&'a WalkHooks<'a>>,
     scanned: Option<&'a AtomicU32>,
+    skipped: Option<&'a AtomicU32>,
+    /// `(dev, ino)` of directories already walked. A bind mount or hardlinked
+    /// dir makes one filesystem object reachable under several paths; without
+    /// this the walk would revisit it forever at depth -1.
+    visited: Option<&'a Mutex<HashSet<(u64, u64)>>>,
+}
+
+/// Mirrors the JS scanner's `markDir`: false when the dir cannot be stat'd or
+/// was already walked under a different path. Inode-less filesystems (Windows
+/// reports 0) cannot dedupe, so they always visit.
+fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
+    let visited = match ctx.visited {
+        Some(v) => v,
+        None => return true,
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let meta = match fs::symlink_metadata(dir.as_std_path()) {
+            Ok(meta) => meta,
+            Err(_) => return false,
+        };
+        if meta.ino() == 0 {
+            return true;
+        }
+        match visited.lock() {
+            Ok(mut guard) => guard.insert((meta.dev(), meta.ino())),
+            // A poisoned lock degrades to no dedupe rather than aborting the scan.
+            Err(_) => true,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        true
+    }
 }
 
 /// Walk with live match/dir hooks. `on_match` fires as soon as an artifact is found,
@@ -151,6 +193,8 @@ pub fn walk_matched_entries_with_hooks(
         Some(IgnoreMatcher::compile(&config.ignore))
     };
     let scanned = AtomicU32::new(0);
+    let skipped = AtomicU32::new(0);
+    let visited = Mutex::new(HashSet::new());
     let ctx = WalkCtx {
         root,
         config,
@@ -158,6 +202,8 @@ pub fn walk_matched_entries_with_hooks(
         ignore: ignore.as_ref(),
         hooks,
         scanned: Some(&scanned),
+        skipped: Some(&skipped),
+        visited: Some(&visited),
     };
     walk_dir(&ctx, root, 0)
 }
@@ -167,9 +213,23 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
         return WalkResult::default();
     }
 
+    let skipped = |mut result: WalkResult| {
+        if let Some(counter) = ctx.skipped {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
+        result.skipped_dirs += 1;
+        result
+    };
+
+    // Already visited via a bind mount / inode alias, or cannot even be
+    // stat'd: nothing below this path is safe to read again.
+    if !mark_dir(ctx, dir) {
+        return skipped(WalkResult::default());
+    }
+
     let read_dir = match fs::read_dir(dir.as_std_path()) {
         Ok(items) => items,
-        Err(_) => return WalkResult::default(),
+        Err(_) => return skipped(WalkResult::default()),
     };
 
     let mut result = WalkResult {
@@ -180,7 +240,8 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
         let n = counter.fetch_add(1, Ordering::Relaxed) + 1;
         if n == 1 || n % 8 == 0 {
             if let Some(on_dir) = ctx.hooks.and_then(|h| h.on_dir) {
-                on_dir(n);
+                let skipped = ctx.skipped.map(|c| c.load(Ordering::Relaxed)).unwrap_or(0);
+                on_dir(n, skipped);
             }
         }
     }
@@ -267,6 +328,7 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
     for child in child_results {
         result.entries.extend(child.entries);
         result.scanned_dirs += child.scanned_dirs;
+        result.skipped_dirs += child.skipped_dirs;
     }
 
     result
@@ -797,6 +859,35 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn unreadable_subdir_counts_as_skipped() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let locked = root.join("locked");
+        fs::create_dir_all(locked.as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::set_permissions(locked.as_std_path(), fs::Permissions::from_mode(0o000))
+            .unwrap_or_else(|err| panic!("chmod failed: {err}"));
+
+        // Running as root (or on an ACL-less filesystem) read_dir succeeds
+        // anyway - there is nothing deterministic to assert in that case.
+        let unreadable = fs::read_dir(locked.as_std_path()).is_err();
+        let result = walk_matched_entries(root, &WalkConfig::default());
+        fs::set_permissions(locked.as_std_path(), fs::Permissions::from_mode(0o700))
+            .unwrap_or_else(|err| panic!("restore chmod failed: {err}"));
+
+        if unreadable {
+            assert_eq!(result.skipped_dirs, 1);
+        } else {
+            assert_eq!(result.skipped_dirs, 0);
+        }
+    }
+
+    #[test]
     fn walk_honors_custom_patterns() {
         let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
         let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
@@ -875,7 +966,7 @@ mod tests {
                     names.push(entry.name.clone());
                 }
             }),
-            on_dir: Some(&|count: u32| {
+            on_dir: Some(&|count: u32, _skipped: u32| {
                 dirs.store(count, Ordering::Relaxed);
             }),
         };

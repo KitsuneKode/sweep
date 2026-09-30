@@ -61,6 +61,8 @@ enum ScanStreamEvent {
         #[serde(rename = "scannedDirs")]
         scanned_dirs: u32,
         found: u32,
+        #[serde(rename = "skippedDirs")]
+        skipped_dirs: u32,
     },
     #[serde(rename = "scan_completed")]
     ScanCompleted { summary: ScanCompletedSummary },
@@ -72,6 +74,7 @@ struct ScanCompletedSummary {
     candidate_count: u32,
     estimated_total_bytes: u64,
     scanned_dirs: u32,
+    skipped_dirs: u32,
     exact: bool,
 }
 
@@ -109,8 +112,8 @@ fn run_scan() -> Result<(), String> {
         let emitter = StreamEmitter::default();
         let on_entry = |candidate: ScanCandidate| emitter.emit_found(candidate);
         let on_entry_sized = |candidate: ScanCandidate| emitter.emit_updated(candidate);
-        let on_progress = |scanned_dirs: u32, found: u32| {
-            emitter.emit_progress(scanned_dirs, found);
+        let on_progress = |scanned_dirs: u32, found: u32, skipped_dirs: u32| {
+            emitter.emit_progress(scanned_dirs, found, skipped_dirs);
         };
 
         let hooks = ScanHooks {
@@ -136,6 +139,7 @@ fn run_scan() -> Result<(), String> {
                 candidate_count: plan.summary.candidate_count,
                 estimated_total_bytes: plan.summary.estimated_total_bytes,
                 scanned_dirs: plan.summary.scanned_dirs,
+                skipped_dirs: plan.summary.skipped_dirs,
                 exact: plan.summary.exact,
             },
         })?;
@@ -187,13 +191,14 @@ impl StreamEmitter {
         }
     }
 
-    fn emit_progress(&self, scanned_dirs: u32, found: u32) {
+    fn emit_progress(&self, scanned_dirs: u32, found: u32, skipped_dirs: u32) {
         if self.has_error() {
             return;
         }
         if let Err(err) = write_json_line(&ScanStreamEvent::ScanProgress {
             scanned_dirs,
             found,
+            skipped_dirs,
         }) {
             self.set_error(err);
         }

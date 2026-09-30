@@ -34,6 +34,8 @@ export interface ArtifactListProps {
   onSetCursor?: (rowIndex: number) => void;
   /** Wheel input moves the cursor by this many item rows. */
   onCursorDelta?: (delta: number) => void;
+  /** Reports the measured viewport height so pageup/pagedown can step a real page. */
+  onViewportRows?: ((rows: number) => void) | undefined;
 }
 
 /**
@@ -58,6 +60,7 @@ export function ArtifactList({
   onToggleGroup,
   onSetCursor,
   onCursorDelta,
+  onViewportRows,
 }: ArtifactListProps) {
   const listRef = useRef<BoxRenderable | null>(null);
   const [hoveredRowIndex, setHoveredRowIndex] = useState<number | null>(null);
@@ -130,8 +133,9 @@ export function ArtifactList({
     const height = listRef.current?.height;
     if (height !== undefined && height > 0) {
       setViewportHeight((current) => (current === height ? current : height));
+      onViewportRows?.(height);
     }
-  }, []);
+  }, [onViewportRows]);
 
   const handleWheel = useCallback(
     (event: MouseEvent) => {

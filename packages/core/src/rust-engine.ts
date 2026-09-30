@@ -292,11 +292,11 @@ export async function scanToPlanViaRust(
         options.onProgress?.({
           scannedDirs: event.scannedDirs,
           found: event.found,
-          skippedDirs: 0,
+          skippedDirs: event.skippedDirs ?? 0,
         });
       } else if (event.type === "scan_completed") {
         state.summary = event.summary;
-        if ("exact" in event.summary && typeof event.summary.exact === "boolean") {
+        if (event.summary.exact !== undefined) {
           exact = event.summary.exact;
         }
       }

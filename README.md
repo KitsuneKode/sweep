@@ -228,6 +228,7 @@ Run `sweep init` to scaffold a starter file, or create `.sweeprc` manually (JSON
 ```
 
 All fields are optional. `patterns` and `ignore` merge with defaults - they do not replace them.
+Globs support `*` (any run of characters) and `?` (exactly one character); both match the artifact name only, never the path.
 
 Disable a default pattern:
 

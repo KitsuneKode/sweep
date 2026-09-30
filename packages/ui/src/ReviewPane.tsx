@@ -39,6 +39,8 @@ export interface ReviewPaneProps {
   onMutate: (fn: (s: SweepUiState) => SweepUiState) => void;
   onFocusPanel: (focus: UiFocus) => void;
   onToggleSelection: (candidateId: string) => void;
+  /** Measured artifact-pane viewport height for real page steps. */
+  onViewportRows?: (rows: number) => void;
 }
 
 export function ReviewPane({
@@ -53,6 +55,7 @@ export function ReviewPane({
   onMutate,
   onFocusPanel,
   onToggleSelection,
+  onViewportRows,
 }: ReviewPaneProps) {
   const patternOptions = useMemo(
     () =>
@@ -227,6 +230,7 @@ export function ReviewPane({
             onToggleGroup={(groupKey) => onMutate((s) => toggleGroup(s, groupKey))}
             onSetCursor={(rowIndex) => onMutate((s) => setRowIndex(s, rowIndex))}
             onCursorDelta={(delta) => onMutate((s) => moveCursor(s, delta))}
+            onViewportRows={onViewportRows}
           />
         )}
       </box>

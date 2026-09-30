@@ -29,7 +29,9 @@ pub struct ScanOptions<'a> {
 pub struct ScanHooks<'a> {
     pub on_entry: Option<&'a (dyn Fn(ScanCandidate) + Sync)>,
     pub on_entry_sized: Option<&'a (dyn Fn(ScanCandidate) + Sync)>,
-    pub on_progress: Option<&'a (dyn Fn(u32, u32) + Sync)>,
+    /// `(scanned_dirs, found, skipped_dirs)` - aligned with the JS
+    /// `onProgress({ scannedDirs, found, skippedDirs })` payload.
+    pub on_progress: Option<&'a (dyn Fn(u32, u32, u32) + Sync)>,
 }
 
 /// Scan `target_dir` with default patterns and produce a protocol-aligned [`ScanPlan`].
@@ -67,9 +69,13 @@ pub fn scan_to_plan_with_config(
             cb(to_candidate(entry, 0));
         }
     };
-    let on_dir = |dirs: u32| {
+    let on_dir = |dirs: u32, skipped_dirs: u32| {
         if let Some(cb) = on_progress {
-            cb(dirs, found.load(std::sync::atomic::Ordering::Relaxed));
+            cb(
+                dirs,
+                found.load(std::sync::atomic::Ordering::Relaxed),
+                skipped_dirs,
+            );
         }
     };
     let hooks = WalkHooks {
@@ -80,6 +86,7 @@ pub fn scan_to_plan_with_config(
     let walk = walk_matched_entries_with_hooks(target_dir, walk_config, Some(&hooks));
     let mut entries = walk.entries;
     let scanned_dirs = walk.scanned_dirs;
+    let skipped_dirs = walk.skipped_dirs;
 
     apply_size_estimates(&mut entries, options.exact);
 
@@ -98,6 +105,7 @@ pub fn scan_to_plan_with_config(
         target_dir.as_str(),
         &candidates,
         scanned_dirs,
+        skipped_dirs,
         selection_policy,
         options.exact,
     ))
@@ -128,6 +136,7 @@ fn build_plan(
     target_dir: &str,
     candidates: &[ScanCandidate],
     scanned_dirs: u32,
+    skipped_dirs: u32,
     selection_policy: &SelectionPolicy,
     exact: bool,
 ) -> ScanPlan {
@@ -144,6 +153,7 @@ fn build_plan(
             candidate_count: candidates.len() as u32,
             estimated_total_bytes,
             scanned_dirs,
+            skipped_dirs,
             exact,
             selected_count: selected_candidate_ids.len() as u32,
             risk_counts,

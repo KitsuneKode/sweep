@@ -95,12 +95,20 @@ pub struct RiskCounts {
     pub blocked: u32,
 }
 
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanPlanSummary {
     pub candidate_count: u32,
     pub estimated_total_bytes: u64,
     pub scanned_dirs: u32,
+    /// Unreadable or deduped directories. The JS engine omits the key at
+    /// zero; `skip_serializing_if` keeps the wire shape identical.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub skipped_dirs: u32,
     pub exact: bool,
     pub selected_count: u32,
     pub risk_counts: RiskCounts,
@@ -129,6 +137,7 @@ impl ScanPlan {
                 candidate_count: 0,
                 estimated_total_bytes: 0,
                 scanned_dirs: 0,
+                skipped_dirs: 0,
                 exact: true,
                 selected_count: 0,
                 risk_counts: RiskCounts::default(),

@@ -140,6 +140,9 @@
         "skippedDirs": {
           "type": "integer",
           "minimum": 0
+        },
+        "exact": {
+          "type": "boolean"
         }
       }
     }

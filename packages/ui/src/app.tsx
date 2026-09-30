@@ -371,6 +371,9 @@ export function SweepApp({
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const stateRef = useRef(state);
+  // The measured artifact-pane height, reported by the list's layout event.
+  // Pageup/pagedown step real pages once known; the estimate below seeds it.
+  const viewportRowsRef = useRef<number | null>(null);
   stateRef.current = state;
 
   // Live-scan lifecycle: boot into the first generation, restart on rescan.
@@ -562,8 +565,9 @@ export function SweepApp({
         listSelectIndex,
         scanError,
         inspectOpen: showInspect,
-        // Approximate visible list rows: full height minus header/status chrome.
-        pageRows: Math.max(6, dimensions.height - 10),
+        // Measured list rows once the pane has laid out; the height-minus-
+        // chrome estimate only seeds the first frame before a size event.
+        pageRows: viewportRowsRef.current ?? Math.max(6, dimensions.height - 10),
       },
       {
         finalize,
@@ -684,6 +688,9 @@ export function SweepApp({
           onMutate={mutate}
           onFocusPanel={focusPanel}
           onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
+          onViewportRows={(rows) => {
+            viewportRowsRef.current = rows;
+          }}
         />
       </box>
 

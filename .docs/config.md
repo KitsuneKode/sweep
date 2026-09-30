@@ -53,6 +53,11 @@ Use `disabledPatterns` to turn off a default like `dist`. Use `ignore` to skip s
 matches (by artifact name, glob such as `*.cache`, or path prefix such as `packages/vendor`). A trailing
 slash is normalized, so `ignore: ["dist/"]` also skips a top-level `dist` entry.
 
+Globs support two wildcards: `*` matches any run of characters (including
+none) and `?` matches exactly one character, so `*.tsbuildinfo` matches
+`tsconfig.tsbuildinfo` and `chunk-?.js` matches `chunk-4.js` but not
+`chunk-42.js`. Patterns match the artifact name only, never the path.
+
 ### Filename rationale
 
 The file is `.sweeprc` - plain JSON, no extension. This is deliberate:

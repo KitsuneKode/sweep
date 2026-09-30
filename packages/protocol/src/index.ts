@@ -168,6 +168,8 @@ export interface ScanProgressEvent {
   type: "scan_progress";
   scannedDirs: number;
   found: number;
+  /** Unreadable / deduped directories - absent on older producers. */
+  skippedDirs?: number;
 }
 
 export interface WarningEvent {
@@ -184,6 +186,8 @@ export interface ScanCompletedEvent {
     scannedDirs: number;
     /** Unreadable / deduped directories - absent on older producers. */
     skippedDirs?: number;
+    /** True when byte estimates are exact - absent on older producers. */
+    exact?: boolean;
   };
 }
 
