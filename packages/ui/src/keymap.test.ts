@@ -229,6 +229,68 @@ describe("handleKeymap", () => {
     }
   });
 
+  test("q in the confirm dialog dismisses instead of quitting", () => {
+    // One keystroke from "are you sure" to process exit would pair a confirm
+    // gate with an instant escape hatch - the dialog cancels, never aborts.
+    const actions = makeActions();
+    handleKeymap(makeContext({ key: { name: "q" }, pendingApply: true }), actions);
+    expect(actions.setPendingApply).toHaveBeenCalledWith(false);
+    expect(actions.finalize).not.toHaveBeenCalled();
+    expect(actions.applyPlan).not.toHaveBeenCalled();
+  });
+
+  test("i on a group header notifies instead of opening an empty modal", () => {
+    // Every group emits a header row at index 0 (rows.ts), so rowIndex 0 is
+    // always a header. The overlay doesn't render without a candidate, but
+    // inspectOpen would still trap every key - an invisible modal is the
+    // worst trap in the app.
+    const actions = makeActions();
+    actions.setInspect = mock(() => {});
+    actions.notify = mock(() => {});
+    handleKeymap(
+      makeContext({
+        key: { name: "i" },
+        state: { ...createUiState(mockPlan()), rowIndex: 0 },
+      }),
+      actions,
+    );
+    expect(actions.setInspect).not.toHaveBeenCalled();
+    expect(actions.notify).toHaveBeenCalledTimes(1);
+  });
+
+  test("artifact actions do not fire while the patterns pane owns the screen", () => {
+    for (const key of [{ name: "o" }, { name: "S" }, { name: "s", shift: true }]) {
+      const actions = makeActions();
+      actions.notify = mock(() => {});
+      actions.toggleSort = mock(() => {});
+      actions.exportPlan = mock(() => {});
+      handleKeymap(
+        makeContext({
+          key,
+          state: { ...createUiState(mockPlan()), focus: "patterns" },
+        }),
+        actions,
+      );
+      expect(actions.toggleSort).not.toHaveBeenCalled();
+      expect(actions.exportPlan).not.toHaveBeenCalled();
+      expect(actions.notify).toHaveBeenCalled();
+    }
+  });
+
+  test("a focus left on an unmounted sidebar reconciles to the list", () => {
+    const actions = makeActions();
+    handleKeymap(
+      makeContext({
+        key: { name: "j" },
+        showSidebar: false,
+        state: { ...createUiState(mockPlan()), focus: "sidebar" },
+      }),
+      actions,
+    );
+    expect(actions.focusPanel).toHaveBeenCalledWith("list");
+    expect(actions.mutate).not.toHaveBeenCalled();
+  });
+
   test("t in the confirm dialog toggles trash and does not cycle the theme", () => {
     const actions = makeActions();
     actions.toggleTrash = mock(() => {});

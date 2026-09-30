@@ -1,6 +1,7 @@
 import type { Command } from "commander";
+import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { applyNoColor } from "./shared.js";
+import { applyNoColor, warnIgnoredOptions } from "./shared.js";
 
 /** Options whose value is a filesystem path - shells complete files for them. */
 const FILE_VALUE_OPTIONS = new Set([
@@ -200,10 +201,11 @@ export function renderCompletions(shell: string, program: Command): string | und
 /** `sweep completions <shell>` - print a completion script generated from the program. */
 export async function handleCompletions(
   shell: string,
-  opts: { color: boolean },
+  opts: CliOptions,
   program: Command,
 ): Promise<void> {
   applyNoColor(opts.color);
+  warnIgnoredOptions(opts, "completions");
 
   try {
     const script = renderCompletions(shell, program);

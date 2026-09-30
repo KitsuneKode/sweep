@@ -6,16 +6,64 @@ use serde::Serialize;
 use std::io::{self, IsTerminal, Read, Write};
 use std::sync::Mutex;
 use sweep_engine::{apply_plan, scan_to_plan_with_sweep_config, ScanHooks, ScanOptions};
+use sweep_errors::EngineError;
 use sweep_types::{ApplyReport, ScanCandidate, ScanPlan, SelectionPolicy, SweepConfig};
 
-fn main() {
-    if let Err(err) = run() {
-        eprintln!("error: {err}");
-        std::process::exit(1);
+/// Exit codes mirror the JS CLI taxonomy (apps/cli/src/errors.ts): the JS
+/// wrapper reads the engine's code and re-throws the matching error class, so
+/// `sweep apply --engine rust` exits 2 for a guardrail trip just like `--engine js`.
+const EXIT_ABORTED: i32 = 1;
+const EXIT_GUARDRAIL: i32 = 2;
+const EXIT_INVALID_INPUT: i32 = 3;
+const EXIT_FAILURE: i32 = 4;
+
+struct CliFailure {
+    code: i32,
+    message: String,
+}
+
+impl CliFailure {
+    /// Bad argv or unparseable stdin - the caller's input is wrong.
+    fn invalid_input(message: impl Into<String>) -> Self {
+        Self {
+            code: EXIT_INVALID_INPUT,
+            message: message.into(),
+        }
+    }
+
+    /// Everything else - IO, serialization, engine-internal failures.
+    fn failure(message: impl Into<String>) -> Self {
+        Self {
+            code: EXIT_FAILURE,
+            message: message.into(),
+        }
     }
 }
 
-fn run() -> Result<(), String> {
+impl From<EngineError> for CliFailure {
+    fn from(err: EngineError) -> Self {
+        match err {
+            EngineError::Guardrail(_) => Self {
+                code: EXIT_GUARDRAIL,
+                message: err.to_string(),
+            },
+            EngineError::InvalidPlan { .. } => Self {
+                code: EXIT_INVALID_INPUT,
+                message: err.to_string(),
+            },
+            EngineError::Filesystem { .. } => Self::failure(err.to_string()),
+        }
+    }
+}
+
+fn main() {
+    if let Err(err) = run() {
+        eprintln!("error: {}", err.message);
+        std::process::exit(err.code);
+    }
+}
+
+fn run() -> Result<(), CliFailure> {
     match std::env::args().nth(1).as_deref() {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
@@ -28,7 +76,10 @@ fn run() -> Result<(), String> {
                 "usage: sweep-engine scan <target-dir>  # optional ScanOptions JSON on stdin"
             );
             eprintln!("       sweep-engine apply               # reads ScanPlan JSON from stdin");
-            Err("missing or unknown subcommand".to_owned())
+            Err(CliFailure {
+                code: EXIT_ABORTED,
+                message: "missing or unknown subcommand".to_owned(),
+            })
         }
     }
 }
@@ -78,15 +129,18 @@ struct ScanCompletedSummary {
     exact: bool,
 }
 
-fn run_scan() -> Result<(), String> {
+fn run_scan() -> Result<(), CliFailure> {
     let target_dir = std::env::args()
         .nth(2)
-        .ok_or_else(|| "scan requires a target directory argument".to_owned())?;
+        .ok_or_else(|| CliFailure::invalid_input("scan requires a target directory argument"))?;
 
     let (config, selection_policy, exact, json_stream) = match read_stdin_if_present()? {
         Some(input) => {
-            let options: ScanStdinOptions = serde_json::from_str(&input)
-                .map_err(|err| format!("failed to parse scan options JSON from stdin: {err}"))?;
+            let options: ScanStdinOptions = serde_json::from_str(&input).map_err(|err| {
+                CliFailure::invalid_input(format!(
+                    "failed to parse scan options JSON from stdin: {err}"
+                ))
+            })?;
             (
                 options.config,
                 options.selection_policy,
@@ -107,7 +161,8 @@ fn run_scan() -> Result<(), String> {
     if json_stream {
         write_json_line(&ScanStreamEvent::ScanStarted {
             target_dir: target_dir.clone(),
-        })?;
+        })
+        .map_err(CliFailure::failure)?;
 
         let emitter = StreamEmitter::default();
         let on_entry = |candidate: ScanCandidate| emitter.emit_found(candidate);
@@ -128,10 +183,10 @@ fn run_scan() -> Result<(), String> {
             &selection_policy,
             ScanOptions { exact, hooks },
         )
-        .map_err(|err| err.to_string())?;
+        .map_err(CliFailure::from)?;
 
         if let Some(err) = emitter.into_error() {
-            return Err(err);
+            return Err(CliFailure::failure(err));
         }
 
         write_json_line(&ScanStreamEvent::ScanCompleted {
@@ -142,7 +197,8 @@ fn run_scan() -> Result<(), String> {
                 skipped_dirs: plan.summary.skipped_dirs,
                 exact: plan.summary.exact,
             },
-        })?;
+        })
+        .map_err(CliFailure::failure)?;
 
         return Ok(());
     }
@@ -156,7 +212,7 @@ fn run_scan() -> Result<(), String> {
             hooks: ScanHooks::default(),
         },
     )
-    .map_err(|err| err.to_string())?;
+    .map_err(CliFailure::from)?;
     write_json_stdout(&plan)
 }
 
@@ -243,7 +299,7 @@ const MAX_STDIN_BYTES: u64 = 256 * 1024 * 1024;
 /// Ok(None) means no stdin was piped; errors propagate - a failed or oversized
 /// read must not silently fall back to default options (user `ignore` patterns
 /// would be dropped, scanning things the config excluded).
-fn read_stdin_if_present() -> Result<Option<String>, String> {
+fn read_stdin_if_present() -> Result<Option<String>, CliFailure> {
     if io::stdin().is_terminal() {
         return Ok(None);
     }
@@ -252,43 +308,48 @@ fn read_stdin_if_present() -> Result<Option<String>, String> {
     io::stdin()
         .take(MAX_STDIN_BYTES + 1)
         .read_to_end(&mut buf)
-        .map_err(|err| format!("failed to read stdin: {err}"))?;
+        .map_err(|err| CliFailure::failure(format!("failed to read stdin: {err}")))?;
 
     if buf.is_empty() {
         return Ok(None);
     }
     if buf.len() as u64 > MAX_STDIN_BYTES {
-        return Err(format!("stdin exceeds the {MAX_STDIN_BYTES}-byte limit"));
+        return Err(CliFailure::invalid_input(format!(
+            "stdin exceeds the {MAX_STDIN_BYTES}-byte limit"
+        )));
     }
-    let input = String::from_utf8(buf)
-        .map_err(|err| format!("stdin is not valid UTF-8 JSON input: {err}"))?;
+    let input = String::from_utf8(buf).map_err(|err| {
+        CliFailure::invalid_input(format!("stdin is not valid UTF-8 JSON input: {err}"))
+    })?;
     if input.trim().is_empty() {
         return Ok(None);
     }
     Ok(Some(input))
 }
 
-fn run_apply() -> Result<(), String> {
-    let input = read_stdin_if_present()?
-        .ok_or_else(|| "apply requires a ScanPlan JSON document on stdin".to_owned())?;
+fn run_apply() -> Result<(), CliFailure> {
+    let input = read_stdin_if_present()?.ok_or_else(|| {
+        CliFailure::invalid_input("apply requires a ScanPlan JSON document on stdin")
+    })?;
 
-    let plan: ScanPlan = serde_json::from_str(&input)
-        .map_err(|err| format!("failed to parse ScanPlan JSON: {err}"))?;
+    let plan: ScanPlan = serde_json::from_str(&input).map_err(|err| {
+        CliFailure::invalid_input(format!("failed to parse ScanPlan JSON: {err}"))
+    })?;
 
-    let report: ApplyReport = apply_plan(&plan).map_err(|err| err.to_string())?;
+    let report: ApplyReport = apply_plan(&plan).map_err(CliFailure::from)?;
     write_json_stdout(&report)
 }
 
-fn write_json_stdout<T: Serialize>(value: &T) -> Result<(), String> {
+fn write_json_stdout<T: Serialize>(value: &T) -> Result<(), CliFailure> {
     let json = serde_json::to_string_pretty(value)
-        .map_err(|err| format!("failed to serialize JSON: {err}"))?;
+        .map_err(|err| CliFailure::failure(format!("failed to serialize JSON: {err}")))?;
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(json.as_bytes())
-        .map_err(|err| format!("failed to write stdout: {err}"))?;
+        .map_err(|err| CliFailure::failure(format!("failed to write stdout: {err}")))?;
     stdout
         .write_all(b"\n")
-        .map_err(|err| format!("failed to write stdout newline: {err}"))?;
+        .map_err(|err| CliFailure::failure(format!("failed to write stdout newline: {err}")))?;
     Ok(())
 }
 

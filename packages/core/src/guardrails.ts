@@ -16,7 +16,16 @@ import {
 // ─── Blocked paths ────────────────────────────────────────────────────────────
 
 /** VCS dirs - never delete artifacts inside these path segments. */
-export const PROTECTED_VCS_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr"]);
+export const PROTECTED_VCS_DIR_NAMES = new Set([
+  ".git",
+  ".svn",
+  ".hg",
+  ".bzr",
+  ".jj",
+  ".sl",
+  "_darcs",
+  ".pijul",
+]);
 
 /**
  * Paths that must never be the target directory.
@@ -84,17 +93,8 @@ export class GuardrailError extends Error {
 
 // ─── Checks ───────────────────────────────────────────────────────────────────
 
-/**
- * Assert that the target directory is safe to operate on.
- * Throws GuardrailError (exit code 2) if not.
- */
-export function assertSafeCwd(targetPath: string): void {
-  // Reject null bytes - can confuse C-level FS calls
-  if (targetPath.includes("\x00")) {
-    throw new GuardrailError(`Path contains null byte: ${JSON.stringify(targetPath)}`);
-  }
-
-  const resolved = normalize(resolve(targetPath));
+/** Blocked-root + depth policy on one already-resolved absolute path. */
+function assertResolvedSafe(resolved: string): void {
   const isBlocked =
     BLOCKED_ROOTS.has(resolved) ||
     (CASE_FOLD_BLOCKED && BLOCKED_ROOTS_LOWER.has(resolved.toLowerCase()));
@@ -114,6 +114,37 @@ export function assertSafeCwd(targetPath: string): void {
       `Path is too shallow to be a project directory: ${sanitizeTerminalText(resolved)}\n` +
         `  Expected at least 2 path segments below filesystem root.`,
     );
+  }
+}
+
+/**
+ * Assert that the target directory is safe to operate on.
+ * Throws GuardrailError (exit code 2) if not.
+ */
+export function assertSafeCwd(targetPath: string): void {
+  // Reject null bytes - can confuse C-level FS calls
+  if (targetPath.includes("\x00")) {
+    throw new GuardrailError(`Path contains null byte: ${JSON.stringify(targetPath)}`);
+  }
+
+  const resolved = normalize(resolve(targetPath));
+  assertResolvedSafe(resolved);
+
+  // A symlinked spelling can launder a forbidden root: `x -> /` passes the
+  // lexical checks while scanning `/` - and once apply resolves it, every
+  // path under `/` is legitimately "within root". When the target exists,
+  // run the same checks on the canonical path too.
+  try {
+    const canonical = normalize(realpathSync(resolved));
+    if (
+      canonical !== resolved &&
+      !(CASE_FOLD_BLOCKED && canonical.toLowerCase() === resolved.toLowerCase())
+    ) {
+      assertResolvedSafe(canonical);
+    }
+  } catch (err) {
+    if (err instanceof GuardrailError) throw err;
+    // Missing/dangling target - assertTargetDirectory reports it downstream.
   }
 }
 
@@ -255,6 +286,23 @@ export function isPathWithinRoot(candidatePath: string, rootPath: string): boole
     return false;
   }
   return true;
+}
+
+/**
+ * Resolved-path equality, case-folded where the filesystem is (macOS/Windows).
+ * A case-variant spelling of the same directory must not slip past the
+ * root-protection check on a case-insensitive volume.
+ */
+export function isSameResolvedPath(a: string, b: string): boolean {
+  const ra = resolve(a);
+  const rb = resolve(b);
+  if (ra === rb) {
+    return true;
+  }
+  if (process.platform === "win32" || process.platform === "darwin") {
+    return ra.toLowerCase() === rb.toLowerCase();
+  }
+  return false;
 }
 
 /** True when any path segment is a protected VCS metadata directory. */

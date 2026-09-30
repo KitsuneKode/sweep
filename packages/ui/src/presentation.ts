@@ -392,12 +392,28 @@ export function buildHeaderStats(
   return joinStyled(interleave(parts, t`  ${dim("·")}  `));
 }
 
-/** Compact reclaim tally for the statusline tail. */
+/**
+ * Queue composition for the statusline tail. Bytes belong to the header -
+ * repeating them here read the same fact twice in two formats. The tally's
+ * job is the *mix*: one dangerous item in a sea of safe ones is the thing
+ * the red confirm dialog exists for.
+ */
 export function buildRiskTally(summary: SweepUiSummary, tokens: ThemeTokens): StyledText {
   if (summary.selectedCount <= 0) {
-    return t`${fg(tokens.textDim)("nothing selected")}`;
+    return t`${fg(tokens.textDim)("queue empty")}`;
   }
-  return t`${fg(tokens.positive)(formatBytes(summary.selectedBytes))} ${fg(tokens.textMuted)("reclaimable")}`;
+  const { safe, caution, dangerous } = summary.selectedRiskCounts;
+  const parts: StyledText[] = [];
+  if (safe > 0) {
+    parts.push(t`${fg(tokens.positive)(`${safe} safe`)}`);
+  }
+  if (caution > 0) {
+    parts.push(t`${fg(tokens.warning)(`${caution} caution`)}`);
+  }
+  if (dangerous > 0) {
+    parts.push(t`${bold(fg(tokens.danger)(`${dangerous} dangerous`))}`);
+  }
+  return joinStyled(interleave(parts, t`${dim(" · ")}`));
 }
 
 function interleave(items: StyledText[], separator: StyledText): StyledText[] {
@@ -498,19 +514,20 @@ export function buildFooterHints(
   }
 
   if (context.kind === "confirm") {
-    return t`${key("y")} ${hint("confirm")}${sep}${key("n")} ${hint("cancel")}${sep}${key("t")} ${hint("trash")}${sep}${key("esc")} ${hint("back")}${sep}${key("ctrl-c")} ${hint("quit")}`;
+    // One hint per distinct action - "n cancel · esc back" says one thing twice.
+    return t`${key("y")} ${hint("confirm")}${sep}${key("n/esc")} ${hint("cancel")}${sep}${key("t")} ${hint("trash")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
   if (context.kind === "help") {
-    return t`${key("?")} ${hint("close")}${sep}${key("esc")} ${hint("close")}${sep}${key("q")} ${hint("close")}`;
+    return t`${key("esc")} ${hint("close")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
   if (context.kind === "inspect") {
-    return t`${key("i")} ${hint("close")}${sep}${key("esc")} ${hint("close")}${sep}${key("q")} ${hint("close")}`;
+    return t`${key("i/esc")} ${hint("close")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
   if (context.kind === "visual") {
-    return t`${key("↑↓")} ${hint("extend")}${sep}${key("space")} ${hint("queue range")}${sep}${key("v")} ${hint("cancel")}${sep}${key("esc")} ${hint("cancel")}`;
+    return t`${key("↑↓")} ${hint("extend")}${sep}${key("space")} ${hint("queue range")}${sep}${key("v/esc")} ${hint("cancel")}`;
   }
 
   if (context.kind === "scanError") {

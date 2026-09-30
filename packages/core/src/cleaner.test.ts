@@ -76,6 +76,38 @@ describe("deduplicateNestedEntries", () => {
   });
 });
 
+describe("clean", () => {
+  test("a vanished entry reports missing instead of a phantom delete", async () => {
+    // rm(force: true) never complains about a missing path, so without the
+    // pre-delete lstat a raced-away entry would land in `deleted`.
+    const root = mkdtempSync(join(tmpdir(), "sweep-clean-missing-"));
+    try {
+      const result = await clean([
+        {
+          path: join(root, "ghost"),
+          name: "ghost",
+          estimatedBytes: 0,
+          isSymlink: false,
+          entryType: "directory",
+        },
+      ]);
+
+      expect(result.deleted).toHaveLength(0);
+      expect(result.failedPaths).toHaveLength(1);
+      expect(result.failedPaths[0]?.code).toBe("missing");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("trashDir without trashRoot is rejected up front", async () => {
+    // The pairing is the containment contract - one without the other means
+    // "move things somewhere undefined", which must throw, not best-guess.
+    await expect(clean([], { trashDir: "/tmp/sweep-unpaired" })).rejects.toThrow(/together/);
+    await expect(clean([], { trashRoot: "/tmp/sweep-unpaired" })).rejects.toThrow(/together/);
+  });
+});
+
 describe("clean with trashDir", () => {
   test("moves entries into the trash dir preserving target-relative paths", async () => {
     const root = mkdtempSync(join(tmpdir(), "sweep-trash-test-"));
@@ -135,7 +167,9 @@ describe("clean with trashDir", () => {
           name: "link-out",
           estimatedBytes: 0,
           isSymlink: true,
-          entryType: "directory",
+          // Plans carry entryType "symlink" for link entries - the scanner
+          // emits it and revalidate enforces it (planner.ts).
+          entryType: "symlink",
         },
       ];
 

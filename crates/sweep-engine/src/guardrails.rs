@@ -4,23 +4,13 @@ use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 use sweep_errors::{EngineError, GuardrailError};
 
-const PROTECTED_VCS_DIR_NAMES: &[&str] = &[".git", ".svn", ".hg", ".bzr"];
+const PROTECTED_VCS_DIR_NAMES: &[&str] = &[
+    ".git", ".svn", ".hg", ".bzr", ".jj", ".sl", "_darcs", ".pijul",
+];
 
-/// Assert that the target directory is safe to operate on.
-pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
-    if target_path.contains('\0') {
-        return Err(GuardrailError::ProtectedPath {
-            path: target_path.to_owned(),
-        }
-        .into());
-    }
-
-    // `..` is not rejected here: normalization collapses it first, then the
-    // blocked-root and depth checks judge the result - same order as the JS
-    // `resolve()` path, so `scan foo/../bar` behaves identically on both.
-    let resolved = normalize_path(target_path);
-
-    let is_blocked = if blocked_roots().contains(&resolved) {
+/// Blocked-root + depth policy on one normalized absolute path.
+fn assert_resolved_safe(resolved: &Path) -> Result<(), EngineError> {
+    let is_blocked = if blocked_roots().contains(resolved) {
         true
     } else if cfg!(windows) || cfg!(target_os = "macos") {
         // Case-insensitive filesystems make /USERS/name the same directory as
@@ -44,8 +34,8 @@ pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
         .into());
     }
 
-    let root = filesystem_root(&resolved);
-    let relative_parts = path_segments_below_root(&resolved, &root);
+    let root = filesystem_root(resolved);
+    let relative_parts = path_segments_below_root(resolved, &root);
     if relative_parts.len() < 2 {
         return Err(GuardrailError::ProtectedPath {
             path: format!(
@@ -58,6 +48,64 @@ pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
     }
 
     Ok(())
+}
+
+/// Assert that the target directory is safe to operate on.
+pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
+    if target_path.contains('\0') {
+        return Err(GuardrailError::ProtectedPath {
+            path: target_path.to_owned(),
+        }
+        .into());
+    }
+
+    // `..` is not rejected here: normalization collapses it first, then the
+    // blocked-root and depth checks judge the result - same order as the JS
+    // `resolve()` path, so `scan foo/../bar` behaves identically on both.
+    // Relative input is absolutized against cwd first - otherwise
+    // `sweep-engine apply` with a relative targetDir would check a fragment
+    // against absolute blocked roots and silently pass.
+    let resolved = if Path::new(target_path).is_absolute() {
+        normalize_path(target_path)
+    } else {
+        normalize_path(
+            &std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("/"))
+                .join(target_path)
+                .to_string_lossy(),
+        )
+    };
+
+    assert_resolved_safe(&resolved)?;
+
+    // A symlinked spelling can launder a forbidden root: `x -> /` passes the
+    // lexical checks while scanning `/`. When the target exists, run the same
+    // checks on the canonical path too (verbatim `\\?\` prefix stripped so it
+    // compares like the lexical spelling).
+    if let Ok(canonical_raw) = std::fs::canonicalize(&resolved) {
+        let canonical = strip_verbatim(&normalize_path(&canonical_raw.to_string_lossy()));
+        let same = if cfg!(windows) || cfg!(target_os = "macos") {
+            canonical.to_string_lossy().to_lowercase() == resolved.to_string_lossy().to_lowercase()
+        } else {
+            canonical == resolved
+        };
+        if !same {
+            assert_resolved_safe(&canonical)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Drop the `\\?\` verbatim prefix canonicalize() adds on Windows so a
+/// canonical path compares lexically against `resolve()`d spellings.
+fn strip_verbatim(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(stripped) = text.strip_prefix("\\\\?\\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
+    }
 }
 
 /// Assert that a pattern string is safe (won't escape the target directory).
@@ -96,6 +144,17 @@ pub fn assert_safe_pattern(pattern: &str) -> Result<(), EngineError> {
     if pattern.contains("..") {
         return Err(GuardrailError::ProtectedPath {
             path: format!("Patterns must not contain \"..\" traversal: \"{pattern}\""),
+        }
+        .into());
+    }
+
+    // Patterns are filenames, not essays - same 256-char bound as the JS side.
+    if pattern.len() > 256 {
+        return Err(GuardrailError::ProtectedPath {
+            path: format!(
+                "Pattern exceeds 256 characters: \"{}…\"",
+                pattern.chars().take(64).collect::<String>()
+            ),
         }
         .into());
     }
@@ -151,6 +210,10 @@ fn blocked_roots() -> HashSet<PathBuf> {
             roots.insert(PathBuf::from(format!("{root}Program Files (x86)")));
             roots.insert(PathBuf::from(format!("{root}Users")));
             roots.insert(PathBuf::from(format!("{root}ProgramData")));
+            // MSYS/Git-for-Windows layouts put real system trees here.
+            roots.insert(PathBuf::from(format!("{root}usr")));
+            roots.insert(PathBuf::from(format!("{root}usr\\local")));
+            roots.insert(PathBuf::from(format!("{root}etc")));
         }
     }
 

@@ -1,18 +1,17 @@
+import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { historyFilePath, readHistory, summarizeHistory } from "@kitsunekode/sweep-core/history";
 import { printStatsSummary } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { applyNoColor, writeJson } from "./shared.js";
+import { applyNoColor, warnIgnoredOptions, writeJson } from "./shared.js";
 
-export type StatsHandlerOptions = {
-  json?: boolean;
-  color: boolean;
-};
+export type StatsHandlerOptions = CliOptions & { json?: boolean };
 
 const RECENT_SESSIONS = 5;
 
 /** `sweep stats` - lifetime reclaimed space plus recent cleanup sessions. */
 export async function handleStats(opts: StatsHandlerOptions): Promise<void> {
   applyNoColor(opts.color);
+  warnIgnoredOptions(opts, "stats", { except: ["--json"] });
 
   try {
     // Stats need every session for correct totals, not the default page.

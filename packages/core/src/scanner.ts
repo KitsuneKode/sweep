@@ -22,7 +22,7 @@ export interface ScanHooks {
 }
 
 /** VCS/metadata dirs - never descend (major win on large trees). */
-const SKIP_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr"]);
+const SKIP_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr", ".jj", ".sl", "_darcs", ".pijul"]);
 
 // macOS and Windows filesystems are case-insensitive, so `.GIT` is the same
 // protected directory as `.git` - compare lowercase there.

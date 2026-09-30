@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
 import type {
   PathFailure,
   RiskTier,
@@ -21,7 +20,7 @@ import {
   WORKSPACE_STUB_REASON,
 } from "./candidate-insights.js";
 import { catalogMatchFor } from "./catalog.js";
-import { isPathWithinRoot, pathHasProtectedVcsSegment } from "./guardrails.js";
+import { isPathWithinRoot, isSameResolvedPath, pathHasProtectedVcsSegment } from "./guardrails.js";
 
 export function buildPlan(
   targetDir: string,
@@ -119,23 +118,6 @@ export function candidateFromEntry(entry: ScanEntry): ScanCandidate {
 export function resolveSelectedCandidates(plan: ScanPlan): ScanCandidate[] {
   const selectedIds = new Set(plan.selectedCandidateIds);
   return plan.candidates.filter((candidate) => selectedIds.has(candidate.id));
-}
-
-/**
- * Resolved-path equality, case-folded where the filesystem is (macOS/Windows).
- * A case-variant spelling of the same directory must not slip past the
- * root-protection check on a case-insensitive volume.
- */
-function isSameResolvedPath(a: string, b: string): boolean {
-  const ra = resolve(a);
-  const rb = resolve(b);
-  if (ra === rb) {
-    return true;
-  }
-  if (process.platform === "win32" || process.platform === "darwin") {
-    return ra.toLowerCase() === rb.toLowerCase();
-  }
-  return false;
 }
 
 export function revalidateCandidates(
@@ -240,18 +222,30 @@ export function revalidateCandidates(
           });
           continue;
         }
+        // A symlinked ancestor can place a lexical-clean path inside VCS
+        // metadata (sub -> repo/.git): check the canonical path too.
+        if (pathHasProtectedVcsSegment(realCandidate)) {
+          failedPaths.push({
+            path: candidate.path,
+            code: "protected_path",
+            error: "candidate resolves inside protected VCS metadata",
+          });
+          continue;
+        }
       }
 
       ready.push(candidate);
     } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
       const error = err instanceof Error ? err.message : String(err);
       failedPaths.push({
         path: candidate.path,
-        code: error.includes("ENOENT")
-          ? "missing"
-          : error.includes("EACCES") || error.includes("EPERM")
-            ? "permission_denied"
-            : "filesystem_error",
+        code:
+          code === "ENOENT"
+            ? "missing"
+            : code === "EACCES" || code === "EPERM"
+              ? "permission_denied"
+              : "filesystem_error",
         error,
       });
     }

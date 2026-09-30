@@ -56,6 +56,35 @@ describe("assertSafeCwd", () => {
     expect(() => assertSafeCwd("./packages/core")).not.toThrow();
   });
 
+  test("blocks a target whose symlink resolves to a protected root", () => {
+    // Lexically `link-to-root` is deep under tmpdir - only canonicalizing the
+    // target catches that it IS `/`. Without this a symlinked scan root can
+    // walk straight past the blocked-root list.
+    if (process.platform === "win32") return; // symlink perms vary on Windows
+    const dir = mkdtempSync(join(tmpdir(), "sweep-cwd-"));
+    const link = join(dir, "link-to-root");
+    symlinkSync("/", link);
+    try {
+      expect(() => assertSafeCwd(link)).toThrow(GuardrailError);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("still allows a symlinked target resolving to an ordinary project dir", () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "sweep-cwd-ok-"));
+    const link = join(tmpdir(), `sweep-cwd-ok-link-${process.pid}`);
+    symlinkSync(dir, link);
+    try {
+      // The link resolves inside tmpdir - deep enough, no protected segment.
+      expect(() => assertSafeCwd(link)).not.toThrow();
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // ── Safe paths ────────────────────────────────────────────────────────────
 
   test("allows a normal project path inside home", () => {

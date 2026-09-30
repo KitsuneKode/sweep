@@ -213,7 +213,9 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     if (key.name === "y") {
       actions.setPendingApply(false);
       actions.applyPlan();
-    } else if (key.name === "n" || key.name === "escape") {
+    } else if (key.name === "n" || key.name === "escape" || key.name === "q") {
+      // q dismisses like every other modal - quitting while a destructive
+      // confirm is up would be one keystroke from intent to exit.
       actions.setPendingApply(false);
     }
     return;
@@ -312,6 +314,18 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     return;
   }
 
+  // Artifact-scope actions must not fire while the patterns pane owns the
+  // screen: `o` sorts an invisible list and `S` exports a queue the user
+  // isn't looking at. r (rescan) and t (theme) stay global - rescanning
+  // after edits is the pane's point.
+  if (
+    state.focus === "patterns" &&
+    (key.name === "o" || key.name === "S" || (key.name === "s" && key.shift))
+  ) {
+    actions.notify?.("finish in patterns first - esc leaves the pane");
+    return;
+  }
+
   // Shift+S must be claimed before plain `s` (safe-only queue) sees it.
   if (key.name === "S" || (key.name === "s" && key.shift)) {
     actions.exportPlan?.();
@@ -341,6 +355,14 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     } else {
       actions.focusPanel("search");
     }
+    return;
+  }
+
+  // The sidebar unmounts under a narrow resize while focus stays behind -
+  // reconcile on the next keypress instead of leaving keys dead in a pane
+  // that isn't rendered.
+  if (state.focus === "sidebar" && !showSidebar) {
+    actions.focusPanel("list");
     return;
   }
 
@@ -495,7 +517,15 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     }
 
     if (key.name === "i") {
-      actions.setInspect?.(true);
+      // Only open inspect when there's a real subject: the overlay doesn't
+      // render without a candidate, but inspectOpen still traps every key -
+      // an invisible modal is the worst trap in the app.
+      const row = buildDisplayRows(state)[state.rowIndex];
+      if (row?.kind === "item") {
+        actions.setInspect?.(true);
+      } else {
+        actions.notify?.("nothing to inspect");
+      }
       return;
     }
 

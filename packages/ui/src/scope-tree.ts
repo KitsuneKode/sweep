@@ -130,8 +130,38 @@ function sortedChildren(node: TrieNode, byId: Map<string, ScanCandidate>): TrieN
   });
 }
 
+// Rebuilt per render otherwise - tuple-keyed single-slot cache, same pattern
+// as the display-rows cache in rows.ts.
+let treeLast: {
+  targetDir: string;
+  candidates: ScanCandidate[];
+  selectedIds: ReadonlySet<string>;
+  expandedKeys: ReadonlySet<string>;
+  rows: ScopeSidebarRow[];
+} | null = null;
+
 /** Visible sidebar rows: all-scopes, then an indented folder tree. */
 export function buildScopeTreeRows(
+  targetDir: string,
+  candidates: ScanCandidate[],
+  selectedIds: Set<string>,
+  expandedKeys: ReadonlySet<string>,
+): ScopeSidebarRow[] {
+  if (
+    treeLast &&
+    treeLast.targetDir === targetDir &&
+    treeLast.candidates === candidates &&
+    treeLast.selectedIds === selectedIds &&
+    treeLast.expandedKeys === expandedKeys
+  ) {
+    return treeLast.rows;
+  }
+  const rows = computeScopeTreeRows(targetDir, candidates, selectedIds, expandedKeys);
+  treeLast = { targetDir, candidates, selectedIds, expandedKeys, rows };
+  return rows;
+}
+
+function computeScopeTreeRows(
   targetDir: string,
   candidates: ScanCandidate[],
   selectedIds: Set<string>,
@@ -178,12 +208,27 @@ export function buildScopeTreeRows(
   return rows;
 }
 
+/**
+ * `path.relative` per candidate per render was the hot-spot on large scans.
+ * Candidate paths are immutable strings, so the scope key caches by content;
+ * the map resets when the target changes instead of growing across rescans.
+ */
+let scopeKeyTarget: string | null = null;
+const scopeKeyCache = new Map<string, string>();
+
 /** Parent directory of an artifact, relative to the scan root. Empty = project root. */
 export function artifactScopeKey(targetDir: string, path: string): string {
+  if (targetDir !== scopeKeyTarget) {
+    scopeKeyCache.clear();
+    scopeKeyTarget = targetDir;
+  }
+  const cached = scopeKeyCache.get(path);
+  if (cached !== undefined) return cached;
   const rel = relativePath(targetDir, path).replaceAll("\\", "/");
   const slash = rel.lastIndexOf("/");
-  if (slash <= 0) return "";
-  return rel.slice(0, slash);
+  const key = slash <= 0 ? "" : rel.slice(0, slash);
+  scopeKeyCache.set(path, key);
+  return key;
 }
 
 /** Prefix match so a folder scope includes every nested artifact. */

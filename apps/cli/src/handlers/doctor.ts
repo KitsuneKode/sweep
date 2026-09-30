@@ -1,24 +1,29 @@
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
+import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
-import { loadConfig, validateProjectConfigFile } from "@kitsunekode/sweep-core/config";
+import { findProjectConfigPath, validateProjectConfigFile } from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import {
   isRustEngineAvailable,
   resolveRustEngineBinary,
 } from "@kitsunekode/sweep-core/rust-engine";
 import { scan } from "@kitsunekode/sweep-core/scanner";
+import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { formatBytes, sanitizeTerminalText } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { applyNoColor, isOpenTuiAvailable, writeJson } from "./shared.js";
+import {
+  applyNoColor,
+  isOpenTuiAvailable,
+  resolveScanConfig,
+  warnIgnoredOptions,
+  writeJson,
+} from "./shared.js";
 
-export type DoctorHandlerOptions = {
+export type DoctorHandlerOptions = CliOptions & {
   path?: string;
-  color: boolean;
   json?: boolean;
-  quiet?: boolean;
-  verbose?: boolean;
 };
 
 export type DoctorCheck = {
@@ -47,29 +52,47 @@ function targetIsDirectory(targetDir: string): boolean {
   }
 }
 
-export async function collectDoctorChecks(targetDir: string): Promise<DoctorCheck[]> {
-  const configPath = resolve(targetDir, ".sweeprc");
-  const config = loadConfig(targetDir);
+export async function collectDoctorChecks(
+  targetDir: string,
+  opts: CliOptions & { trash?: boolean },
+): Promise<DoctorCheck[]> {
+  // Report the config file loadConfig would actually find - ancestors count.
+  const configPath = findProjectConfigPath(targetDir);
   const rustBinary = resolveRustEngineBinary();
   const rustOk = isRustEngineAvailable();
   const duOk = duAvailable();
   const openTuiOk = isOpenTuiAvailable();
-  const hasConfigFile = existsSync(configPath);
+  const hasConfigFile = configPath !== null;
   const configValidity = hasConfigFile
     ? validateProjectConfigFile(configPath, targetDir)
-    : { ok: true as const, path: configPath };
+    : { ok: true as const, path: configPath ?? "" };
+
+  // The dry scan runs the config a real run would use - CLI flags included -
+  // so doctor's preview matches `sweep <same flags>` behavior.
+  let config: SweepConfig | null = null;
+  let configLoadError: string | undefined;
+  try {
+    config = resolveScanConfig(targetDir, opts);
+  } catch (error) {
+    configLoadError = error instanceof Error ? error.message : String(error);
+  }
 
   let scanOk = true;
   let scanDetail = "not run";
-  try {
-    const result = await scan(targetDir, config, false);
-    scanDetail =
-      `${result.entries.length} candidates · ${formatBytes(result.estimatedTotalBytes)} · ` +
-      `${result.scannedDirs} dirs` +
-      (result.skippedDirs > 0 ? ` (${result.skippedDirs} skipped)` : "");
-  } catch (error) {
+  if (config === null) {
     scanOk = false;
-    scanDetail = error instanceof Error ? error.message : String(error);
+    scanDetail = `skipped (config error: ${configLoadError})`;
+  } else {
+    try {
+      const result = await scan(targetDir, config, false);
+      scanDetail =
+        `${result.entries.length} candidates · ${formatBytes(result.estimatedTotalBytes)} · ` +
+        `${result.scannedDirs} dirs` +
+        (result.skippedDirs > 0 ? ` (${result.skippedDirs} skipped)` : "");
+    } catch (error) {
+      scanOk = false;
+      scanDetail = error instanceof Error ? error.message : String(error);
+    }
   }
 
   return [
@@ -83,18 +106,24 @@ export async function collectDoctorChecks(targetDir: string): Promise<DoctorChec
     },
     {
       name: "config",
-      ok: configValidity.ok,
-      detail: hasConfigFile
-        ? configValidity.ok
-          ? configPath
-          : configValidity.detail
-        : "defaults (no .sweeprc)",
+      ok: configLoadError === undefined && configValidity.ok,
+      detail:
+        configLoadError ??
+        (hasConfigFile
+          ? configValidity.ok
+            ? configPath!
+            : configValidity.detail
+          : "defaults (no .sweeprc)"),
     },
-    { name: "patterns", ok: config.patterns.length > 0, detail: String(config.patterns.length) },
+    {
+      name: "patterns",
+      ok: config !== null && config.patterns.length > 0,
+      detail: config === null ? "config error" : String(config.patterns.length),
+    },
     {
       name: "disabled_patterns",
       ok: true,
-      detail: String(config.disabledPatterns?.length ?? 0),
+      detail: String(config?.disabledPatterns?.length ?? 0),
     },
     { name: "du", ok: duOk, detail: duOk ? "available" : "walk fallback" },
     {
@@ -109,13 +138,18 @@ export async function collectDoctorChecks(targetDir: string): Promise<DoctorChec
 
 export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
   applyNoColor(opts.color);
+  // Doctor scans (dry) and honors the output trio - apply-only flags warn.
+  warnIgnoredOptions(opts, "doctor", {
+    scans: true,
+    except: ["--json", "--quiet", "--verbose"],
+  });
 
   const targetDir = resolve(opts.path ?? ".");
 
   try {
     assertSafeCwd(targetDir);
 
-    const checks = await collectDoctorChecks(targetDir);
+    const checks = await collectDoctorChecks(targetDir, opts);
     const hasWarnings = checks.some((check) => !check.ok);
 
     if (opts.json) {

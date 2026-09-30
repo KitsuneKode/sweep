@@ -1,8 +1,8 @@
-import { existsSync, mkdirSync, rmdirSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type {
   ApplyReport,
   CliOptions,
@@ -23,6 +23,7 @@ import {
   assertSafeCwd,
   assertSafePattern,
   assertTargetDirectory,
+  isSameResolvedPath,
 } from "@kitsunekode/sweep-core/guardrails";
 import { toCandidate } from "@kitsunekode/sweep-core/planner";
 import { appendHistory } from "@kitsunekode/sweep-core/history";
@@ -78,7 +79,9 @@ export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepCon
   for (const pattern of ignore) assertSafePattern(pattern);
 
   const cliOverrides: Partial<SweepConfig> = {
-    depth: opts.depth,
+    // Only forward depth when the user actually passed it - a defaulted flag
+    // must not shadow the project/global config layer.
+    ...(opts.depth !== undefined ? { depth: opts.depth } : {}),
     ...(patterns.length > 0 ? { patterns } : {}),
     ...(disabledPatterns.length > 0 ? { disabledPatterns } : {}),
     ...(ignore.length > 0 ? { ignore } : {}),
@@ -96,6 +99,48 @@ export function resolveEngineBackend(opts: Pick<CliOptions, "engine">): EngineBa
   if (opts.engine === "js") return "js";
   if (opts.engine === "rust") return "rust";
   return isRustEngineAvailable() ? "rust" : "js";
+}
+
+/**
+ * Warn when a command parses global flags it never acts on.
+ *
+ * Every program-level option parses on every subcommand, so without this a
+ * `sweep apply --pattern x` or `sweep stats --dry-run` silently drops user
+ * intent - the worst failure mode for a trust-first tool. The `shape` flags
+ * name which groups the command honors; `except` subtracts individual flags
+ * the command reads only partially.
+ */
+export function warnIgnoredOptions(
+  opts: CliOptions & { trash?: boolean; json?: boolean },
+  command: string,
+  shape: { scans?: boolean; applies?: boolean; structured?: boolean; except?: string[] } = {},
+): void {
+  const ignored = new Set<string>();
+  if (!shape.scans) {
+    if ((opts.pattern ?? []).length > 0) ignored.add("--pattern");
+    if ((opts.ignore ?? []).length > 0) ignored.add("--ignore");
+    if ((opts.disabledPattern ?? []).length > 0) ignored.add("--disabled-pattern");
+    if (opts.depth !== undefined) ignored.add("--depth");
+    if (opts.select !== undefined && opts.select !== "default") ignored.add("--select");
+    if (opts.includeDangerous) ignored.add("--include-dangerous");
+  }
+  if (!shape.applies) {
+    if (opts.yes) ignored.add("--yes");
+    if (opts.trash) ignored.add("--trash");
+    if (opts.forceLarge) ignored.add("--force-large");
+    if (opts.dryRun) ignored.add("--dry-run");
+  }
+  if (!shape.structured) {
+    if (opts.json) ignored.add("--json");
+    if (opts.quiet) ignored.add("--quiet");
+    if (opts.verbose) ignored.add("--verbose");
+  }
+  for (const flag of shape.except ?? []) ignored.delete(flag);
+  if (ignored.size === 0) return;
+  const list = [...ignored].sort().join(", ");
+  console.error(
+    `warning: ${list} ${ignored.size === 1 ? "has" : "have"} no effect on \`sweep ${command}\``,
+  );
 }
 
 export async function runScanToPlan(
@@ -308,13 +353,14 @@ export async function confirmPlanDeletion(
   if (options.yes) return true;
 
   const { formatBytes } = await import("@kitsunekode/sweep-display");
+  const selectedIds = new Set(plan.selectedCandidateIds);
   const selectedBytes = plan.candidates
-    .filter((candidate) => plan.selectedCandidateIds.includes(candidate.id))
+    .filter((candidate) => selectedIds.has(candidate.id))
     .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
 
   const dangerousCount = plan.candidates.filter(
     (candidate) =>
-      plan.selectedCandidateIds.includes(candidate.id) &&
+      selectedIds.has(candidate.id) &&
       (candidate.riskTier === "dangerous" || candidate.riskTier === "blocked"),
   ).length;
 
@@ -352,9 +398,8 @@ export async function executePlanDeletion(
   // Re-assert the target guardrail here - not just in callers - so the trash
   // mkdir below can never run against a root a forged plan would fail on.
   assertSafeCwd(plan.targetDir);
-  const selected = plan.candidates.filter((candidate) =>
-    plan.selectedCandidateIds.includes(candidate.id),
-  );
+  const selectedIds = new Set(plan.selectedCandidateIds);
+  const selected = plan.candidates.filter((candidate) => selectedIds.has(candidate.id));
   // Schema-valid doesn't mean semantically sound - a hand-edited or stale
   // plan can list ids that match no candidate. Surface it instead of
   // silently dropping them.
@@ -380,6 +425,20 @@ export async function executePlanDeletion(
     }
     trashDir = freshTrashDir(plan.targetDir);
     mkdirSync(trashDir, { recursive: true });
+    // Pin the trash root's identity before any move touches it: a watcher
+    // could have swapped the fresh directory for a symlink between existsSync
+    // and mkdir - every rename would then land outside the target.
+    const trashStat = lstatSync(trashDir);
+    const realTrash = realpathSync(trashDir);
+    const realTarget = realpathSync(plan.targetDir);
+    if (
+      trashStat.isSymbolicLink() ||
+      !isSameResolvedPath(realTrash, join(realTarget, basename(trashDir)))
+    ) {
+      throw new GuardrailError(
+        `trash directory ${trashDir} is not a real directory inside the target`,
+      );
+    }
   }
 
   // Ctrl+C during apply must not vanish the report: stop scheduling new

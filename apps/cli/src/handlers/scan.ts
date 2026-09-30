@@ -1,5 +1,6 @@
 import type { CliOptions, ScanEvent } from "@kitsunekode/sweep-protocol";
 import { toCandidate } from "@kitsunekode/sweep-core/planner";
+import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
@@ -10,6 +11,7 @@ import {
   resolveScanTarget,
   runScanToPlan,
   runScanWithDisplay,
+  warnIgnoredOptions,
   writeJson,
   writeJsonLine,
 } from "./shared.js";
@@ -19,8 +21,18 @@ export async function handleScan(
   opts: CliOptions & { json?: boolean; jsonStream?: boolean },
 ): Promise<void> {
   applyNoColor(opts.color);
+  warnIgnoredOptions(opts, "scan", {
+    scans: true,
+    except: ["--json", "--quiet", "--verbose"],
+  });
 
   try {
+    if (opts.json && opts.jsonStream) {
+      throw new GuardrailError(
+        "Choose one: --json emits a plan; --json-stream emits NDJSON events.",
+      );
+    }
+
     const targetDir = resolveScanTarget(pathArg);
     const config = resolveScanConfig(targetDir, opts);
     const projectConfig = resolveProjectScanConfig(targetDir, opts);
@@ -36,6 +48,9 @@ export async function handleScan(
         selectionPolicy,
         engine,
         projectConfig,
+        onProgress: (progress) => {
+          writeJsonLine({ type: "scan_progress", ...progress } satisfies ScanEvent);
+        },
         onEntry: (entry) => {
           const candidate = toCandidate(entry);
           writeJsonLine({ type: "candidate_found", candidate } satisfies ScanEvent);

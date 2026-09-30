@@ -549,6 +549,33 @@ describe("sweep ui state", () => {
     expect(isCustomPattern(state, "dist")).toBe(false);
   });
 
+  test("removing the last custom pattern keeps the pattern cursor in range", () => {
+    // Without the clamp the cursor parks past the end of the list and the next
+    // space/d reads a row that doesn't exist.
+    let state = createUiState(createPlan(), {
+      catalogPatterns: ["node_modules"],
+      extraPatterns: ["*.bak"],
+    });
+    state = setPatternIndex(state, allPatterns(state).length - 1);
+    state = removeCustomPattern(state, "*.bak");
+
+    expect(state.patternIndex).toBeLessThanOrEqual(Math.max(0, allPatterns(state).length - 1));
+    expect(patternAtCursor(state)).toBe("node_modules");
+  });
+
+  test("memoized selectors stay referentially stable across unrelated state churn", () => {
+    // Cursor moves rebuild the state object but not the row inputs - the
+    // tuple-keyed cache must return the same arrays or every keystroke pays a
+    // full O(n log n) regroup.
+    let state = createUiState(createPlan());
+    const rows = buildDisplayRows(state);
+    const visible = getVisibleCandidates(state);
+
+    state = setRowIndex(state, state.rowIndex + 1);
+    expect(buildDisplayRows(state)).toBe(rows);
+    expect(getVisibleCandidates(state)).toBe(visible);
+  });
+
   test("rescanConfigFromState hands extras and disabled patterns back for rescan", () => {
     let state = createUiState(createPlan(), { extraPatterns: ["*.bak"] });
     state = togglePattern(state, "*.bak");
@@ -648,6 +675,41 @@ describe("sweep ui state", () => {
       const done = finalizeScan(state, { ...createPlan(), candidates: [] });
       expect(done.selectedIds.size).toBe(0);
       expect(done.candidates).toHaveLength(0);
+    });
+
+    test("a mid-scan clear keeps later discoveries and the policy pass out of the queue", () => {
+      // `u` means "queue nothing at all" - not "nothing I can see yet". Without
+      // the latch, clearing early in a big scan visibly refills the queue and
+      // enter->y deletes things the user believes they dequeued.
+      let state = createUiState({ ...createPlan(), candidates: [] });
+      state = setScanning(state, true);
+      state = upsertCandidates(state, [discovery("a")]);
+      expect(state.selectedIds.has("a")).toBe(true);
+
+      state = clearSelection(state);
+      expect(state.selectedIds.size).toBe(0);
+
+      state = upsertCandidates(state, [discovery("b"), discovery("c")]);
+      expect(state.selectedIds.size).toBe(0);
+
+      const done = finalizeScan(state, {
+        ...createPlan(),
+        candidates: [discovery("a"), discovery("b"), discovery("c")],
+        selectedCandidateIds: ["a", "b", "c"],
+      });
+      expect(done.selectedIds.size).toBe(0);
+    });
+
+    test("a rescan lifts the cleared-queue latch so the new generation seeds", () => {
+      let state = createUiState({ ...createPlan(), candidates: [] });
+      state = setScanning(state, true);
+      state = clearSelection(state);
+      expect(state.queueCleared).toBe(true);
+
+      const fresh = resetForRescan(state);
+      expect(fresh.queueCleared).toBe(false);
+      const reseeded = upsertCandidates(fresh, [discovery("a")]);
+      expect(reseeded.selectedIds.has("a")).toBe(true);
     });
   });
 

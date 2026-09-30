@@ -264,6 +264,7 @@ describe("buildHeaderStats queue counts", () => {
     selectedBytes: 3072,
     visibleSelectedCount: 3,
     dangerousVisibleCount: 0,
+    selectedRiskCounts: { safe: 3, caution: 0, dangerous: 0 },
     ...over,
   });
 

@@ -110,6 +110,13 @@ function main(): void {
   const manifest = JSON.parse(original) as Record<string, unknown>;
   const catalogs = readCatalogs(REPO_ROOT);
 
+  // The workspace `exports` points at ./src/*.ts, which is not in the tarball.
+  // Published consumers get the bundled equivalents instead.
+  manifest.exports = {
+    ".": "./dist/sweep-lib.js",
+    "./bin": "./dist/sweep.js",
+  };
+
   for (const field of ["dependencies", "optionalDependencies", "peerDependencies"] as const) {
     const resolved = resolveDependencies(manifest[field] as DependencyBlock | undefined, catalogs);
     if (resolved) manifest[field] = resolved;

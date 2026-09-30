@@ -91,11 +91,34 @@ export async function buildCliBundle(): Promise<Bun.BuildOutput> {
   return result;
 }
 
+/**
+ * Programmatic surface (`makeProgram`, `VERSION`) for the published `exports`
+ * map. No shebang and no argv bootstrap - importing it must not run the CLI.
+ * `sweep-ui.js` still resolves as a sibling of this bundle's import.meta.url.
+ */
+export async function buildLibBundle(): Promise<Bun.BuildOutput> {
+  const version = readCliVersion();
+
+  return runBundle("lib", {
+    entrypoints: [join(REPO_ROOT, "apps/cli/src/index.ts")],
+    target: "node",
+    format: "esm",
+    naming: { entry: "sweep-lib.[ext]" },
+    external: ["@opentui/core", "./sweep-ui.js", "@kitsunekode/sweep-ui"],
+    define: {
+      __SWEEP_VERSION__: JSON.stringify(version),
+    },
+    root: REPO_ROOT,
+    tsconfig: join(REPO_ROOT, "apps/cli/tsconfig.json"),
+  });
+}
+
 export async function buildAllBundles(): Promise<void> {
   console.log("bundling sweep publish artifacts\n");
   await buildUiBundle();
   await buildCliBundle();
-  console.log("\ndone: apps/cli/dist/sweep.js + apps/cli/dist/sweep-ui.js");
+  await buildLibBundle();
+  console.log("\ndone: apps/cli/dist/sweep.js + sweep-ui.js + sweep-lib.js");
 }
 
 if (import.meta.main) {
@@ -109,6 +132,10 @@ if (import.meta.main) {
     }
     if (target === "cli") {
       await buildCliBundle();
+      return;
+    }
+    if (target === "lib") {
+      await buildLibBundle();
       return;
     }
     if (target === "all") {

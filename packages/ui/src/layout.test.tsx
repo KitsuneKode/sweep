@@ -181,7 +181,7 @@ describe("layout across terminal sizes", () => {
     await press(setup, "?");
     const frame = setup.captureCharFrame();
 
-    expect(frame).toContain("keyboard");
+    expect(frame).toContain("keys");
     expectFits(frame, 40);
   });
 

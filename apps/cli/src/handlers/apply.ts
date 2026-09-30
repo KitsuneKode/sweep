@@ -20,17 +20,14 @@ import {
   executePlanDeletion,
   promptConfirm,
   resolveEngineBackend,
+  warnIgnoredOptions,
   writeJson,
 } from "./shared.js";
 
-export type ApplyHandlerOptions = {
+export type ApplyHandlerOptions = import("@kitsunekode/sweep-protocol").CliOptions & {
   plan: string;
-  yes: boolean;
-  forceLarge?: boolean;
   trash?: boolean;
   json?: boolean;
-  color: boolean;
-  engine?: import("@kitsunekode/sweep-protocol").EngineBackend;
 };
 
 export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
@@ -71,6 +68,21 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
     // a saved or shared plan is not a trusted lane around maxSizeGB.
     const config = loadConfig(plan.targetDir);
     assertSizeLimit(getSelectedBytes(plan), config.maxSizeGB, opts.forceLarge ?? false);
+
+    if (opts.dryRun) {
+      // A plan "preview" must never delete: report what applying would do.
+      const totalBytes = getSelectedBytes(plan);
+      if (opts.json) {
+        writeJson(plan);
+      } else {
+        console.log(
+          `Dry run: would ${opts.trash ? "move to .sweep-trash" : "delete"} ${selectedCount} item(s) (~${formatBytes(totalBytes)}).`,
+        );
+      }
+      exitWith(EXIT.OK);
+    }
+
+    warnIgnoredOptions(opts, "apply", { applies: true, except: ["--json"] });
 
     if (!opts.yes) {
       const totalBytes = getSelectedBytes(plan);

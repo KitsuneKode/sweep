@@ -37,15 +37,24 @@ export function printDeletionProgress(
 
   if (process.stdout.isTTY) {
     process.stdout.write(`\r${pc.cyan("…")} ${line}${suffix}`);
+    progressDrawn = true;
     return;
   }
 
   console.log(`sweep: ${options.verb ?? "deleting"} ${line}${suffix}`);
 }
 
+/**
+ * Whether this process ever drew a transient progress line. The erase write
+ * must only happen when a line exists - under `--json` on a real TTY, an
+ * unconditional `\r\x1b[K` would corrupt the machine-readable payload.
+ */
+let progressDrawn = false;
+
 /** Clear the active deletion progress line in TTY mode. */
 export function clearDeletionProgress(): void {
-  if (process.stdout.isTTY) {
+  if (process.stdout.isTTY && progressDrawn) {
     process.stdout.write("\r\x1b[K");
+    progressDrawn = false;
   }
 }

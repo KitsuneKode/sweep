@@ -1,18 +1,19 @@
 import { resolve } from "node:path";
+import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { writeInitSweeprc } from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd, assertTargetDirectory } from "@kitsunekode/sweep-core/guardrails";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-display";
-import { applyNoColor, resolveTargetPath } from "./shared.js";
+import { applyNoColor, resolveTargetPath, warnIgnoredOptions } from "./shared.js";
 
-export type InitHandlerOptions = {
+export type InitHandlerOptions = CliOptions & {
   path?: string;
   force: boolean;
-  color: boolean;
 };
 
 export async function handleInit(opts: InitHandlerOptions): Promise<void> {
   applyNoColor(opts.color);
+  warnIgnoredOptions(opts, "init");
 
   const targetDir = resolveTargetPath(opts.path ?? ".");
   const configPath = resolve(targetDir, ".sweeprc");

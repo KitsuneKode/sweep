@@ -148,6 +148,43 @@ describe("core engine", () => {
     expect(plan.summary.riskCounts.dangerous).toBe(1);
   });
 
+  test("applyPlan rejects a plan carrying a foreign protocol version", async () => {
+    // A plan file is untrusted input - interpreting a future/past schema with
+    // this engine's semantics is how silent misdeletes happen.
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const foreign = { ...plan, protocolVersion: "999" as "1" };
+
+    await expect(applyPlan(foreign)).rejects.toThrow(/protocol version/);
+    expect(existsSync(dir("node_modules"))).toBe(true);
+  });
+
+  test("applyPlan collapses a nested child into its parent delete", async () => {
+    // A forged or stale plan can name both a directory and something inside
+    // it; the child delete must fold into the parent - one attempt, no phantom
+    // "missing" failure, and interrupted compares against the real work set.
+    mkdirSync(dir("node_modules", "pkg"), { recursive: true });
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const parent = plan.candidates.find((c) => c.name === "node_modules")!;
+    const child = {
+      ...parent,
+      id: "cand_nested",
+      path: dir("node_modules", "pkg"),
+      name: "pkg",
+    };
+    const forged = {
+      ...plan,
+      candidates: [...plan.candidates, child],
+      selectedCandidateIds: [...plan.selectedCandidateIds, "cand_nested"],
+    };
+
+    const applied = await applyPlan(forged);
+    expect(applied.report.deletedCount).toBe(1);
+    expect(applied.report.failedCount).toBe(0);
+    expect(applied.interrupted).toBe(false);
+    expect(existsSync(dir("node_modules"))).toBe(false);
+  });
+
   test("applyPlan fails outside-target paths per entry without aborting", async () => {
     // Forged entries become per-path report failures (matching the Rust
     // engine); legitimate selected candidates still apply, and nothing

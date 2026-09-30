@@ -115,10 +115,17 @@ on `scan --json-stream` and consumed by the TUI.
 
 - `--json` produces stable machine-readable shapes (`scan`, `apply`, `doctor`,
   `clean`); structured failures carry stable codes.
-- `scan --json-stream` emits newline-delimited `ScanEvent`s (`scan_progress`,
-  `scan_candidate`, `scan_completed`).
+- `scan --json-stream` emits newline-delimited `ScanEvent`s:
+  `scan_started`, `candidate_found`, `candidate_updated` (sized enrichments),
+  `scan_progress`, `warning`, and `scan_completed` (always last).
+- `ApplyReport.failedPaths[].code` is one of: `missing` (vanished before
+  delete), `changed_symlink_state`, `changed_entry_type`, `outside_target`,
+  `protected_path` (VCS metadata or protected segment), `permission_denied`,
+  `busy`, `filesystem_error`.
 - Exit codes: `0` success, `1` aborted, `2` guardrail, `3` config error,
-  `4` operation failed, `5` doctor warnings.
+  `4` operation failed, `5` doctor warnings. The Rust engine exits with the
+  same codes and the JS wrapper re-throws the matching class, so
+  `--engine rust` and `--engine js` agree.
 - Non-TTY output disables color and spinners automatically.
 
 ## Distribution

@@ -1,12 +1,12 @@
+import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { getSelectedBytes, loadPlan } from "@kitsunekode/sweep-core/plan";
 import { printPlanInfo } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { applyNoColor, writeJson } from "./shared.js";
+import { applyNoColor, warnIgnoredOptions, writeJson } from "./shared.js";
 
-export type InspectHandlerOptions = {
+export type InspectHandlerOptions = CliOptions & {
   plan: string;
   json?: boolean;
-  color: boolean;
 };
 
 function countBy<T extends string>(values: T[]): Record<T, number> {
@@ -20,6 +20,7 @@ function countBy<T extends string>(values: T[]): Record<T, number> {
 /** `sweep inspect` - print a saved plan's provenance and totals without applying it. */
 export async function handleInspect(opts: InspectHandlerOptions): Promise<void> {
   applyNoColor(opts.color);
+  warnIgnoredOptions(opts, "inspect", { except: ["--json"] });
 
   try {
     const plan = loadPlan(opts.plan);

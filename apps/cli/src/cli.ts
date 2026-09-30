@@ -1,4 +1,4 @@
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { handleApply } from "./handlers/apply.js";
 import { handleClean } from "./handlers/clean.js";
@@ -58,12 +58,15 @@ function addScanOptions<T extends Command>(command: T): T {
       (v: string, acc: string[]) => [...acc, v],
       [] as string[],
     )
-    .option(
-      "--depth <n>",
-      "Max recursion depth (-1 = unlimited)",
-      (v) => Number.parseInt(v, 10),
-      -1,
-    )
+    .option("--depth <n>", "Max recursion depth (-1 = unlimited)", (v: string) => {
+      const parsed = Number.parseInt(v, 10);
+      // No default: an absent flag must leave project/global config depth
+      // reachable; InvalidArgumentError makes a bad value a usage error.
+      if (!Number.isInteger(parsed)) {
+        throw new InvalidArgumentError(`expected an integer, got "${v}"`);
+      }
+      return parsed;
+    })
     .option("--select <mode>", "Default selection policy: default, safe, all, none", "default")
     .option("--include-dangerous", "Include dangerous candidates in selection", false)
     .option("--config <path>", "Explicit config file path")
@@ -141,15 +144,13 @@ export function makeProgram(): Command {
     .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
     .option("--json", "Emit JSON apply results", false)
     .action(function (this: Command) {
-      const opts = this.optsWithGlobals<{
-        plan: string;
-        yes: boolean;
-        forceLarge?: boolean;
-        trash?: boolean;
-        json?: boolean;
-        color: boolean;
-        engine?: import("@kitsunekode/sweep-protocol").EngineBackend;
-      }>();
+      const opts = this.optsWithGlobals<
+        CliOptions & {
+          plan: string;
+          trash?: boolean;
+          json?: boolean;
+        }
+      >();
       void handleApply(opts);
     });
 
@@ -159,11 +160,12 @@ export function makeProgram(): Command {
     .requiredOption("--plan <path>", "Path to a saved scan plan")
     .option("--json", "Emit the plan summary as JSON", false)
     .action(function (this: Command) {
-      const opts = this.optsWithGlobals<{
-        plan: string;
-        json?: boolean;
-        color: boolean;
-      }>();
+      const opts = this.optsWithGlobals<
+        CliOptions & {
+          plan: string;
+          json?: boolean;
+        }
+      >();
       void handleInspect(opts);
     });
 
@@ -172,7 +174,7 @@ export function makeProgram(): Command {
     .description("Show cleanup history and total reclaimed space")
     .option("--json", "Emit history as JSON", false)
     .action(function (this: Command) {
-      const opts = this.optsWithGlobals<{ json?: boolean; color: boolean }>();
+      const opts = this.optsWithGlobals<CliOptions & { json?: boolean }>();
       void handleStats(opts);
     });
 
@@ -181,7 +183,7 @@ export function makeProgram(): Command {
     .description("Print shell completion script (bash, zsh, or fish)")
     .argument("<shell>", "Shell to generate completions for: bash, zsh, or fish")
     .action(function (this: Command, shell: string) {
-      const opts = this.optsWithGlobals<{ color: boolean }>();
+      const opts = this.optsWithGlobals<CliOptions>();
       void handleCompletions(shell, opts, this.parent ?? this);
     });
 
@@ -191,8 +193,8 @@ export function makeProgram(): Command {
     .argument("[path]", "Directory to initialize", ".")
     .option("-f, --force", "Overwrite an existing .sweeprc", false)
     .action(function (this: Command, pathArg: string) {
-      const opts = this.optsWithGlobals<{ force?: boolean; color: boolean }>();
-      void handleInit({ path: pathArg, force: opts.force ?? false, color: opts.color });
+      const opts = this.optsWithGlobals<CliOptions & { force?: boolean }>();
+      void handleInit({ ...opts, path: pathArg, force: opts.force ?? false });
     });
 
   program
@@ -200,13 +202,8 @@ export function makeProgram(): Command {
     .description("Check sweep environment, config, and dry-scan preview")
     .argument("[path]", "Directory to inspect", ".")
     .action(function (this: Command, pathArg: string) {
-      const opts = this.optsWithGlobals<{
-        color: boolean;
-        json?: boolean;
-        quiet?: boolean;
-        verbose?: boolean;
-      }>();
-      void handleDoctor({ path: pathArg, ...opts });
+      const opts = this.optsWithGlobals<CliOptions & { json?: boolean }>();
+      void handleDoctor({ ...opts, path: pathArg });
     });
 
   return program;

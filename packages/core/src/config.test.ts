@@ -203,6 +203,32 @@ describe("writeProjectSweeprc", () => {
     expect(JSON.parse(readFileSync(configPath, "utf-8")).patterns).toContain("dist");
   });
 
+  test("a forced update preserves fields the pattern pane does not own", () => {
+    // shift-W overwrites - but an existing hand-authored config carries
+    // guardrails (maxSizeGB, depth, ignore) that are not the pane's to drop.
+    mkdirSync(dir("project"), { recursive: true });
+    writeConfig(dir("project"), { maxSizeGB: 3, depth: 4, ignore: ["keep-me"] });
+    const configPath = dir("project", ".sweeprc");
+
+    expect(writeProjectSweeprc(configPath, delta, true)).toBe("updated");
+    const written = JSON.parse(readFileSync(configPath, "utf-8"));
+    expect(written.patterns).toContain("dist");
+    expect(written.maxSizeGB).toBe(3);
+    expect(written.depth).toBe(4);
+    expect(written.ignore).toEqual(["keep-me"]);
+    expect(loadConfig(dir("project")).maxSizeGB).toBe(3);
+  });
+
+  test("a forced update refuses when the existing file is not parseable", () => {
+    // Better to fail loud than to silently discard a config the user wrote.
+    mkdirSync(dir("project"), { recursive: true });
+    const configPath = dir("project", ".sweeprc");
+    writeFileSync(configPath, "{ not json");
+
+    expect(() => writeProjectSweeprc(configPath, delta, true)).toThrow(ConfigParseError);
+    expect(readFileSync(configPath, "utf-8")).toBe("{ not json");
+  });
+
   test("refuses to write through a symlinked .sweeprc", () => {
     if (process.platform === "win32") return; // symlink perms vary
     mkdirSync(dir("project"), { recursive: true });

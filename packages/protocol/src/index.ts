@@ -95,7 +95,8 @@ export interface CliOptions {
   ignore: string[];
   includeDangerous: boolean;
   select: SelectionMode;
-  depth: number;
+  /** Absent unless the user passed --depth - config layers stay reachable. */
+  depth?: number;
   config?: string;
   color: boolean;
   engine: EngineBackend;

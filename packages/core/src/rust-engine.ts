@@ -17,7 +17,7 @@ import type {
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { GuardrailError } from "./guardrails.js";
 import { buildPlan } from "./planner.js";
-import { validateApplyReport } from "./plan.js";
+import { PlanValidationError, validateApplyReport } from "./plan.js";
 import type { ScanHooks } from "./scanner.js";
 import type { ScanToPlanOptions } from "./engine.js";
 import { nativePlatformForCurrentProcess } from "./native-platforms.js";
@@ -257,9 +257,17 @@ async function runEngineAsync(
       if (code === 0) {
         settle(() => resolvePromise(stdout));
       } else {
+        // The engine exits with the CLI's taxonomy (2 guardrail, 3 invalid
+        // input, 4 failure) so `sweep --engine rust` maps errors identically
+        // to the JS engine instead of collapsing every failure to exit 4.
+        const message = stderr.trim() || `rust engine exited with status ${code ?? "signal"}`;
         settle(() =>
           rejectPromise(
-            new Error(stderr.trim() || `rust engine exited with status ${code ?? "signal"}`),
+            code === 2
+              ? new GuardrailError(message, 2)
+              : code === 3
+                ? new PlanValidationError(message)
+                : new Error(message),
           ),
         );
       }

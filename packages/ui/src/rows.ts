@@ -39,14 +39,60 @@ function itemComparator(sortBy: UiSortBy): (a: ScanCandidate, b: ScanCandidate) 
   return (a, b) => b.estimatedBytes - a.estimatedBytes || a.name.localeCompare(b.name);
 }
 
-const displayRowsCache = new WeakMap<SweepUiState, UiDisplayRow[]>();
+/**
+ * Display rows depend on a fixed input tuple - the visible candidates plus
+ * sort/pin/collapse - but every dispatch produces a new state object, so a
+ * WeakMap keyed on `state` misses on every keystroke. Key on the tuple
+ * instead; the visible-candidate list is itself memoized upstream, so
+ * identical inputs mean identical rows.
+ */
+interface RowsInputs {
+  candidates: ScanCandidate[];
+  filter: string;
+  scopeFilter: string | null;
+  riskFilter: SweepUiState["riskFilter"];
+  selectedIds: ReadonlySet<string>;
+  collapsedGroups: ReadonlySet<string>;
+  sortBy: UiSortBy;
+  orderPinned: boolean;
+  targetDir: string;
+  nowMinute: number;
+}
+
+let rowsLast: { inputs: RowsInputs; result: UiDisplayRow[] } | null = null;
 
 export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
-  const cached = displayRowsCache.get(state);
-  if (cached) return cached;
-  const rows = computeDisplayRows(state);
-  displayRowsCache.set(state, rows);
-  return rows;
+  const inputs: RowsInputs = {
+    candidates: state.candidates,
+    filter: state.filter,
+    scopeFilter: state.scopeFilter,
+    riskFilter: state.riskFilter,
+    selectedIds: state.selectedIds,
+    collapsedGroups: state.collapsedGroups,
+    sortBy: state.sortBy,
+    orderPinned: state.orderPinned,
+    targetDir: state.targetDir,
+    nowMinute: Math.floor(Date.now() / 60_000),
+  };
+  const last = rowsLast;
+  if (
+    last &&
+    last.inputs.candidates === inputs.candidates &&
+    last.inputs.selectedIds === inputs.selectedIds &&
+    last.inputs.collapsedGroups === inputs.collapsedGroups &&
+    last.inputs.filter === inputs.filter &&
+    last.inputs.scopeFilter === inputs.scopeFilter &&
+    last.inputs.riskFilter === inputs.riskFilter &&
+    last.inputs.sortBy === inputs.sortBy &&
+    last.inputs.orderPinned === inputs.orderPinned &&
+    last.inputs.targetDir === inputs.targetDir &&
+    last.inputs.nowMinute === inputs.nowMinute
+  ) {
+    return last.result;
+  }
+  const result = computeDisplayRows(state);
+  rowsLast = { inputs, result };
+  return result;
 }
 
 /**

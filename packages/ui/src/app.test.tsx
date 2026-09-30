@@ -78,7 +78,8 @@ describe("sweep TUI render", () => {
     expect(frame).toContain("found");
     expect(frame).toContain("queued");
     expect(frame).toContain("apply");
-    expect(frame).toContain("reclaimable");
+    // The tally carries the queue's risk mix - the header owns the bytes.
+    expect(frame).toContain("1 safe");
   });
 
   test("renders scope sidebar with reclaim bytes and project groups", async () => {
@@ -90,6 +91,44 @@ describe("sweep TUI render", () => {
     expect(frame).toContain("▾");
     expect(frame).toContain("project root");
     expect(frame).not.toMatch(/▸ project root.*▸/);
+  });
+
+  test("enter while a scan is running warns instead of opening the confirm dialog", async () => {
+    // A confirm whose candidate count is still growing under the user's eyes
+    // is a trap - apply stays closed until the generation settles.
+    const outcomes: SweepUiOutcome[] = [];
+    // scanning only clears via onDone/onError, so a start() that resolves
+    // without calling either keeps the generation open for the whole test.
+    const pendingScan: UiScanControl = {
+      start: () => Promise.resolve(),
+      syncPatterns: () => {},
+    };
+    const setup = await testRender(
+      <SweepApp
+        plan={createPlan()}
+        scan={pendingScan}
+        initiallyScanning
+        onDone={(result) => outcomes.push(result)}
+      />,
+      { width: 120, height: 32 },
+    );
+    teardown = () => setup.renderer.destroy();
+    await act(async () => {
+      await setup.renderOnce();
+    });
+
+    await act(async () => {
+      setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    await act(async () => {
+      await setup.renderOnce();
+    });
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("scan still running");
+    expect(frame).not.toContain("Permanently delete");
+    expect(outcomes).toEqual([]);
   });
 
   test("q aborts and reports the abort outcome", async () => {

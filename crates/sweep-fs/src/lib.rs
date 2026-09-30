@@ -174,7 +174,9 @@ pub struct WalkResult {
     pub skipped_dirs: u32,
 }
 
-const SKIP_DIR_NAMES: &[&str] = &[".git", ".svn", ".hg", ".bzr"];
+const SKIP_DIR_NAMES: &[&str] = &[
+    ".git", ".svn", ".hg", ".bzr", ".jj", ".sl", "_darcs", ".pijul",
+];
 
 /// macOS and Windows filesystems are case-insensitive, so `.GIT` is the same
 /// protected directory as `.git` - compare lowercase there (JS parity).
@@ -216,9 +218,22 @@ struct WalkCtx<'a> {
 }
 
 /// Mirrors the JS scanner's `markDir`: false when the dir cannot be stat'd or
-/// was already walked under a different path. Inode-less filesystems (Windows
-/// reports 0) cannot dedupe, so they always visit.
+/// was already walked under a different path. The not-a-real-dir refusal runs
+/// on every platform; only the (dev, ino) dedupe is unix-specific - Windows
+/// dedupes on (volume serial, file index) instead.
 fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
+    let meta = match fs::symlink_metadata(dir.as_std_path()) {
+        Ok(meta) => meta,
+        Err(_) => return false,
+    };
+    // A dir swapped for a symlink between read_dir and this lstat would be
+    // followed by read_dir below and walked outside the target - refuse
+    // anything that is no longer a real directory. Junctions are reparse
+    // points and get the same refusal. (Narrows the swap window; eliminating
+    // it needs fd-relative walks.)
+    if meta.file_type().is_symlink() || meta_is_reparse_point(&meta) || !meta.is_dir() {
+        return false;
+    }
     let visited = match ctx.visited {
         Some(v) => v,
         None => return true,
@@ -226,17 +241,6 @@ fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        let meta = match fs::symlink_metadata(dir.as_std_path()) {
-            Ok(meta) => meta,
-            Err(_) => return false,
-        };
-        // A dir swapped for a symlink between read_dir and this lstat would be
-        // followed by read_dir below and walked outside the target - refuse
-        // anything that is no longer a real directory. (Narrows the swap
-        // window; eliminating it needs fd-relative walks.)
-        if meta.file_type().is_symlink() || !meta.is_dir() {
-            return false;
-        }
         if meta.ino() == 0 {
             return true;
         }
@@ -246,9 +250,22 @@ fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
             Err(_) => true,
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = dir;
+        use std::os::windows::fs::MetadataExt;
+        match (meta.volume_serial_number(), meta.file_index()) {
+            (Some(vol), Some(idx)) if idx != 0 => match visited.lock() {
+                Ok(mut guard) => guard.insert((vol, idx)),
+                Err(_) => true,
+            },
+            // Filesystems without file indices (some network drives) cannot
+            // dedupe - links are refused above, so no revisit cycle can form.
+            _ => true,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (visited, dir);
         true
     }
 }
@@ -475,10 +492,18 @@ impl IgnoreMatcher {
             .strip_prefix(root)
             .map(|p| p.as_str())
             .unwrap_or(full_path.as_str());
+        // On Windows the relative path carries `\` separators while ignore
+        // patterns are forward-slash-joined - normalize before comparing
+        // (JS compileIgnoreMatcher does the same .replace(/\\/g, "/")).
+        let rel = if cfg!(windows) {
+            Cow::Owned(rel.replace('\\', "/"))
+        } else {
+            Cow::Borrowed(rel)
+        };
         let rel_key = if self.case_insensitive {
             Cow::Owned(rel.to_ascii_lowercase())
         } else {
-            Cow::Borrowed(rel)
+            rel
         };
 
         for prefix in &self.prefixes {
@@ -720,6 +745,23 @@ fn stat_fallback(path: &Utf8Path) -> u64 {
         .unwrap_or(0)
 }
 
+/// True when `meta` (from `symlink_metadata`) describes a Windows reparse
+/// point - junctions, symlinks, and other tagged links. Reparse points are
+/// the NTFS mechanism behind junctions; unlike a plain `is_symlink()` check
+/// this catches directory junctions too. On other platforms nothing here
+/// applies - `file_type().is_symlink()` is the whole story.
+#[cfg(windows)]
+fn meta_is_reparse_point(meta: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn meta_is_reparse_point(_meta: &fs::Metadata) -> bool {
+    false
+}
+
 fn is_reparse_point_or_symlink(entry_path: &Utf8Path) -> bool {
     let meta = match fs::symlink_metadata(entry_path.as_std_path()) {
         Ok(meta) => meta,
@@ -730,33 +772,12 @@ fn is_reparse_point_or_symlink(entry_path: &Utf8Path) -> bool {
         return true;
     }
 
-    #[cfg(windows)]
-    if meta.is_dir() {
-        if let Ok(real) = std::fs::canonicalize(entry_path.as_std_path()) {
-            let resolved = normalize_path_buf(entry_path.as_std_path());
-            return normalize_path_buf(&real) != resolved;
-        }
-    }
-
-    false
-}
-
-#[cfg(windows)]
-fn normalize_path_buf(path: &std::path::Path) -> std::path::PathBuf {
-    use std::path::Component;
-    let mut normalized = std::path::PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-            Component::RootDir => normalized.push(component.as_os_str()),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                normalized.pop();
-            }
-            Component::Normal(part) => normalized.push(part),
-        }
-    }
-    normalized
+    // Comparing canonicalize() output to the raw path is NOT a reparse check:
+    // canonicalize returns verbatim \\?\ paths on Windows while the walked
+    // path is not verbatim, so every directory would classify as a link and
+    // the walk would never descend. The reparse-point attribute bit is the
+    // real signal.
+    meta_is_reparse_point(&meta)
 }
 
 fn walk_size(path: &Utf8Path) -> u64 {
@@ -766,6 +787,13 @@ fn walk_size(path: &Utf8Path) -> u64 {
     };
 
     if meta.file_type().is_symlink() {
+        return meta.len();
+    }
+
+    // Reparse-point directories (junctions) must not be descended: they can
+    // point anywhere, including upward into the tree - that is a cycle, not
+    // a subtree. Report only the link's own footprint.
+    if meta_is_reparse_point(&meta) {
         return meta.len();
     }
 

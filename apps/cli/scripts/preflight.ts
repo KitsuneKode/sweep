@@ -13,7 +13,7 @@ const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(CLI_ROOT, "../..");
 const DIST = join(CLI_ROOT, "dist/sweep.js");
 const PKG_PATH = join(CLI_ROOT, "package.json");
-const ALLOWED_DIST_FILES = new Set(["sweep.js", "sweep-ui.js"]);
+const ALLOWED_DIST_FILES = new Set(["sweep.js", "sweep-ui.js", "sweep-lib.js"]);
 
 const NODE =
   process.env.npm_node_execpath ??
@@ -151,6 +151,39 @@ check("publishConfig.access is 'public' (required for scoped packages)", () => {
 check("bin points to dist/sweep.js", () => {
   const { bin } = pkg() as { bin?: Record<string, string> };
   assert(bin?.["sweep"] === "dist/sweep.js", `got: ${JSON.stringify(bin)}`);
+});
+
+check("every exports/bin target resolves to a real file", () => {
+  // The workspace manifest points exports at ./src/*.ts; prepack rewrites them
+  // to dist. Either way, whatever a manifest advertises must exist - a
+  // dangling target is "import worked in dev, E404 in production".
+  const p = pkg() as { exports?: Record<string, unknown>; bin?: Record<string, string> };
+  const targets: string[] = [];
+  for (const value of Object.values(p.exports ?? {})) {
+    if (typeof value === "string") targets.push(value);
+  }
+  for (const value of Object.values(p.bin ?? {})) targets.push(value);
+  assert(targets.length > 0, "manifest has no exports/bin targets");
+  for (const target of targets) {
+    const rel = target.replace(/^\.\//, "");
+    assert(existsSync(join(CLI_ROOT, rel)), `missing target: ${target}`);
+  }
+});
+
+check("sweep-lib.js imports without running the CLI", () => {
+  // The programmatic surface must not parse argv on import - importing the
+  // package and exiting clean proves the bin bootstrap isn't in this bundle.
+  const lib = join(CLI_ROOT, "dist/sweep-lib.js");
+  if (!existsSync(lib)) return;
+  const out = execFileSync(
+    NODE,
+    [
+      "-e",
+      `import("${lib.replaceAll("\\", "/")}").then(m => { if (typeof m.makeProgram !== "function") process.exit(2); })`,
+    ],
+    { encoding: "utf8", timeout: 5000, stdio: "pipe" },
+  );
+  void out;
 });
 
 check("files array includes dist, README.md, and LICENSE", () => {

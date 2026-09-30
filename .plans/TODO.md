@@ -15,9 +15,16 @@
 
 - [x] Execute [TUI + core audit fixes](tui-audit/README.md) — modal viewport
       clamp, patterns pane, streaming queue + always-confirm apply, density
-      pass, engine/guardrail edge cases. Remaining leftovers tracked in
-      `tui-audit/04-edge-cases.md` (Rust `skippedDirs` emission, `pageRows`
-      estimate, `?` glob semantics).
+      pass, engine/guardrail edge cases. All leftovers in
+      `tui-audit/04-edge-cases.md` are landed (Rust `skippedDirs` emission,
+      measured `pageRows`, `?` glob docs).
+- [x] Execute the second-pass trust/parity/perf audit — `--dry-run` on apply,
+      `queueCleared` mid-scan latch, apply gate while scanning, canonicalized
+      `assertSafeCwd`, canonical VCS check, normalized nested dedupe +
+      delete-time reverify, tuple-keyed selector caches, Windows reparse-point
+      detection + `\`→`/` ignore normalization, engine exit-code parity,
+      published `exports` → `dist/sweep-lib.js`, Rust legs in the win/mac CI
+      matrix.
 - [ ] Execute [daily-driver overhaul](daily-driver-overhaul/master.md) — **unified
       program**: Phase 0 catalog/hygiene → trust → TUI → streaming → orchestration →
       CLI → Rust → polish ([scope index](daily-driver-overhaul/README.md))

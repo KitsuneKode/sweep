@@ -113,6 +113,49 @@ describe("CLI scan/apply", () => {
     expect(existsSync(dir("target"))).toBe(false);
   });
 
+  test("apply --dry-run reports the plan without deleting anything", () => {
+    // A scripted "preview first" run parsed --dry-run but deleted anyway -
+    // the flag must gate the destructive path, not just parse.
+    mkdirSync(dir("node_modules"));
+    mkdirSync(dir("target"));
+
+    const scanResult = runCli(["scan", tmpDir, "--json"]);
+    expect(scanResult.exitCode).toBe(0);
+    const planPath = dir("plan.json");
+    writeFileSync(planPath, scanResult.stdout);
+
+    const applyResult = runCli(["--dry-run", "apply", "--plan", planPath, "--yes", "--json"]);
+
+    expect(applyResult.exitCode).toBe(0);
+    expect(existsSync(dir("node_modules"))).toBe(true);
+    expect(existsSync(dir("target"))).toBe(true);
+  });
+
+  test("--config pointing at a missing file is an error, not silent defaults", () => {
+    mkdirSync(dir("node_modules"));
+
+    const result = runCli(["--config", dir("does-not-exist.json"), "scan", tmpDir, "--json"]);
+
+    expect(result.exitCode).toBe(3);
+    expect(result.stderr).toContain("does-not-exist.json");
+  });
+
+  test("--depth rejects a non-integer instead of running unbounded", () => {
+    const result = runCli(["--depth", "abc", "scan", tmpDir, "--json"]);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("expected an integer");
+  });
+
+  test("scan --json and --json-stream together conflict instead of double-emitting", () => {
+    mkdirSync(dir("node_modules"));
+
+    const result = runCli(["scan", tmpDir, "--json", "--json-stream"]);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("json");
+  });
+
   test("scan excludes dangerous custom-pattern candidates from default selection", () => {
     mkdirSync(dir("custom-cache"));
 

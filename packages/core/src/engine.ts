@@ -10,7 +10,7 @@ import type {
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
-import { clean } from "./cleaner.js";
+import { clean, deduplicateNestedEntries } from "./cleaner.js";
 import type { ScanHooks } from "./scanner.js";
 import { scan } from "./scanner.js";
 import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./planner.js";
@@ -64,6 +64,14 @@ export async function applyPlan(
   plan: ScanPlan,
   options: ApplyPlanOptions = {},
 ): Promise<ApplyPlanResult> {
+  // A plan file is untrusted input: refuse unknown protocol versions instead
+  // of interpreting a future/past schema with this engine's semantics.
+  // Mirrors the Rust engine's apply_plan check.
+  if (plan.protocolVersion !== PROTOCOL_VERSION) {
+    throw new GuardrailError(
+      `unsupported plan protocol version "${plan.protocolVersion}" (expected "${PROTOCOL_VERSION}")`,
+    );
+  }
   assertSafeCwd(plan.targetDir);
   const selected = resolveSelectedCandidates(plan);
 
@@ -79,17 +87,21 @@ export async function applyPlan(
     selected,
     plan.targetDir,
   );
-  const cleanResult = await clean(ready, {
+  // Dedupe up front so `interrupted` compares against the real work set -
+  // entries deduped away are never attempted and must not read as skipped.
+  const workSet = deduplicateNestedEntries(ready);
+  const cleanResult = await clean(workSet, {
     onProgress: (entry) => {
       options.onDeleted?.(entry);
     },
     isCancelled: options.isCancelled,
     trashDir: options.trashDir,
     trashRoot: options.trashRoot,
+    containmentRoot: plan.targetDir,
   });
   const allFailures = [...revalidationFailures, ...cleanResult.failedPaths];
   // Skipped (unattempted) entries land in neither list - that's the interrupt signal.
-  const interrupted = cleanResult.deleted.length + cleanResult.failedPaths.length < ready.length;
+  const interrupted = cleanResult.deleted.length + cleanResult.failedPaths.length < workSet.length;
 
   return {
     report: {

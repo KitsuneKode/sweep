@@ -88,7 +88,7 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
     let mut total_bytes_freed = 0u64;
 
     for entry in ready {
-        match delete_entry(&entry) {
+        match delete_entry(&entry, real_root.as_deref()) {
             Ok(()) => {
                 deleted_count += 1;
                 total_bytes_freed += entry.estimated_bytes;
@@ -174,6 +174,17 @@ fn revalidate_candidate(
                             "candidate resolves outside the plan target directory".to_owned(),
                         ));
                     }
+                    // A symlinked ancestor can place a lexical-clean path
+                    // inside VCS metadata (sub -> repo/.git): check the
+                    // canonical path too. JS parity.
+                    if guardrails::path_has_protected_vcs_segment(&real_candidate.to_string_lossy())
+                    {
+                        return Err(path_failure(
+                            &candidate.entry.path,
+                            FailureReasonCode::ProtectedPath,
+                            "candidate resolves inside protected VCS metadata".to_owned(),
+                        ));
+                    }
                 }
                 Err(err) => {
                     return Err(path_failure(
@@ -242,31 +253,129 @@ fn lexical_abs(path: &Path) -> std::path::PathBuf {
     out
 }
 
-fn deduplicate_nested_entries(mut entries: Vec<ScanEntry>) -> Vec<ScanEntry> {
-    entries.sort_by(|left, right| left.path.cmp(&right.path));
+/// Comparison key for dedupe: lexical-abs path, case-folded where the
+/// filesystem folds. A forged plan can smuggle duplicates through spelling
+/// variants (`a/../b`, case) that byte-order compare differently. JS parity.
+fn dedupe_key(path: &str) -> String {
+    let normalized = lexical_abs(Path::new(path)).to_string_lossy().into_owned();
+    if cfg!(windows) || cfg!(target_os = "macos") {
+        normalized.to_lowercase()
+    } else {
+        normalized
+    }
+}
+
+fn deduplicate_nested_entries(entries: Vec<ScanEntry>) -> Vec<ScanEntry> {
+    // Key once per entry - computing inside the comparator would be O(n log n)
+    // keys instead of O(n).
+    let mut keyed: Vec<(String, ScanEntry)> = entries
+        .into_iter()
+        .map(|entry| (dedupe_key(&entry.path), entry))
+        .collect();
+    keyed.sort_by(|left, right| left.0.cmp(&right.0));
     let mut retained: Vec<ScanEntry> = Vec::new();
-    for entry in entries {
+    let mut retained_exact = std::collections::HashSet::new();
+    let mut retained_dirs = std::collections::HashSet::new();
+    for (key, entry) in keyed {
         // Exact-path duplicates dedupe too - a crafted plan listing the same
         // path twice would otherwise double-delete and report a phantom
-        // "missing" failure. Aligned with the JS deduplicateNestedEntries.
-        let is_inside = retained.iter().any(|parent| {
-            entry.path == parent.path
-                || (parent.entry_type == EntryType::Directory
-                    && !parent.is_symlink
-                    && (entry.path.starts_with(&format!("{}/", parent.path))
-                        || entry.path.starts_with(&format!("{}\\", parent.path))))
-        });
-        if !is_inside {
-            retained.push(entry);
+        // "missing" failure. Ancestor probing walks the entry's own parent
+        // chain against retained directory keys: O(n * depth), not O(n²).
+        // Aligned with the JS deduplicateNestedEntries.
+        if retained_exact.contains(&key) {
+            continue;
         }
+        let mut inside_retained = false;
+        let mut current = Path::new(key.as_str()).parent().map(Path::to_path_buf);
+        while let Some(dir) = current {
+            if retained_dirs.contains(dir.to_string_lossy().as_ref()) {
+                inside_retained = true;
+                break;
+            }
+            current = dir.parent().map(Path::to_path_buf);
+        }
+        if inside_retained {
+            continue;
+        }
+        retained_exact.insert(key.clone());
+        if entry.entry_type == EntryType::Directory && !entry.is_symlink {
+            retained_dirs.insert(key);
+        }
+        retained.push(entry);
     }
     retained
 }
 
-fn delete_entry(entry: &ScanEntry) -> Result<(), PathFailure> {
+fn delete_entry(entry: &ScanEntry, real_root: Option<&Path>) -> Result<(), PathFailure> {
     let path = Path::new(entry.path.as_str());
+
+    if let Some(root) = real_root {
+        // Shrink the validate-then-delete race: an ancestor swapped for a
+        // symlink after revalidation redirects remove_dir_all outside the
+        // target. Re-canonicalize the parent right before the delete - the
+        // escape window shrinks to the syscall itself. JS parity.
+        if let Some(parent) = path.parent() {
+            match fs::canonicalize(parent) {
+                Ok(real_parent) if real_parent.starts_with(root) => {}
+                Ok(_) => {
+                    return Err(path_failure(
+                        &entry.path,
+                        FailureReasonCode::OutsideTarget,
+                        "parent resolves outside containment root".to_owned(),
+                    ));
+                }
+                Err(err) => {
+                    return Err(path_failure(
+                        &entry.path,
+                        classify_io_error(&err),
+                        err.to_string(),
+                    ));
+                }
+            }
+        }
+        // Type-flip check: a real dir swapped for a symlink since validation
+        // must not be deleted through or unlinked as the wrong kind.
+        match fs::symlink_metadata(path) {
+            Ok(meta) => {
+                let now_symlink = meta.file_type().is_symlink();
+                let now_type = if now_symlink {
+                    EntryType::Symlink
+                } else if meta.is_dir() {
+                    EntryType::Directory
+                } else {
+                    EntryType::File
+                };
+                if now_symlink != entry.is_symlink {
+                    return Err(path_failure(
+                        &entry.path,
+                        FailureReasonCode::ChangedSymlinkState,
+                        "entry symlink state changed since validation".to_owned(),
+                    ));
+                }
+                if now_type != entry.entry_type {
+                    return Err(path_failure(
+                        &entry.path,
+                        FailureReasonCode::ChangedEntryType,
+                        "entry type changed since validation".to_owned(),
+                    ));
+                }
+            }
+            Err(err) => {
+                return Err(path_failure(
+                    &entry.path,
+                    classify_io_error(&err),
+                    err.to_string(),
+                ));
+            }
+        }
+    }
+
     let result = if entry.is_symlink {
-        fs::remove_file(path)
+        // Directory junctions and dir symlinks on Windows are dir reparse
+        // points - remove_file refuses them, so fall back to remove_dir
+        // (deletes the link itself, never the target). Matches the JS
+        // unlink -> rmdir fallback.
+        fs::remove_file(path).or_else(|_| fs::remove_dir(path))
     } else {
         fs::remove_dir_all(path).or_else(|err| {
             if entry.entry_type == EntryType::File {

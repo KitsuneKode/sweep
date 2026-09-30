@@ -214,13 +214,18 @@ export interface ProjectSweeprcDelta {
 }
 
 /**
- * Write a project `.sweeprc` holding only the pattern delta.
+ * Write a project `.sweeprc` holding the pattern delta.
  *
  * Safety contract - same as writeInitSweeprc, plus no-clobber by default:
  * - refuses to write through a symlink (dangling included),
  * - returns "exists" unless `force` is passed (the TUI asks first),
  * - writes to a sibling temp file then renames, so a crash mid-write never
- *   leaves a torn config.
+ *   leaves a torn config,
+ * - read-modify-write on overwrite: the pane only owns `patterns` and
+ *   `disabledPatterns`, so an existing file's `ignore`, `maxSizeGB`, `depth`,
+ *   or unrecognized fields are preserved verbatim instead of silently
+ *   reverting to defaults. An unparseable existing file refuses to be
+ *   clobbered - nothing silently resets a guardrail.
  */
 export function writeProjectSweeprc(
   configPath: string,
@@ -243,12 +248,41 @@ export function writeProjectSweeprc(
     // ENOENT - nothing there, safe to create.
   }
 
-  // Delta-only document: omit empty keys so the file stays minimal and the
-  // reader merges it over defaults like any other .sweeprc.
-  const doc: Record<string, string[]> = {};
-  if (delta.patterns.length > 0) doc.patterns = [...new Set(delta.patterns)].sort();
-  if (delta.disabledPatterns.length > 0) {
-    doc.disabledPatterns = [...new Set(delta.disabledPatterns)].sort();
+  // Start from whatever the existing file holds so overwrite only ever
+  // replaces the two fields the pattern editor owns.
+  const doc: Record<string, unknown> = {};
+  if (existed) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(configPath, "utf-8"));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new ConfigParseError(
+        `Refusing to overwrite ${configPath}: existing config is not parseable (${msg})`,
+        { cause: err },
+      );
+    }
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw new ConfigParseError(
+        `Refusing to overwrite ${configPath}: existing config must be a JSON object`,
+      );
+    }
+    Object.assign(doc, raw);
+  }
+
+  // Delta fields: absent means "use defaults", so an empty edited set removes
+  // the key entirely rather than persisting a misleading empty array.
+  const patterns = [...new Set(delta.patterns)].sort();
+  const disabledPatterns = [...new Set(delta.disabledPatterns)].sort();
+  if (patterns.length > 0) {
+    doc.patterns = patterns;
+  } else {
+    delete doc.patterns;
+  }
+  if (disabledPatterns.length > 0) {
+    doc.disabledPatterns = disabledPatterns;
+  } else {
+    delete doc.disabledPatterns;
   }
 
   // O_EXCL ("wx") on the temp path: a planted `.sweeprc.tmp-*` symlink fails
@@ -415,7 +449,15 @@ export function loadConfig(
 
   let project: Partial<SweepConfig> = {};
   if (explicitConfigPath) {
-    project = readJsonConfig(resolve(explicitConfigPath)) ?? {};
+    // An explicit --config that does not resolve is a typo, not a request for
+    // defaults - fail loudly (exit 3) instead of scanning with nothing.
+    const resolvedPath = resolve(explicitConfigPath);
+    if (!existsSync(resolvedPath)) {
+      throw new ConfigParseError(`Config file not found: ${resolvedPath}`);
+    }
+    // An explicit file replaces the discovered-project layer entirely; fields
+    // it omits still inherit from global config and built-in defaults.
+    project = readJsonConfig(resolvedPath) ?? {};
   } else {
     project = findProjectConfig(cwd) ?? {};
   }

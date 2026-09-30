@@ -90,6 +90,13 @@ export interface SweepUiState {
    * alone - a user decision always outranks `selectedByDefault`.
    */
   selectionTouched: Set<string>;
+  /**
+   * `u` mid-scan means "queue nothing at all" - without this flag, candidates
+   * discovered after the clear would keep auto-seeding and the queue would
+   * visibly refill behind the user's back. Cleared by `resetForRescan`: a new
+   * scan generation is a new decision.
+   */
+  queueCleared: boolean;
 }
 
 export interface SweepUiSummary {
@@ -107,6 +114,8 @@ export interface SweepUiSummary {
   /** Queued artifacts that also pass the current filter/scope. */
   visibleSelectedCount: number;
   dangerousVisibleCount: number;
+  /** Per-tier composition of the queue - the statusline tally's fact. */
+  selectedRiskCounts: Record<"safe" | "caution" | "dangerous", number>;
 }
 
 export interface SweepUiInitOptions {
@@ -148,6 +157,7 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     expandedScopes: new Set<string>(),
     skippedDirs: 0,
     selectionTouched: new Set<string>(),
+    queueCleared: false,
   };
 
   const rows = buildDisplayRows(state);
@@ -302,12 +312,18 @@ export function removeCustomPattern(state: SweepUiState, pattern: string): Sweep
   if (!isCustomPattern(state, pattern)) return state;
   const disabledPatterns = new Set(state.disabledPatterns);
   disabledPatterns.delete(pattern);
-  return {
+  const next = {
     ...state,
     extraPatterns: state.extraPatterns.filter((p) => p !== pattern),
     disabledPatterns,
     patternsDirty: true,
-    focus: "patterns",
+    focus: "patterns" as const,
+  };
+  // The removed row may have been the last visible one - a stale cursor would
+  // make the next space/d read a row that doesn't exist.
+  return {
+    ...next,
+    patternIndex: clamp(next.patternIndex, 0, Math.max(0, visiblePatternRows(next).length - 1)),
   };
 }
 
@@ -533,6 +549,7 @@ export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[])
       !existing &&
       candidate.selectedByDefault &&
       candidate.riskTier !== "blocked" &&
+      !state.queueCleared &&
       !state.selectionTouched.has(candidate.id)
     ) {
       selectedIds.add(candidate.id);
@@ -616,7 +633,7 @@ export function finalizeScan(state: SweepUiState, plan: ScanPlan | undefined): S
   for (const candidate of plan.candidates) {
     const keep = state.selectionTouched.has(candidate.id)
       ? state.selectedIds.has(candidate.id)
-      : policyIds.has(candidate.id);
+      : policyIds.has(candidate.id) && !state.queueCleared;
     if (keep && candidate.riskTier !== "blocked") selectedIds.add(candidate.id);
   }
 
@@ -715,6 +732,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     patternsDirty: false,
     selectedIds: new Set<string>(),
     selectionTouched: new Set<string>(),
+    queueCleared: false,
     rowIndex: 0,
     visualAnchorId: null,
     sidebarIndex: 0,
@@ -753,11 +771,24 @@ export function toggleCurrentSelection(state: SweepUiState): SweepUiState {
   return toggleSelectionById(state, candidate.id);
 }
 
-function candidateById(state: SweepUiState, candidateId: string): ScanCandidate | undefined {
-  for (const candidate of state.candidates) {
-    if (candidate.id === candidateId) return candidate;
+/**
+ * id -> candidate index keyed on the `candidates` array itself: the array is
+ * replaced only when the scan upserts, so cursor/keypress dispatches reuse
+ * one map instead of rebuilding it per lookup. O(n) build, then O(1) hits.
+ */
+const candidateIndexCache = new WeakMap<ScanCandidate[], Map<string, ScanCandidate>>();
+
+function candidateIndex(candidates: ScanCandidate[]): Map<string, ScanCandidate> {
+  let index = candidateIndexCache.get(candidates);
+  if (!index) {
+    index = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+    candidateIndexCache.set(candidates, index);
   }
-  return undefined;
+  return index;
+}
+
+function candidateById(state: SweepUiState, candidateId: string): ScanCandidate | undefined {
+  return candidateIndex(state.candidates).get(candidateId);
 }
 
 export function toggleSelectionById(state: SweepUiState, candidateId: string): SweepUiState {
@@ -959,11 +990,17 @@ export function applyVisualRange(state: SweepUiState): VisualApplyResult {
 
 export function clearSelection(state: SweepUiState): SweepUiState {
   // Everything currently known counts as user-handled: a mid-scan `u` means
-  // "queue nothing I can see", and the end-of-scan policy pass must not
-  // silently re-add those same artifacts behind the user's back.
+  // "queue nothing at all" - not "nothing I can see" - so discoveries after
+  // the press must not auto-seed either. queueCleared suppresses both the
+  // streaming seed and the end-of-scan policy pass for this generation.
   const selectionTouched = new Set(state.selectionTouched);
   for (const candidate of state.candidates) selectionTouched.add(candidate.id);
-  return { ...state, selectedIds: new Set<string>(), selectionTouched };
+  return {
+    ...state,
+    selectedIds: new Set<string>(),
+    selectionTouched,
+    queueCleared: true,
+  };
 }
 
 export function getCurrentCandidate(state: SweepUiState): ScanCandidate | undefined {
@@ -985,11 +1022,13 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
   // Filtering the view must never change what apply is about to delete.
   let selectedCount = 0;
   let selectedBytes = 0;
+  const selectedRiskCounts = { safe: 0, caution: 0, dangerous: 0 };
   for (const candidate of state.candidates) {
     if (candidate.riskTier === "blocked") continue; // apply drops these too
     if (!state.selectedIds.has(candidate.id)) continue;
     selectedCount++;
     selectedBytes += candidate.estimatedBytes;
+    selectedRiskCounts[candidate.riskTier]++;
   }
 
   return {
@@ -998,6 +1037,7 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
     selectedBytes,
     visibleSelectedCount,
     dangerousVisibleCount,
+    selectedRiskCounts,
   };
 }
 

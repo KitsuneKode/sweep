@@ -649,6 +649,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sweep-engine",
+ "sweep-errors",
  "sweep-fs",
  "sweep-types",
  "tempfile",

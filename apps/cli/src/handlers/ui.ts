@@ -20,6 +20,7 @@ import {
   resolveScanConfig,
   resolveSelectionPolicy,
   resolveScanTarget,
+  warnIgnoredOptions,
 } from "./shared.js";
 
 function isModuleNotFound(error: unknown): boolean {
@@ -121,6 +122,12 @@ async function loadSweepUi(): Promise<SweepUiModule> {
 
 export async function handleUi(pathArg: string, opts: CliOptions): Promise<void> {
   applyNoColor(opts.color);
+  // The TUI is interactive: JSON/quiet/verbose have no meaning inside it.
+  // yes/force-large gate --force-large; trash/dry-run reach the UI directly.
+  warnIgnoredOptions(opts, "ui", {
+    scans: true,
+    except: ["--yes", "--force-large", "--trash", "--dry-run"],
+  });
 
   try {
     const targetDir = resolveScanTarget(pathArg);

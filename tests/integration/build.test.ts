@@ -24,17 +24,19 @@ beforeAll(() => {
 });
 
 describe("published CLI bundle", () => {
-  test("dist contains only sweep.js and sweep-ui.js", () => {
+  test("dist contains only the three public bundles", () => {
     const files = readdirSync(DIST).sort();
-    expect(files).toEqual(["sweep-ui.js", "sweep.js"]);
+    expect(files).toEqual(["sweep-lib.js", "sweep-ui.js", "sweep.js"]);
   });
 
-  test("main bundle does not import @opentui at startup", () => {
-    const bundle = Bun.file(SWEEP);
-    expect(bundle.size).toBeGreaterThan(10_000);
-    const source = readFileSync(SWEEP, "utf8");
-    expect(source.includes('from "@opentui/core"')).toBe(false);
-    expect(source.includes('require("@opentui/core")')).toBe(false);
+  test("cli and lib bundles do not import @opentui at startup", () => {
+    for (const file of ["sweep.js", "sweep-lib.js"]) {
+      const bundle = Bun.file(join(DIST, file));
+      expect(bundle.size).toBeGreaterThan(10_000);
+      const source = readFileSync(join(DIST, file), "utf8");
+      expect(source.includes('from "@opentui/core"')).toBe(false);
+      expect(source.includes('require("@opentui/core")')).toBe(false);
+    }
   });
 
   test("bun apps/cli/dist/sweep.js --version exits 0 with semver output", () => {

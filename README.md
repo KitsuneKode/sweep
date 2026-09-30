@@ -320,6 +320,16 @@ future scans automatically.
 
 ---
 
+## Environment variables
+
+| Variable            | Purpose                                                             |
+| ------------------- | ------------------------------------------------------------------- |
+| `SWEEP_CONFIG_DIR`  | Overrides the config dir (`config.json`, `history.jsonl` live here) |
+| `SWEEP_ENGINE_PATH` | Points `--engine rust` / `auto` at a custom `sweep-engine` binary   |
+| `NO_COLOR`          | Disables all color output (same effect as `--no-color`)             |
+
+---
+
 ## Exit codes
 
 | Code | Meaning                          |

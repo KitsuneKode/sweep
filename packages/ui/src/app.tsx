@@ -142,77 +142,109 @@ export class UiErrorBoundary extends Component<{ children: ReactNode }, { error:
   }
 }
 
-/** A help row, or a section break when `keys` is null. */
-const HELP_ROWS: ReadonlyArray<readonly [keys: string | null, description: string]> = [
+/** A help row: keycap + what it does. Sections break on `keys === null`. */
+type HelpRow = readonly [keys: string | null, description: string];
+
+const HELP_LEFT: ReadonlyArray<HelpRow> = [
   [null, "move"],
-  ["↑↓ / j k", "cursor (wheel scrolls too)"],
-  ["g / G · home / end", "first / last row"],
-  ["ctrl-u/d · pgup/dn", "page up · down"],
+  ["↑↓ / j k", "cursor · wheel scrolls"],
+  ["g / G", "first / last row"],
+  ["ctrl-u/d", "page up · down"],
   ["h · l", "collapse · expand group"],
   ["w · e", "collapse all · expand all"],
   [null, "queue"],
   ["space", "queue / unqueue row"],
-  ["v", "visual range - space queues it"],
-  ["a · s · u", "safe+caution · safe only · clear"],
-  ["enter", "apply (always asks to confirm)"],
-  [null, "filter & view"],
-  ["/", "filter - tab cycles panes"],
-  ["kind:x risk:y >100MB older:30d", "filter syntax (+ is:queued, !term)"],
+  ["v", "visual range - space queues"],
+  ["a · s · u", "queue visible · safe · clear"],
+  ["enter", "apply (always confirms)"],
+];
+
+const HELP_RIGHT: ReadonlyArray<HelpRow> = [
+  [null, "view"],
+  ["/", "filter list · tab cycles panes"],
   ["1 - 4", "risk filter"],
   ["o", "sort size · name · age"],
   ["i", "inspect row"],
-  ["tab", "scopes - space queues the scope"],
   ["y", "copy row path"],
-  ["S", "save queue as a plan file"],
+  ["S", "save queue as a plan"],
   [null, "patterns (p)"],
   ["space", "toggle pattern"],
   ["/", "filter the catalog"],
-  ["a", "add a custom pattern"],
-  ["d", "remove a custom pattern"],
-  ["w / W", "write .sweeprc (W overwrites)"],
-  ["r", "rescan with the new set"],
+  ["a · d", "add · remove custom"],
+  ["w / W", "write .sweeprc (W force)"],
+  ["r", "rescan with new set"],
   [null, "app"],
+  ["tab", "scopes - space queues scope"],
   ["t", "theme dark · light · auto"],
-  ["?", "this panel"],
   ["q · ctrl-c", "quit · quit now"],
 ];
 
-const HELP_KEY_WIDTH =
-  Math.max(...HELP_ROWS.map(([keys]) => (keys === null ? 0 : keys.length))) + 2;
-/** Border (2) + horizontal padding (6) around the widest row. */
-const HELP_WIDTH =
-  HELP_KEY_WIDTH + Math.max(...HELP_ROWS.map(([, description]) => description.length)) + 8;
+const HELP_FILTER_SYNTAX = "kind:x  risk:y  path:z  >100MB  older:30d  is:queued  !term";
 
-function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
-  // Word wrap instead of clipping: on a narrow terminal a long row breaks
-  // between words rather than losing its tail.
+function helpColumn(rows: ReadonlyArray<HelpRow>, keyWidth: number, tokens: ThemeTokens) {
   return (
-    <Modal tokens={tokens} title=" keyboard " width={HELP_WIDTH}>
-      <box flexDirection="column" gap={0}>
-        {HELP_ROWS.map(([keys, description]) =>
-          keys === null ? (
+    <box flexDirection="column" flexShrink={0}>
+      {rows.map(([keys, description], index) =>
+        keys === null ? (
+          <box key={`section-${description}`} flexDirection="column">
+            <text content="" />
             <text
-              key={`section-${description}`}
-              content={t`${bold(fg(tokens.accent)(description))}`}
+              content={t`${bold(fg(tokens.accent)(description.toUpperCase()))}`}
               wrapMode="none"
             />
-          ) : (
-            <text
-              key={keys}
-              content={t`${fg(tokens.text)(keys.padEnd(HELP_KEY_WIDTH))}${fg(tokens.textMuted)(description)}`}
-              wrapMode="word"
-            />
-          ),
-        )}
-      </box>
+          </box>
+        ) : (
+          <text
+            // Index, not the keycap: "space" and "/" legitimately appear in
+            // two sections, and single-column mode concatenates both columns.
+            key={`${keys}-${index}`}
+            content={t`${bold(fg(tokens.text)(keys.padEnd(keyWidth)))}${fg(tokens.textMuted)(description)}`}
+            wrapMode="none"
+          />
+        ),
+      )}
+    </box>
+  );
+}
+
+function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: number }) {
+  // Keys get the strong color, descriptions recede, section headers are the
+  // only accent - the hierarchy reads at a glance instead of one gray wall.
+  const keyWidth =
+    Math.max(
+      ...HELP_LEFT.map(([k]) => k?.length ?? 0),
+      ...HELP_RIGHT.map(([k]) => k?.length ?? 0),
+    ) + 2;
+  const leftWidth = keyWidth + Math.max(...HELP_LEFT.map(([, d]) => d.length));
+  const rightWidth = keyWidth + Math.max(...HELP_RIGHT.map(([, d]) => d.length));
+  const twoColWidth = leftWidth + rightWidth + 4; // column gap
+
+  // Narrow terminals collapse to one column and drop the syntax sample -
+  // better absent than wrapped mid-token.
+  const singleWidth = Math.max(leftWidth, rightWidth);
+  const twoCol = width >= twoColWidth + 6;
+  const modalWidth = twoCol ? twoColWidth + 6 : Math.min(singleWidth + 6, Math.max(28, width - 4));
+
+  return (
+    <Modal tokens={tokens} title=" keys " width={modalWidth}>
+      {twoCol ? (
+        <box flexDirection="row" gap={4}>
+          {helpColumn(HELP_LEFT, keyWidth, tokens)}
+          {helpColumn(HELP_RIGHT, keyWidth, tokens)}
+        </box>
+      ) : (
+        helpColumn([...HELP_LEFT, ...HELP_RIGHT], keyWidth, tokens)
+      )}
       <text content="" />
+      {twoCol || modalWidth > HELP_FILTER_SYNTAX.length + 12 ? (
+        <text
+          content={t`${fg(tokens.textDim)("filter")}  ${fg(tokens.textSecondary)(HELP_FILTER_SYNTAX)}`}
+          wrapMode="none"
+        />
+      ) : null}
       <text
-        content={t`${fg(tokens.textDim)("esc walks back a view. It never quits.")}`}
-        wrapMode="word"
-      />
-      <text
-        content={t`${fg(tokens.textDim)("ctrl-c always quits, from any pane or dialog.")}`}
-        wrapMode="word"
+        content={t`${fg(tokens.textDim)("esc unwinds one layer, never quits · ctrl-c always quits")}`}
+        wrapMode="none"
       />
     </Modal>
   );
@@ -496,6 +528,12 @@ export function SweepApp({
   );
 
   const requestApply = useCallback(() => {
+    if (state.scanning) {
+      // The queue is a moving target while discovery streams: a confirm
+      // dialog whose count grows under the user's eyes is a trap.
+      setNotice("scan still running - wait or esc out");
+      return;
+    }
     if (summary.selectedCount === 0) {
       setNotice("nothing queued: space on a row queues it");
       return;
@@ -504,7 +542,7 @@ export function SweepApp({
     // dangerous tiers. The dialog tones down (no red banner) when nothing
     // dangerous is queued, but it is always there.
     setPendingApply(true);
-  }, [summary]);
+  }, [summary, state.scanning]);
 
   const focusPanel = useCallback(
     (focus: SweepUiState["focus"]) => {
@@ -669,6 +707,19 @@ export function SweepApp({
     [showInspect, state],
   );
 
+  // The inspected candidate can disappear mid-overlay (rescan, filter change):
+  // without this the overlay unmounts while inspectOpen keeps trapping keys.
+  useEffect(() => {
+    if (showInspect && !inspectCandidate) setShowInspect(false);
+  }, [showInspect, inspectCandidate]);
+
+  // The sidebar unmounts under a narrow terminal; focus must not survive
+  // into a pane that no longer exists - the keymap does the same reconcile
+  // for the pre-effect window.
+  useEffect(() => {
+    if (!showSidebar && state.focus === "sidebar") focusPanel("list");
+  }, [showSidebar, state.focus, focusPanel]);
+
   const confirmPreview = useMemo(
     () =>
       state.candidates
@@ -830,7 +881,7 @@ export function SweepApp({
         ) : null}
       </box>
 
-      {showHelp ? <HelpOverlay tokens={tokens} /> : null}
+      {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
       {pendingApply ? (
         <ConfirmOverlay
           tokens={tokens}
