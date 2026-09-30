@@ -46,8 +46,13 @@ function compileMatcher(patterns: string[]): (name: string) => boolean {
   const regexes: RegExp[] = [];
 
   for (const p of patterns) {
-    if (p.includes("*")) {
-      const escaped = p.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    if (p.includes("*") || p.includes("?")) {
+      // `?` is escaped first so it survives as \?, then becomes . - a raw `?`
+      // would be a regex quantifier, silently mis-matching ("foo?" → "fo").
+      const escaped = p
+        .replace(/[.+^${}()|[\]\\?]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\\\?/g, ".");
       regexes.push(new RegExp(`^${escaped}$`, isCaseInsensitive ? "i" : undefined));
     }
   }
@@ -155,7 +160,9 @@ async function batchEstimateAsync(
 
 function statFallback(entryPath: string): number {
   try {
-    return statSync(entryPath).size;
+    // lstat, not stat: a symlink candidate's size is the link itself - stat
+    // would report the target, misreporting freed bytes by the target's size.
+    return lstatSync(entryPath).size;
   } catch {
     return 0;
   }
@@ -424,6 +431,10 @@ export async function scan(
   const markDir = async (dir: string): Promise<boolean> => {
     try {
       const stat = await lstat(dir);
+      // A dir swapped for a symlink between readdir and here would make
+      // readdir follow it outside the target - refuse anything that is no
+      // longer a real directory. (Narrows, not eliminates, the swap window.)
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
       if (stat.ino === 0) return true; // no inode identity, cannot dedupe
       const key = `${stat.dev}:${stat.ino}`;
       if (visitedDirs.has(key)) return false;

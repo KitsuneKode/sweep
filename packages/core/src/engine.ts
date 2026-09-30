@@ -14,7 +14,7 @@ import { clean } from "./cleaner.js";
 import type { ScanHooks } from "./scanner.js";
 import { scan } from "./scanner.js";
 import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./planner.js";
-import { GuardrailError, assertPathWithinRoot, assertSafeCwd } from "./guardrails.js";
+import { GuardrailError, assertSafeCwd } from "./guardrails.js";
 import { applyPlanViaRust, type EngineBackend } from "./rust-engine.js";
 
 export interface ScanToPlanOptions extends ScanHooks {
@@ -71,10 +71,10 @@ export async function applyPlan(
     return emptyApplyPlanResult(plan);
   }
 
-  for (const candidate of selected) {
-    assertPathWithinRoot(candidate.path, plan.targetDir);
-  }
-
+  // Plans are untrusted input: every selected path is revalidated per entry
+  // (containment, target-root, VCS segments, symlink/type state), matching the
+  // Rust engine's apply_plan. Forged entries become per-path failures in the
+  // report instead of aborting the whole apply.
   const { ready, failedPaths: revalidationFailures } = revalidateCandidates(
     selected,
     plan.targetDir,
@@ -154,10 +154,8 @@ export async function applyPlanWithBackend(
     return emptyApplyPlanResult(plan);
   }
 
-  for (const candidate of selected) {
-    assertPathWithinRoot(candidate.path, plan.targetDir);
-  }
-
+  // The Rust engine revalidates per entry itself (containment, protected
+  // paths, symlink/type state); forged candidates come back as failures.
   const report = await applyPlanViaRust(plan, options.signal);
   const failedPathSet = new Set(report.failedPaths.map((failure) => failure.path));
   const revalidationCodes = new Set<PathFailure["code"]>([
@@ -165,6 +163,7 @@ export async function applyPlanWithBackend(
     "changed_symlink_state",
     "changed_entry_type",
     "outside_target",
+    "protected_path",
   ]);
   const revalidationFailures = report.failedPaths.filter((failure) =>
     revalidationCodes.has(failure.code),

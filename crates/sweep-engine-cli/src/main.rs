@@ -83,7 +83,7 @@ fn run_scan() -> Result<(), String> {
         .nth(2)
         .ok_or_else(|| "scan requires a target directory argument".to_owned())?;
 
-    let (config, selection_policy, exact, json_stream) = match read_stdin_if_present() {
+    let (config, selection_policy, exact, json_stream) = match read_stdin_if_present()? {
         Some(input) => {
             let options: ScanStdinOptions = serde_json::from_str(&input)
                 .map_err(|err| format!("failed to parse scan options JSON from stdin: {err}"))?;
@@ -234,21 +234,42 @@ fn default_sweep_config() -> SweepConfig {
     }
 }
 
-fn read_stdin_if_present() -> Option<String> {
+/// Same bound as the JS plan-file cap (256 MB) - far past any legitimate
+/// ScanPlan, and a runaway writer can't pin the engine in an unbounded read.
+/// +1 byte is the oversize probe: read_to_end alone can't tell a truncated
+/// stream from one exactly at the cap.
+const MAX_STDIN_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Ok(None) means no stdin was piped; errors propagate - a failed or oversized
+/// read must not silently fall back to default options (user `ignore` patterns
+/// would be dropped, scanning things the config excluded).
+fn read_stdin_if_present() -> Result<Option<String>, String> {
     if io::stdin().is_terminal() {
-        return None;
+        return Ok(None);
     }
 
-    let mut input = String::new();
-    match io::stdin().read_to_string(&mut input) {
-        Ok(_) if input.trim().is_empty() => None,
-        Ok(_) => Some(input),
-        Err(_) => None,
+    let mut buf = Vec::new();
+    io::stdin()
+        .take(MAX_STDIN_BYTES + 1)
+        .read_to_end(&mut buf)
+        .map_err(|err| format!("failed to read stdin: {err}"))?;
+
+    if buf.is_empty() {
+        return Ok(None);
     }
+    if buf.len() as u64 > MAX_STDIN_BYTES {
+        return Err(format!("stdin exceeds the {MAX_STDIN_BYTES}-byte limit"));
+    }
+    let input = String::from_utf8(buf)
+        .map_err(|err| format!("stdin is not valid UTF-8 JSON input: {err}"))?;
+    if input.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(input))
 }
 
 fn run_apply() -> Result<(), String> {
-    let input = read_stdin_if_present()
+    let input = read_stdin_if_present()?
         .ok_or_else(|| "apply requires a ScanPlan JSON document on stdin".to_owned())?;
 
     let plan: ScanPlan = serde_json::from_str(&input)

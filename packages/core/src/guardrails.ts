@@ -251,24 +251,6 @@ export function isPathWithinRoot(candidatePath: string, rootPath: string): boole
   return true;
 }
 
-/**
- * Assert a candidate deletion path stays inside the plan target directory.
- * Throws GuardrailError (exit code 2) if not.
- */
-export function assertPathWithinRoot(
-  candidatePath: string,
-  rootPath: string,
-  label = "Candidate path",
-): void {
-  if (!isPathWithinRoot(candidatePath, rootPath)) {
-    throw new GuardrailError(
-      `${label} is outside the scan target:\n` +
-        `  ${sanitizeTerminalText(candidatePath)}\n` +
-        `  target: ${sanitizeTerminalText(resolve(rootPath))}`,
-    );
-  }
-}
-
 /** True when any path segment is a protected VCS metadata directory. */
 export function pathHasProtectedVcsSegment(entryPath: string): boolean {
   const insensitive = process.platform === "darwin" || process.platform === "win32";

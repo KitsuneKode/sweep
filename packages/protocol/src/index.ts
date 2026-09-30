@@ -12,6 +12,7 @@ export type FailureReasonCode =
   | "changed_symlink_state"
   | "changed_entry_type"
   | "outside_target"
+  | "protected_path"
   | "permission_denied"
   | "busy"
   | "filesystem_error";
@@ -128,6 +129,7 @@ export const FAILURE_REASON_CODES = [
   "changed_symlink_state",
   "changed_entry_type",
   "outside_target",
+  "protected_path",
   "permission_denied",
   "busy",
   "filesystem_error",

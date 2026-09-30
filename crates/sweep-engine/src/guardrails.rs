@@ -206,10 +206,18 @@ fn path_segments_below_root(resolved: &Path, parsed_root: &Path) -> Vec<String> 
 }
 
 /// Whether any path segment is a protected VCS metadata directory.
+/// Case-insensitive on macOS/Windows filesystems, matching the JS engine -
+/// `.GIT` is the same directory as `.git` there.
 pub fn path_has_protected_vcs_segment(entry_path: &str) -> bool {
-    entry_path
-        .split(['/', '\\'])
-        .any(|segment| PROTECTED_VCS_DIR_NAMES.contains(&segment))
+    let case_insensitive = cfg!(windows) || cfg!(target_os = "macos");
+    entry_path.split(['/', '\\']).any(|segment| {
+        if case_insensitive {
+            let lower = segment.to_ascii_lowercase();
+            PROTECTED_VCS_DIR_NAMES.contains(&lower.as_str())
+        } else {
+            PROTECTED_VCS_DIR_NAMES.contains(&segment)
+        }
+    })
 }
 
 #[cfg(test)]

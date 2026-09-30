@@ -119,6 +119,16 @@ pub struct WalkResult {
 
 const SKIP_DIR_NAMES: &[&str] = &[".git", ".svn", ".hg", ".bzr"];
 
+/// macOS and Windows filesystems are case-insensitive, so `.GIT` is the same
+/// protected directory as `.git` - compare lowercase there (JS parity).
+fn is_skip_dir_name(name: &str) -> bool {
+    if case_insensitive_fs() {
+        SKIP_DIR_NAMES.contains(&name.to_ascii_lowercase().as_str())
+    } else {
+        SKIP_DIR_NAMES.contains(&name)
+    }
+}
+
 /// Callbacks fired during a directory walk so callers can stream matches live.
 pub struct WalkHooks<'a> {
     pub on_match: Option<&'a (dyn Fn(&WalkEntry) + Sync)>,
@@ -163,6 +173,13 @@ fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
             Ok(meta) => meta,
             Err(_) => return false,
         };
+        // A dir swapped for a symlink between read_dir and this lstat would be
+        // followed by read_dir below and walked outside the target - refuse
+        // anything that is no longer a real directory. (Narrows the swap
+        // window; eliminating it needs fd-relative walks.)
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return false;
+        }
         if meta.ino() == 0 {
             return true;
         }
@@ -302,7 +319,7 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
         }
 
         if is_dir {
-            if SKIP_DIR_NAMES.contains(&file_name.as_str()) {
+            if is_skip_dir_name(&file_name) {
                 continue;
             }
             subdirs.push(full_path);
@@ -312,7 +329,7 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
                     continue;
                 }
                 if meta.is_dir() {
-                    if SKIP_DIR_NAMES.contains(&file_name.as_str()) {
+                    if is_skip_dir_name(&file_name) {
                         continue;
                     }
                     subdirs.push(full_path);
@@ -364,9 +381,12 @@ impl IgnoreMatcher {
                 } else {
                     pattern.to_string()
                 };
-                if pattern.contains('*') {
+                if pattern.contains('*') || pattern.contains('?') {
                     let escaped = regex_lite::escape(&source);
-                    let regex_pattern = format!("^{}$", escaped.replace("\\*", ".*"));
+                    // `?` is glob single-char (.) and `*` is .* - same mapping
+                    // as the JS compileIgnoreMatcher.
+                    let regex_pattern =
+                        format!("^{}$", escaped.replace("\\*", ".*").replace("\\?", "."));
                     if let Ok(re) = regex_lite::Regex::new(&regex_pattern) {
                         path_globs.push(re);
                     }
@@ -437,9 +457,13 @@ impl PatternMatcher {
             } else {
                 pattern.clone()
             };
-            if source.contains('*') {
+            if source.contains('*') || source.contains('?') {
                 let escaped = regex_lite::escape(&source);
-                let regex_pattern = format!("^{}$", escaped.replace("\\*", ".*"));
+                // `?` is glob single-char (.) - without this a raw `?` would be
+                // a regex quantifier on JS while Rust escaped it literally,
+                // making the same pattern mean different things per engine.
+                let regex_pattern =
+                    format!("^{}$", escaped.replace("\\*", ".*").replace("\\?", "."));
                 if let Ok(re) = regex_lite::Regex::new(&regex_pattern) {
                     globs.push(re);
                 }
@@ -632,7 +656,9 @@ fn du_estimate_chunk(
 }
 
 fn stat_fallback(path: &Utf8Path) -> u64 {
-    fs::metadata(path.as_std_path())
+    // symlink_metadata, not metadata: a symlink candidate's size is the link
+    // itself - following it would report the target and misreport freed bytes.
+    fs::symlink_metadata(path.as_std_path())
         .map(|meta| meta.len())
         .unwrap_or(0)
 }
@@ -969,6 +995,69 @@ mod tests {
             .map(|entry| entry.name.as_str())
             .collect();
         assert_eq!(names, vec!["node_modules"]);
+    }
+
+    #[test]
+    fn question_mark_is_glob_single_char_not_regex_quantifier() {
+        // `foo?` must match `foo1` and NOT `foo`/`fo` - aligned with the JS
+        // matcher, where a raw `?` would be a regex quantifier.
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        fs::write(root.join("foo1").as_std_path(), "x")
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+        fs::write(root.join("foo").as_std_path(), "x")
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+
+        let config = WalkConfig {
+            patterns: vec!["foo?".to_owned()],
+            ..WalkConfig::default()
+        };
+        let result = walk_matched_entries(root, &config);
+        let names: Vec<&str> = result
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(names, vec!["foo1"]);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn dir_swapped_for_symlink_is_not_descended() {
+        // mark_dir must refuse a path that turned into a symlink between
+        // read_dir and the descent check - otherwise read_dir would follow
+        // the link and walk outside the target.
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let sub = root.join("sub");
+        fs::create_dir_all(sub.as_std_path()).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let ctx_config = WalkConfig::default();
+        let visited = Mutex::new(HashSet::new());
+        let ctx = WalkCtx {
+            root,
+            config: &ctx_config,
+            matcher: &PatternMatcher::compile(&ctx_config.patterns),
+            ignore: None,
+            hooks: None,
+            scanned: None,
+            skipped: None,
+            visited: Some(&visited),
+        };
+
+        assert!(mark_dir(&ctx, &sub), "real dir should be visitable");
+
+        fs::remove_dir_all(sub.as_std_path()).unwrap_or_else(|err| panic!("rmdir failed: {err}"));
+        std::os::unix::fs::symlink("/", sub.as_std_path())
+            .unwrap_or_else(|err| panic!("symlink failed: {err}"));
+        assert!(
+            !mark_dir(&ctx, &sub),
+            "a dir swapped for a symlink must not be descended"
+        );
     }
 
     #[test]

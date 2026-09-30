@@ -79,7 +79,8 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
         : `Apply plan with ${selectedCount} items`;
       const confirmed = await promptConfirm(`${action} (~${formatBytes(totalBytes)})?`);
       if (!confirmed) {
-        printDeclined();
+        // A decline under --json emits no stdout at all - exit code carries it.
+        if (!opts.json) printDeclined();
         exitWith(EXIT.ABORTED);
       }
     }

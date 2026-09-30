@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { GuardrailError } from "./guardrails.js";
 import { applyPlan, applyPlanWithBackend, scanToPlan } from "./engine.js";
 import { isRustEngineAvailable, resolveRustEngineBinary } from "./rust-engine.js";
 import { DEFAULT_CONFIG } from "./config.js";
@@ -149,7 +148,10 @@ describe("core engine", () => {
     expect(plan.summary.riskCounts.dangerous).toBe(1);
   });
 
-  test("applyPlan rejects outside-target paths before deletion", async () => {
+  test("applyPlan fails outside-target paths per entry without aborting", async () => {
+    // Forged entries become per-path report failures (matching the Rust
+    // engine); legitimate selected candidates still apply, and nothing
+    // outside the target is ever touched.
     mkdirSync(dir("node_modules"));
 
     const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
@@ -167,11 +169,15 @@ describe("core engine", () => {
       selectedCandidateIds: [...plan.selectedCandidateIds, "cand_outside"],
     };
 
-    await expect(applyPlan(malicious)).rejects.toBeInstanceOf(GuardrailError);
-    expect(existsSync(dir("node_modules"))).toBe(true);
+    const { report } = await applyPlan(malicious);
+    expect(report.failedPaths).toContainEqual(
+      expect.objectContaining({ path: outsidePath, code: "outside_target" }),
+    );
+    expect(existsSync(outsidePath)).toBe(false);
+    expect(existsSync(dir("node_modules"))).toBe(false);
   });
 
-  test("applyPlanWithBackend rust rejects outside-target paths before subprocess", async () => {
+  test("applyPlanWithBackend rust reports outside-target paths per entry", async () => {
     if (process.env.SWEEP_ENGINE_FROM_NPM === "1") {
       return;
     }
@@ -195,8 +201,12 @@ describe("core engine", () => {
       selectedCandidateIds: [...plan.selectedCandidateIds, "cand_outside"],
     };
 
-    await expect(applyPlanWithBackend(malicious, "rust")).rejects.toBeInstanceOf(GuardrailError);
-    expect(existsSync(dir("node_modules"))).toBe(true);
+    const { report } = await applyPlanWithBackend(malicious, "rust");
+    expect(report.failedPaths).toContainEqual(
+      expect.objectContaining({ path: outsidePath, code: "outside_target" }),
+    );
+    expect(existsSync(outsidePath)).toBe(false);
+    expect(existsSync(dir("node_modules"))).toBe(false);
   });
 
   test("scanToPlan handles the seeded large-plan scenario predictably", async () => {

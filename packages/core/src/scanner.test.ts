@@ -68,6 +68,19 @@ describe("scan: basic matching", () => {
     // Should match both tsbuildinfo files
     expect(result.entries.some((e) => e.name === "tsconfig.tsbuildinfo")).toBe(true);
   });
+
+  test("? is glob single-char, not a regex quantifier", async () => {
+    // `foo?` must match `foo1` and NOT `foo`/`fo` - before the fix the raw `?`
+    // compiled as a regex quantifier, silently missing or over-matching, and
+    // diverged from the Rust engine (which escaped it literally).
+    writeFileSync(dir("foo1"), "x");
+    writeFileSync(dir("foo"), "x");
+    writeFileSync(dir("fo"), "x");
+    const config: SweepConfig = { ...DEFAULT_CONFIG, patterns: ["foo?"] };
+    const result = await scan(tmpDir, config);
+    const names = result.entries.map((e) => e.name).sort();
+    expect(names).toEqual(["foo1"]);
+  });
 });
 
 describe("scan: modified time", () => {
@@ -325,6 +338,20 @@ describe("scanner: size estimation", () => {
     const size = exactSize(dir("node_modules"));
     expect(size).toBe(5 + 7 + 5);
     expect(await exactSizeAsync(dir("node_modules"))).toBe(size);
+  });
+
+  test("symlink candidates report the link's size, not the target's", async () => {
+    // statSync follows the link and would report the target's size - deleting
+    // the link frees only the link entry, so the estimate must not inflate.
+    if (process.platform === "win32") return;
+    mkdirSync(dir("real"));
+    writeFileSync(dir("real", "big.bin"), Buffer.alloc(64 * 1024));
+    safeSymlink(dir("real"), dir("node_modules"));
+
+    const result = await scan(tmpDir, DEFAULT_CONFIG);
+    const link = result.entries.find((entry) => entry.name === "node_modules");
+    if (!link?.isSymlink) return; // symlink could not be created
+    expect(link.estimatedBytes).toBeLessThan(64 * 1024);
   });
 
   test("abort signal stops sizing without throwing", async () => {

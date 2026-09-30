@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import type {
   CandidateKind,
   PathFailure,
@@ -120,6 +121,23 @@ export function resolveSelectedCandidates(plan: ScanPlan): ScanCandidate[] {
   return plan.candidates.filter((candidate) => selectedIds.has(candidate.id));
 }
 
+/**
+ * Resolved-path equality, case-folded where the filesystem is (macOS/Windows).
+ * A case-variant spelling of the same directory must not slip past the
+ * root-protection check on a case-insensitive volume.
+ */
+function isSameResolvedPath(a: string, b: string): boolean {
+  const ra = resolve(a);
+  const rb = resolve(b);
+  if (ra === rb) {
+    return true;
+  }
+  if (process.platform === "win32" || process.platform === "darwin") {
+    return ra.toLowerCase() === rb.toLowerCase();
+  }
+  return false;
+}
+
 export function revalidateCandidates(
   candidates: ScanCandidate[],
   targetDir?: string,
@@ -153,6 +171,29 @@ export function revalidateCandidates(
       continue;
     }
 
+    // A plan file is untrusted input: the riskTier field is attacker-controlled,
+    // so safety classifications are re-derived from the path here. The scanner
+    // never emits the target root itself or anything inside VCS metadata, so a
+    // plan that selects them was hand-made. Case-insensitive filesystems make
+    // "/TMP/PROJ" the same directory as "/tmp/proj", so compare case-folded
+    // where the platform does.
+    if (targetDir && isSameResolvedPath(candidate.path, targetDir)) {
+      failedPaths.push({
+        path: candidate.path,
+        code: "protected_path",
+        error: "candidate path is the plan target directory itself",
+      });
+      continue;
+    }
+    if (pathHasProtectedVcsSegment(candidate.path)) {
+      failedPaths.push({
+        path: candidate.path,
+        code: "protected_path",
+        error: "candidate path is inside protected VCS metadata",
+      });
+      continue;
+    }
+
     try {
       const stat = lstatSync(candidate.path);
       const isSymlink = stat.isSymbolicLink();
@@ -181,6 +222,16 @@ export function revalidateCandidates(
       // when the target could be resolved above.
       if (!isSymlink && realTarget) {
         const realCandidate = realpathSync(candidate.path);
+        // Canonical equality means the candidate IS the target root spelled
+        // differently (case-variant, symlinked parent) - never deletable.
+        if (isSameResolvedPath(realCandidate, realTarget)) {
+          failedPaths.push({
+            path: candidate.path,
+            code: "protected_path",
+            error: "candidate path resolves to the plan target directory itself",
+          });
+          continue;
+        }
         if (!isPathWithinRoot(realCandidate, realTarget)) {
           failedPaths.push({
             path: candidate.path,

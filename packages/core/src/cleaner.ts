@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync } from "node:fs";
+import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { rename, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
@@ -37,8 +37,11 @@ export interface CleanOptions {
  * start with that prefix.
  */
 export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
-  // Sort shallowest paths first
-  const sorted = [...entries].sort((a, b) => a.path.localeCompare(b.path));
+  // Sort shallowest paths first. Byte order, not localeCompare: ICU collation
+  // is locale-dependent and would sort differently from the Rust engine's
+  // byte-wise cmp, producing different retained sets for paths that differ
+  // only in case or punctuation.
+  const sorted = [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const retained: ScanEntry[] = [];
 
   for (const entry of sorted) {
@@ -63,12 +66,28 @@ export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
  * A path outside `trashRoot` or an absolute relative result is refused -
  * the trash layout must stay inside `trashDir`.
  */
+/** lstat-based existence check - a dangling symlink still occupies the slot. */
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function moveToTrash(entry: ScanEntry, trashDir: string, trashRoot: string): Promise<void> {
   const rel = relative(trashRoot, entry.path);
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`trash destination escapes root for ${entry.path}`);
   }
-  const destination = join(trashDir, rel);
+  // POSIX rename silently replaces an existing destination - leftovers from a
+  // prior trash run or case-variant duplicates must not be clobbered, so bump
+  // a suffix until the slot is free. lstat catches dangling links too.
+  let destination = join(trashDir, rel);
+  for (let suffix = 2; pathExists(destination); suffix++) {
+    destination = join(trashDir, `${rel}-${suffix}`);
+  }
   mkdirSync(dirname(destination), { recursive: true });
   // A symlink planted inside the trash layout would redirect the rename -
   // verify the real parent still lands under the real trash dir.

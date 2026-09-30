@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScanEntry, ScanResult } from "@kitsunekode/sweep-protocol";
@@ -106,6 +106,62 @@ describe("planner", () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  test("revalidateCandidates refuses the target root itself", () => {
+    // A forged plan can name the root as a candidate - the scan never emits
+    // it, but the apply path must not rm -r the project top (incl. .git).
+    const candidate = toCandidate({
+      path: tmpDir,
+      name: "project",
+      estimatedBytes: 0,
+      isSymlink: false,
+      entryType: "directory",
+    });
+
+    const { ready, failedPaths } = revalidateCandidates([candidate], tmpDir);
+
+    expect(ready).toHaveLength(0);
+    expect(failedPaths[0]?.code).toBe("protected_path");
+    expect(failedPaths[0]?.error).toContain("target directory itself");
+  });
+
+  test("revalidateCandidates refuses the root spelled with dot segments", () => {
+    // "target/." and "target/sub/.." resolve to the target root - the
+    // canonical-equality check must catch spellings past the lexical one.
+    for (const spelling of [`${tmpDir}/.`, `${tmpDir}/sub/../`]) {
+      const candidate = toCandidate({
+        path: spelling,
+        name: "project",
+        estimatedBytes: 0,
+        isSymlink: false,
+        entryType: "directory",
+      });
+
+      const { ready, failedPaths } = revalidateCandidates([candidate], tmpDir);
+
+      expect(ready).toHaveLength(0);
+      expect(failedPaths[0]?.code).toBe("protected_path");
+    }
+  });
+
+  test("revalidateCandidates refuses candidates inside VCS metadata", () => {
+    // riskTier is plan-controlled JSON - a forged "safe" tier must not bypass
+    // the .git protection that inferRiskTier applies at scan time.
+    mkdirSync(dir(".git", "objects"), { recursive: true });
+    const candidate = toCandidate({
+      path: dir(".git"),
+      name: ".git",
+      estimatedBytes: 0,
+      isSymlink: false,
+      entryType: "directory",
+    });
+
+    const { ready, failedPaths } = revalidateCandidates([candidate], tmpDir);
+
+    expect(ready).toHaveLength(0);
+    expect(failedPaths[0]?.code).toBe("protected_path");
+    expect(existsSync(dir(".git"))).toBe(true);
   });
 
   test("revalidateCandidates keeps symlink candidates (unlink-only is already safe)", () => {

@@ -54,6 +54,29 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
             continue;
         }
 
+        // A plan file is untrusted input: riskTier is attacker-controlled, so
+        // safety classifications are re-derived from the path. The scanner
+        // never emits the target root itself or anything inside VCS metadata -
+        // a plan that selects them was hand-made. Aligned with the JS engine's
+        // revalidateCandidates. Case-insensitive filesystems make "/TMP/PROJ"
+        // the same directory as "/tmp/proj", so compare case-folded there.
+        if same_resolved_path(&candidate.entry.path, &plan.target_dir) {
+            failed_paths.push(path_failure(
+                &candidate.entry.path,
+                FailureReasonCode::ProtectedPath,
+                "candidate path is the plan target directory itself".to_owned(),
+            ));
+            continue;
+        }
+        if guardrails::path_has_protected_vcs_segment(&candidate.entry.path) {
+            failed_paths.push(path_failure(
+                &candidate.entry.path,
+                FailureReasonCode::ProtectedPath,
+                "candidate path is inside protected VCS metadata".to_owned(),
+            ));
+            continue;
+        }
+
         match revalidate_candidate(candidate, real_root.as_deref()) {
             Ok(entry) => ready.push(entry),
             Err(failure) => failed_paths.push(failure),
@@ -133,7 +156,18 @@ fn revalidate_candidate(
         if let Some(root) = real_root {
             match fs::canonicalize(path) {
                 Ok(real_candidate) => {
-                    if real_candidate != root && !real_candidate.starts_with(root) {
+                    // Canonical equality means the candidate IS the target root
+                    // spelled differently (case-variant, symlinked parent) -
+                    // never deletable.
+                    if real_candidate == root {
+                        return Err(path_failure(
+                            &candidate.entry.path,
+                            FailureReasonCode::ProtectedPath,
+                            "candidate path resolves to the plan target directory itself"
+                                .to_owned(),
+                        ));
+                    }
+                    if !real_candidate.starts_with(root) {
                         return Err(path_failure(
                             &candidate.entry.path,
                             FailureReasonCode::OutsideTarget,
@@ -170,6 +204,22 @@ fn is_path_within_root(candidate_path: &str, root_path: &str) -> bool {
     }
 }
 
+/// Resolved-path equality, case-folded where the filesystem is (macOS/Windows).
+/// A case-variant spelling of the same directory must not slip past the
+/// root-protection check on a case-insensitive volume.
+fn same_resolved_path(a: &str, b: &str) -> bool {
+    let ra = lexical_abs(Path::new(a));
+    let rb = lexical_abs(Path::new(b));
+    if ra == rb {
+        return true;
+    }
+    if cfg!(windows) || cfg!(target_os = "macos") {
+        ra.to_string_lossy().to_lowercase() == rb.to_string_lossy().to_lowercase()
+    } else {
+        false
+    }
+}
+
 fn lexical_abs(path: &Path) -> std::path::PathBuf {
     use std::path::{Component, PathBuf};
     let absolute = if path.is_absolute() {
@@ -196,11 +246,15 @@ fn deduplicate_nested_entries(mut entries: Vec<ScanEntry>) -> Vec<ScanEntry> {
     entries.sort_by(|left, right| left.path.cmp(&right.path));
     let mut retained: Vec<ScanEntry> = Vec::new();
     for entry in entries {
+        // Exact-path duplicates dedupe too - a crafted plan listing the same
+        // path twice would otherwise double-delete and report a phantom
+        // "missing" failure. Aligned with the JS deduplicateNestedEntries.
         let is_inside = retained.iter().any(|parent| {
-            parent.entry_type == EntryType::Directory
-                && !parent.is_symlink
-                && (entry.path.starts_with(&format!("{}/", parent.path))
-                    || entry.path.starts_with(&format!("{}\\", parent.path)))
+            entry.path == parent.path
+                || (parent.entry_type == EntryType::Directory
+                    && !parent.is_symlink
+                    && (entry.path.starts_with(&format!("{}/", parent.path))
+                        || entry.path.starts_with(&format!("{}\\", parent.path))))
         });
         if !is_inside {
             retained.push(entry);
@@ -421,6 +475,181 @@ mod tests {
             FailureReasonCode::OutsideTarget.as_str()
         );
         assert!(victim.exists());
+    }
+
+    #[test]
+    fn apply_plan_refuses_target_root_as_candidate() {
+        // A forged plan can name the target root itself as a candidate - the
+        // scanner never emits it, but apply must not remove_dir_all the whole
+        // project (including its .git).
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let root = dir.path().to_string_lossy().into_owned();
+        fs::create_dir_all(dir.path().join(".git"))
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let root_for_candidate = root.clone();
+        let plan = ScanPlan {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            target_dir: root.clone(),
+            selection_policy: SelectionPolicy::default(),
+            candidates: vec![candidate(
+                &root_for_candidate,
+                "project",
+                EntryType::Directory,
+                false,
+            )],
+            summary: ScanPlanSummary {
+                candidate_count: 1,
+                estimated_total_bytes: 0,
+                scanned_dirs: 1,
+                skipped_dirs: 0,
+                exact: false,
+                selected_count: 1,
+                risk_counts: Default::default(),
+            },
+            selected_candidate_ids: vec!["cand_project".to_owned()],
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+        };
+
+        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(report.failed_count, 1);
+        assert_eq!(
+            report.failed_paths[0].code,
+            FailureReasonCode::ProtectedPath.as_str()
+        );
+        assert!(dir.path().join(".git").exists());
+    }
+
+    #[test]
+    fn apply_plan_refuses_root_spelled_with_dot_segments() {
+        // "target/." and "target/sub/.." resolve to the target root - the
+        // canonical-equality check must catch spellings past the lexical one.
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let root = dir.path().to_string_lossy().into_owned();
+        fs::create_dir_all(dir.path().join(".git"))
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::create_dir_all(dir.path().join("sub"))
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        for spelling in [format!("{root}/."), format!("{root}/sub/..")] {
+            let plan = ScanPlan {
+                protocol_version: PROTOCOL_VERSION.to_owned(),
+                target_dir: root.clone(),
+                selection_policy: SelectionPolicy::default(),
+                candidates: vec![candidate(&spelling, "project", EntryType::Directory, false)],
+                summary: ScanPlanSummary {
+                    candidate_count: 1,
+                    estimated_total_bytes: 0,
+                    scanned_dirs: 1,
+                    skipped_dirs: 0,
+                    exact: false,
+                    selected_count: 1,
+                    risk_counts: Default::default(),
+                },
+                selected_candidate_ids: vec!["cand_project".to_owned()],
+                created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+            };
+
+            let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+            assert_eq!(report.deleted_count, 0, "spelling {spelling} deleted root");
+            assert_eq!(
+                report.failed_paths[0].code,
+                FailureReasonCode::ProtectedPath.as_str()
+            );
+        }
+        assert!(dir.path().join(".git").exists());
+    }
+
+    #[test]
+    fn apply_plan_refuses_vcs_metadata_candidates() {
+        // riskTier is plan-controlled JSON - a forged "safe" tier must not
+        // bypass the VCS protection applied at scan time.
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let root = dir.path().to_string_lossy();
+        let git_dir = dir.path().join(".git");
+        fs::create_dir_all(git_dir.join("objects"))
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let git_path = git_dir.to_string_lossy().into_owned();
+        let plan = ScanPlan {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            target_dir: root.to_string(),
+            selection_policy: SelectionPolicy::default(),
+            candidates: vec![ScanCandidate {
+                entry: ScanEntry {
+                    path: git_path,
+                    name: ".git".to_owned(),
+                    estimated_bytes: 0,
+                    modified_ms: None,
+                    is_symlink: false,
+                    entry_type: EntryType::Directory,
+                },
+                id: "cand_git".to_owned(),
+                kind: "node_modules".to_owned(),
+                risk_tier: RiskTier::Safe,
+                reasons: vec!["default-pattern".to_owned()],
+                selected_by_default: true,
+            }],
+            summary: ScanPlanSummary {
+                candidate_count: 1,
+                estimated_total_bytes: 0,
+                scanned_dirs: 1,
+                skipped_dirs: 0,
+                exact: false,
+                selected_count: 1,
+                risk_counts: Default::default(),
+            },
+            selected_candidate_ids: vec!["cand_git".to_owned()],
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+        };
+
+        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(
+            report.failed_paths[0].code,
+            FailureReasonCode::ProtectedPath.as_str()
+        );
+        assert!(git_dir.exists());
+    }
+
+    #[test]
+    fn apply_plan_deduplicates_exact_path_duplicates() {
+        // The same path listed under two ids must delete once - the second
+        // removal would ENOENT into a phantom "missing" failure.
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let root = dir.path().to_string_lossy();
+        let artifact = dir.path().join("node_modules");
+        fs::create_dir_all(&artifact).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let artifact_path = artifact.to_string_lossy().into_owned();
+        let mut dupe = candidate(&artifact_path, "node_modules", EntryType::Directory, false);
+        dupe.id = "cand_dupe".to_owned();
+        let plan = ScanPlan {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            target_dir: root.to_string(),
+            selection_policy: SelectionPolicy::default(),
+            candidates: vec![
+                candidate(&artifact_path, "node_modules", EntryType::Directory, false),
+                dupe,
+            ],
+            summary: ScanPlanSummary {
+                candidate_count: 2,
+                estimated_total_bytes: 0,
+                scanned_dirs: 1,
+                skipped_dirs: 0,
+                exact: false,
+                selected_count: 2,
+                risk_counts: Default::default(),
+            },
+            selected_candidate_ids: vec!["cand_node_modules".to_owned(), "cand_dupe".to_owned()],
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+        };
+
+        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        assert_eq!(report.deleted_count, 1);
+        assert_eq!(report.failed_count, 0);
+        assert!(!artifact.exists());
     }
 
     #[test]

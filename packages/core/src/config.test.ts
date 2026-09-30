@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -145,6 +145,18 @@ describe("writeInitSweeprc", () => {
     const configPath = dir("project", ".sweeprc");
     expect(writeInitSweeprc(configPath)).toBe("exists");
     expect(loadConfig(dir("project")).maxSizeGB).toBe(1);
+  });
+
+  test("refuses to write through a symlinked .sweeprc - even with force", () => {
+    // A hostile checkout can ship .sweeprc -> ~/.ssh/config; writeFileSync
+    // would follow the link and truncate the target. Refuse instead.
+    if (process.platform === "win32") return; // symlink perms vary
+    mkdirSync(dir("project"), { recursive: true });
+    writeFileSync(dir("outside.txt"), "keep me");
+    symlinkSync(dir("outside.txt"), dir("project", ".sweeprc"));
+
+    expect(() => writeInitSweeprc(dir("project", ".sweeprc"), true)).toThrow(ConfigParseError);
+    expect(readFileSync(dir("outside.txt"), "utf-8")).toBe("keep me");
   });
 });
 

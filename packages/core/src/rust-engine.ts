@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
@@ -82,8 +82,10 @@ function resolveOptionalNativeBinary(packageRoot: string): string | null {
  *
  * Resolution order:
  * 1. `SWEEP_ENGINE_PATH` environment variable
- * 2. Installed optional `@kitsunekode/sweep-engine-*` platform package
- * 3. `target/debug/sweep-engine` or `target/release/sweep-engine` under package root (dev)
+ * 2. Workspace `target/{debug,release}/sweep-engine` (dev builds must shadow
+ *    the installed optional package - otherwise local Rust changes are never
+ *    exercised by tests or dev runs while `cargo test` validates other code)
+ * 3. Installed optional `@kitsunekode/sweep-engine-*` platform package
  * 4. `sweep-engine` on `PATH`
  */
 export function resolveRustEngineBinary(): string {
@@ -93,22 +95,42 @@ export function resolveRustEngineBinary(): string {
   }
 
   const packageRoot = sweepPackageRoot();
+  const binaryName = process.platform === "win32" ? "sweep-engine.exe" : "sweep-engine";
+
+  // Cargo workspace builds land in <repo>/target, not <repo>/apps/cli/target -
+  // walk up so a local build is found from either layout. The Cargo.toml gate
+  // keeps this scoped to real source checkouts: a published install or an
+  // unrelated ~/target/debug/sweep-engine must not shadow the package binary.
+  // Newest build wins - a stale target/release artifact must not beat a fresh
+  // cargo build --profile dev.
+  for (let dir = packageRoot, depth = 0; depth < 4; depth++) {
+    if (existsSync(join(dir, "Cargo.toml"))) {
+      let newest: { path: string; mtimeMs: number } | null = null;
+      for (const profile of ["debug", "release"] as const) {
+        const local = join(dir, "target", profile, binaryName);
+        try {
+          const { mtimeMs } = statSync(local);
+          if (!newest || mtimeMs > newest.mtimeMs) {
+            newest = { path: local, mtimeMs };
+          }
+        } catch {
+          // not built for this profile
+        }
+      }
+      if (newest) {
+        return newest.path;
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
 
   const fromOptional = resolveOptionalNativeBinary(packageRoot);
   if (fromOptional) {
     return fromOptional;
-  }
-
-  for (const profile of ["debug", "release"] as const) {
-    const local = join(packageRoot, "target", profile, "sweep-engine");
-    if (existsSync(local)) {
-      return local;
-    }
-  }
-
-  const localWindows = join(packageRoot, "target", "debug", "sweep-engine.exe");
-  if (existsSync(localWindows)) {
-    return localWindows;
   }
 
   return "sweep-engine";

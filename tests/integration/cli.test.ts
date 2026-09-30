@@ -223,7 +223,8 @@ describe("CLI scan/apply", () => {
 
     expect(proc.exitCode).toBe(1);
     expect(existsSync(dir("node_modules"))).toBe(true);
-    expect(Buffer.from(proc.stdout).toString("utf8")).toContain("Delete");
+    // Prompts live on stderr - stdout stays clean for --json consumers.
+    expect(Buffer.from(proc.stderr).toString("utf8")).toContain("Delete");
   });
 
   test("ui command refuses to run without a TTY", () => {

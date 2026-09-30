@@ -82,6 +82,7 @@ describe("protocol package", () => {
       "changed_symlink_state",
       "changed_entry_type",
       "outside_target",
+      "protected_path",
       "permission_denied",
       "busy",
       "filesystem_error",

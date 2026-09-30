@@ -83,7 +83,8 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
         ...(opts.trash ? { trash: true } : {}),
       }))
     ) {
-      printDeclined();
+      // A decline under --json emits no stdout at all - exit code carries it.
+      if (!opts.json) printDeclined();
       exitWith(EXIT.ABORTED);
     }
 

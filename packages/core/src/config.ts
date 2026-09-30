@@ -185,8 +185,20 @@ export function validateProjectConfigFile(configPath: string, cwd: string): Conf
 }
 
 export function writeInitSweeprc(configPath: string, force = false): "created" | "exists" {
-  if (existsSync(configPath) && !force) {
-    return "exists";
+  // lstat before existsSync: a symlinked .sweeprc (possibly dangling) would
+  // make writeFileSync follow the link and overwrite whatever it points at.
+  try {
+    const stat = lstatSync(configPath);
+    if (stat.isSymbolicLink()) {
+      throw new ConfigParseError(
+        `${configPath} is a symlink - refusing to write through it. Remove it first.`,
+      );
+    }
+    if (!force) return "exists";
+  } catch (err) {
+    if (err instanceof ConfigParseError) throw err;
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    // ENOENT - nothing there, safe to create.
   }
 
   writeFileSync(configPath, `${JSON.stringify(INIT_SWEEPRC_TEMPLATE, null, 2)}\n`, "utf-8");
@@ -253,8 +265,12 @@ export function compileIgnoreMatcher(targetDir: string, ignore: string[]): Ignor
     const pattern = raw.replace(/\/+$/, "");
     if (pattern.length === 0) continue;
     const key = isCaseInsensitive ? pattern.toLowerCase() : pattern;
-    if (pattern.includes("*")) {
-      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+    if (pattern.includes("*") || pattern.includes("?")) {
+      // `?` is glob single-char, not a regex quantifier - escape then convert.
+      const escaped = pattern
+        .replace(/[.+^${}()|[\]\\?]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\\\?/g, ".");
       const re = new RegExp(`^${escaped}$`, flags);
       if (pattern.includes("/")) {
         pathGlobs.push(re);

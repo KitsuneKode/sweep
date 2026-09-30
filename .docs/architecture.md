@@ -130,7 +130,9 @@ The gap between scan and apply is a trust boundary - the tree may have changed.
 Both engines re-validate before deleting:
 
 - **Lexical containment** - every candidate path must resolve inside the plan
-  target (`assertPathWithinRoot` / `is_path_within_root`).
+  target (`isPathWithinRoot` / `is_path_within_root`); the target root itself
+  and VCS metadata segments are reported as `protected_path` failures rather
+  than deleted.
 - **Type drift** - symlink-state or entry-type changes since the plan are
   rejected (`changed_symlink_state` / `changed_entry_type`).
 - **Realpath containment** - a lexical check alone misses an ancestor swapped

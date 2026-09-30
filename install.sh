@@ -63,8 +63,13 @@ expected="$(cut -d' ' -f1 < "$tmp/sweep.sha256")"
 info "checksum verified"
 
 mkdir -p "$INSTALL_DIR"
-mv "$tmp/sweep" "$INSTALL_DIR/sweep"
-chmod +x "$INSTALL_DIR/sweep"
+# Stage inside INSTALL_DIR so the final step is an atomic same-fs rename - a
+# cross-device mv could leave a truncated binary at the destination.
+stage="$INSTALL_DIR/.sweep.new.$$"
+trap 'rm -rf "$tmp" "${stage:-}"' EXIT
+cp "$tmp/sweep" "$stage" || fail "failed to stage binary in $INSTALL_DIR"
+chmod +x "$stage"
+mv -f "$stage" "$INSTALL_DIR/sweep"
 
 info "installed sweep → $INSTALL_DIR/sweep"
 case ":$PATH:" in

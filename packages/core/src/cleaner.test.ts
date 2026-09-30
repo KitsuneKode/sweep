@@ -190,4 +190,42 @@ describe("clean with trashDir", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("never clobbers an existing trash destination - bumps a suffix", async () => {
+    // POSIX rename silently replaces an existing destination: a leftover from
+    // an earlier trash run (or a case-variant duplicate) sitting at the same
+    // rel path must survive alongside the new move.
+    const root = mkdtempSync(join(tmpdir(), "sweep-trash-collide-"));
+    try {
+      const targetDir = join(root, "project");
+      mkdirSync(join(targetDir, "node_modules"), { recursive: true });
+      writeFileSync(join(targetDir, "node_modules", "index.js"), "new");
+
+      const trashDir = join(targetDir, ".sweep-trash-2025-01-01");
+      mkdirSync(join(trashDir, "node_modules"), { recursive: true });
+      writeFileSync(join(trashDir, "node_modules", "index.js"), "prior");
+
+      const result = await clean(
+        [
+          {
+            path: join(targetDir, "node_modules"),
+            name: "node_modules",
+            estimatedBytes: 1,
+            isSymlink: false,
+            entryType: "directory",
+          },
+        ],
+        { trashDir, trashRoot: targetDir },
+      );
+
+      expect(result.failedPaths).toEqual([]);
+      expect(result.deleted.length).toBe(1);
+      // Prior trash contents survive; the new move lands under a bumped name.
+      expect(readFileSync(join(trashDir, "node_modules", "index.js"), "utf-8")).toBe("prior");
+      expect(readFileSync(join(trashDir, "node_modules-2", "index.js"), "utf-8")).toBe("new");
+      expect(existsSync(join(targetDir, "node_modules"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

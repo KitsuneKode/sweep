@@ -105,7 +105,7 @@ export async function runScanToPlan(
     engine?: EngineBackend;
     projectConfig?: SweepConfig;
   } = {},
-): Promise<{ result: ScanResult; plan: ScanPlan }> {
+): Promise<{ result: ScanResult; plan: ScanPlan; engineUsed: "js" | "rust" }> {
   const projectConfig = options.projectConfig ?? DEFAULT_CONFIG;
 
   if (options.engine === "rust") {
@@ -113,7 +113,8 @@ export async function runScanToPlan(
     if (blocked) {
       console.error(`warning: ${blocked}; using JS engine`);
       const { engine: _engine, projectConfig: _projectConfig, ...scanOptions } = options;
-      return scanToPlan(targetDir, config, scanOptions);
+      const { result, plan } = await scanToPlan(targetDir, config, scanOptions);
+      return { result, plan, engineUsed: "js" };
     }
 
     const { engine: _engine, projectConfig: _projectConfig, ...rustOptions } = options;
@@ -125,10 +126,12 @@ export async function runScanToPlan(
     return {
       plan,
       result: scanResultFromPlan(plan),
+      engineUsed: "rust",
     };
   }
 
-  return scanToPlan(targetDir, config, options);
+  const { result, plan } = await scanToPlan(targetDir, config, options);
+  return { result, plan, engineUsed: "js" };
 }
 
 function scanResultFromPlan(plan: ScanPlan): ScanResult {
@@ -186,12 +189,16 @@ export function writeJsonLine(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
-/** Show a [y/N] prompt. Default is NO (empty input → false). */
+/**
+ * Show a [y/N] prompt. Default is NO (empty input → false).
+ * The question goes to stderr: stdout is reserved for results so `--json`
+ * consumers never see prompt text, and a piped stdin still hits EOF→decline.
+ */
 export function promptConfirm(question: string): Promise<boolean> {
   return new Promise((resolvePromise) => {
     const rl = createInterface({
       input: process.stdin,
-      output: process.stdout,
+      output: process.stderr,
     });
 
     const settle = (value: boolean): void => {
@@ -240,9 +247,10 @@ export async function runScanWithDisplay(
     const progressive = createProgressiveScanRenderer(spinnerLabel ?? "Scanning...");
     let result: ScanResult;
     let plan: ScanPlan;
+    let engineUsed: "js" | "rust" = "js";
 
     try {
-      ({ result, plan } = await runScanToPlan(targetDir, config, {
+      ({ result, plan, engineUsed } = await runScanToPlan(targetDir, config, {
         ...scanOptions,
         onEntry: () => {
           progressive.stopSpinner();
@@ -262,7 +270,7 @@ export async function runScanWithDisplay(
       count: result.entries.length,
       totalBytes: result.estimatedTotalBytes,
       exact: result.exact,
-      ...(scanOptions.engine ? { engine: scanOptions.engine } : {}),
+      engine: engineUsed,
     });
 
     return { result, plan };
@@ -341,6 +349,9 @@ export async function executePlanDeletion(
   /** Absolute trash dir when `--trash` moved entries instead of deleting. */
   trashDir?: string;
 }> {
+  // Re-assert the target guardrail here - not just in callers - so the trash
+  // mkdir below can never run against a root a forged plan would fail on.
+  assertSafeCwd(plan.targetDir);
   const selected = plan.candidates.filter((candidate) =>
     plan.selectedCandidateIds.includes(candidate.id),
   );
