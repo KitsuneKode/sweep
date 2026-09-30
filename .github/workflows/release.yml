@@ -24,16 +24,19 @@ jobs:
     steps:
       - id: intent
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BUILD_NATIVE_INPUT: ${{ inputs.build_native }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           needs_native="false"
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ inputs.build_native }}" = "true" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$BUILD_NATIVE_INPUT" = "true" ]; then
               needs_native="true"
             fi
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            msg="${{ github.event.head_commit.message }}"
-            if printf '%s' "$msg" | grep -qiE '^chore: version packages'; then
+          elif [ "$EVENT_NAME" = "push" ]; then
+            if printf '%s' "$HEAD_COMMIT_MESSAGE" | grep -qiE '^chore: version packages'; then
               needs_native="true"
             fi
           fi
@@ -61,26 +64,26 @@ jobs:
       id-token: write
       actions: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         if: needs.release-intent.outputs.needs_native_build == 'true'
         with:
           name: native-packages-all
           path: native-packages
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
 
       # Trusted publishing (OIDC) needs setup-node v6: v4/v5 write an
       # `_authToken=` line into .npmrc, and npm reads that as "auth is already
-      # configured" and never starts the OIDC exchange — which is what failed
+      # configured" and never starts the OIDC exchange - which is what failed
       # the 0.3.0 release with ENEEDAUTH. Node 24 carries npm 11.x; OIDC needs
       # npm >= 11.5.1.
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -136,7 +139,7 @@ jobs:
       - name: Create release PR or publish
         id: release
         if: steps.changesets.outputs.run == 'true'
-        uses: changesets/action@v1
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1
         with:
           version: bun run version
           publish: bun run scripts/publish-release.ts
@@ -147,7 +150,7 @@ jobs:
           SWEEP_RELEASE_REQUIRES_NATIVE: ${{ needs.release-intent.outputs.needs_native_build }}
 
       # The v* tag pushed by changesets/action above is a GITHUB_TOKEN event,
-      # which GitHub suppresses — cli-binaries.yml's `push: tags` trigger never
+      # which GitHub suppresses - cli-binaries.yml's `push: tags` trigger never
       # fires. Dispatch it explicitly on the tag instead.
       - name: Build standalone binaries for the tag
         if: steps.release.outputs.published == 'true'

@@ -1,0 +1,8 @@
+# Everything defaults to the maintainer. Narrower rules below cover the parts
+# where a silent change is most expensive: the delete path and the wire format.
+*                              @KitsuneKode
+/packages/core/src/cleaner.ts  @KitsuneKode
+/packages/core/src/guardrails.ts @KitsuneKode
+/packages/protocol/            @KitsuneKode
+/crates/                       @KitsuneKode
+/.github/                      @KitsuneKode

@@ -28,7 +28,7 @@ jobs:
           - id: darwin-arm64
             os: macos-latest
           - id: darwin-x64
-            os: macos-13
+            os: macos-15-intel
           - id: linux-x64
             os: ubuntu-latest
           - id: linux-arm64
@@ -37,9 +37,9 @@ jobs:
             os: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
 
@@ -59,14 +59,14 @@ jobs:
           bun run scripts/build-standalone.ts "" "$out"
           echo "OUT=$out" >> "$GITHUB_ENV"
 
-      - name: Smoke — embedded UI probe + version
+      - name: Smoke - embedded UI probe + version
         shell: bash
         run: |
           "./$OUT" --ui-probe
           "./$OUT" --version
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sweep-${{ matrix.id }}
           path: ${{ env.OUT }}
@@ -78,13 +78,13 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download all binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           merge-multiple: true
           path: dist-bin
 
       - name: Attach to GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: dist-bin/*
         env:
