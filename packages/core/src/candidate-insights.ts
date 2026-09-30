@@ -31,7 +31,7 @@ function canonicalPath(path: string): string {
   try {
     resolved = realpathSync(path);
   } catch {
-    // dangling or unreadable — compare the unresolved path
+    // dangling or unreadable - compare the unresolved path
   }
   const normalized = resolve(resolved)
     .replace(/^\\\\\?\\/i, "")

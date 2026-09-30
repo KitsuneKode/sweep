@@ -33,7 +33,7 @@ function writeConfig(dirPath: string, config: object): void {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
-describe("loadConfig — defaults", () => {
+describe("loadConfig: defaults", () => {
   test("returns built-in defaults when no config files exist", () => {
     const config = loadConfig(dir("nonexistent-project"));
     expect(config.patterns).toEqual(DEFAULT_CONFIG.patterns);
@@ -56,7 +56,7 @@ describe("loadConfig — defaults", () => {
   });
 });
 
-describe("loadConfig — project config (.sweeprc)", () => {
+describe("loadConfig: project config (.sweeprc)", () => {
   test("finds .sweeprc in the target directory", () => {
     mkdirSync(dir("project"), { recursive: true });
     writeConfig(dir("project"), { maxSizeGB: 5 });
@@ -67,7 +67,7 @@ describe("loadConfig — project config (.sweeprc)", () => {
   test("walks up to find .sweeprc in parent", () => {
     mkdirSync(dir("project", "packages", "web"), { recursive: true });
     writeConfig(dir("project"), { maxSizeGB: 3 });
-    // Run from the nested package — should find config in project root
+    // Run from the nested package - should find config in project root
     const config = loadConfig(dir("project", "packages", "web"));
     expect(config.maxSizeGB).toBe(3);
   });
@@ -91,7 +91,7 @@ describe("loadConfig — project config (.sweeprc)", () => {
 
   test("deduplicates merged patterns", () => {
     mkdirSync(dir("project"), { recursive: true });
-    // node_modules is already in defaults — adding it again should not duplicate
+    // node_modules is already in defaults - adding it again should not duplicate
     writeConfig(dir("project"), { patterns: ["node_modules", "custom"] });
     const config = loadConfig(dir("project"));
     const nodeModulesCount = config.patterns.filter((p) => p === "node_modules").length;
@@ -148,7 +148,7 @@ describe("writeInitSweeprc", () => {
   });
 });
 
-describe("isIgnoredEntry — globs", () => {
+describe("isIgnoredEntry: globs", () => {
   test("matches basename globs like *.cache", () => {
     mkdirSync(dir("project", "foo.cache"), { recursive: true });
     expect(
@@ -172,7 +172,7 @@ describe("isIgnoredEntry — globs", () => {
   });
 });
 
-describe("loadConfig — explicit --config path", () => {
+describe("loadConfig: explicit --config path", () => {
   test("uses explicit config file, skipping walk-up", () => {
     mkdirSync(dir("configs"), { recursive: true });
     mkdirSync(dir("project"), { recursive: true });
@@ -185,7 +185,7 @@ describe("loadConfig — explicit --config path", () => {
   });
 });
 
-describe("loadConfig — CLI overrides", () => {
+describe("loadConfig: CLI overrides", () => {
   test("CLI maxSizeGB overrides project config", () => {
     mkdirSync(dir("project"), { recursive: true });
     writeConfig(dir("project"), { maxSizeGB: 5 });

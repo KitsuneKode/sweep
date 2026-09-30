@@ -1,7 +1,7 @@
 # Release & Distribution
 
 Two independent shipping paths. They share the version number but not
-machinery — do not couple them without a decision-log entry.
+machinery - do not couple them without a decision-log entry.
 
 ## 1. npm package (primary)
 
@@ -52,9 +52,9 @@ bun run bootstrap:npm-trust                      # report only
 bun run bootstrap:npm-trust -- --publish --trust # apply (prompts 2FA)
 ```
 
-That publishes a binary-free placeholder at `0.0.1` for any missing package —
+That publishes a binary-free placeholder at `0.0.1` for any missing package -
 deliberately below any shipping version, because the CLI pins its engines to an
-exact version — and then registers the trusted publisher for every package via
+exact version - and then registers the trusted publisher for every package via
 `npm trust github`, so no clicking through npmjs.com. It skips packages that
 already exist, so re-run it whenever a platform is added to `NATIVE_PLATFORMS`.
 
@@ -73,14 +73,15 @@ this has to be run by a human; CI cannot do it.
 | `sweep-win-x64`      | windows-latest | `.exe`        |
 
 Each is built by `scripts/build-standalone.ts` from `apps/cli/src/bin-standalone.ts`
-— an entrypoint that imports the UI module statically and registers it before the
-CLI boots. The static graph makes Bun embed the UI code and OpenTUI's native
-library/worker/grammars, so no asset extraction or `OTUI_ASSET_ROOT` is needed at
-runtime. Every binary runs two smoke tests before upload: `--ui-probe` (proves the
-embedded UI graph loads, including native dlopen) and `--version`. All four are
-attached to the tag's GitHub release.
 
-The npm package keeps the dynamic `sweep-ui.js` sibling loading — only standalone
+- an entrypoint that imports the UI module statically and registers it before the
+  CLI boots. The static graph makes Bun embed the UI code and OpenTUI's native
+  library/worker/grammars, so no asset extraction or `OTUI_ASSET_ROOT` is needed at
+  runtime. Every binary runs two smoke tests before upload: `--ui-probe` (proves the
+  embedded UI graph loads, including native dlopen) and `--version`. All four are
+  attached to the tag's GitHub release.
+
+The npm package keeps the dynamic `sweep-ui.js` sibling loading - only standalone
 binaries use the static entrypoint.
 
 ### Cut a binary release
@@ -100,6 +101,6 @@ git tag vX.Y.Z && git push origin vX.Y.Z   # binaries build + attach automatical
 ## Known distribution gaps
 
 - linux-arm64 binary: needs either an arm64 runner or cross-compile validation
-- musl (Alpine): requires `OPENTUI_LIBC=musl` build variant — not wired yet
+- musl (Alpine): requires `OPENTUI_LIBC=musl` build variant - not wired yet
 - Windows TUI: OpenTUI native FFI works under Bun on Windows; CI smoke covers
   non-TTY commands only, interactive verification is manual

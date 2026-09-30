@@ -50,7 +50,7 @@ function pkg(): Record<string, unknown> {
 console.log("\npreflight checks\n");
 
 check("dist/sweep.js exists", () => {
-  assert(existsSync(DIST), "not found — run: bun run build");
+  assert(existsSync(DIST), "not found. Run: bun run build");
 });
 
 check("dist/sweep.js starts with shebang on line 1", () => {
@@ -62,7 +62,7 @@ check("dist/sweep.js starts with shebang on line 1", () => {
 check("dist/sweep.js bundle size > 10 KB", () => {
   if (!existsSync(DIST)) return;
   const { size } = statSync(DIST);
-  assert(size > 10_000, `suspiciously small: ${size} bytes — build may have failed silently`);
+  assert(size > 10_000, `suspiciously small: ${size} bytes; build may have failed silently`);
 });
 
 check("dist/ contains only expected bundle files", () => {
@@ -198,7 +198,7 @@ check(".env is not tracked by git", () => {
       stdio: "pipe",
       encoding: "utf8",
     });
-    throw new Error(".env IS tracked by git — run: git rm --cached .env");
+    throw new Error(".env IS tracked by git. Run: git rm --cached .env");
   } catch (err: unknown) {
     const e = err as NodeJS.ErrnoException & { status?: number };
     if (e.message?.includes("IS tracked")) throw e;
@@ -217,8 +217,8 @@ check("no uncommitted changes to apps/ or packages/", () => {
 
 console.log();
 if (failed) {
-  console.error("preflight failed — fix the errors above before publishing\n");
+  console.error("preflight failed. Fix the errors above before publishing\n");
   process.exit(1);
 }
 
-console.log("all checks passed — ready to publish\n");
+console.log("all checks passed. Ready to publish\n");

@@ -67,7 +67,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       );
     }
 
-    // The plan path must enforce the same size ceiling as interactive flows —
+    // The plan path must enforce the same size ceiling as interactive flows -
     // a saved or shared plan is not a trusted lane around maxSizeGB.
     const config = loadConfig(plan.targetDir);
     assertSizeLimit(getSelectedBytes(plan), config.maxSizeGB, opts.forceLarge ?? false);

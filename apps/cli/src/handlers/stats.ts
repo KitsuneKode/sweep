@@ -10,7 +10,7 @@ export type StatsHandlerOptions = {
 
 const RECENT_SESSIONS = 5;
 
-/** `sweep stats` — lifetime reclaimed space plus recent cleanup sessions. */
+/** `sweep stats` - lifetime reclaimed space plus recent cleanup sessions. */
 export async function handleStats(opts: StatsHandlerOptions): Promise<void> {
   applyNoColor(opts.color);
 

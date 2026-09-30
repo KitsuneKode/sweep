@@ -45,7 +45,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       projectConfig,
       spinnerLabel: opts.dryRun ? "Scanning (dry-run)..." : "Scanning...",
       output: {
-        // --json output must stay machine-readable — no banner/plan text on stdout.
+        // --json output must stay machine-readable - no banner/plan text on stdout.
         ...(opts.quiet || opts.json ? { quiet: true } : {}),
         ...(opts.verbose && !opts.json ? { verbose: true } : {}),
       },

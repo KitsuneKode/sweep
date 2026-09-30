@@ -19,7 +19,7 @@ export const VERSION = typeof __SWEEP_VERSION__ !== "undefined" ? __SWEEP_VERSIO
 const HELP_EXAMPLES = `
 Examples:
   $ sweep                         Clean current directory (prompts before delete)
-  $ sweep clean ~/projects/app    Same as default — explicit clean command
+  $ sweep clean ~/projects/app    Same as default, explicit clean command
   $ sweep --dry-run               Preview deletions without changes
   $ sweep --trash                 Move candidates to .sweep-trash-<ts>/ (reversible)
   $ sweep init                    Scaffold .sweeprc in the current directory

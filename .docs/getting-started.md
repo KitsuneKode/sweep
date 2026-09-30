@@ -4,30 +4,30 @@
 
 - [Bun](https://bun.sh) 1.4.2+ (matches `devEngines` in root `package.json`)
 - Node.js ≥ 18 (for preflight smoke tests and `npm link` consumers)
-- Rust toolchain (via rustup — `rust-toolchain.toml` pins stable + rustfmt +
+- Rust toolchain (via rustup - `rust-toolchain.toml` pins stable + rustfmt +
   clippy). Required, not optional: Turborepo runs `cargo metadata` while
-  discovering the Cargo workspace, so **every** `turbo run …` command — even
-  the JS-only gates — fails without `cargo` on `PATH`.
+  discovering the Cargo workspace, so **every** `turbo run …` command - even
+  the JS-only gates - fails without `cargo` on `PATH`.
 
 ## Install
 
 ```bash
 git clone https://github.com/KitsuneKode/sweep.git
 cd sweep
-bun install --frozen-lockfile   # required — links apps/cli and package workspaces
+bun install --frozen-lockfile   # required - links apps/cli and package workspaces
 ```
 
 ## Daily development
 
 ```bash
-# Run CLI from source (no build) — pass args after --
+# Run CLI from source (no build) - pass args after --
 bun run dev -- --help
 bun run dev -- scan . --dry-run
 
 # Interactive UI (requires a real TTY + Bun; loads packages/ui from source)
 bun run dev -- ui .
 
-# Production-like CLI (bundled output — needed for node-only smoke tests)
+# Production-like CLI (bundled output - needed for node-only smoke tests)
 bun run build
 node apps/cli/dist/sweep.js --version
 
@@ -58,7 +58,7 @@ bun run unlink:global
 | Symptom                                  | Fix                                                                          |
 | ---------------------------------------- | ---------------------------------------------------------------------------- |
 | `sweep: command not found` after link    | Ensure npm global bin is on your `PATH`                                      |
-| Stale behavior after edits               | Re-run `bun run build` — linked CLI runs `apps/cli/dist/sweep.js`            |
+| Stale behavior after edits               | Re-run `bun run build` - linked CLI runs `apps/cli/dist/sweep.js`            |
 | OpenTUI errors in `sweep ui`             | Build first; UI ships as `apps/cli/dist/sweep-ui.js`                         |
 | `Cannot find package 'commander'` on dev | Run `bun install` at repo root (`scripts/dev.ts` retries this automatically) |
 | `bun run dev` ignores your args          | Use `bun run dev -- <args>` from repo root                                   |

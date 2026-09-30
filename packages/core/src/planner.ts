@@ -39,7 +39,7 @@ export function buildPlan(
       estimatedTotalBytes: result.estimatedTotalBytes,
       scannedDirs: result.scannedDirs,
       // Sparse field: absent means "nothing skipped" (or a pre-field plan).
-      // Keeping zero implicit also keeps JS and Rust plans byte-identical —
+      // Keeping zero implicit also keeps JS and Rust plans byte-identical -
       // the Rust engine cannot report skips yet.
       ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),
       exact: result.exact,
@@ -132,13 +132,13 @@ export function revalidateCandidates(
 
   // Resolve the target once: the lexical containment check alone is not enough,
   // because a directory inside the tree can be swapped for a symlink between
-  // scan and apply — rm would then recurse through it outside the target.
+  // scan and apply - rm would then recurse through it outside the target.
   let realTarget: string | undefined;
   if (targetDir) {
     try {
       realTarget = realpathSync(targetDir);
     } catch {
-      // Target itself is unreadable — every candidate will fail lstat anyway.
+      // Target itself is unreadable - every candidate will fail lstat anyway.
       realTarget = undefined;
     }
   }
@@ -177,7 +177,7 @@ export function revalidateCandidates(
       }
 
       // Symlink candidates are unlinked (the link removed, never followed), so
-      // realpath containment is only meaningful for real entries — and only
+      // realpath containment is only meaningful for real entries - and only
       // when the target could be resolved above.
       if (!isSymlink && realTarget) {
         const realCandidate = realpathSync(candidate.path);

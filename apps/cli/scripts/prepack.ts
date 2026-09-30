@@ -5,8 +5,8 @@
  * the published manifest is installable by npm.
  *
  * The workspace manifest uses Bun's `workspace:` and `catalog:` protocols.
- * `bun publish` resolves those while packing, but `npm publish` — which is what
- * `changeset publish` shells out to — does not: it ships the literal strings and
+ * `bun publish` resolves those while packing, but `npm publish` - which is what
+ * `changeset publish` shells out to - does not: it ships the literal strings and
  * every install then dies with EUNSUPPORTEDPROTOCOL. That is exactly how 0.3.0
  * shipped broken.
  *

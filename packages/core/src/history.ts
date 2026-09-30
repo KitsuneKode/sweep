@@ -24,7 +24,7 @@ export interface HistorySummary {
 }
 
 const HISTORY_FILE = "history.jsonl";
-/** Cap history reads — stats stay cheap no matter how long the log gets. */
+/** Cap history reads - stats stay cheap no matter how long the log gets. */
 const MAX_READ_BYTES = 8 * 1024 * 1024;
 
 export function historyFilePath(): string {
@@ -32,7 +32,7 @@ export function historyFilePath(): string {
 }
 
 /**
- * Best-effort append — history is a nicety, never a reason to fail an apply.
+ * Best-effort append - history is a nicety, never a reason to fail an apply.
  * Returns false when the write could not be completed.
  */
 export function appendHistory(entry: CleanupHistoryEntry): boolean {
@@ -48,7 +48,7 @@ export function appendHistory(entry: CleanupHistoryEntry): boolean {
 
 /**
  * Read history oldest-first. Malformed lines are skipped. Files larger than
- * MAX_READ_BYTES are tail-sliced — the first partial line is dropped because
+ * MAX_READ_BYTES are tail-sliced - the first partial line is dropped because
  * every entry is a complete JSON document on its own line.
  */
 export function readHistory(limit = 200): CleanupHistoryEntry[] {
@@ -78,7 +78,7 @@ export function readHistory(limit = 200): CleanupHistoryEntry[] {
         entries.push(parsed);
       }
     } catch {
-      // Corrupt line — skip it.
+      // Corrupt line - skip it.
     }
   }
   return entries.slice(-limit);

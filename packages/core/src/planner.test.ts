@@ -93,7 +93,7 @@ describe("planner", () => {
     });
 
     // The candidate passes a lexical root check, but "sub" now resolves
-    // outside the target — rm would recurse through the link.
+    // outside the target - rm would recurse through the link.
     rmSync(dir("sub"), { recursive: true });
     symlinkSync(outside, dir("sub"));
     mkdirSync(join(outside, "node_modules"), { recursive: true });

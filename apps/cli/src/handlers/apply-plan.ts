@@ -11,7 +11,7 @@ export type ApplyReviewedPlanResult =
       status: "completed";
       report: ApplyReport;
       cleanResult: CleanResult;
-      /** SIGINT stopped scheduling mid-apply — report covers what landed. */
+      /** SIGINT stopped scheduling mid-apply - report covers what landed. */
       interrupted: boolean;
       /** Set when entries were moved instead of deleted. */
       trashDir?: string;

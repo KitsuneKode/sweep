@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# sweep installer — https://github.com/KitsuneKode/sweep
+# sweep installer - https://github.com/KitsuneKode/sweep
 #   curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
 #
 # Options (env):
@@ -57,4 +57,4 @@ esac
 
 "$INSTALL_DIR/sweep" --version >/dev/null 2>&1 \
   && info "ok: $("$INSTALL_DIR/sweep" --version)" \
-  || info "note: binary installed but did not run — check platform support"
+  || info "note: binary installed but did not run - check platform support"

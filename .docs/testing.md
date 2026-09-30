@@ -64,12 +64,12 @@ Table-driven parity between the JS scanner and (optionally) the Rust binary.
 
 Each fixture directory under `tests/fixtures/<name>/` contains:
 
-- `request.json` — scan options (`exact`, `selectionPolicy`, …)
-- `expected.plan.json` — normalized golden `ScanPlan`
+- `request.json` - scan options (`exact`, `selectionPolicy`, …)
+- `expected.plan.json` - normalized golden `ScanPlan`
 
 `tests/integration/engine-contract.test.ts` runs every fixture against the JS
 engine. Rust cases run only when `target/debug/sweep-engine` exists (skip
-otherwise — CI Rust workflow builds it).
+otherwise - CI Rust workflow builds it).
 
 Regenerate a golden after intentional JS plan changes:
 
@@ -82,7 +82,7 @@ bun run scripts/generate-parity-fixture.ts -- tests/fixtures/node_modules-only
 
 | `--engine`     | Behavior                                                                                   |
 | -------------- | ------------------------------------------------------------------------------------------ |
-| `js` (default) | TypeScript scanner — deterministic, honors `.sweeprc` and CLI flags                        |
+| `js` (default) | TypeScript scanner - deterministic, honors `.sweeprc` and CLI flags                        |
 | `rust`         | Rust subprocess; honors `.sweeprc` and CLI scan flags (`--pattern`, `--ignore`, `--depth`) |
 | `auto`         | Rust when a local `sweep-engine` binary exists, otherwise JS                               |
 
@@ -153,23 +153,23 @@ bun run dev -- ui /path/to/project   # in an interactive terminal only
 ### Driving the TUI headlessly
 
 `packages/ui` tests render the real `SweepApp` through OpenTUI's `testRender`.
-Three harness gotchas have each cost a false alarm — know them before trusting
+Three harness gotchas have each cost a false alarm - know them before trusting
 a weird frame:
 
-- **`pressKey("down")` types the literal letters** `d`/`o`/`w`/`n` — which fire
+- **`pressKey("down")` types the literal letters** `d`/`o`/`w`/`n` - which fire
   `o` (sort) and `w` (collapse all). Use `mockInput.pressArrow("down")` or the
-  raw sequence `"\x1B[B"`. Same for `pressKey("space")` — send `" "`.
+  raw sequence `"\x1B[B"`. Same for `pressKey("space")` - send `" "`.
 - **`Esc` needs a real-time wait** (~25ms). The input parser holds a bare ESC
   for `DEFAULT_TIMEOUT_MS` (20ms) to disambiguate from escape sequences, and
   the fake test clock never fires it. `await` a real `setTimeout` after
   `pressEscape`.
 - **`flush()` waits for scheduler idle**, which can never settle if anything
-  schedules a delayed render. `renderOnce()` drains React and paints — prefer
+  schedules a delayed render. `renderOnce()` drains React and paints - prefer
   it in settle loops.
 
 Cursor keys skip group headers: a `down` from a header lands on the first
 item. The footer context line is `✓ <kind> <size> <path>` for an item, or the
-group summary (`<label> · N items · <size>`) when the cursor sits on a header —
+group summary (`<label> · N items · <size>`) when the cursor sits on a header -
 `No matching artifacts.` only appears when the filtered list is genuinely
 empty.
 

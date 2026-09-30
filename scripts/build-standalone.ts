@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { REPO_ROOT, readCliVersion } from "./bundle.js";
 
-// Standalone executables require the `--compile` flag on Bun's CLI — the
+// Standalone executables require the `--compile` flag on Bun's CLI - the
 // JS API (Bun.build) emits plain JS bundles, not embedded executables.
 // See https://bun.com/docs/bundler/executables
 

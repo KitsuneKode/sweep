@@ -85,7 +85,7 @@ export function printGroupedScanPlan(
     plan.summary.skippedDirs && plan.summary.skippedDirs > 0
       ? ` (${plan.summary.skippedDirs} skipped)`
       : "";
-  // Paths come off disk — escape control characters before they reach the
+  // Paths come off disk - escape control characters before they reach the
   // terminal or a hostile directory name becomes an ANSI injection vector.
   const shownTarget = sanitizeTerminalText(targetDir);
   const header = `Scanned ${plan.summary.scannedDirs} dirs${skipped} in ${shownTarget}`;
@@ -163,7 +163,7 @@ function printScanTotals(
     if (hiddenStubCount > 0 && !verbose) {
       console.log(
         pc.dim(
-          `  ${hiddenStubCount} workspace node_modules ${hiddenStubCount === 1 ? "stub" : "stubs"} hidden — ${pc.bold("--verbose")} to list`,
+          `  ${hiddenStubCount} workspace node_modules ${hiddenStubCount === 1 ? "stub" : "stubs"} hidden, ${pc.bold("--verbose")} to list`,
         ),
       );
     }
@@ -206,8 +206,6 @@ function printGroupedCandidates(
       );
     }
 
-    const maxNameLen = Math.max(...group.entries.map((entry) => entry.name.length), 12);
-
     for (const entry of group.entries) {
       const size = formatBytes(entry.estimatedBytes);
       const selected = selectedIds.has(entry.id);
@@ -237,7 +235,7 @@ function printGroupedCandidates(
 }
 
 export function printDryRunNotice(): void {
-  console.log(pc.dim(pc.italic("  Dry run — no files deleted.")));
+  console.log(pc.dim(pc.italic("  Dry run. No files deleted.")));
   console.log();
 }
 
@@ -258,13 +256,13 @@ export function printCleanResult(
         pc.dim(`(${duration})`),
     );
   } else {
-    console.log(`sweep: done — ${formatBytes(result.totalBytesFreed)} freed in ${duration}`);
+    console.log(`sweep: done, ${formatBytes(result.totalBytesFreed)} freed in ${duration}`);
   }
 
   if (options.trashDir) {
     console.log(
       pc.dim(
-        `  restore: entries moved to ${sanitizeTerminalText(options.trashDir)} — ` +
+        `  restore: entries moved to ${sanitizeTerminalText(options.trashDir)}: ` +
           `delete that directory to reclaim the space.`,
       ),
     );
@@ -285,7 +283,7 @@ export function printAborted(): void {
   console.log(pc.dim("Aborted."));
 }
 
-/** Deletion was interrupted (SIGINT) — some entries were removed, the rest untouched. */
+/** Deletion was interrupted (SIGINT) - some entries were removed, the rest untouched. */
 export function printInterrupted(
   deleted: number,
   total: number,
@@ -294,7 +292,7 @@ export function printInterrupted(
   console.log();
   console.log(
     pc.yellow(
-      `⚠ Interrupted — ${deleted} of ${total} item(s) ${options.verb ?? "deleted"}. ` +
+      `⚠ Interrupted: ${deleted} of ${total} item(s) ${options.verb ?? "deleted"}. ` +
         `The rest were left in place.`,
     ),
   );
@@ -302,7 +300,7 @@ export function printInterrupted(
 
 /** Neutral message shown when the user declines a confirmation prompt. */
 export function printDeclined(): void {
-  console.log(pc.dim("Declined — nothing deleted."));
+  console.log(pc.dim("Declined. Nothing deleted."));
 }
 
 export interface PlanInfoSummary {
@@ -320,7 +318,7 @@ export interface PlanInfoSummary {
   risks: Record<string, number>;
 }
 
-/** `sweep inspect` — provenance + totals for a saved plan, no apply. */
+/** `sweep inspect` - provenance + totals for a saved plan, no apply. */
 export function printPlanInfo(planPath: string, summary: PlanInfoSummary): void {
   console.log(`  ${pc.bold("plan")}      ${sanitizeTerminalText(planPath)}`);
   console.log(`    target      ${sanitizeTerminalText(summary.targetDir)}`);
@@ -368,7 +366,7 @@ export interface StatsTotals {
   totalFailed: number;
 }
 
-/** `sweep stats` — lifetime reclaimed space plus recent sessions. */
+/** `sweep stats` - lifetime reclaimed space plus recent sessions. */
 export function printStatsSummary(
   totals: StatsTotals,
   recent: StatsSession[],
@@ -376,7 +374,7 @@ export function printStatsSummary(
   totalSessionCount: number,
 ): void {
   if (totalSessionCount === 0) {
-    console.log(pc.dim("No cleanup history yet — run sweep clean to start the counter."));
+    console.log(pc.dim("No cleanup history yet. Run sweep clean to start the counter."));
     return;
   }
 
@@ -408,7 +406,7 @@ export function printStatsSummary(
 
 export function printError(message: string): void {
   // Error strings often embed filesystem paths (ENOENT messages quote the
-  // failed path verbatim) — sanitize at the chokepoint so every caller is
+  // failed path verbatim) - sanitize at the chokepoint so every caller is
   // covered, not just the ones that remembered to escape their input.
   console.error(`\n  ${pc.red("✗")} ${sanitizeMultilineTerminalText(message)}\n`);
 }

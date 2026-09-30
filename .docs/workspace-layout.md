@@ -28,11 +28,11 @@ sweep/
 
 ### `apps/cli` (`@kitsunekode/sweep`)
 
-- `src/cli.ts` — Commander `makeProgram()` and global options.
-- `src/bin.ts` — Node shebang entry (bundled to `apps/cli/dist/sweep.js`).
-- `src/handlers/` — `scan`, `apply`, `clean`, `plan`, `ui`, `doctor`.
-- `scripts/build.ts` — produces `apps/cli/dist/sweep.js` and `apps/cli/dist/sweep-ui.js`.
-- `scripts/preflight.ts` — publish guardrails for this package.
+- `src/cli.ts` - Commander `makeProgram()` and global options.
+- `src/bin.ts` - Node shebang entry (bundled to `apps/cli/dist/sweep.js`).
+- `src/handlers/` - `scan`, `apply`, `clean`, `plan`, `ui`, `doctor`.
+- `scripts/build.ts` - produces `apps/cli/dist/sweep.js` and `apps/cli/dist/sweep-ui.js`.
+- `scripts/preflight.ts` - publish guardrails for this package.
 - Depends on `core`, `display`, `protocol`, and `ui`.
 
 ## Packages
@@ -72,7 +72,7 @@ CLI package owns all publish artifacts:
 
 1. UI bundle → `apps/cli/dist/sweep-ui.js` (lazy-loaded by CLI; `@opentui/core` external peer).
 2. CLI bundle → `apps/cli/dist/sweep.js` (Node ESM; `./sweep-ui.js` external).
-3. `apps/cli/package.json` `files: ["dist", "README.md", "LICENSE"]` — only those ship to npm (`prepack` copies README/LICENSE from repo root).
+3. `apps/cli/package.json` `files: ["dist", "README.md", "LICENSE"]` - only those ship to npm (`prepack` copies README/LICENSE from repo root).
 4. Optional `@kitsunekode/sweep-engine-*` platform packages ship the Rust binary.
 5. `prepublishOnly` runs `turbo run check build preflight`.
 
@@ -89,10 +89,10 @@ turbo. Root `bun run test` runs the integration test package against `tests/`.
 
 ## Tests
 
-- `tests/integration/` — cross-package CLI, build, engine contract, and seed-script tests.
-- `packages/*/src/*.test.ts` and `apps/cli/src/*.test.ts` — colocated unit tests per package.
-- `crates/sweep-engine-cli/tests/` — Rust CLI integration tests.
-- `tests/fixtures/` and `scripts/seed-fixture.ts` — seeded parity scenarios.
+- `tests/integration/` - cross-package CLI, build, engine contract, and seed-script tests.
+- `packages/*/src/*.test.ts` and `apps/cli/src/*.test.ts` - colocated unit tests per package.
+- `crates/sweep-engine-cli/tests/` - Rust CLI integration tests.
+- `tests/fixtures/` and `scripts/seed-fixture.ts` - seeded parity scenarios.
 
 ## What is not published
 

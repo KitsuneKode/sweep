@@ -95,7 +95,7 @@ export async function buildAllBundles(): Promise<void> {
   console.log("bundling sweep publish artifacts\n");
   await buildUiBundle();
   await buildCliBundle();
-  console.log("\ndone — apps/cli/dist/sweep.js + apps/cli/dist/sweep-ui.js");
+  console.log("\ndone: apps/cli/dist/sweep.js + apps/cli/dist/sweep-ui.js");
 }
 
 if (import.meta.main) {

@@ -10,7 +10,7 @@ export function formatDeletionProgress(
 ): string {
   const prefix = `[${current}/${total}]`;
   if (!currentPath) return prefix;
-  // Paths come off disk — escape control characters before terminal output.
+  // Paths come off disk - escape control characters before terminal output.
   return `${prefix} ${sanitizeTerminalText(currentPath)}`;
 }
 

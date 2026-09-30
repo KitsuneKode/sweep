@@ -1,8 +1,8 @@
 /**
  * Entrypoint for standalone compiled binaries (`bun build --compile`).
  *
- * Unlike bin.ts — which loads the UI through runtime-resolved specifiers so
- * npm installs can fetch it separately — this entry imports the UI module
+ * Unlike bin.ts - which loads the UI through runtime-resolved specifiers so
+ * npm installs can fetch it separately - this entry imports the UI module
  * statically and registers it before the CLI boots. The static graph is what
  * makes Bun embed the UI code and OpenTUI's native assets into the executable.
  */
@@ -10,7 +10,7 @@ import { makeProgram } from "./cli.js";
 import { handleFatalError } from "./errors.js";
 import { registerUiModule } from "./handlers/ui.js";
 // The UI package's entry is a .tsx module and the CLI compiles without JSX
-// support — that mismatch is why the normal path loads it dynamically.
+// support - that mismatch is why the normal path loads it dynamically.
 // Here the un-typed static import is the whole point: Bun embeds the UI
 // code and OpenTUI native assets into the compiled executable.
 // @ts-expect-error -- .tsx entry resolved by Bun's bundler, not tsc

@@ -36,7 +36,7 @@ const CLEAN_OPTIONS = [...SHARED_OPTIONS, "--dry-run", "--trash", "--force-large
 const SCAN_OPTIONS = [...SHARED_OPTIONS, "--json-stream"];
 const APPLY_OPTIONS = ["--plan", "--engine", "--trash", "--force-large", "--json", "--yes"];
 
-const BASH_SCRIPT = `# sweep bash completion — install:
+const BASH_SCRIPT = `# sweep bash completion. Install:
 #   sweep completions bash > "$(brew --prefix 2>/dev/null)/etc/bash_completion.d/sweep" 2>/dev/null \\
 #     || sweep completions bash > ~/.local/share/bash-completion/completions/sweep
 _sweep() {
@@ -69,7 +69,7 @@ complete -F _sweep sweep
 `;
 
 const ZSH_SCRIPT = `#compdef sweep
-# sweep zsh completion — install:
+# sweep zsh completion. Install:
 #   sweep completions zsh > ~/.zsh/completions/_sweep   # (dir must be in $fpath)
 _sweep() {
   local -a commands
@@ -93,7 +93,7 @@ ${SHARED_OPTIONS.map((o) => `    '${o}[sweep option]'`).join("\n")}
 _sweep "$@"
 `;
 
-const FISH_SCRIPT = `# sweep fish completion — install:
+const FISH_SCRIPT = `# sweep fish completion. Install:
 #   sweep completions fish > ~/.config/fish/completions/sweep.fish
 ${COMMANDS.map(
   (c) => `complete -c sweep -f -n "__fish_use_subcommand" -a ${c} -d "sweep ${c}"`,
@@ -124,7 +124,7 @@ const SCRIPTS: Record<string, string> = {
   fish: FISH_SCRIPT,
 };
 
-/** `sweep completions <shell>` — print a static completion script to stdout. */
+/** `sweep completions <shell>` - print a static completion script to stdout. */
 export async function handleCompletions(shell: string, opts: { color: boolean }): Promise<void> {
   applyNoColor(opts.color);
 

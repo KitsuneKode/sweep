@@ -17,7 +17,7 @@ function countBy<T extends string>(values: T[]): Record<T, number> {
   return counts;
 }
 
-/** `sweep inspect` — print a saved plan's provenance and totals without applying it. */
+/** `sweep inspect` - print a saved plan's provenance and totals without applying it. */
 export async function handleInspect(opts: InspectHandlerOptions): Promise<void> {
   applyNoColor(opts.color);
 

@@ -1,4 +1,4 @@
-# sweep — Technical Specification
+# sweep - Technical Specification
 
 **Version**: 0.1.0  
 **Status**: In Development
@@ -7,16 +7,16 @@
 
 ## Problem
 
-Every JS/TS/Rust/Java project accumulates gigabytes of regeneratable build artifacts —
+Every JS/TS/Rust/Java project accumulates gigabytes of regeneratable build artifacts -
 `node_modules`, `dist`, `.next`, `target`, etc. Cleaning these is manual, project-specific,
 and easy to get wrong (deleting the wrong thing, missing nested monorepo packages,
 or accidentally running in the wrong directory).
 
 Existing solutions:
 
-- `rm -rf node_modules dist` — manual, no safety net, no monorepo awareness
-- `npx rimraf` — single pattern, no config, no guardrails
-- `cargo clean` — language-specific
+- `rm -rf node_modules dist` - manual, no safety net, no monorepo awareness
+- `npx rimraf` - single pattern, no config, no guardrails
+- `cargo clean` - language-specific
 
 **sweep** is the universal version: recursive, safe, configurable, globally installable.
 
@@ -24,19 +24,19 @@ Existing solutions:
 
 ## Goals
 
-1. **Safe by default** — hard guardrails that prevent destroying system or home directories
-2. **Monorepo-first** — recursive scan finds `packages/*/node_modules` automatically
-3. **Universal** — works in any project, any language (JS, Rust, Java, Python, etc.)
-4. **Zero-config** — sensible defaults work for 90% of projects out of the box
-5. **Composable** — `sweep -y` in CI, `sweep --dry-run` for inspection, config file for project-specific rules
-6. **Fast** — single bundle, no startup overhead, parallel FS ops where safe
+1. **Safe by default** - hard guardrails that prevent destroying system or home directories
+2. **Monorepo-first** - recursive scan finds `packages/*/node_modules` automatically
+3. **Universal** - works in any project, any language (JS, Rust, Java, Python, etc.)
+4. **Zero-config** - sensible defaults work for 90% of projects out of the box
+5. **Composable** - `sweep -y` in CI, `sweep --dry-run` for inspection, config file for project-specific rules
+6. **Fast** - single bundle, no startup overhead, parallel FS ops where safe
 
 ---
 
 ## Non-Goals
 
 - Not a general-purpose `rm` replacement
-- Not a full disk analyzer (no treemap explorer) — use `sweep ui` for interactive review
+- Not a full disk analyzer (no treemap explorer) - use `sweep ui` for interactive review
 - Not a file watcher / auto-cleaner
 - Not responsible for cleaning git history or Docker images
 
@@ -116,16 +116,16 @@ sweep [path] [options]
 | --------------------- | ----- | -------- | ------- | ------------------------------------ |
 | `--dry-run`           | `-n`  | bool     | false   | Preview only, no deletion            |
 | `--yes`               | `-y`  | bool     | false   | Skip confirmation prompt             |
-| `--force-large`       | —     | bool     | false   | Allow exceeding `maxSizeGB`          |
+| `--force-large`       | -     | bool     | false   | Allow exceeding `maxSizeGB`          |
 | `--pattern`           | `-p`  | string[] | []      | Additional patterns (repeatable)     |
 | `--ignore`            | `-i`  | string[] | []      | Ignore patterns (repeatable)         |
-| `--select`            | —     | string   | default | Selection policy for plan generation |
-| `--include-dangerous` | —     | bool     | false   | Explicitly include dangerous matches |
-| `--depth`             | —     | number   | -1      | Max recursion depth (-1 = unlimited) |
-| `--config`            | —     | string   | —       | Explicit config file path            |
-| `--no-color`          | —     | bool     | false   | Disable color output                 |
-| `--version`           | `-V`  | —        | —       | Print version                        |
-| `--help`              | `-h`  | —        | —       | Print help                           |
+| `--select`            | -     | string   | default | Selection policy for plan generation |
+| `--include-dangerous` | -     | bool     | false   | Explicitly include dangerous matches |
+| `--depth`             | -     | number   | -1      | Max recursion depth (-1 = unlimited) |
+| `--config`            | -     | string   | -       | Explicit config file path            |
+| `--no-color`          | -     | bool     | false   | Disable color output                 |
+| `--version`           | `-V`  | -        | -       | Print version                        |
+| `--help`              | `-h`  | -        | -       | Print help                           |
 
 ### Behavior Flow
 
@@ -167,7 +167,7 @@ Plans and apply reports should carry enough structure for cross-engine parity:
 ### Scan Summary (TTY)
 
 ```
- sweep — artifact cleanup
+ sweep - artifact cleanup
 
 Scanned 47 directories in /home/user/projects/myapp
 
@@ -192,7 +192,7 @@ Delete 4 items (~846 MB)? [y/N]
 ```
 [Scan summary as above]
 
-Dry run — no files deleted.
+Dry run - no files deleted.
 ```
 
 ### CI / Non-TTY (no color, no spinner)
@@ -204,7 +204,7 @@ sweep: deleted node_modules (/home/user/projects/myapp/node_modules)
 sweep: deleted node_modules (/home/user/projects/myapp/packages/web/node_modules)
 sweep: deleted dist (/home/user/projects/myapp/packages/api/dist)
 sweep: deleted .next (/home/user/projects/myapp/apps/web/.next)
-sweep: done — 846.4 MB freed in 2.3s
+sweep: done - 846.4 MB freed in 2.3s
 ```
 
 ---
@@ -214,8 +214,8 @@ sweep: done — 846.4 MB freed in 2.3s
 ### Locations (in priority order)
 
 1. Path from `--config` flag
-2. `.sweeprc` — found by walking up from CWD (stops at FS root)
-3. `~/.config/sweep/config.json` — global user defaults
+2. `.sweeprc` - found by walking up from CWD (stops at FS root)
+3. `~/.config/sweep/config.json` - global user defaults
 
 ### Schema
 
@@ -254,7 +254,7 @@ The following `targetDir` values are rejected with exit code 2:
 - `/home` (home parent)
 - `/usr`, `/etc`, `/opt`, `/var`, `/bin`, `/sbin`, `/lib`, `/lib64`
 - `/boot`, `/sys`, `/proc`
-- `os.homedir()` (e.g., `/home/alice`) — home root itself is blocked
+- `os.homedir()` (e.g., `/home/alice`) - home root itself is blocked
 
 Any path that resolves to fewer than 2 path segments below root is blocked.
 
@@ -326,5 +326,5 @@ Follows [Semantic Versioning](https://semver.org/):
 1. **Path injection**: All paths are resolved with `path.resolve()` before any check
 2. **Glob injection via config**: patterns are validated before use
 3. **Arbitrary file deletion**: guardrails are checked before ANY deletion, not just the first
-4. The tool never reads file contents — only paths and metadata
+4. The tool never reads file contents - only paths and metadata
 5. `--config` flag path is also checked for `..` traversal before reading

@@ -146,7 +146,7 @@ describe("assertSafePattern", () => {
   });
 });
 
-describe("assertSafeCwd — adversarial inputs", () => {
+describe("assertSafeCwd: adversarial inputs", () => {
   test("blocks null-byte injection in path", () => {
     // Null bytes in paths can confuse C-level FS calls
     expect(() => assertSafeCwd(join(tmpdir(), "project\x00evil"))).toThrow(GuardrailError);
@@ -178,7 +178,7 @@ describe("assertSafeCwd — adversarial inputs", () => {
   });
 });
 
-describe("assertSafePattern — adversarial inputs", () => {
+describe("assertSafePattern: adversarial inputs", () => {
   test("blocks pattern that is just a dot", () => {
     expect(() => assertSafePattern(".")).not.toThrow(); // "." is a valid name (like .next)
   });

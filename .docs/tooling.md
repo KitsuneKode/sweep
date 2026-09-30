@@ -48,7 +48,7 @@ synthetic workspace package. `sweep-rust#test` is `cargo test --workspace
 `sweep-engine-cli#build` / `sweep-engine-cli#build:release` produce the debug
 and release `sweep-engine` binaries. Cargo dependency edges are real graph
 edges (`sweep-engine-cli#build` waits on `sweep-engine#build` etc.), so Turbo
-caches per crate and inputs track only the crate plus its Cargo deps — a
+caches per crate and inputs track only the crate plus its Cargo deps - a
 `sweep-types` edit no longer busts every Rust task.
 
 Workspace lints in `Cargo.toml` deny `clippy::unwrap_used` and
@@ -69,10 +69,10 @@ The Cargo workspace is five small crates (~900 lines total today):
 
 This is a normal Rust split: library vs CLI, types/errors/fs at the edges. It is
 slightly more granular than a two-crate setup would require at current size, but
-it is not wrong — it keeps compile boundaries clear and matches how larger CLIs
+it is not wrong - it keeps compile boundaries clear and matches how larger CLIs
 are structured. Only `sweep-engine-cli` ships to npm (via platform packages).
 
-The five **npm** `@kitsunekode/sweep-engine-*` packages are unrelated to this —
+The five **npm** `@kitsunekode/sweep-engine-*` packages are unrelated to this -
 they are per-OS binaries (Turbo-style optional deps), not extra Rust crates.
 
 ### Native engine npm packages (Turbo-style)
@@ -99,38 +99,38 @@ Root `optionalDependencies` on the CLI package are synced via `bun run sync-engi
 artifacts, then `scripts/publish-release.ts` publishes native packages before
 `@kitsunekode/sweep`. Reusable workflow: `native-engine-release.yml`.
 
-**Do not** add `native-packages/*` to Bun workspaces — they are publish-time
+**Do not** add `native-packages/*` to Bun workspaces - they are publish-time
 artifacts only.
 
 ## Turborepo
 
 `turbo.json` defines the task graph:
 
-- `transit` — dependency-order cache invalidation without blocking on `^build`
+- `transit` - dependency-order cache invalidation without blocking on `^build`
   (each package defines `"transit": "exit 0"` so `^transit` resolves in the graph)
-- `build` — depends on `^build`; `apps/cli` outputs `dist/**` (see `scripts/bundle.ts`)
+- `build` - depends on `^build`; `apps/cli` outputs `dist/**` (see `scripts/bundle.ts`)
 
 The published npm package is `@kitsunekode/sweep` in `apps/cli`. The private root
 (`sweep-monorepo`) must **not** be listed in `workspaces.packages` (never add `"."`).
 Root `package.json` scripts are orchestrators (`turbo run build`, etc.).
 
-- `typecheck`, `lint`, `fmt`, `fmt:check` — depend on `transit`
-- `test` — depends on `transit` and `^build` (CLI bundle for integration tests)
-- `check` — aggregates `fmt:check`, `lint`, `test`, `typecheck` (`fmt` writes;
+- `typecheck`, `lint`, `fmt`, `fmt:check` - depend on `transit`
+- `test` - depends on `transit` and `^build` (CLI bundle for integration tests)
+- `check` - aggregates `fmt:check`, `lint`, `test`, `typecheck` (`fmt` writes;
   `fmt:check` is the read-only `oxfmt --check` variant so `check` fails CI on
   unformatted files instead of silently rewriting them)
-- `check:affected` — same gate, only packages/tasks affected by git changes
+- `check:affected` - same gate, only packages/tasks affected by git changes
   (`turbo run check --affected`; optional `--affected-base=origin/main` in CI)
 - Cargo built-in task names (`build`, `test`, `check`, `lint`, `format`,
-  `clean`, `dev`) collide with the JS task names — `turbo run test` unfiltered
+  `clean`, `dev`) collide with the JS task names - `turbo run test` unfiltered
   would run both Bun tests and `cargo test`, and would fail for contributors
   without a Rust toolchain. **Convention: root scripts always scope selection**
-  — `--filter "@kitsunekode/*"` on the JS gates, explicit
-  `turbo run "sweep-rust#<task>"` / `"sweep-engine-cli#build"` for Rust. Task
-  `dependsOn` edges still cross languages where declared:
-  `packages/integration-tests`' `test` waits on `sweep-engine-cli#build` so
-  the debug engine binary exists before engine-native contract tests.
-- `//#`-style root tasks are gone — the Cargo workspace packages replaced
+  - `--filter "@kitsunekode/*"` on the JS gates, explicit
+    `turbo run "sweep-rust#<task>"` / `"sweep-engine-cli#build"` for Rust. Task
+    `dependsOn` edges still cross languages where declared:
+    `packages/integration-tests`' `test` waits on `sweep-engine-cli#build` so
+    the debug engine binary exists before engine-native contract tests.
+- `//#`-style root tasks are gone - the Cargo workspace packages replaced
   them. If one is ever reintroduced, remember Turbo resolves `//#name` to a
   **plain-named** root script (`name`, not `//#name`), and Turbo 2.11's loop
   detection rejects a script that calls `turbo run` back into the same task
@@ -139,7 +139,7 @@ Root `package.json` scripts are orchestrators (`turbo run build`, etc.).
 Local cache eviction is on: `cacheMaxAge: 14d`, `cacheMaxSize: 10GB`. Cached
 task logs are quiet (`outputLogs: "new-only"`).
 
-The Cargo workspace flags are `futureFlags` — experimental and reversible. If
+The Cargo workspace flags are `futureFlags` - experimental and reversible. If
 the feature is ever removed upstream, the fallback is `//#` root tasks or
 direct `cargo` scripts; the `rust:*` script names should stay the public
 surface either way.
@@ -154,7 +154,7 @@ toolchain is a hard dev prerequisite (see `getting-started.md`); the
   whether cargo must exist.
 - **`devEngines` vs npm-in-repo.** npm 11+ enforces `devEngines` by walking up
   to the workspace root, so `runtime: bun` would make _every_ `npm` invocation
-  inside the repo fail (`EBADDEVENGINES`) — including `npm pack` and the
+  inside the repo fail (`EBADDEVENGINES`) - including `npm pack` and the
   `npm publish` calls in `scripts/publish-release.ts`. Both fields therefore
   carry `onFail: "warn"`: npm prints the mismatch as a warning and proceeds,
   which keeps trusted publishing and `npm pack` working while still telling
@@ -192,7 +192,7 @@ runs `typecheck` or `bun test`. Shared tsconfig uses `"types": ["bun"]`.
 
 Use `"catalog:"` only in workspace `dependencies` / `devDependencies`. Published
 packages (e.g. `apps/cli`) must use **literal semver** in `peerDependencies` and
-`optionalDependencies` — npm consumers do not understand `catalog:`.
+`optionalDependencies` - npm consumers do not understand `catalog:`.
 
 CI runs (typescript job):
 

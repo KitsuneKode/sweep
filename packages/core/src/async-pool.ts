@@ -1,6 +1,6 @@
 /**
  * Run async work over items with a bounded concurrency pool.
- * When `isCancelled` returns true, unprocessed items are skipped — the pool
+ * When `isCancelled` returns true, unprocessed items are skipped - the pool
  * drains in-flight work and resolves (results array keeps empty slots).
  */
 export async function mapPool<T, R>(

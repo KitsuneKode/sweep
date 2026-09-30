@@ -2,14 +2,14 @@
 
 ## Intent
 
-Quiet utilitarian terminal for artifact cleanup review — a trust-first reclaim
+Quiet utilitarian terminal for artifact cleanup review - a trust-first reclaim
 tool that feels like a better alternative to blunt disk cleaners (npkill-class).
 Structure in muted charcoal; meaning in restrained semantic color; identity in
 ember amber. Users scan scopes, tune patterns, select safely, apply.
 
 Who: a developer reclaiming space across a project tree, often a monorepo.
 Job: pick the right artifacts, understand risk, free bytes without fear.
-Feel: dense like a trading floor for disk, calm like a review pane — not a toy.
+Feel: dense like a trading floor for disk, calm like a review pane - not a toy.
 
 ## Palette
 
@@ -71,15 +71,15 @@ footer hints                         selection tally
 
 Body is a horizontal split when `width >= 72`:
 
-- **Scope sidebar** — `24`–`32` cols; label + count + compact bytes
-- **Review pane** — plain filter input, bordered list, muted risk line
+- **Scope sidebar** - `24`–`32` cols; label + count + compact bytes
+- **Review pane** - plain filter input, bordered list, muted risk line
 
 ## Scope sidebar
 
 Keep the ghui list pattern (`SelectableRow` + scrollbox). No panel titles, no
 in-panel footer hints. One header line: `scopes · N  size`.
 
-Rows: `› label  count  bytes` — no selected-count column (too cramped).
+Rows: `› label  count  bytes` - no selected-count column (too cramped).
 
 ## Filter
 
@@ -93,7 +93,7 @@ No chip bar.
 ## Footer
 
 Context on its own truncated line. Footer hints on the next line; selection
-tally right-aligned. Never put a long path beside the keymap — it collides.
+tally right-aligned. Never put a long path beside the keymap - it collides.
 
 ## Code map
 

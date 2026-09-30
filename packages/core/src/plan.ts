@@ -64,7 +64,7 @@ export function validatePlan(value: unknown): ScanPlan {
 
 /**
  * Validate an engine-produced apply report. `SWEEP_ENGINE_PATH` lets the
- * subprocess binary be user-supplied, so its stdout is untrusted input — a
+ * subprocess binary be user-supplied, so its stdout is untrusted input - a
  * malformed report must fail loudly instead of silently passing a fake
  * deletedCount to the caller.
  */
@@ -80,7 +80,7 @@ export function validateApplyReport(value: unknown): ApplyReport {
 }
 
 /**
- * Plans embed one JSON object per candidate — a few hundred bytes each.
+ * Plans embed one JSON object per candidate - a few hundred bytes each.
  * 256 MB is far past any legitimate plan (≈1M candidates) and stops a
  * hostile or corrupt file from pinning the process in JSON.parse.
  */

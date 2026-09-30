@@ -3,7 +3,7 @@
  * Dev entrypoint: ensure workspace deps exist, then run the CLI from source.
  *
  * Before the monorepo split, commander lived on the root package. Now it is
- * installed per-workspace under apps/cli/node_modules — a plain `bun install`
+ * installed per-workspace under apps/cli/node_modules - a plain `bun install`
  * at the repo root is required after clone or branch switches.
  */
 import { spawnSync } from "node:child_process";
@@ -19,7 +19,7 @@ function ensureWorkspaceDeps(): void {
     return;
   }
 
-  console.error("sweep: workspace dependencies are missing — running bun install…");
+  console.error("sweep: workspace dependencies are missing, running bun install…");
   const install = spawnSync("bun", ["install"], { cwd: ROOT, stdio: "inherit" });
   if (install.status !== 0) {
     process.exit(install.status ?? 1);
@@ -38,7 +38,7 @@ function ensureWorkspaceDeps(): void {
 ensureWorkspaceDeps();
 
 const args = process.argv.slice(2);
-// Spawn bin.ts by absolute path and keep the user's cwd — running from
+// Spawn bin.ts by absolute path and keep the user's cwd - running from
 // apps/cli would silently re-root relative path arguments (e.g. `ui ../foo`).
 // SWEEP_CONFIG_DIR keeps dev runs' history/config writes out of the real
 // user config dir; an explicit user-set value still wins.

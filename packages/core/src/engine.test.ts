@@ -89,7 +89,7 @@ describe("core engine", () => {
   });
 
   test("applyPlan stops scheduling deletions once cancelled", async () => {
-    // More candidates than the pool's concurrency (4) — after the first delete
+    // More candidates than the pool's concurrency (4) - after the first delete
     // resolves, every subsequent pull sees the cancellation and skips work.
     const names = [
       "node_modules",
@@ -121,7 +121,7 @@ describe("core engine", () => {
     expect(applied.interrupted).toBe(true);
     // At most the initial pool batch can have been attempted.
     expect(applied.report.deletedCount + applied.report.failedCount).toBeLessThanOrEqual(4);
-    // Cancelled work is never attempted — most directories survive.
+    // Cancelled work is never attempted - most directories survive.
     const remaining = names.filter((name) => existsSync(dir(name)));
     expect(remaining.length).toBeGreaterThanOrEqual(names.length - 4);
   });

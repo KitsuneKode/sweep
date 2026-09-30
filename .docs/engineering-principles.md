@@ -4,9 +4,9 @@
 
 When tradeoffs conflict, prefer in this order:
 
-1. **Trust** — guardrails, explicit selection, predictable failure modes.
-2. **Performance** — time-to-first-result, bounded memory, low overhead.
-3. **Predictability** — stable contracts, structured errors, parity-friendly behavior.
+1. **Trust** - guardrails, explicit selection, predictable failure modes.
+2. **Performance** - time-to-first-result, bounded memory, low overhead.
+3. **Predictability** - stable contracts, structured errors, parity-friendly behavior.
 
 ## Single source of truth
 
@@ -51,7 +51,7 @@ When tradeoffs conflict, prefer in this order:
 
 Before merge or publish:
 
-- `bun run check` — format, lint, typecheck, and tests (Turborepo).
-- `bun run build` — bundle to `apps/cli/dist/sweep.js` and `apps/cli/dist/sweep-ui.js`.
-- `bun run preflight` — publish guardrails (also runs on `prepublishOnly`).
+- `bun run check` - format, lint, typecheck, and tests (Turborepo).
+- `bun run build` - bundle to `apps/cli/dist/sweep.js` and `apps/cli/dist/sweep-ui.js`.
+- `bun run preflight` - publish guardrails (also runs on `prepublishOnly`).
 - Rust path changes: `bun run rust:check`.

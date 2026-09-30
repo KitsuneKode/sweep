@@ -15,12 +15,12 @@ import {
 
 // ─── Blocked paths ────────────────────────────────────────────────────────────
 
-/** VCS dirs — never delete artifacts inside these path segments. */
+/** VCS dirs - never delete artifacts inside these path segments. */
 export const PROTECTED_VCS_DIR_NAMES = new Set([".git", ".svn", ".hg", ".bzr"]);
 
 /**
  * Paths that must never be the target directory.
- * Evaluated AFTER resolve() — these are canonical absolute paths.
+ * Evaluated AFTER resolve() - these are canonical absolute paths.
  * Built once at module load (not per-call) for performance.
  */
 function buildBlockedRoots(): Set<string> {
@@ -83,7 +83,7 @@ export class GuardrailError extends Error {
  * Throws GuardrailError (exit code 2) if not.
  */
 export function assertSafeCwd(targetPath: string): void {
-  // Reject null bytes — can confuse C-level FS calls
+  // Reject null bytes - can confuse C-level FS calls
   if (targetPath.includes("\x00")) {
     throw new GuardrailError(`Path contains null byte: ${JSON.stringify(targetPath)}`);
   }
@@ -113,10 +113,10 @@ export function assertSafeCwd(targetPath: string): void {
 
 /**
  * Assert that the target exists and is a directory. Kept separate from
- * assertSafeCwd, which is pure safety policy — tests assert the safety of
+ * assertSafeCwd, which is pure safety policy - tests assert the safety of
  * hypothetical paths that need not exist. statSync follows symlinks: a
  * symlinked directory is a valid target, a dangling link reports as missing.
- * Throws GuardrailError (exit code 2) — a usage error, checked before scanning.
+ * Throws GuardrailError (exit code 2) - a usage error, checked before scanning.
  */
 export function assertTargetDirectory(targetPath: string): void {
   const resolved = resolve(targetPath);

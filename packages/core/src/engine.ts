@@ -33,7 +33,7 @@ export interface ApplyPlanResult {
   selected: ScanCandidate[];
   ready: ScanEntry[];
   revalidationFailures: PathFailure[];
-  /** True when cancellation stopped scheduling — some candidates were never attempted. */
+  /** True when cancellation stopped scheduling - some candidates were never attempted. */
   interrupted: boolean;
 }
 
@@ -88,7 +88,7 @@ export async function applyPlan(
     trashRoot: options.trashRoot,
   });
   const allFailures = [...revalidationFailures, ...cleanResult.failedPaths];
-  // Skipped (unattempted) entries land in neither list — that's the interrupt signal.
+  // Skipped (unattempted) entries land in neither list - that's the interrupt signal.
   const interrupted = cleanResult.deleted.length + cleanResult.failedPaths.length < ready.length;
 
   return {
@@ -142,7 +142,7 @@ export async function applyPlanWithBackend(
     return applyPlan(plan, options);
   }
 
-  // Trash is JS-only — a rust call that silently ignored trashDir would
+  // Trash is JS-only - a rust call that silently ignored trashDir would
   // delete permanently when the caller asked for a move. Fail loudly.
   if (options.trashDir || options.trashRoot) {
     throw new GuardrailError("trash mode is not supported by the Rust engine");

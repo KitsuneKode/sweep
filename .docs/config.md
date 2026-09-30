@@ -9,11 +9,11 @@ As of the current code:
 - explicit config path: `--config <path>`
 - global config path: `~/.config/sweep/config.json`
   (honors `XDG_CONFIG_HOME`; `%APPDATA%\sweep\config.json` on Windows)
-- `SWEEP_CONFIG_DIR` overrides the config dir entirely — tests and
+- `SWEEP_CONFIG_DIR` overrides the config dir entirely - tests and
   `bun run dev` set it so runs never touch real user state (config +
   `history.jsonl` live under the same dir).
 
-Config resolution order (scalars — highest priority wins):
+Config resolution order (scalars - highest priority wins):
 
 1. CLI overrides
 2. Explicit config path if provided
@@ -23,9 +23,9 @@ Config resolution order (scalars — highest priority wins):
 
 Array merge behavior:
 
-- `patterns` — merged and deduplicated from defaults + global + project + CLI
-- `disabledPatterns` — merged from global + project + CLI, then subtracted from `patterns`
-- `ignore` — merged from all layers; applied as name, glob (`*.cache`), or path-prefix excludes at scan time
+- `patterns` - merged and deduplicated from defaults + global + project + CLI
+- `disabledPatterns` - merged from global + project + CLI, then subtracted from `patterns`
+- `ignore` - merged from all layers; applied as name, glob (`*.cache`), or path-prefix excludes at scan time
 
 ## Fields
 
@@ -55,7 +55,7 @@ slash is normalized, so `ignore: ["dist/"]` also skips a top-level `dist` entry.
 
 ### Filename rationale
 
-The file is `.sweeprc` — plain JSON, no extension. This is deliberate:
+The file is `.sweeprc` - plain JSON, no extension. This is deliberate:
 
 - One unambiguous name across Linux/macOS/Windows (no `.rc.json` vs `.rc` divergence).
 - Dotfile convention keeps it out of the way at the repo root.
@@ -71,11 +71,11 @@ explicit patterns in `.sweeprc`; to narrow, use `disabledPatterns`.
 ## Safety model (applies to every command)
 
 1. **Nothing is deleted without an explicit user action.** Scan/plan/UI are read-only.
-2. **Blocked paths are hard-locked** — VCS internals and protected roots cannot be
+2. **Blocked paths are hard-locked** - VCS internals and protected roots cannot be
    selected for deletion in any mode.
 3. **Dangerous-tier items require individual selection plus a red confirmation dialog**
    naming the count and stating the action is irreversible.
-4. **Bulk select (`a`) covers safe + caution only** — dangerous items can never enter a
+4. **Bulk select (`a`) covers safe + caution only** - dangerous items can never enter a
    selection through a bulk shortcut.
 5. **Size guardrail**: totals above `maxSizeGB` refuse to proceed without
    `--force-large --yes`.

@@ -32,7 +32,7 @@ export const DEFAULT_PATTERNS: string[] = [
 
 export const DEFAULT_CONFIG: SweepConfig = {
   patterns: DEFAULT_PATTERNS,
-  // Trash dirs created by `sweep --trash` must never be re-selected —
+  // Trash dirs created by `sweep --trash` must never be re-selected -
   // they hold live restore data until the user purges them.
   ignore: [".sweep-trash-*"],
   maxSizeGB: 10,
@@ -168,7 +168,7 @@ export function writeInitSweeprc(configPath: string, force = false): "created" |
 /**
  * Platform-resolved sweep config dir: $XDG_CONFIG_HOME/sweep,
  * %APPDATA%/sweep on Windows, else ~/.config/sweep.
- * `SWEEP_CONFIG_DIR` overrides everything — used by tests and dev runs so
+ * `SWEEP_CONFIG_DIR` overrides everything - used by tests and dev runs so
  * they never touch the user's real config/history files.
  */
 export function sweepConfigDir(): string {
@@ -208,7 +208,7 @@ export type IgnoreMatcher = (entryPath: string, entryName: string) => boolean;
  * Compile ignore patterns once per scan so the hot walk path avoids
  * re-resolving targetDir and re-scanning pattern strings for every entry.
  *
- * Returns null when there are no ignore rules — callers skip the check entirely.
+ * Returns null when there are no ignore rules - callers skip the check entirely.
  */
 export function compileIgnoreMatcher(targetDir: string, ignore: string[]): IgnoreMatcher | null {
   if (ignore.length === 0) return null;
@@ -329,7 +329,7 @@ export function loadConfig(
     cliOverrides.maxSizeGB ?? project.maxSizeGB ?? global.maxSizeGB ?? DEFAULT_CONFIG.maxSizeGB;
   const depth = cliOverrides.depth ?? project.depth ?? global.depth ?? DEFAULT_CONFIG.depth;
 
-  // Scalars come from hand-edited config files — validate rather than letting
+  // Scalars come from hand-edited config files - validate rather than letting
   // NaN-adjacent or negative values silently warp scan/delete behavior.
   if (!Number.isFinite(maxSizeGB) || maxSizeGB < 0) {
     throw new ConfigParseError(`"maxSizeGB" must be a non-negative number (got ${maxSizeGB})`);
@@ -357,7 +357,7 @@ export function buildRescanConfig(
 ): SweepConfig {
   const disabledSet = new Set(ui.disabledPatterns);
   const enabledCatalog = DEFAULT_PATTERNS.filter((pattern) => !disabledSet.has(pattern));
-  // Custom patterns can be toggled off in the editor too — a disabled extra
+  // Custom patterns can be toggled off in the editor too - a disabled extra
   // must not silently keep matching.
   const enabledExtras = ui.extraPatterns.filter((pattern) => !disabledSet.has(pattern));
   const patterns = [...new Set([...enabledCatalog, ...enabledExtras])];

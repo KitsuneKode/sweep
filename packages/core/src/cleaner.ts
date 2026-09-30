@@ -16,7 +16,7 @@ export interface CleanOptions {
   isCancelled?: (() => boolean) | undefined;
   /**
    * When set, entries are moved into this directory instead of deleted.
-   * `trashDir` must live on the same filesystem as the entries — moves are
+   * `trashDir` must live on the same filesystem as the entries - moves are
    * atomic renames, never copy-and-delete.
    */
   trashDir?: string | undefined;
@@ -30,7 +30,7 @@ export interface CleanOptions {
 
 /**
  * Filter out candidate entries that are contained within an ancestor candidate
- * that is already scheduled for recursive removal — and exact-path duplicates.
+ * that is already scheduled for recursive removal - and exact-path duplicates.
  * A crafted plan can list the same path under two ids; concurrent rm on the
  * same target then double-counts deletions in the report.
  * Sort is lexicographic so a parent path is retained before any children that
@@ -60,7 +60,7 @@ export function deduplicateNestedEntries(entries: ScanEntry[]): ScanEntry[] {
 /**
  * Move an entry into the trash dir, preserving its path relative to
  * `trashRoot`. `rename` on a symlink moves the link itself, never the target.
- * A path outside `trashRoot` or an absolute relative result is refused —
+ * A path outside `trashRoot` or an absolute relative result is refused -
  * the trash layout must stay inside `trashDir`.
  */
 async function moveToTrash(entry: ScanEntry, trashDir: string, trashRoot: string): Promise<void> {
@@ -74,14 +74,14 @@ async function moveToTrash(entry: ScanEntry, trashDir: string, trashRoot: string
 }
 
 /**
- * Delete all entries in the list with bounded concurrency — or move them to
+ * Delete all entries in the list with bounded concurrency - or move them to
  * `options.trashDir` when trash mode is requested.
  *
  * Symlinks are removed with unlink (removes the link entry, not the target).
  * Reparse points / NTFS junctions on Windows are unlinked/removed safely without recursion.
  * Directories are removed with rm({ recursive: true, force: true }).
  *
- * Returns a CleanResult with stats. Never throws — failed entries are collected.
+ * Returns a CleanResult with stats. Never throws - failed entries are collected.
  * When `isCancelled` turns true, unprocessed entries are skipped: they appear
  * in neither `deleted` nor `failedPaths`, so callers can detect interruption
  * via `deleted.length + failedPaths.length < deduplicated.length`.

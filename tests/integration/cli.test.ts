@@ -34,7 +34,7 @@ function runCli(
     cwd: REPO_ROOT,
     stdout: "pipe",
     stderr: "pipe",
-    // Isolate user state — applies write to the real history.jsonl otherwise.
+    // Isolate user state - applies write to the real history.jsonl otherwise.
     env: {
       ...process.env,
       SWEEP_CONFIG_DIR: dir("test-config"),
