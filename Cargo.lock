@@ -631,6 +631,7 @@ dependencies = [
  "camino",
  "chrono",
  "hex",
+ "rayon",
  "sha2",
  "sweep-errors",
  "sweep-fs",

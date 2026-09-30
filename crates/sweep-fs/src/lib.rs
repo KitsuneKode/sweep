@@ -599,12 +599,6 @@ pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
         return result;
     }
 
-    let (flag, multiplier) = match std::env::consts::OS {
-        "linux" => ("-sb", 1u64),
-        "macos" => ("-sk", 1024u64),
-        _ => return result,
-    };
-
     let chunks = chunk_paths_for_du(paths);
     // A dedicated small pool bounds concurrency at DU_MAX_INFLIGHT instead of
     // the global rayon pool's thread count - parallel `du` on the same volume
@@ -616,12 +610,12 @@ pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
         Ok(pool) => pool.install(|| {
             chunks
                 .par_iter()
-                .map(|chunk| du_estimate_chunk(flag, multiplier, chunk).unwrap_or_default())
+                .map(|chunk| du_estimate_chunk(chunk).unwrap_or_default())
                 .collect()
         }),
         Err(_) => chunks
             .iter()
-            .map(|chunk| du_estimate_chunk(flag, multiplier, chunk).unwrap_or_default())
+            .map(|chunk| du_estimate_chunk(chunk).unwrap_or_default())
             .collect(),
     };
     for chunk_map in chunk_results {
@@ -702,14 +696,22 @@ pub fn apply_size_estimates(entries: &mut [WalkEntry], exact: bool) {
 
 const DU_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn du_estimate_chunk(
-    flag: &str,
-    multiplier: u64,
-    paths: &[&Utf8Path],
-) -> Option<HashMap<String, u64>> {
+/// Size one chunk of paths with a single `du` subprocess.
+///
+/// Public so streaming consumers (the engine's progressive sizer) can issue
+/// chunks as paths arrive rather than waiting for the full set. `None` means
+/// `du` failed or is unsupported on this platform - callers fall back to
+/// `exact_size`/`stat_fallback` per path.
+pub fn du_estimate_chunk(paths: &[&Utf8Path]) -> Option<HashMap<String, u64>> {
     if paths.is_empty() {
         return Some(HashMap::new());
     }
+
+    let (flag, multiplier) = match std::env::consts::OS {
+        "linux" => ("-sb", 1u64),
+        "macos" => ("-sk", 1024u64),
+        _ => return None,
+    };
 
     let mut command = Command::new("du");
     command.arg(flag);
@@ -763,7 +765,9 @@ fn du_estimate_chunk(
     Some(result)
 }
 
-fn stat_fallback(path: &Utf8Path) -> u64 {
+/// Size of the entry itself (lstat, so symlinks report the link). The
+/// no-recursion fallback when `du` misses a path.
+pub fn stat_fallback(path: &Utf8Path) -> u64 {
     // symlink_metadata, not metadata: a symlink candidate's size is the link
     // itself - following it would report the target and misreport freed bytes.
     fs::symlink_metadata(path.as_std_path())
