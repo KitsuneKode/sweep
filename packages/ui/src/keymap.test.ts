@@ -299,7 +299,8 @@ describe("handleKeymap", () => {
     }
   });
 
-  test("space on a sidebar row queues the whole scope", () => {
+  test("space on a sidebar row requests the scope toggle", () => {
+    // The app owns the toggle because the notice needs the skipped count.
     const state: SweepUiState = {
       ...createUiState(mockPlan()),
       focus: "sidebar",
@@ -307,13 +308,10 @@ describe("handleKeymap", () => {
       selectedIds: new Set(),
     };
     const actions = makeActions();
+    actions.applyScopeToggle = mock(() => {});
     handleKeymap(makeContext({ key: { name: "space" }, state }), actions);
-    expect(actions.mutate).toHaveBeenCalled();
-
-    const mutator = (actions.mutate as unknown as { mock: { calls: unknown[][] } }).mock
-      .calls[0]?.[0] as (s: SweepUiState) => SweepUiState;
-    const next = mutator(state);
-    expect(next.selectedIds.has("cand_1")).toBe(true);
+    expect(actions.applyScopeToggle).toHaveBeenCalled();
+    expect(actions.mutate).not.toHaveBeenCalled();
   });
 
   test("Ctrl+U and Ctrl+D page scrolling", () => {

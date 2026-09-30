@@ -21,7 +21,6 @@ import {
   setPatternIndex,
   setFilter,
   startVisual,
-  toggleSidebarScopeSelection,
   type UiFocus,
 } from "./state.js";
 import { buildDisplayRows, firstSelectableRow, lastSelectableRow } from "./rows.js";
@@ -142,6 +141,8 @@ export interface KeymapActions {
   yankPath?: () => void;
   /** Queue or unqueue the visual range, then leave visual mode. */
   applyVisual?: () => void;
+  /** Queue or unqueue the scope under the sidebar cursor, then report skips. */
+  applyScopeToggle?: () => void;
   /** Flash a one-line notice for a keypress that deliberately does nothing. */
   notify?: (message: string) => void;
 }
@@ -337,9 +338,9 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (key.name === "space") {
-      // Queue/dequeue the whole scope - the tree row is a checkbox group, not
-      // just a filter. Blocked entries stay locked inside it.
-      actions.mutate((s) => toggleSidebarScopeSelection(s));
+      // Queue/dequeue the scope - the tree row is a checkbox group, not just a
+      // filter. Dangerous and blocked entries stay out of bulk gestures.
+      actions.applyScopeToggle?.();
       return;
     }
     return;

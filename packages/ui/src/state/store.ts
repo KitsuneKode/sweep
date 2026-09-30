@@ -602,21 +602,37 @@ export function selectVisible(state: SweepUiState, includeDangerous: boolean): S
   return { ...state, selectedIds, selectionTouched };
 }
 
+export interface ScopeToggleResult {
+  state: SweepUiState;
+  queued: number;
+  unqueued: number;
+  /** Dangerous or blocked rows in the scope that were left alone. */
+  skipped: number;
+}
+
 /**
- * Queue or dequeue every queueable artifact under a sidebar scope.
+ * Queue or dequeue artifacts under a sidebar scope.
  *
- * If all non-blocked candidates in the scope are already queued, the toggle
- * reverses into a dequeue (like a checkbox row). `scopeKey === null` means the
- * root row - every candidate. Blocked entries are hard-locked either way.
+ * Bulk gestures never queue dangerous or blocked rows - same rule as `a` and
+ * visual ranges, since a scope `space` could otherwise smuggle a dangerous
+ * artifact behind the confirm dialog. Dangerous entries deliberately queued
+ * row-by-row are also left alone when the toggle reverses.
+ * `scopeKey === null` is the "all scopes" row - the whole target.
  */
-export function toggleScopeSelection(state: SweepUiState, scopeKey: string | null): SweepUiState {
-  const eligible = state.candidates.filter(
+export function toggleScopeSelection(
+  state: SweepUiState,
+  scopeKey: string | null,
+): ScopeToggleResult {
+  const inScope = state.candidates.filter(
     (candidate) =>
-      candidate.riskTier !== "blocked" &&
-      (scopeKey === null ||
-        candidateMatchesScope(artifactScopeKey(state.targetDir, candidate.path), scopeKey)),
+      scopeKey === null ||
+      candidateMatchesScope(artifactScopeKey(state.targetDir, candidate.path), scopeKey),
   );
-  if (eligible.length === 0) return state;
+  const eligible = inScope.filter(
+    (candidate) => candidate.riskTier !== "blocked" && candidate.riskTier !== "dangerous",
+  );
+  const skipped = inScope.length - eligible.length;
+  if (eligible.length === 0) return { state, queued: 0, unqueued: 0, skipped };
 
   const selectedIds = new Set(state.selectedIds);
   const allSelected = eligible.every((candidate) => selectedIds.has(candidate.id));
@@ -626,14 +642,19 @@ export function toggleScopeSelection(state: SweepUiState, scopeKey: string | nul
     if (allSelected) selectedIds.delete(candidate.id);
     else selectedIds.add(candidate.id);
   }
-  return { ...state, selectedIds, selectionTouched };
+  return {
+    state: { ...state, selectedIds, selectionTouched },
+    queued: allSelected ? 0 : eligible.length,
+    unqueued: allSelected ? eligible.length : 0,
+    skipped,
+  };
 }
 
 /** Same toggle, addressed by the sidebar cursor row instead of a scope key. */
-export function toggleSidebarScopeSelection(state: SweepUiState): SweepUiState {
+export function toggleSidebarScopeSelection(state: SweepUiState): ScopeToggleResult {
   const rows = sidebarRowsFor(state);
   const row = rows[state.sidebarIndex];
-  if (!row) return state;
+  if (!row) return { state, queued: 0, unqueued: 0, skipped: 0 };
   return toggleScopeSelection(state, row.key);
 }
 

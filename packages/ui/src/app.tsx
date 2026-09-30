@@ -45,6 +45,7 @@ import {
   setFocus,
   setScanning,
   toggleSelectionById,
+  toggleSidebarScopeSelection,
   toggleSortBy,
   setScannedDirs,
   setSkippedDirs,
@@ -541,6 +542,15 @@ export function SweepApp({
     else setNotice(`nothing queueable in that range${skipped}`);
   }, []);
 
+  const applyScopeToggle = useCallback(() => {
+    const result = toggleSidebarScopeSelection(stateRef.current);
+    dispatch({ type: "replace", state: result.state });
+    const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
+    if (result.queued > 0) setNotice(`queued ${result.queued} in scope${skipped}`);
+    else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued} in scope${skipped}`);
+    else setNotice(`nothing queueable in that scope${skipped}`);
+  }, []);
+
   useKeyboard((key) => {
     handleKeymap(
       {
@@ -571,6 +581,7 @@ export function SweepApp({
         exportPlan,
         yankPath,
         applyVisual,
+        applyScopeToggle,
         notify: setNotice,
       },
     );

@@ -658,39 +658,48 @@ describe("sweep ui state", () => {
   });
 
   describe("toggleScopeSelection", () => {
-    test("null scope queues every queueable artifact", () => {
+    test("null scope queues safe and caution, never dangerous or blocked", () => {
       const state = clearSelection(createUiState(createPlan()));
-      const toggled = toggleScopeSelection(state, null);
+      const result = toggleScopeSelection(state, null);
 
-      // cand_blocked is hard-locked - the all-scopes row must not reach it.
-      expect([...toggled.selectedIds].sort()).toEqual(["cand_dangerous", "cand_safe"]);
+      // Bulk gestures follow `a` and visual ranges: dangerous needs a
+      // deliberate per-row toggle, blocked is hard-locked.
+      expect([...result.state.selectedIds]).toEqual(["cand_safe"]);
+      expect(result.queued).toBe(1);
+      expect(result.skipped).toBe(2);
     });
 
     test("a scope key queues the subtree, including nested parents", () => {
       const base = clearSelection(createUiState(createPlan()));
       // ".git" holds only the blocked candidate - the toggle is a no-op there.
-      expect(toggleScopeSelection(base, ".git")).toBe(base);
+      const empty = toggleScopeSelection(base, ".git");
+      expect(empty.state).toBe(base);
+      expect(empty.skipped).toBe(1);
 
       const rootScoped = toggleScopeSelection(base, "");
-      expect([...rootScoped.selectedIds].sort()).toEqual(["cand_dangerous", "cand_safe"]);
+      expect([...rootScoped.state.selectedIds]).toEqual(["cand_safe"]);
+      expect(rootScoped.skipped).toBe(1); // cand_dangerous stayed out
     });
 
-    test("a fully-queued scope toggles back off", () => {
-      const on = toggleScopeSelection(createUiState(createPlan()), "");
-      expect(on.selectedIds.has("cand_dangerous")).toBe(true);
+    test("a fully-queued scope toggles back off, leaving deliberate dangerous picks", () => {
+      // createUiState seeds cand_safe; queueing cand_dangerous row-by-row is
+      // the deliberate gesture the bulk toggle must not sweep away.
+      const seeded = toggleSelectionById(createUiState(createPlan()), "cand_dangerous");
+      expect(seeded.selectedIds.has("cand_dangerous")).toBe(true);
 
-      const off = toggleScopeSelection(on, "");
-      expect(off.selectedIds.has("cand_dangerous")).toBe(false);
-      expect(off.selectedIds.has("cand_safe")).toBe(false);
-      // The user's choice now outranks re-seeding on stream upserts.
-      expect(off.selectionTouched.has("cand_dangerous")).toBe(true);
+      const off = toggleScopeSelection(seeded, "");
+      expect(off.state.selectedIds.has("cand_safe")).toBe(false);
+      // The deliberate dangerous queue survives the bulk dequeue.
+      expect(off.state.selectedIds.has("cand_dangerous")).toBe(true);
+      expect(off.unqueued).toBe(1);
     });
 
     test("toggleSidebarScopeSelection drives the same toggle from the cursor row", () => {
       const state = clearSelection(createUiState(createPlan()));
       // sidebarIndex 0 is the "all scopes" row - a scope-level toggle of everything.
-      const toggled = toggleSidebarScopeSelection({ ...state, sidebarIndex: 0 });
-      expect([...toggled.selectedIds].sort()).toEqual(["cand_dangerous", "cand_safe"]);
+      const result = toggleSidebarScopeSelection({ ...state, sidebarIndex: 0 });
+      expect([...result.state.selectedIds]).toEqual(["cand_safe"]);
+      expect(result.skipped).toBe(2);
     });
   });
 });
