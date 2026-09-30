@@ -231,4 +231,36 @@ describe("rust SweepConfig forwarding", () => {
     expect(rustNames).toContain("node_modules");
     expect(rustNames).not.toContain("dist");
   });
+
+  // Windows names are UTF-16 - raw invalid bytes only exist on unix filesystems.
+  test("non-UTF8 dir names: both engines count the undescendable dir as skipped", async () => {
+    if (process.platform === "win32" || !rustAvailable()) {
+      return;
+    }
+
+    tempRoot = mkdtempSync(join(tmpdir(), "sweep-utf8-parity-"));
+    // mkdirSync accepts Buffer paths; the U+FFFD-mangled name readdir returns
+    // cannot address this dir, so both levels are created from raw bytes.
+    const weird = Buffer.concat([Buffer.from(`${tempRoot}/`), Buffer.from([0xff, 0xfe])]);
+    mkdirSync(weird);
+    mkdirSync(Buffer.concat([weird, Buffer.from("/node_modules")]));
+
+    const { plan: jsPlan } = await scanToPlan(tempRoot, DEFAULT_CONFIG, {
+      selectionPolicy: DEFAULT_SELECTION_POLICY,
+      exact: false,
+    });
+    const rustPlan = await scanToPlanViaRust(tempRoot, {
+      config: DEFAULT_CONFIG,
+      selectionPolicy: DEFAULT_SELECTION_POLICY,
+      exact: false,
+    });
+
+    // The mangled name cannot be lstat'd, so neither engine descends - the
+    // parity contract is that both report it the same way: zero candidates,
+    // one skipped dir.
+    expect(jsPlan.candidates).toHaveLength(0);
+    expect(rustPlan.candidates).toHaveLength(0);
+    expect(rustPlan.summary.skippedDirs).toBe(jsPlan.summary.skippedDirs);
+    expect(jsPlan.summary.skippedDirs).toBe(1);
+  });
 });

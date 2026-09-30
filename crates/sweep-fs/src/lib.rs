@@ -248,10 +248,11 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
     let mut subdirs: Vec<Utf8PathBuf> = Vec::new();
 
     for item in read_dir.flatten() {
-        let file_name = match item.file_name().into_string() {
-            Ok(name) => name,
-            Err(_) => continue,
-        };
+        // Lossy-decode invalid UTF-8 instead of dropping the entry - the JS
+        // engine sees the same U+FFFD-mangled name. The mangled path cannot be
+        // lstat'd, so the entry ends up counted skipped on both engines rather
+        // than invisible on Rust and skipped on JS.
+        let file_name = item.file_name().to_string_lossy().into_owned();
 
         let full_path = dir.join(&file_name);
         if ctx
@@ -731,6 +732,27 @@ mod tests {
         assert_eq!(result.entries.len(), 1);
         assert_eq!(result.entries[0].name, "node_modules");
         assert_eq!(result.scanned_dirs, 2);
+    }
+
+    // JS readdir yields U+FFFD-mangled names for invalid UTF-8; the lossy path
+    // cannot be lstat'd back to the real entry, so both engines must count the
+    // dir as skipped rather than silently dropping it from the walk entirely.
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_directory_counts_as_skipped() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let weird = dir.path().join(std::ffi::OsStr::from_bytes(b"\xff\xfe"));
+        fs::create_dir_all(weird.join("node_modules"))
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+
+        let result = walk_matched_entries(root, &WalkConfig::default());
+        assert_eq!(result.entries.len(), 0);
+        assert_eq!(result.skipped_dirs, 1);
     }
 
     #[test]

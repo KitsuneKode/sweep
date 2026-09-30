@@ -1,4 +1,11 @@
-import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { sweepConfigDir } from "./config.js";
 
@@ -26,6 +33,8 @@ export interface HistorySummary {
 const HISTORY_FILE = "history.jsonl";
 /** Cap history reads - stats stay cheap no matter how long the log gets. */
 const MAX_READ_BYTES = 8 * 1024 * 1024;
+/** Rotates once past this size; the tail half is kept. */
+const MAX_FILE_BYTES = 16 * 1024 * 1024;
 
 export function historyFilePath(): string {
   return join(sweepConfigDir(), HISTORY_FILE);
@@ -40,13 +49,35 @@ export function appendHistory(entry: CleanupHistoryEntry): boolean {
     const dir = sweepConfigDir();
     // History records real directory names - keep it user-private.
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    appendFileSync(join(dir, HISTORY_FILE), `${JSON.stringify(entry)}\n`, {
+    const filePath = join(dir, HISTORY_FILE);
+    appendFileSync(filePath, `${JSON.stringify(entry)}\n`, {
       encoding: "utf-8",
       mode: 0o600,
     });
+    rotateIfNeeded(filePath);
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Trim the log once it passes MAX_FILE_BYTES - history is a running tally,
+ * not an audit archive, so dropping the oldest half is fine. The rewrite goes
+ * through a sibling file + rename so a crash cannot leave a torn log.
+ */
+function rotateIfNeeded(filePath: string): void {
+  try {
+    if (statSync(filePath).size <= MAX_FILE_BYTES) return;
+    const raw = readFileSync(filePath, "utf-8");
+    const tail = raw.slice(raw.length - MAX_FILE_BYTES / 2);
+    const firstNewline = tail.indexOf("\n");
+    const kept = firstNewline === -1 ? tail : tail.slice(firstNewline + 1);
+    const tmp = `${filePath}.tmp`;
+    writeFileSync(tmp, kept, { encoding: "utf-8", mode: 0o600 });
+    renameSync(tmp, filePath);
+  } catch {
+    // Rotation is best-effort - the read cap keeps stats fast regardless.
   }
 }
 

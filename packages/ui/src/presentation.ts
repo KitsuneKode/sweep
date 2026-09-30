@@ -339,6 +339,7 @@ export function buildHeaderStats(
   dryRun?: boolean,
   width?: number,
   trash?: boolean,
+  engine?: "js" | "rust",
 ): StyledText {
   const w = width ?? Number.POSITIVE_INFINITY;
   const parts: StyledText[] = [];
@@ -366,6 +367,12 @@ export function buildHeaderStats(
     if (w >= 84) {
       parts.push(t`${bold(fg(tokens.positive)(formatBytes(summary.selectedBytes)))}`);
     }
+  }
+
+  // Diagnostics only - which backend scanned. Drops below the queue's floor
+  // on narrow layouts; TRASH/DRY RUN are safety state and never drop.
+  if (engine && w >= 110) {
+    parts.push(t`${fg(tokens.textDim)(`engine:${engine}`)}`);
   }
 
   if (trash) {

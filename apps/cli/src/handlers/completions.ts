@@ -1,84 +1,136 @@
+import type { Command } from "commander";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { applyNoColor } from "./shared.js";
 
-const COMMANDS = [
-  "clean",
-  "scan",
-  "plan",
-  "ui",
-  "apply",
-  "init",
-  "doctor",
-  "stats",
-  "inspect",
-  "completions",
-] as const;
-
-const SHARED_OPTIONS = [
-  "--pattern",
-  "--ignore",
-  "--disabled-pattern",
-  "--depth",
-  "--select",
-  "--include-dangerous",
+/** Options whose value is a filesystem path - shells complete files for them. */
+const FILE_VALUE_OPTIONS = new Set([
   "--config",
-  "--engine",
-  "--no-color",
-  "--json",
-  "--quiet",
-  "--verbose",
-  "--yes",
-  "--help",
-  "--version",
-];
+  "--plan",
+  "--ignore",
+  "--pattern",
+  "--disabled-pattern",
+]);
 
-const CLEAN_OPTIONS = [...SHARED_OPTIONS, "--dry-run", "--trash", "--force-large"];
-const SCAN_OPTIONS = [...SHARED_OPTIONS, "--json-stream"];
-const APPLY_OPTIONS = ["--plan", "--engine", "--trash", "--force-large", "--json", "--yes"];
+/** Options whose value comes from a fixed set - complete the words, not files. */
+const WORD_VALUE_OPTIONS: Record<string, string> = {
+  "--engine": "auto js rust",
+  "--select": "default safe all none",
+};
 
-const BASH_SCRIPT = `# sweep bash completion. Install:
+/**
+ * Options on the root program that belong to the bare `sweep` (clean) action -
+ * they do not apply after a subcommand (`sweep stats --dry-run` is rejected).
+ */
+const ROOT_ACTION_OPTIONS = new Set(["--dry-run", "--trash", "--force-large"]);
+
+interface CompletionModel {
+  commands: string[];
+  /** Long flags shared by every command (program globals + implicit help/version). */
+  globalFlags: string[];
+  /** Bare `sweep` flags - globals plus the clean-action options. */
+  rootFlags: string[];
+  /** Per-command long flags, globals excluded. */
+  commandFlags: Record<string, string[]>;
+}
+
+function longFlags(command: Command): string[] {
+  return command.options
+    .map((option) => option.long)
+    .filter((flag): flag is string => Boolean(flag));
+}
+
+/**
+ * Derive the completion model from the live Commander program. Hand-maintained
+ * flag lists drifted before (plan completing --json-stream, inspect completing
+ * --engine) - generating from the program makes drift structurally impossible.
+ */
+function buildModel(program: Command): CompletionModel {
+  const root = longFlags(program);
+  // --version registers on program.options via .version(); --help does not.
+  const implicit = root.includes("--help") ? [] : ["--help"];
+  const globalFlags = [...root.filter((flag) => !ROOT_ACTION_OPTIONS.has(flag)), ...implicit];
+  const commandFlags: Record<string, string[]> = {};
+  for (const command of program.commands) {
+    commandFlags[command.name()] = longFlags(command);
+  }
+  return {
+    commands: Object.keys(commandFlags),
+    globalFlags,
+    rootFlags: [...root, ...implicit],
+    commandFlags,
+  };
+}
+
+function flagsFor(model: CompletionModel, command: string): string[] {
+  return [...model.globalFlags, ...(model.commandFlags[command] ?? [])];
+}
+
+function bashScript(model: CompletionModel): string {
+  const cases = model.commands
+    .map(
+      (command) =>
+        `    ${command}) COMPREPLY=($(compgen -W "${flagsFor(model, command).join(" ")}" -f -- "$cur")) ;;`,
+    )
+    .join("\n");
+  const valueCases = [
+    ...Object.entries(WORD_VALUE_OPTIONS).map(
+      ([flag, words]) => `    ${flag}) COMPREPLY=($(compgen -W "${words}" -- "$cur")); return 0 ;;`,
+    ),
+    `    ${[...FILE_VALUE_OPTIONS].join("|")}) COMPREPLY=($(compgen -f -- "$cur")); return 0 ;;`,
+    `    completions) COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur")); return 0 ;;`,
+  ].join("\n");
+
+  return `# sweep bash completion. Install:
 #   sweep completions bash > "$(brew --prefix 2>/dev/null)/etc/bash_completion.d/sweep" 2>/dev/null \\
 #     || sweep completions bash > ~/.local/share/bash-completion/completions/sweep
 _sweep() {
   local cur prev commands
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
-  commands="${COMMANDS.join(" ")}"
+  commands="${model.commands.join(" ")}"
 
   case "$prev" in
     sweep)
       COMPREPLY=($(compgen -W "$commands" -- "$cur"))
       return 0
       ;;
-    --engine)      COMPREPLY=($(compgen -W "auto js rust" -- "$cur")); return 0 ;;
-    --select)      COMPREPLY=($(compgen -W "default safe all none" -- "$cur")); return 0 ;;
-    --config|--plan|--ignore|--pattern|--disabled-pattern)
-      COMPREPLY=($(compgen -f -- "$cur")); return 0 ;;
-    --depth)       COMPREPLY=($(compgen -W "-1 0 1 2 3 4 5" -- "$cur")); return 0 ;;
-    completions)   COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur")); return 0 ;;
+${valueCases}
   esac
 
   case "\${COMP_WORDS[1]}" in
-    clean|ui)      COMPREPLY=($(compgen -W "${CLEAN_OPTIONS.join(" ")}" -f -- "$cur")) ;;
-    scan|plan)     COMPREPLY=($(compgen -W "${SCAN_OPTIONS.join(" ")}" -f -- "$cur")) ;;
-    apply|inspect) COMPREPLY=($(compgen -W "${APPLY_OPTIONS.join(" ")}" -f -- "$cur")) ;;
-    *)             COMPREPLY=($(compgen -W "${SHARED_OPTIONS.join(" ")} ${CLEAN_OPTIONS.join(" ")}" -f -- "$cur")) ;;
+${cases}
+    *) COMPREPLY=($(compgen -W "${model.rootFlags.join(" ")}" -f -- "$cur")) ;;
   esac
 }
 complete -F _sweep sweep
 `;
+}
 
-const ZSH_SCRIPT = `#compdef sweep
+function zshScript(model: CompletionModel): string {
+  const commandEntries = model.commands
+    .map((command) => `    '${command}:sweep ${command}'`)
+    .join("\n");
+  const flagEntries = model.globalFlags.map((flag) => `    '${flag}[sweep option]'`).join("\n");
+  const cases = model.commands
+    .map((command) => {
+      const flags = flagsFor(model, command)
+        .map((flag) => `'${flag}[sweep option]'`)
+        .join(" ");
+      return `    ${command}) _arguments ${flags} '*:path:_files -/' ;;`;
+    })
+    .join("\n");
+
+  return `#compdef sweep
 # sweep zsh completion. Install:
 #   sweep completions zsh > ~/.zsh/completions/_sweep   # (dir must be in $fpath)
 _sweep() {
   local -a commands
   commands=(
-${COMMANDS.map((c) => `    '${c}:sweep ${c}'`).join("\n")}
+${commandEntries}
   )
   local -a shared_options
   shared_options=(
-${SHARED_OPTIONS.map((o) => `    '${o}[sweep option]'`).join("\n")}
+${flagEntries}
   )
   if (( CURRENT == 2 )); then
     _describe 'command' commands
@@ -86,53 +138,78 @@ ${SHARED_OPTIONS.map((o) => `    '${o}[sweep option]'`).join("\n")}
     return
   fi
   case "$words[2]" in
-    apply|inspect) _arguments '--plan[plan file]:plan file:_files' '--engine[engine]:(auto js rust)' '--trash[reversible]' '--force-large[bypass size cap]' '--json[json output]' ;;
-    *) _arguments $shared_options '--dry-run[preview]' '--trash[reversible]' '--force-large[bypass size cap]' '*:path:_files -/' ;;
+${cases}
+    *) _arguments ${model.rootFlags.map((flag) => `'${flag}[sweep option]'`).join(" ")} '*:path:_files -/' ;;
   esac
 }
 _sweep "$@"
 `;
+}
 
-const FISH_SCRIPT = `# sweep fish completion. Install:
+function fishScript(model: CompletionModel, program: Command): string {
+  const commandLines = model.commands
+    .map(
+      (command) =>
+        `complete -c sweep -f -n "__fish_use_subcommand" -a ${command} -d "sweep ${command}"`,
+    )
+    .join("\n");
+
+  // One completion line per flag. Command-specific flags are gated on their
+  // subcommand so `sweep inspect --trash` never completes.
+  const flagLines: string[] = [];
+  const seenGlobal = new Set<string>();
+  for (const command of program.commands) {
+    const name = command.name();
+    for (const option of command.options) {
+      if (!option.long) continue;
+      const gated = `-n "__fish_seen_subcommand_from ${name}"`;
+      flagLines.push(
+        `complete -c sweep ${gated} -l ${option.long.slice(2)}${option.required || option.optional ? " -r" : ""}${FILE_VALUE_OPTIONS.has(option.long) ? " -F" : ""} -d "${option.description.replace(/"/g, "'")}"`,
+      );
+    }
+  }
+  for (const option of program.options) {
+    if (!option.long || seenGlobal.has(option.long)) continue;
+    seenGlobal.add(option.long);
+    const words = WORD_VALUE_OPTIONS[option.long];
+    // Root-action flags (--dry-run/--trash/--force-large on the bare `sweep`
+    // clean action) only apply before a subcommand is typed.
+    const gate = ROOT_ACTION_OPTIONS.has(option.long) ? ' -n "__fish_use_subcommand"' : "";
+    flagLines.push(
+      `complete -c sweep${gate} -l ${option.long.slice(2)}${words ? ` -xa "${words}"` : option.required || option.optional ? " -r" : ""}${FILE_VALUE_OPTIONS.has(option.long) ? " -F" : ""} -d "${option.description.replace(/"/g, "'")}"`,
+    );
+  }
+  flagLines.push('complete -c sweep -l help -d "show help"');
+
+  return `# sweep fish completion. Install:
 #   sweep completions fish > ~/.config/fish/completions/sweep.fish
-${COMMANDS.map(
-  (c) => `complete -c sweep -f -n "__fish_use_subcommand" -a ${c} -d "sweep ${c}"`,
-).join("\n")}
-complete -c sweep -n "__fish_seen_subcommand_from apply inspect" -l plan -r -F -d "saved plan file"
-complete -c sweep -l engine -xa "auto js rust"
-complete -c sweep -l select -xa "default safe all none"
-complete -c sweep -l config -r -F
-complete -c sweep -s p -l pattern -r
-complete -c sweep -s i -l ignore -r
-complete -c sweep -l disabled-pattern -r
-complete -c sweep -l depth -x
-complete -c sweep -s n -l dry-run -d "preview deletions"
-complete -c sweep -l trash -d "move to .sweep-trash instead of deleting"
-complete -c sweep -l force-large -d "bypass maxSizeGB cap"
-complete -c sweep -s y -l yes -d "skip confirmation"
-complete -c sweep -l json -d "JSON output"
-complete -c sweep -l json-stream -d "NDJSON scan events"
-complete -c sweep -s q -l quiet -d "minimal output"
-complete -c sweep -l verbose -d "per-candidate progress"
-complete -c sweep -l no-color -d "disable colors"
-complete -c sweep -l include-dangerous -d "include dangerous candidates"
+${commandLines}
+${flagLines.join("\n")}
 `;
+}
 
-const SCRIPTS: Record<string, string> = {
-  bash: BASH_SCRIPT,
-  zsh: ZSH_SCRIPT,
-  fish: FISH_SCRIPT,
-};
+/** Render one shell's completion script; undefined for an unknown shell. */
+export function renderCompletions(shell: string, program: Command): string | undefined {
+  const model = buildModel(program);
+  if (shell === "bash") return bashScript(model);
+  if (shell === "zsh") return zshScript(model);
+  if (shell === "fish") return fishScript(model, program);
+  return undefined;
+}
 
-/** `sweep completions <shell>` - print a static completion script to stdout. */
-export async function handleCompletions(shell: string, opts: { color: boolean }): Promise<void> {
+/** `sweep completions <shell>` - print a completion script generated from the program. */
+export async function handleCompletions(
+  shell: string,
+  opts: { color: boolean },
+  program: Command,
+): Promise<void> {
   applyNoColor(opts.color);
 
   try {
-    const script = SCRIPTS[shell];
+    const script = renderCompletions(shell, program);
     if (!script) {
       const { printError } = await import("@kitsunekode/sweep-display");
-      printError(`Unknown shell "${shell}". Supported: ${Object.keys(SCRIPTS).join(", ")}`);
+      printError(`Unknown shell "${shell}". Supported: bash, zsh, fish`);
       exitWith(EXIT.GUARDRAIL);
     }
     process.stdout.write(script);

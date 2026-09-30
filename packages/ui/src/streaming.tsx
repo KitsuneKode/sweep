@@ -167,6 +167,7 @@ export async function runSweepUiStreaming(
       <UiErrorBoundary>
         <SweepApp
           plan={emptyPlan(options.targetDir, options.selectionPolicy)}
+          engine={options.engine}
           {...(options.dryRun ? { dryRun: true } : {})}
           {...(options.trash ? { trash: true } : {})}
           {...(options.init ? { init: options.init } : {})}

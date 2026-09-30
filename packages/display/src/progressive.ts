@@ -11,6 +11,8 @@ export interface ProgressiveScanSummary {
   count: number;
   totalBytes: number;
   exact: boolean;
+  /** Scan backend that produced the result - diagnostics under --verbose. */
+  engine?: string;
 }
 
 export interface ProgressiveScanRenderer {
@@ -81,6 +83,7 @@ export function createProgressiveScanRenderer(
 
       const skipped =
         summary.skippedDirs && summary.skippedDirs > 0 ? `, ${summary.skippedDirs} skipped` : "";
+      const engine = summary.engine ? pc.dim(` · engine ${summary.engine}`) : "";
 
       if (process.stdout.isTTY) {
         console.log();
@@ -91,6 +94,7 @@ export function createProgressiveScanRenderer(
         console.log(
           pc.dim(`Scanned ${pc.bold(summary.scannedDirs.toString())} dirs`) +
             (skipped ? pc.yellow(skipped) : "") +
+            engine +
             pc.dim("."),
         );
         console.log();
@@ -98,7 +102,9 @@ export function createProgressiveScanRenderer(
         console.log(
           `sweep: found ${summary.count} items (${sizePrefix}${formatBytes(summary.totalBytes)} ${totalLabel})`,
         );
-        console.log(`sweep: scanned ${summary.scannedDirs} dirs${skipped}`);
+        console.log(
+          `sweep: scanned ${summary.scannedDirs} dirs${skipped}${summary.engine ? `, engine=${summary.engine}` : ""}`,
+        );
       }
     },
     stopSpinner() {

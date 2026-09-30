@@ -262,6 +262,7 @@ export async function runScanWithDisplay(
       count: result.entries.length,
       totalBytes: result.estimatedTotalBytes,
       exact: result.exact,
+      ...(scanOptions.engine ? { engine: scanOptions.engine } : {}),
     });
 
     return { result, plan };

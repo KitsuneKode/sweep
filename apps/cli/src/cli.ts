@@ -182,7 +182,7 @@ export function makeProgram(): Command {
     .argument("<shell>", "Shell to generate completions for: bash, zsh, or fish")
     .action(function (this: Command, shell: string) {
       const opts = this.optsWithGlobals<{ color: boolean }>();
-      void handleCompletions(shell, opts);
+      void handleCompletions(shell, opts, this.parent ?? this);
     });
 
   program

@@ -292,4 +292,19 @@ describe("buildHeaderStats queue counts", () => {
     );
     expect(line).not.toContain("queued");
   });
+
+  test("names the engine on wide layouts and drops it on narrow ones", () => {
+    const wide = plain(
+      buildHeaderStats(planFixture(), summary(), darkTheme, false, 128, false, "rust"),
+    );
+    expect(wide).toContain("engine:rust");
+
+    const narrow = plain(
+      buildHeaderStats(planFixture(), summary(), darkTheme, false, 90, false, "rust"),
+    );
+    expect(narrow).not.toContain("engine");
+
+    const absent = plain(buildHeaderStats(planFixture(), summary(), darkTheme, false, 128, false));
+    expect(absent).not.toContain("engine");
+  });
 });

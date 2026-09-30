@@ -67,6 +67,8 @@ export interface SweepUiOptions {
   dryRun?: boolean;
   /** Trash mode: the apply dialog must say "move", not "permanently delete". */
   trash?: boolean;
+  /** Which scan backend produced the plan - shown as a dim header chip. */
+  engine?: "js" | "rust";
   init?: SweepUiInitOptions;
 }
 
@@ -86,6 +88,8 @@ export interface SweepAppProps {
   dryRun?: boolean;
   /** Trash mode - changes confirm copy and adds a TRASH header chip. */
   trash?: boolean;
+  /** Which scan backend produced the plan - shown as a dim header chip. */
+  engine?: "js" | "rust";
   onDone: (outcome: SweepUiOutcome) => void;
   init?: SweepUiInitOptions;
   /** When present, the app boots into a live scan and fills in as results stream. */
@@ -353,6 +357,7 @@ export function SweepApp({
   plan,
   dryRun,
   trash,
+  engine,
   onDone,
   init,
   scan,
@@ -610,7 +615,15 @@ export function SweepApp({
     [state.candidates, state.selectedIds, state.targetDir],
   );
 
-  const headerStats = buildHeaderStats(plan, summary, tokens, dryRun, dimensions.width, trashMode);
+  const headerStats = buildHeaderStats(
+    plan,
+    summary,
+    tokens,
+    dryRun,
+    dimensions.width,
+    trashMode,
+    engine,
+  );
 
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
   // The sidebar is the scope filter's control surface, and it hides under 72
@@ -800,6 +813,7 @@ export async function runSweepUi(
           plan={plan}
           {...(options.dryRun ? { dryRun: true } : {})}
           {...(options.trash ? { trash: true } : {})}
+          {...(options.engine ? { engine: options.engine } : {})}
           {...(options.init ? { init: options.init } : {})}
           onDone={session.finish}
         />
