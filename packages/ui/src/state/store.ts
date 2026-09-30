@@ -19,7 +19,10 @@ import { getVisibleCandidates, invalidateSelectorCache } from "./selectors.js";
 
 export type UiFocus = "search" | "sidebar" | "list" | "patterns";
 
-export type UiSortBy = "size" | "name";
+export type UiSortBy = "size" | "name" | "age";
+
+/** `o` walks this ring; size stays first because it is the default triage order. */
+const SORT_ORDER: readonly UiSortBy[] = ["size", "name", "age"];
 
 export interface SweepUiState {
   targetDir: string;
@@ -31,6 +34,11 @@ export interface SweepUiState {
   scopeFilter: string | null;
   riskFilter: RiskTier | "all";
   rowIndex: number;
+  /**
+   * Candidate the visual-mode range started on, or null outside visual mode.
+   * An id rather than a row index, so sorting or streaming cannot move it.
+   */
+  visualAnchorId: string | null;
   sidebarIndex: number;
   /** Cursor in the pattern editor; independent of artifact `rowIndex`. */
   patternIndex: number;
@@ -49,8 +57,8 @@ export interface SweepUiState {
    *
    * Set while a live scan is streaming: sizes arrive after discovery, so
    * "largest first" would re-sort the list on every batch and move rows out
-   * from under the cursor. Cleared when the scan ends — which re-sorts once,
-   * authoritatively — or when the user asks for a sort themselves.
+   * from under the cursor. Cleared when the scan ends - which re-sorts once,
+   * authoritatively - or when the user asks for a sort themselves.
    */
   orderPinned: boolean;
   /** Scope groups hidden in the artifact list (key "" = project root). */
@@ -66,7 +74,7 @@ export interface SweepUiState {
   /**
    * Ids whose queued state the user set by hand (toggle/bulk/clear). The
    * streaming seed and the end-of-scan policy reconciliation leave these
-   * alone — a user decision always outranks `selectedByDefault`.
+   * alone - a user decision always outranks `selectedByDefault`.
    */
   selectionTouched: Set<string>;
 }
@@ -77,8 +85,8 @@ export interface SweepUiSummary {
    * Size of the whole queue, not just its visible part.
    *
    * `applyUiSelection` deletes every queued id regardless of the current
-   * filter or scope, so anything that warns the user — the header, the tally,
-   * the confirm dialog — has to count the same way. Counting only what is on
+   * filter or scope, so anything that warns the user - the header, the tally,
+   * the confirm dialog - has to count the same way. Counting only what is on
    * screen made the confirmation understate the damage.
    */
   selectedCount: number;
@@ -107,6 +115,7 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     scopeFilter: null,
     riskFilter: "all",
     rowIndex: 0,
+    visualAnchorId: null,
     sidebarIndex: 0,
     patternIndex: 0,
     selectedIds,
@@ -138,7 +147,7 @@ export function activePatterns(state: SweepUiState): string[] {
 
 /**
  * Every row the patterns editor can show: built-in catalog first, then custom
- * patterns passed via --pattern/.sweeprc. Toggling works on both — a disabled
+ * patterns passed via --pattern/.sweeprc. Toggling works on both - a disabled
  * custom pattern sits in `disabledPatterns` like a catalog one.
  */
 export function allPatterns(state: SweepUiState): string[] {
@@ -162,7 +171,7 @@ function sidebarRowsFor(state: SweepUiState) {
 
 export function setFilter(state: SweepUiState, filter: string): SweepUiState {
   invalidateSelectorCache();
-  const next: SweepUiState = { ...state, filter };
+  const next: SweepUiState = { ...state, filter, visualAnchorId: null };
   const rows = buildDisplayRows(next);
   return {
     ...next,
@@ -184,6 +193,7 @@ export function setScopeFilter(state: SweepUiState, scopeFilter: string | null):
   const next: SweepUiState = {
     ...withExpansion,
     scopeFilter,
+    visualAnchorId: null,
     sidebarIndex: scopeFilterToSidebarIndex(scopeFilter, sidebarRows),
   };
   const rows = buildDisplayRows(next);
@@ -195,7 +205,7 @@ export function setScopeFilter(state: SweepUiState, scopeFilter: string | null):
 
 export function setRiskFilter(state: SweepUiState, riskFilter: RiskTier | "all"): SweepUiState {
   invalidateSelectorCache();
-  const next: SweepUiState = { ...state, riskFilter };
+  const next: SweepUiState = { ...state, riskFilter, visualAnchorId: null };
   const rows = buildDisplayRows(next);
   return {
     ...next,
@@ -218,7 +228,10 @@ export function togglePattern(state: SweepUiState, pattern: string): SweepUiStat
   };
 }
 
-export function setFocus(state: SweepUiState, focus: UiFocus): SweepUiState {
+export function setFocus(input: SweepUiState, focus: UiFocus): SweepUiState {
+  // Leaving the list abandons any half-made visual range.
+  const state =
+    focus !== "list" && input.visualAnchorId !== null ? { ...input, visualAnchorId: null } : input;
   if (focus === "sidebar") {
     const sidebarRows = sidebarRowsFor(state);
     return {
@@ -296,7 +309,7 @@ export function setThemeMode(state: SweepUiState, themeMode: ThemeMode): SweepUi
  * Merge streaming candidates by id (sized re-upserts replace discovery stubs).
  *
  * Newly discovered ids seed into the queue from `selectedByDefault`, matching
- * the non-streaming plan's `selectedCandidateIds` — without this every `sweep
+ * the non-streaming plan's `selectedCandidateIds`; without this every `sweep
  * ui` session would finish scanning with an empty queue. A sized re-upsert
  * never re-seeds: once an id exists, its queued state is whatever the user
  * (or the policy) last left it.
@@ -310,7 +323,7 @@ export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[])
   const selectedIds = new Set(state.selectedIds);
   for (const candidate of incoming) {
     const existing = byId.get(candidate.id);
-    // Never let a sized update clobber a user selection decision — ids are
+    // Never let a sized update clobber a user selection decision - ids are
     // deterministic so sized entries arrive with identical fields except bytes.
     byId.set(candidate.id, existing ? { ...existing, ...candidate } : candidate);
     if (
@@ -357,7 +370,7 @@ export function setScanning(state: SweepUiState, scanning: boolean): SweepUiStat
   const settled: SweepUiState = { ...state, scanning: false, orderPinned: false };
 
   // If the cursor is still parked where it was auto-placed, the user never
-  // chose it — land them on the biggest win instead of wherever the first
+  // chose it - land them on the biggest win instead of wherever the first
   // artifact discovered happens to have sorted to.
   if (state.rowIndex === firstItemRowIndex(buildDisplayRows(state))) {
     const rows = buildDisplayRows(settled);
@@ -383,7 +396,7 @@ export function setSkippedDirs(state: SweepUiState, skippedDirs: number): SweepU
  * Fold the finished scan's authoritative plan back into live state.
  *
  * Streaming feeds per-entry stubs through `candidateFromEntry`, which enriches
- * one candidate at a time — cross-candidate insights (workspace stubs, symlink
+ * one candidate at a time - cross-candidate insights (workspace stubs, symlink
  * aliases) can only run once the whole set exists. When the engine finishes it
  * hands back a real `buildPlan` result; this swaps the stub candidates for the
  * enriched ones and reconciles the queue:
@@ -415,10 +428,11 @@ export function finalizeScan(state: SweepUiState, plan: ScanPlan | undefined): S
 
 export function toggleSortBy(state: SweepUiState): SweepUiState {
   invalidateSelectorCache();
-  const sortBy: UiSortBy = state.sortBy === "size" ? "name" : "size";
+  const next = SORT_ORDER[(SORT_ORDER.indexOf(state.sortBy) + 1) % SORT_ORDER.length];
+  const sortBy: UiSortBy = next ?? "size";
   // The user asked for this reorder, so apply it now rather than silently
   // doing nothing until the scan finishes. Movement they requested is fine.
-  return reanchor(state, { sortBy, orderPinned: false });
+  return reanchor(state, { sortBy, orderPinned: false, visualAnchorId: null });
 }
 
 /** Collapse or expand one scope group in the artifact list. */
@@ -442,10 +456,12 @@ export function expandAllGroups(state: SweepUiState): SweepUiState {
 }
 
 /**
- * One step of the esc ladder — walk backwards through UI state instead of
+ * One step of the esc ladder - walk backwards through UI state instead of
  * quitting. Returns null when there is nothing left to unwind.
  */
 export function escapeStep(state: SweepUiState): SweepUiState | null {
+  // A half-made range is the innermost layer: esc drops it and nothing else.
+  if (state.visualAnchorId !== null) return cancelVisual(state);
   if (state.focus === "patterns") {
     return setFocus(state, "list");
   }
@@ -456,7 +472,7 @@ export function escapeStep(state: SweepUiState): SweepUiState | null {
     return setFocus(state, "list");
   }
 
-  // List focus — peel off view narrowing one layer at a time.
+  // List focus - peel off view narrowing one layer at a time.
   if (state.riskFilter !== "all") {
     return setRiskFilter(state, "all");
   }
@@ -485,6 +501,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     selectedIds: new Set<string>(),
     selectionTouched: new Set<string>(),
     rowIndex: 0,
+    visualAnchorId: null,
     sidebarIndex: 0,
     scopeFilter: null,
     collapsedGroups: new Set<string>(),
@@ -590,7 +607,7 @@ export function selectVisible(state: SweepUiState, includeDangerous: boolean): S
  *
  * If all non-blocked candidates in the scope are already queued, the toggle
  * reverses into a dequeue (like a checkbox row). `scopeKey === null` means the
- * root row — every candidate. Blocked entries are hard-locked either way.
+ * root row - every candidate. Blocked entries are hard-locked either way.
  */
 export function toggleScopeSelection(state: SweepUiState, scopeKey: string | null): SweepUiState {
   const eligible = state.candidates.filter(
@@ -618,6 +635,90 @@ export function toggleSidebarScopeSelection(state: SweepUiState): SweepUiState {
   const row = rows[state.sidebarIndex];
   if (!row) return state;
   return toggleScopeSelection(state, row.key);
+}
+
+export interface VisualRange {
+  /** Item candidate ids inside the range, in list order. */
+  ids: string[];
+  /** Display-row bounds, inclusive; headers inside the span are not in `ids`. */
+  from: number;
+  to: number;
+}
+
+/** The live visual range, or null when not in visual mode or the anchor left the list. */
+export function visualRange(state: SweepUiState): VisualRange | null {
+  if (state.visualAnchorId === null) return null;
+  const rows = buildDisplayRows(state);
+  const anchor = rows.findIndex(
+    (row) => row.kind === "item" && row.candidateId === state.visualAnchorId,
+  );
+  if (anchor < 0) return null;
+  const from = Math.min(anchor, state.rowIndex);
+  const to = Math.max(anchor, state.rowIndex);
+  const ids: string[] = [];
+  for (let index = from; index <= to; index += 1) {
+    const row = rows[index];
+    if (row?.kind === "item") ids.push(row.candidateId);
+  }
+  return { ids, from, to };
+}
+
+/** Anchor a range on the row under the cursor. No-op on a header row. */
+export function startVisual(state: SweepUiState): SweepUiState {
+  const current = getCurrentCandidate(state);
+  if (!current) return state;
+  return { ...state, visualAnchorId: current.id };
+}
+
+export function cancelVisual(state: SweepUiState): SweepUiState {
+  return state.visualAnchorId === null ? state : { ...state, visualAnchorId: null };
+}
+
+export interface VisualApplyResult {
+  state: SweepUiState;
+  queued: number;
+  unqueued: number;
+  /** Dangerous or blocked rows in the range that were left alone. */
+  skipped: number;
+}
+
+/**
+ * Queue (or, when everything eligible is already queued, unqueue) the range.
+ *
+ * Like bulk select, a range never queues dangerous or blocked artifacts:
+ * dangerous ones enter the queue only through a deliberate single-row toggle,
+ * so sweeping a span cannot smuggle one behind the confirm dialog.
+ */
+export function applyVisualRange(state: SweepUiState): VisualApplyResult {
+  const range = visualRange(state);
+  const cleared = cancelVisual(state);
+  if (!range) return { state: cleared, queued: 0, unqueued: 0, skipped: 0 };
+
+  const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
+  const eligible: ScanCandidate[] = [];
+  let skipped = 0;
+  for (const id of range.ids) {
+    const candidate = byId.get(id);
+    if (!candidate) continue;
+    if (candidate.riskTier === "blocked" || candidate.riskTier === "dangerous") skipped += 1;
+    else eligible.push(candidate);
+  }
+  if (eligible.length === 0) return { state: cleared, queued: 0, unqueued: 0, skipped };
+
+  const selectedIds = new Set(state.selectedIds);
+  const selectionTouched = new Set(state.selectionTouched);
+  const allQueued = eligible.every((candidate) => selectedIds.has(candidate.id));
+  for (const candidate of eligible) {
+    selectionTouched.add(candidate.id);
+    if (allQueued) selectedIds.delete(candidate.id);
+    else selectedIds.add(candidate.id);
+  }
+  return {
+    state: { ...cleared, selectedIds, selectionTouched },
+    queued: allQueued ? 0 : eligible.length,
+    unqueued: allQueued ? eligible.length : 0,
+    skipped,
+  };
 }
 
 export function clearSelection(state: SweepUiState): SweepUiState {

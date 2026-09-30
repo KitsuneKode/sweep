@@ -4,6 +4,8 @@ export type {
   UiFocus,
   SweepUiInitOptions,
   UiSortBy,
+  VisualApplyResult,
+  VisualRange,
 } from "./state/store.js";
 export {
   activePatterns,
@@ -41,6 +43,10 @@ export {
   setScannedDirs,
   setSkippedDirs,
   toggleSortBy,
+  applyVisualRange,
+  cancelVisual,
+  startVisual,
+  visualRange,
   resetForRescan,
   toggleGroup,
   expandAllGroups,

@@ -19,10 +19,11 @@ import {
   setScopeFilter,
   toggleGroup,
   togglePattern,
+  visualRange,
   type SweepUiState,
   type UiFocus,
-  type UiSortBy,
 } from "./state.js";
+import { FILTER_HINT } from "./filter-query.js";
 import type { ThemeTokens } from "./theme.js";
 
 export interface ReviewPaneProps {
@@ -57,7 +58,7 @@ export function ReviewPane({
     () =>
       allPatterns(state).map((pattern) => ({
         // Custom (--pattern / .sweeprc) entries sit below the built-ins and
-        // carry an inline marker — a per-row description field would cost
+        // carry an inline marker - a per-row description field would cost
         // every option a second line.
         name:
           formatPatternRow(pattern, !state.disabledPatterns.has(pattern)) +
@@ -70,12 +71,13 @@ export function ReviewPane({
 
   const dimensions = useTerminalDimensions();
   // Artifact pane inner width: total terminal width minus sidebar (if shown),
-  // gap between panes (1), outer padding (2), pane border+padding (4).
+  // outer padding (2), pane border+padding (4). The panes touch: no gap.
   const artifactPaneInnerWidth = Math.max(
     36,
-    dimensions.width - (showSidebar ? sidebarWidth + 1 : 0) - 2 - 4,
+    dimensions.width - (showSidebar ? sidebarWidth : 0) - 2 - 4,
   );
 
+  const visual = visualRange(state);
   const hasFilter = state.filter.length > 0 || state.riskFilter !== "all";
   const scopeEmpty = state.scopeFilter !== null && visibleItems.length === 0;
   const nothingFound = visibleItems.length === 0 && !scopeEmpty && !state.scanning;
@@ -83,7 +85,7 @@ export function ReviewPane({
   const listFocused = state.focus === "list" || state.focus === "patterns";
   const emptyScan = state.scanning && state.candidates.length === 0;
 
-  // The pane title is the one indicator that survives every terminal width —
+  // The pane title is the one indicator that survives every terminal width -
   // sidebar and footer chips both hide on narrow layouts. An active scope or
   // risk filter must always be legible somewhere the user is already looking.
   const titleParts = ["artifacts"];
@@ -96,7 +98,7 @@ export function ReviewPane({
   const paneTitle = searchFocused ? " › filter " : ` ${titleParts.join(" · ")} `;
 
   return (
-    <box width="100%" flexGrow={1} minHeight={0} flexDirection="row" gap={1}>
+    <box width="100%" flexGrow={1} minHeight={0} flexDirection="row">
       {showSidebar ? (
         <box
           width={sidebarWidth}
@@ -109,7 +111,6 @@ export function ReviewPane({
           backgroundColor={tokens.bg}
           overflow="hidden"
           paddingX={1}
-          paddingTop={1}
           paddingBottom={0}
         >
           <ScopeSidebar
@@ -137,14 +138,13 @@ export function ReviewPane({
         backgroundColor={tokens.surface}
         overflow="hidden"
         paddingX={1}
-        paddingTop={1}
         paddingBottom={0}
       >
         <box width="100%" height={1} flexShrink={0}>
           <input
             focused={searchFocused}
             value={state.filter}
-            placeholder="Filter…"
+            placeholder={`Filter… ${FILTER_HINT}`}
             backgroundColor={tokens.surfaceInset}
             focusedBackgroundColor={tokens.surfaceInset}
             textColor={tokens.text}
@@ -160,7 +160,6 @@ export function ReviewPane({
             scannedDirs={state.scannedDirs}
             skippedDirs={state.skippedDirs}
             orderPinned={state.orderPinned}
-            sortBy={state.sortBy}
           />
         ) : null}
         {state.focus === "patterns" ? (
@@ -169,11 +168,11 @@ export function ReviewPane({
             flexGrow={1}
             minHeight={0}
             // Every option costs a second line when descriptions are on, even
-            // empty ones — customs are marked inline in the name instead.
+            // empty ones - customs are marked inline in the name instead.
             showDescription={false}
             showScrollIndicator
             wrapSelection={false}
-            // The keymap owns arrows/space for this pane — leaving the select's
+            // The keymap owns arrows/space for this pane - leaving the select's
             // own bindings live makes shift+arrows diverge (its ±5 fast-scroll
             // fights the keymap's ±1 patternIndex).
             keyBindings={[]}
@@ -219,6 +218,7 @@ export function ReviewPane({
             candidatesById={candidatesById}
             selectedIds={state.selectedIds}
             currentRowIndex={state.rowIndex}
+            visualRange={visual}
             focused={state.focus === "list"}
             tokens={tokens}
             paneWidth={artifactPaneInnerWidth}
@@ -274,14 +274,12 @@ function ScanningStrip({
   scannedDirs,
   skippedDirs,
   orderPinned,
-  sortBy,
 }: {
   tokens: ThemeTokens;
   found: number;
   scannedDirs: number;
   skippedDirs: number;
   orderPinned: boolean;
-  sortBy: UiSortBy;
 }) {
   const dirs = scannedDirs > 0 ? `${scannedDirs.toLocaleString()} dirs` : "walking\u2026";
   return (
@@ -300,7 +298,7 @@ function ScanningStrip({
         wrapMode="none"
       />
       {skippedDirs > 0 ? (
-        // Unreadable/cycled dirs mean the result set is partial — that must be
+        // Unreadable/cycled dirs mean the result set is partial - that must be
         // visible, not quietly absorbed into a total.
         <text
           content={t` ${dim("\u00b7")}  ${fg(tokens.warning)(`${skippedDirs} skipped`)}`}

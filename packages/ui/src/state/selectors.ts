@@ -1,4 +1,5 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { compileFilter } from "../filter-query.js";
 import { artifactScopeKey, candidateMatchesScope } from "../scope-tree.js";
 import type { SweepUiState } from "./store.js";
 
@@ -8,22 +9,18 @@ export function invalidateSelectorCache(): void {
   // WeakMap caches are keyed by immutable state objects; this remains for API compatibility.
 }
 
-function filterCandidates(candidates: ScanCandidate[], filter: string): ScanCandidate[] {
-  const query = filter.trim().toLowerCase();
-  if (query.length === 0) return candidates;
-
-  return candidates.filter((candidate) => {
-    const haystack =
-      `${candidate.name} ${candidate.path} ${candidate.kind} ${candidate.riskTier}`.toLowerCase();
-    return haystack.includes(query);
-  });
+function filterCandidates(state: SweepUiState): ScanCandidate[] {
+  const matches = compileFilter(state.filter);
+  if (!matches) return state.candidates;
+  const context = { selectedIds: state.selectedIds, now: Date.now() };
+  return state.candidates.filter((candidate) => matches(candidate, context));
 }
 
 export function getVisibleCandidates(state: SweepUiState): ScanCandidate[] {
   const cached = visibleCache.get(state);
   if (cached) return cached;
 
-  let result = filterCandidates(state.candidates, state.filter);
+  let result = filterCandidates(state);
 
   if (state.scopeFilter !== null) {
     result = result.filter((candidate) =>

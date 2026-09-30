@@ -33,10 +33,13 @@ export interface ThemeTokens {
 }
 
 /**
- * Helio palette — ported from helio's shadcn-style tokens (lib/theme.ts).
+ * Helio palette - ported from helio's shadcn-style tokens (lib/theme.ts).
  * Structure in neutral charcoal; meaning in restrained semantic color;
  * identity in muted sage green (oklch 0.633 0.031 155 ≈ #7c9082).
- * Risk tiers: safe = sage, caution = olive, dangerous = red, blocked = slate.
+ * Risk tiers: safe = sage, caution = amber, dangerous = red, blocked = slate.
+ * Caution is amber, not olive: an olive sat about 7 ΔE from safe sage and the
+ * two tiers read as one color. textDim stays at 4.5:1 or better on surfaces,
+ * since it styles real information (column headers, scope sizes).
  */
 export const darkTheme: ThemeTokens = {
   bg: "#0a0a0a",
@@ -48,11 +51,11 @@ export const darkTheme: ThemeTokens = {
   text: "#f5f5f5",
   textSecondary: "#c9c9c9",
   textMuted: "#a0a0a0",
-  textDim: "#565656",
+  textDim: "#808080",
   accent: "#7c9082",
   accentContrast: "#0a0a0a",
   positive: "#8b9d83",
-  warning: "#a0aa88",
+  warning: "#d9a94f",
   danger: "#ef4444",
   blocked: "#6b7280",
   info: "#93a0b4",
@@ -74,16 +77,16 @@ export const lightTheme: ThemeTokens = {
   borderSoft: "#0000000f",
   borderFocus: "#7c9082",
   text: "#1a1f2e",
-  textSecondary: "#525a6b",
-  textMuted: "#6b7280",
-  textDim: "#9aa0a8",
+  textSecondary: "#474f60",
+  textMuted: "#5b6372",
+  textDim: "#686f7c",
   accent: "#7c9082",
-  accentContrast: "#ffffff",
-  positive: "#5f7c6a",
-  warning: "#787a4e",
+  accentContrast: "#141824",
+  positive: "#597564",
+  warning: "#8a6212",
   danger: "#c73e3a",
   blocked: "#5b6472",
-  info: "#5f7d99",
+  info: "#56718b",
   selectionBg: "#bfc9bb",
   selectionText: "#1a1f2e",
   selectionSoftBg: "#e3e8e0",

@@ -35,7 +35,7 @@ export function buildTreeGuides(rows: readonly ScopeSidebarRow[]): string[] {
 
 /**
  * True when some row after `index` sits at exactly `depth` without the tree
- * first popping back above it — i.e. the guide at `depth` keeps going.
+ * first popping back above it - i.e. the guide at `depth` keeps going.
  */
 function hasLaterSiblingAt(
   rows: readonly ScopeSidebarRow[],

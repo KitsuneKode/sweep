@@ -1,6 +1,7 @@
 import { bold, fg, StyledText, t } from "@opentui/core";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { basename } from "node:path";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import {
@@ -17,6 +18,7 @@ import { ReviewPane } from "./ReviewPane.js";
 import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
+import { writePlanExport } from "./plan-export.js";
 import { openUiSession } from "./runtime.js";
 import {
   buildBrandLine,
@@ -32,6 +34,7 @@ import {
 import { buildDisplayRows } from "./rows.js";
 import {
   applyUiSelection,
+  applyVisualRange,
   countSelectedDangerous,
   createUiState,
   finalizeScan,
@@ -46,6 +49,7 @@ import {
   setScannedDirs,
   setSkippedDirs,
   upsertCandidates,
+  visualRange,
   type SweepUiInitOptions,
   type SweepUiState,
 } from "./state.js";
@@ -79,7 +83,7 @@ function uiReducer(state: SweepUiState, action: UiAction): SweepUiState {
 export interface SweepAppProps {
   plan: ScanPlan;
   dryRun?: boolean;
-  /** Trash mode — changes confirm copy and adds a TRASH header chip. */
+  /** Trash mode - changes confirm copy and adds a TRASH header chip. */
   trash?: boolean;
   onDone: (outcome: SweepUiOutcome) => void;
   init?: SweepUiInitOptions;
@@ -89,7 +93,7 @@ export interface SweepAppProps {
 }
 
 function styledContentFallback(message: string): ReactNode {
-  // Renders when the app crashed before (or without) theme context — always
+  // Renders when the app crashed before (or without) theme context - always
   // uses the dark palette directly rather than resolving a mode.
   return (
     <box
@@ -100,7 +104,7 @@ function styledContentFallback(message: string): ReactNode {
       backgroundColor={darkTheme.bg}
     >
       <text
-        content={t`${bold(fg(darkTheme.danger)("◆ sweep"))} ${fg(darkTheme.textMuted)("— the interactive view hit an error")}`}
+        content={t`${bold(fg(darkTheme.danger)("◆ sweep"))} ${fg(darkTheme.textMuted)("hit an error in the interactive view")}`}
       />
       <text content="" />
       <text content={sanitizeTerminalText(message)} fg={darkTheme.text} />
@@ -128,50 +132,59 @@ export class UiErrorBoundary extends Component<{ children: ReactNode }, { error:
   }
 }
 
-function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
-  const line = (keys: string, desc: string) =>
-    t`${fg(tokens.text)(keys.padEnd(20))} ${fg(tokens.textMuted)(desc)}`;
+const HELP_ROWS: ReadonlyArray<readonly [keys: string, description: string]> = [
+  ["↑↓ / j k", "move cursor (skips headings)"],
+  ["g / G", "jump to first / last"],
+  ["ctrl-u / ctrl-d", "half page up / down"],
+  ["pgup / pgdn · home / end", "page · first / last row"],
+  ["h · l", "collapse · expand the folder"],
+  ["w · e", "collapse all · expand all"],
+  ["space", "queue / unqueue for deletion"],
+  ["a · s · u", "safe+caution · safe only · clear"],
+  ["o", "sort by size · name · age (stalest first)"],
+  ["r", "rescan from disk"],
+  ["/ then tab", "filter · cycle panes (⇥ back)"],
+  ["/ syntax", "kind:target  risk:caution  >100MB  older:30d  is:queued  !term"],
+  ["1 – 4", "filter by risk level"],
+  ["p", "pattern editor"],
+  ["i", "inspect: kind, path, reasons"],
+  ["v", "visual range: extend with ↑↓, space queues it, esc cancels"],
+  ["y", "copy the row's path to the clipboard"],
+  ["S", "save the queue as a plan file (sweep apply --plan)"],
+  ["enter", "apply (always asks to confirm)"],
+  ["scopes (tab)", "enter scopes · space queues the whole scope"],
+  ["t", "cycle theme (dark · light · auto)"],
+  ["mouse", "wheel scrolls · click focuses · click again queues"],
+  ["? · q · ctrl-c", "help · quit · quit"],
+];
 
+const HELP_KEY_WIDTH = Math.max(...HELP_ROWS.map(([keys]) => keys.length)) + 2;
+/** Border (2) + horizontal padding (6) around the widest row. */
+const HELP_WIDTH =
+  HELP_KEY_WIDTH + Math.max(...HELP_ROWS.map(([, description]) => description.length)) + 8;
+
+function HelpOverlay({ tokens }: { tokens: ThemeTokens }) {
+  // Word wrap instead of clipping: on a narrow terminal a long row breaks
+  // between words rather than losing its tail.
   return (
-    <Modal tokens={tokens} title=" keyboard " width={72}>
+    <Modal tokens={tokens} title=" keyboard " width={HELP_WIDTH}>
       <box flexDirection="column" gap={0}>
-        <text content={line("↑↓ / j k", "move cursor (skips headings)")} wrapMode="none" />
-        <text content={line("g / G", "jump to first / last")} wrapMode="none" />
-        <text content={line("ctrl-u / ctrl-d", "half page up / down")} wrapMode="none" />
-        <text
-          content={line("pgup / pgdn · home / end", "page · first / last row")}
-          wrapMode="none"
-        />
-        <text content={line("h · l", "collapse · expand the folder")} wrapMode="none" />
-        <text content={line("w · e", "collapse all · expand all")} wrapMode="none" />
-        <text content={line("space", "queue / unqueue for deletion")} wrapMode="none" />
-        <text content={line("a · s · u", "safe+caution · safe only · clear")} wrapMode="none" />
-        <text content={line("o", "sort by size ↔ name")} wrapMode="none" />
-        <text content={line("r", "rescan from disk")} wrapMode="none" />
-        <text content={line("/ then tab", "filter · cycle panes (⇥ back)")} wrapMode="none" />
-        <text content={line("1 – 4", "filter by risk level")} wrapMode="none" />
-        <text content={line("p", "pattern editor")} wrapMode="none" />
-        <text content={line("i", "inspect artifact — kind, path, reasons")} wrapMode="none" />
-        <text content={line("enter", "apply — always asks to confirm")} wrapMode="none" />
-        <text
-          content={line("scopes (tab)", "enter scopes · space queues the whole scope")}
-          wrapMode="none"
-        />
-        <text content={line("t", "cycle theme (dark · light · auto)")} wrapMode="none" />
-        <text
-          content={line("mouse", "wheel scrolls · click focuses · click again queues")}
-          wrapMode="none"
-        />
-        <text content={line("? · q · ctrl-c", "help · quit · quit")} wrapMode="none" />
+        {HELP_ROWS.map(([keys, description]) => (
+          <text
+            key={keys}
+            content={t`${fg(tokens.text)(keys.padEnd(HELP_KEY_WIDTH))}${fg(tokens.textMuted)(description)}`}
+            wrapMode="word"
+          />
+        ))}
       </box>
       <text content="" />
       <text
-        content={t`${fg(tokens.textDim)("esc walks back a view — it never quits.")}`}
-        wrapMode="none"
+        content={t`${fg(tokens.textDim)("esc walks back a view. It never quits.")}`}
+        wrapMode="word"
       />
       <text
         content={t`${fg(tokens.textDim)("ctrl-c always quits, from any pane or dialog.")}`}
-        wrapMode="none"
+        wrapMode="word"
       />
     </Modal>
   );
@@ -190,12 +203,12 @@ function ConfirmOverlay({
   selectedCount: number;
   selectedBytes: number;
   dangerousCount: number;
-  /** Largest queued candidates by bytes — the last gate should name names. */
+  /** Largest queued candidates by bytes - the last gate should name names. */
   previewPaths: string[];
   dryRun?: boolean;
   trash?: boolean;
 }) {
-  // The verb has to match what executePlanDeletion will actually do —
+  // The verb has to match what executePlanDeletion will actually do -
   // "permanently delete" while moving to trash understates nothing, and
   // "move" while deleting would be a lie the other way.
   const action = dryRun ? "Preview removal of" : trash ? "Move to trash" : "Permanently delete";
@@ -234,17 +247,22 @@ function ConfirmOverlay({
           content={t`${fg(trash ? tokens.warning : tokens.danger)(
             trash
               ? `⚠ ${dangerousCount} dangerous item${dangerousCount === 1 ? "" : "s"} leave the working tree.`
-              : `⚠ ${dangerousCount} dangerous item${dangerousCount === 1 ? "" : "s"} selected — this cannot be undone.`,
+              : `⚠ ${dangerousCount} dangerous item${dangerousCount === 1 ? "" : "s"} selected. This cannot be undone.`,
           )}`}
         />
       ) : trash ? (
         <text
-          content={t`${fg(tokens.textDim)("Moves into .sweep-trash-* under the target — reversible.")}`}
+          content={t`${fg(tokens.textDim)("Moves into .sweep-trash-* under the target. Reversible.")}`}
         />
       ) : (
         <text content={t`${fg(tokens.textDim)("No dangerous items in this selection.")}`} />
       )}
       <text content="" />
+      {dryRun ? null : (
+        <text
+          content={t`${bold(fg(tokens.text)("t"))} ${fg(tokens.textMuted)(trash ? "delete permanently instead" : "move to trash instead (reversible)")}`}
+        />
+      )}
       <text
         content={t`${bold(fg(tokens.text)("y"))} ${fg(tokens.textMuted)("confirm")}    ${bold(fg(tokens.text)("n"))}${fg(tokens.textMuted)(" / esc cancel")}`}
       />
@@ -253,7 +271,7 @@ function ConfirmOverlay({
 }
 
 /**
- * Per-candidate detail — the "why" behind a row. Reasons, entry type and the
+ * Per-candidate detail - the "why" behind a row. Reasons, entry type and the
  * full (sanitized) path never fit the list row; the list is for triage, this
  * is for trust.
  */
@@ -304,7 +322,7 @@ function InspectOverlay({
         {field(
           "type",
           candidate.isSymlink
-            ? `${candidate.entryType} (link only — target never scanned)`
+            ? `${candidate.entryType} (link only, target never scanned)`
             : candidate.entryType,
         )}
         {candidate.reasons.length > 0 ? (
@@ -383,13 +401,13 @@ export function SweepApp({
             fn: (s) =>
               finalizeScan(setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs), finalPlan),
           });
-          // The scan chip quietly flipping to NORMAL is the only signal today —
+          // The scan chip quietly flipping to NORMAL is the only signal today -
           // say what landed so the end of a long scan is legible at a glance.
           const found = finalPlan?.candidates.length;
           setNotice(
             found !== undefined
-              ? `scan complete — ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
-              : `scan complete — ${scannedDirs.toLocaleString()} dirs`,
+              ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
+              : `scan complete: ${scannedDirs.toLocaleString()} dirs`,
           );
         },
         onError: (error) => {
@@ -408,7 +426,6 @@ export function SweepApp({
       abortRef.current?.abort();
     };
     // Boot-only effect; rescans are triggered explicitly via r.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const requestRescan = useCallback(() => {
@@ -456,10 +473,10 @@ export function SweepApp({
 
   const requestApply = useCallback(() => {
     if (summary.selectedCount === 0) {
-      setNotice("nothing queued — space on a row queues it");
+      setNotice("nothing queued: space on a row queues it");
       return;
     }
-    // Every apply deletes real files — the confirm gate is not reserved for
+    // Every apply deletes real files - the confirm gate is not reserved for
     // dangerous tiers. The dialog tones down (no red banner) when nothing
     // dangerous is queued, but it is always there.
     setPendingApply(true);
@@ -472,9 +489,57 @@ export function SweepApp({
     [mutate],
   );
 
+  // Starts from `--trash`, but the confirm dialog can flip it: the last
+  // moment before deleting is exactly when someone wants the reversible option.
+  const [trashMode, setTrashMode] = useState(Boolean(trash));
+  const toggleTrash = useCallback(() => setTrashMode((current) => !current), []);
+
   const applyPlan = useCallback(() => {
-    finalize({ type: "apply", plan: applyUiSelection(plan, state) });
-  }, [finalize, plan, state]);
+    finalize({
+      type: "apply",
+      plan: applyUiSelection(plan, state),
+      ...(trashMode ? { trash: true } : {}),
+    });
+  }, [finalize, plan, state, trashMode]);
+
+  const renderer = useRenderer();
+
+  const exportPlan = useCallback(() => {
+    if (summary.selectedCount === 0) {
+      setNotice("nothing queued: space on a row queues it");
+      return;
+    }
+    try {
+      const file = writePlanExport(applyUiSelection(plan, state), process.cwd());
+      setNotice(`plan saved: ${sanitizeTerminalText(basename(file))} (sweep apply --plan)`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      setNotice(`couldn't save plan: ${sanitizeTerminalText(reason)}`);
+    }
+  }, [plan, state, summary.selectedCount]);
+
+  const yankPath = useCallback(() => {
+    const candidate = getCurrentCandidate(state);
+    if (!candidate) {
+      setNotice("nothing under the cursor");
+      return;
+    }
+    const copied = renderer.copyToClipboardOSC52(candidate.path);
+    setNotice(
+      copied
+        ? `copied ${sanitizeTerminalText(relativePath(state.targetDir, candidate.path))}`
+        : "this terminal does not accept clipboard writes (OSC 52)",
+    );
+  }, [renderer, state]);
+
+  const applyVisual = useCallback(() => {
+    const result = applyVisualRange(stateRef.current);
+    dispatch({ type: "replace", state: result.state });
+    const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
+    if (result.queued > 0) setNotice(`queued ${result.queued}${skipped}`);
+    else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued}${skipped}`);
+    else setNotice(`nothing queueable in that range${skipped}`);
+  }, []);
 
   useKeyboard((key) => {
     handleKeymap(
@@ -502,6 +567,10 @@ export function SweepApp({
         toggleSort: () => dispatch({ type: "mutate", fn: toggleSortBy }),
         dismissScanError: () => setScanError(null),
         setInspect: setShowInspect,
+        toggleTrash,
+        exportPlan,
+        yankPath,
+        applyVisual,
         notify: setNotice,
       },
     );
@@ -526,11 +595,11 @@ export function SweepApp({
     [state.candidates, state.selectedIds, state.targetDir],
   );
 
-  const headerStats = buildHeaderStats(plan, summary, tokens, dryRun, dimensions.width, trash);
+  const headerStats = buildHeaderStats(plan, summary, tokens, dryRun, dimensions.width, trashMode);
 
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
   // The sidebar is the scope filter's control surface, and it hides under 72
-  // cols — without a chip the list is silently filtered with no way to see why
+  // cols - without a chip the list is silently filtered with no way to see why
   // (esc still clears it).
   const scopeFilterLabel =
     state.scopeFilter === null
@@ -542,6 +611,8 @@ export function SweepApp({
   // Overlays cover the panes but not the statusline, so the footer has to
   // describe whatever is actually on top or the user is left with no visible
   // way out of a modal.
+  const visualActive = state.focus === "list" && visualRange(state) !== null;
+
   const footerContext: FooterContext = scanError
     ? { kind: "scanError" }
     : pendingApply
@@ -550,7 +621,9 @@ export function SweepApp({
         ? { kind: "inspect" }
         : showHelp
           ? { kind: "help" }
-          : { kind: "pane", focus: state.focus };
+          : visualActive
+            ? { kind: "visual" }
+            : { kind: "pane", focus: state.focus };
 
   const footerContent = buildFooterHints(footerContext, tokens, {
     ...(dryRun ? { dryRun: true } : {}),
@@ -628,7 +701,7 @@ export function SweepApp({
         {state.scanning ? (
           <ScanModeChip tokens={tokens} />
         ) : (
-          <ModeChip label={` ${modeLabel(state.focus, false)} `} tokens={tokens} />
+          <ModeChip label={` ${modeLabel(state.focus, false, visualActive)} `} tokens={tokens} />
         )}
         <box flexGrow={1} flexShrink={0} paddingLeft={1} flexDirection="row">
           <text content={footerContent} wrapMode="none" />
@@ -644,12 +717,15 @@ export function SweepApp({
               wrapMode="none"
             />
           ) : null}
-          {roomForChips && state.sortBy === "name" ? (
-            <text content={t`  ${fg(tokens.info)("· sorted by name")}`} wrapMode="none" />
+          {roomForChips && state.sortBy !== "size" ? (
+            <text
+              content={t`  ${fg(tokens.info)(`· sorted by ${state.sortBy}`)}`}
+              wrapMode="none"
+            />
           ) : null}
         </box>
         {roomForTally ? (
-          <box paddingRight={1} flexShrink={1}>
+          <box paddingLeft={2} paddingRight={1} flexShrink={1}>
             <text content={tallyContent} wrapMode="none" />
           </box>
         ) : null}
@@ -664,7 +740,7 @@ export function SweepApp({
           dangerousCount={dangerousSelected}
           previewPaths={confirmPreview}
           {...(dryRun ? { dryRun: true } : {})}
-          {...(trash ? { trash: true } : {})}
+          {...(trashMode ? { trash: true } : {})}
         />
       ) : null}
       {showInspect && inspectCandidate ? (

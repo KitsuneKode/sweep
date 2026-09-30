@@ -2,7 +2,7 @@ import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { relativePath } from "./presentation.js";
 
 export interface ArtifactScopeGroup {
-  /** Stable sort key — empty string means scan root. */
+  /** Stable sort key - empty string means scan root. */
   key: string;
   /** Human label for the scope, e.g. `project root` or `apps/cli/`. */
   label: string;

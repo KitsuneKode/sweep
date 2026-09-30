@@ -220,6 +220,58 @@ describe("handleKeymap", () => {
     expect(actions.requestApply).toHaveBeenCalled();
   });
 
+  test("shift+s exports the plan and never falls through to safe-only queueing", () => {
+    for (const key of [{ name: "S" }, { name: "s", shift: true }]) {
+      const actions = makeActions();
+      actions.exportPlan = mock(() => {});
+      handleKeymap(makeContext({ key }), actions);
+      expect(actions.exportPlan).toHaveBeenCalledTimes(1);
+      expect(actions.mutate).not.toHaveBeenCalled();
+    }
+  });
+
+  test("t in the confirm dialog toggles trash and does not cycle the theme", () => {
+    const actions = makeActions();
+    actions.toggleTrash = mock(() => {});
+    handleKeymap(makeContext({ key: { name: "t" }, pendingApply: true }), actions);
+    expect(actions.toggleTrash).toHaveBeenCalledTimes(1);
+    expect(actions.mutate).not.toHaveBeenCalled();
+    expect(actions.applyPlan).not.toHaveBeenCalled();
+  });
+
+  test("y yanks the cursor path from the list", () => {
+    const actions = makeActions();
+    actions.yankPath = mock(() => {});
+    handleKeymap(makeContext({ key: { name: "y" } }), actions);
+    expect(actions.yankPath).toHaveBeenCalledTimes(1);
+  });
+
+  test("v starts a visual range and v again cancels it", () => {
+    const start = makeActions();
+    handleKeymap(makeContext({ key: { name: "v" } }), start);
+    const started = (start.mutate as ReturnType<typeof mock>).mock.calls[0]?.[0] as (
+      s: SweepUiState,
+    ) => SweepUiState;
+    const anchored = started(createUiState(mockPlan()));
+    expect(anchored.visualAnchorId).toBe("cand_1");
+
+    const stop = makeActions();
+    handleKeymap(makeContext({ key: { name: "v" }, state: anchored }), stop);
+    const stopped = (stop.mutate as ReturnType<typeof mock>).mock.calls[0]?.[0] as (
+      s: SweepUiState,
+    ) => SweepUiState;
+    expect(stopped(anchored).visualAnchorId).toBeNull();
+  });
+
+  test("space queues the range instead of the single row while in visual mode", () => {
+    const actions = makeActions();
+    actions.applyVisual = mock(() => {});
+    const state = { ...createUiState(mockPlan()), visualAnchorId: "cand_1" };
+    handleKeymap(makeContext({ key: { name: "space" }, state }), actions);
+    expect(actions.applyVisual).toHaveBeenCalledTimes(1);
+    expect(actions.mutate).not.toHaveBeenCalled();
+  });
+
   test("i opens the inspect overlay and the overlay traps keys", () => {
     const open = makeActions();
     open.setInspect = mock(() => {});
@@ -232,7 +284,7 @@ describe("handleKeymap", () => {
     );
     expect(open.setInspect).toHaveBeenCalledWith(true);
 
-    // While open, navigation keys are trapped — the modal is the surface.
+    // While open, navigation keys are trapped - the modal is the surface.
     const trapped = makeActions();
     trapped.setInspect = mock(() => {});
     handleKeymap(makeContext({ key: { name: "j" }, inspectOpen: true }), trapped);

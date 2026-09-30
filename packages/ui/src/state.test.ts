@@ -4,6 +4,7 @@ import { buildRescanConfig, DEFAULT_CONFIG } from "@kitsunekode/sweep-core/confi
 import {
   allPatterns,
   applyUiSelection,
+  applyVisualRange,
   clearSelection,
   createUiState,
   escapeStep,
@@ -18,7 +19,11 @@ import {
   selectSafeOnly,
   selectVisible,
   setFilter,
+  setFocus,
+  setRiskFilter,
+  setRowIndex,
   setScopeFilter,
+  startVisual,
   toggleCurrentSelection,
   toggleGroup,
   togglePattern,
@@ -27,6 +32,7 @@ import {
   toggleSelectionById,
   toggleSortBy,
   upsertCandidates,
+  visualRange,
   setPatternIndex,
   setScanning,
   type SweepUiState,
@@ -156,7 +162,7 @@ describe("sweep ui state", () => {
     state = toggleCurrentSelection(state);
     expect(state.selectedIds.has("cand_blocked")).toBe(false);
 
-    // Dangerous items CAN be toggled deliberately — the red confirm dialog is
+    // Dangerous items CAN be toggled deliberately - the red confirm dialog is
     // the safety gate, not an unselectable row.
     state = setFilter(createUiState(createPlan()), "custom-cache");
     expect(getCurrentCandidate(state)?.riskTier).toBe("dangerous");
@@ -205,7 +211,7 @@ describe("sweep ui state", () => {
 
   test("summary totals always match what apply would delete", () => {
     // Regression: the confirm dialog read visible-only counts, so queuing
-    // artifacts and then narrowing the view made it understate the damage —
+    // artifacts and then narrowing the view made it understate the damage -
     // it offered to delete 1 item while apply removed 3.
     const plan = createPlan();
     const narrowing: Array<[string, (s: SweepUiState) => SweepUiState]> = [
@@ -329,26 +335,37 @@ describe("sweep ui state", () => {
     expect(getCurrentCandidate(state)?.id).toBe("cand_safe");
   });
 
-  test("toggleSortBy cycles size and name ordering", () => {
-    let state = createUiState(createPlan());
+  test("toggleSortBy cycles size, name, then age ordering", () => {
+    const plan = createPlan();
+    const modified: Record<string, number> = { cand_safe: 1_000, cand_dangerous: 3_000 };
+    let state = createUiState({
+      ...plan,
+      candidates: plan.candidates.map((candidate) =>
+        modified[candidate.id] === undefined
+          ? candidate
+          : { ...candidate, modifiedMs: modified[candidate.id] as number },
+      ),
+    });
+    const order = () =>
+      buildDisplayRows(state)
+        .filter((row) => row.kind === "item")
+        .map((row) => (row.kind === "item" ? row.candidateId : ""));
     expect(state.sortBy).toBe("size");
+    // Largest first.
+    expect(order()).toEqual(["cand_dangerous", "cand_safe", "cand_blocked"]);
 
     state = toggleSortBy(state);
     expect(state.sortBy).toBe("name");
-
     // Name ordering is visible in display rows (getVisibleCandidates only filters).
-    const itemIds = buildDisplayRows(state)
-      .filter((row) => row.kind === "item")
-      .map((row) => (row.kind === "item" ? row.candidateId : ""));
-    expect(itemIds).toEqual(["cand_dangerous", "cand_safe", "cand_blocked"]);
+    expect(order()).toEqual(["cand_dangerous", "cand_safe", "cand_blocked"]);
+
+    state = toggleSortBy(state);
+    expect(state.sortBy).toBe("age");
+    // Stalest first; the candidate with no mtime sinks to the bottom.
+    expect(order()).toEqual(["cand_safe", "cand_dangerous", "cand_blocked"]);
 
     state = toggleSortBy(state);
     expect(state.sortBy).toBe("size");
-    const sizedIds = buildDisplayRows(state)
-      .filter((row) => row.kind === "item")
-      .map((row) => (row.kind === "item" ? row.candidateId : ""));
-    // Largest first.
-    expect(sizedIds).toEqual(["cand_dangerous", "cand_safe", "cand_blocked"]);
   });
 
   test("resetForRescan clears artifacts and selections but keeps view config", () => {
@@ -598,8 +615,8 @@ describe("sweep ui state", () => {
     });
 
     test("an untouched cursor lands on the biggest win, not its old artifact", () => {
-      // Nobody chose this row — it was auto-placed at the top when the first
-      // batch arrived — so the sort should win over preserving it.
+      // Nobody chose this row - it was auto-placed at the top when the first
+      // batch arrived - so the sort should win over preserving it.
       const state = streamed();
       expect(state.rowIndex).toBe(firstItemRowIndex(buildDisplayRows(state)));
 
@@ -611,7 +628,7 @@ describe("sweep ui state", () => {
 
     test("the cursor keeps its artifact through the closing re-sort", () => {
       let state = streamed();
-      // Park on the last row in discovery order — a different row number once
+      // Park on the last row in discovery order - a different row number once
       // the list re-sorts by size.
       state = { ...state, rowIndex: buildDisplayRows(state).length - 1 };
       const before = getCurrentCandidate(state);
@@ -645,13 +662,13 @@ describe("sweep ui state", () => {
       const state = clearSelection(createUiState(createPlan()));
       const toggled = toggleScopeSelection(state, null);
 
-      // cand_blocked is hard-locked — the all-scopes row must not reach it.
+      // cand_blocked is hard-locked - the all-scopes row must not reach it.
       expect([...toggled.selectedIds].sort()).toEqual(["cand_dangerous", "cand_safe"]);
     });
 
     test("a scope key queues the subtree, including nested parents", () => {
       const base = clearSelection(createUiState(createPlan()));
-      // ".git" holds only the blocked candidate — the toggle is a no-op there.
+      // ".git" holds only the blocked candidate - the toggle is a no-op there.
       expect(toggleScopeSelection(base, ".git")).toBe(base);
 
       const rootScoped = toggleScopeSelection(base, "");
@@ -671,9 +688,100 @@ describe("sweep ui state", () => {
 
     test("toggleSidebarScopeSelection drives the same toggle from the cursor row", () => {
       const state = clearSelection(createUiState(createPlan()));
-      // sidebarIndex 0 is the "all scopes" row — a scope-level toggle of everything.
+      // sidebarIndex 0 is the "all scopes" row - a scope-level toggle of everything.
       const toggled = toggleSidebarScopeSelection({ ...state, sidebarIndex: 0 });
       expect([...toggled.selectedIds].sort()).toEqual(["cand_dangerous", "cand_safe"]);
     });
+  });
+});
+
+describe("visual range", () => {
+  function tierPlan(): ScanPlan {
+    const base = createPlan();
+    const make = (
+      id: string,
+      name: string,
+      riskTier: "safe" | "caution" | "dangerous" | "blocked",
+      bytes: number,
+    ) => ({
+      id,
+      path: `/tmp/sweep-ui/${name}`,
+      name,
+      kind: "custom" as const,
+      estimatedBytes: bytes,
+      isSymlink: false,
+      entryType: "directory" as const,
+      riskTier,
+      reasons: [],
+      selectedByDefault: false,
+    });
+    return {
+      ...base,
+      candidates: [
+        make("a", "a", "safe", 500),
+        make("b", "b", "caution", 400),
+        make("c", "c", "dangerous", 300),
+        make("d", "d", "blocked", 200),
+        make("e", "e", "safe", 100),
+      ],
+      selectedCandidateIds: [],
+    };
+  }
+
+  const itemIndex = (state: SweepUiState, id: string) =>
+    buildDisplayRows(state).findIndex((row) => row.kind === "item" && row.candidateId === id);
+
+  test("the range spans the anchor and the cursor in list order", () => {
+    let state = startVisual(createUiState(tierPlan()));
+    expect(state.visualAnchorId).toBe("a");
+    state = setRowIndex(state, itemIndex(state, "c"));
+    expect(visualRange(state)?.ids).toEqual(["a", "b", "c"]);
+    // Extending upward past the anchor works too.
+    state = { ...state, visualAnchorId: "e" };
+    expect(visualRange(state)?.ids).toEqual(["c", "d", "e"]);
+  });
+
+  test("queues safe and caution rows but never dangerous or blocked ones", () => {
+    let state = startVisual(createUiState(tierPlan()));
+    state = setRowIndex(state, itemIndex(state, "e"));
+    const result = applyVisualRange(state);
+    expect([...result.state.selectedIds].sort()).toEqual(["a", "b", "e"]);
+    expect(result.queued).toBe(3);
+    expect(result.skipped).toBe(2);
+    expect(result.state.visualAnchorId).toBeNull();
+  });
+
+  test("applying a fully queued range unqueues it", () => {
+    let state = startVisual(createUiState(tierPlan()));
+    state = setRowIndex(state, itemIndex(state, "b"));
+    const queued = applyVisualRange(state).state;
+    let again = startVisual(setRowIndex(queued, itemIndex(queued, "a")));
+    again = setRowIndex(again, itemIndex(again, "b"));
+    const result = applyVisualRange(again);
+    expect(result.unqueued).toBe(2);
+    expect(result.state.selectedIds.size).toBe(0);
+  });
+
+  test("esc drops the range before anything else unwinds", () => {
+    const anchored = { ...startVisual(createUiState(tierPlan())), filter: "a" };
+    const step = escapeStep(anchored);
+    expect(step?.visualAnchorId).toBeNull();
+    expect(step?.filter).toBe("a");
+  });
+
+  test("changing the filter or leaving the list abandons the range", () => {
+    const anchored = startVisual(createUiState(tierPlan()));
+    expect(setFilter(anchored, "a").visualAnchorId).toBeNull();
+    expect(setRiskFilter(anchored, "safe").visualAnchorId).toBeNull();
+    expect(setScopeFilter(anchored, "")?.visualAnchorId).toBeNull();
+    expect(setFocus(anchored, "sidebar").visualAnchorId).toBeNull();
+    expect(setFocus(anchored, "list").visualAnchorId).toBe("a");
+  });
+
+  test("a range whose anchor left the list is inert", () => {
+    const anchored = startVisual(createUiState(tierPlan()));
+    const filtered = { ...anchored, filter: "zzz" };
+    expect(visualRange(filtered)).toBeNull();
+    expect(applyVisualRange(filtered).state.selectedIds.size).toBe(0);
   });
 });

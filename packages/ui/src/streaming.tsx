@@ -20,7 +20,7 @@ export interface UiScanHooks {
   onBatch: (candidates: ScanCandidate[]) => void;
   onProgress?: (meta: { scannedDirs: number; skippedDirs: number }) => void;
   /**
-   * Scan finished. `plan` is the authoritative enriched result — the same
+   * Scan finished. `plan` is the authoritative enriched result - the same
    * `buildPlan` output a non-streaming run produces, so workspace stubs and
    * symlink aliases are marked and `selectedCandidateIds` reflects policy.
    */
@@ -32,7 +32,7 @@ export interface UiScanHooks {
 export interface UiScanControl {
   /**
    * Runs one scan generation to completion (or abort). Errors funnel to
-   * `hooks.onError` rather than rejecting, but it is async all the same —
+   * `hooks.onError` rather than rejecting, but it is async all the same -
    * callers must not treat the return as "the scan is done".
    */
   start(hooks: UiScanHooks, signal: AbortSignal): Promise<void>;
@@ -47,7 +47,7 @@ export interface SweepUiStreamingOptions {
   selectionPolicy: SelectionPolicy;
   engine: "js" | "rust";
   dryRun?: boolean;
-  /** Trash mode — the apply dialog says "move" and a TRASH chip shows. */
+  /** Trash mode - the apply dialog says "move" and a TRASH chip shows. */
   trash?: boolean;
   init?: SweepUiInitOptions;
 }
@@ -116,7 +116,7 @@ export async function runSweepUiStreaming(
           skippedDirs = skipped;
           if (!signal.aborted) hooks.onProgress?.({ scannedDirs: dirs, skippedDirs: skipped });
         };
-        // The authoritative enriched plan — cross-candidate insights need the
+        // The authoritative enriched plan - cross-candidate insights need the
         // whole set, so per-entry `candidateFromEntry` stubs are reconciled
         // against this when the scan ends.
         let finalPlan: ScanPlan | undefined;

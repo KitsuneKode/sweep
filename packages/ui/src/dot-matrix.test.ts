@@ -43,7 +43,7 @@ describe("dotFrame", () => {
     }
   });
 
-  test("actually animates — the grid is not the same on every frame", () => {
+  test("actually animates: the grid is not the same on every frame", () => {
     const frames = new Set<string>();
     for (let f = 0; f < DOT_CYCLE; f++) frames.add(JSON.stringify(dotFrame("pulseRings", f)));
     expect(frames.size).toBeGreaterThan(1);

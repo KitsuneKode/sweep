@@ -120,7 +120,7 @@ describe("sweep TUI render", () => {
       setup.mockInput.pressEnter();
       await setup.flush();
     });
-    // Safe/caution-only queues are deletions too — enter opens the dialog,
+    // Safe/caution-only queues are deletions too - enter opens the dialog,
     // nothing is applied until y.
     expect(outcomes).toEqual([]);
 
@@ -163,7 +163,7 @@ describe("sweep TUI render", () => {
       await setup.renderOnce();
     });
 
-    // Bulk select (safe + caution only), then enter — the confirm dialog
+    // Bulk select (safe + caution only), then enter - the confirm dialog
     // still opens (every apply is destructive), and dangerous items that are
     // only visible are never queued by `a`.
     await act(async () => {
@@ -257,7 +257,7 @@ describe("sweep TUI render", () => {
       syncPatterns() {},
     };
 
-    // Empty seed plan — exactly what runSweepUiStreaming boots with.
+    // Empty seed plan - exactly what runSweepUiStreaming boots with.
     const emptyPlan: ScanPlan = {
       ...createPlan(),
       candidates: [],
@@ -411,8 +411,8 @@ describe("streaming reorder", () => {
       }
 
       // The warnings are the regression signal. Painted-frame assertions after
-      // mount are not reliable here — the harness does not drive the renderer's
-      // own draw loop — so this asserts on the reconciler contract directly.
+      // mount are not reliable here - the harness does not drive the renderer's
+      // own draw loop - so this asserts on the reconciler contract directly.
       expect(warnings.filter((line) => line.includes("insertBefore"))).toEqual([]);
       expect(warnings.filter((line) => line.includes("does not exist within"))).toEqual([]);
     } finally {

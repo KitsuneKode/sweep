@@ -17,7 +17,7 @@ export type UiDisplayRow =
       kind: "item";
       candidateId: string;
       /**
-       * Label of the owning group header — item rows suppress the per-item
+       * Label of the owning group header - item rows suppress the per-item
        * parent path when it would just repeat this.
        */
       groupLabel: string;
@@ -27,7 +27,15 @@ function itemComparator(sortBy: UiSortBy): (a: ScanCandidate, b: ScanCandidate) 
   if (sortBy === "name") {
     return (a, b) => a.name.localeCompare(b.name);
   }
-  // Largest first — ncdu-style triage order; ties break alphabetically.
+  if (sortBy === "age") {
+    // Stalest first: the oldest artifacts are the safest wins. Unknown mtimes
+    // sink to the bottom rather than posing as ancient.
+    return (a, b) =>
+      (a.modifiedMs ?? Number.POSITIVE_INFINITY) - (b.modifiedMs ?? Number.POSITIVE_INFINITY) ||
+      b.estimatedBytes - a.estimatedBytes ||
+      a.name.localeCompare(b.name);
+  }
+  // Largest first - ncdu-style triage order; ties break alphabetically.
   return (a, b) => b.estimatedBytes - a.estimatedBytes || a.name.localeCompare(b.name);
 }
 
@@ -57,7 +65,7 @@ function discoveryIndex(state: SweepUiState): Map<string, number> {
   return index;
 }
 
-/** Earliest discovery position in a group — where the group sorts while pinned. */
+/** Earliest discovery position in a group - where the group sorts while pinned. */
 function firstDiscovery(group: { candidateIds: string[] }, order: Map<string, number>): number {
   let earliest = Number.POSITIVE_INFINITY;
   for (const id of group.candidateIds) {
@@ -90,6 +98,9 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
   } else if (state.sortBy === "size") {
     // Heaviest scope first so the top of the list is the biggest win.
     groups.sort((left, right) => groupBytes(right, byId) - groupBytes(left, byId));
+  } else if (state.sortBy === "age") {
+    // The scope holding the stalest artifact leads.
+    groups.sort((left, right) => oldestModified(left, byId) - oldestModified(right, byId));
   }
 
   for (const group of groups) {
@@ -103,7 +114,7 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
 
     const collapsed = state.collapsedGroups.has(group.key);
     const bytes = groupCandidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
-    // Every group gets a header — even single-item ones. An orphan row under
+    // Every group gets a header - even single-item ones. An orphan row under
     // the previous group's heading reads as belonging to that group, which is
     // how a root-level artifact could end up looking like it lived inside the
     // group above it. While pinned this is doubly required: without it a
@@ -126,6 +137,17 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
   }
 
   return rows;
+}
+
+function oldestModified(
+  group: { candidateIds: string[] },
+  byId: Map<string, ScanCandidate>,
+): number {
+  let oldest = Number.POSITIVE_INFINITY;
+  for (const id of group.candidateIds) {
+    oldest = Math.min(oldest, byId.get(id)?.modifiedMs ?? Number.POSITIVE_INFINITY);
+  }
+  return oldest;
 }
 
 function groupBytes(group: { candidateIds: string[] }, byId: Map<string, ScanCandidate>): number {

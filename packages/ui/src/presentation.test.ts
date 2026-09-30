@@ -8,6 +8,7 @@ import {
   buildGroupHeaderContent,
   buildHeaderStats,
   relativePath,
+  rowTotalWidth,
   splitNameCell,
   truncateScopeLabel,
 } from "./presentation.js";
@@ -90,6 +91,69 @@ describe("presentation formatters", () => {
     );
   });
 
+  test("age and size bar columns appear with room and shed with width", () => {
+    const wide = artifactRowWidths(80);
+    const medium = artifactRowWidths(60);
+    const narrow = artifactRowWidths(40);
+    expect([wide.ageWidth > 0, wide.barWidth > 0]).toEqual([true, true]);
+    expect([medium.ageWidth > 0, medium.barWidth > 0]).toEqual([true, false]);
+    expect([narrow.ageWidth > 0, narrow.barWidth > 0]).toEqual([false, false]);
+  });
+
+  test("every row is exactly as wide as the header rule at any pane width", () => {
+    const now = Date.UTC(2026, 8, 30);
+    for (const listWidth of [40, 60, 80, 120]) {
+      const widths = artifactRowWidths(listWidth);
+      const line = plain(
+        buildArtifactRowContent(
+          candidate({ modifiedMs: now - 200 * 86_400_000 }),
+          true,
+          false,
+          widths,
+          darkTheme,
+          undefined,
+          undefined,
+          { now, maxBytes: 1024 },
+        ),
+      );
+      expect(line.length).toBe(rowTotalWidth(widths));
+    }
+  });
+
+  test("a row shows its age and a bar scaled to the largest listed artifact", () => {
+    const now = Date.UTC(2026, 8, 30);
+    const line = plain(
+      buildArtifactRowContent(
+        candidate({ modifiedMs: now - 240 * 86_400_000, estimatedBytes: 512 }),
+        false,
+        false,
+        artifactRowWidths(80),
+        darkTheme,
+        undefined,
+        undefined,
+        { now, maxBytes: 1024 },
+      ),
+    );
+    expect(line).toContain("8mo");
+    expect(line).toContain("██");
+  });
+
+  test("a missing mtime leaves the age cell blank rather than inventing one", () => {
+    const line = plain(
+      buildArtifactRowContent(
+        candidate(),
+        false,
+        false,
+        artifactRowWidths(80),
+        darkTheme,
+        undefined,
+        undefined,
+        { now: Date.UTC(2026, 8, 30), maxBytes: 1024 },
+      ),
+    );
+    expect(line).not.toMatch(/\d+(m|h|d|mo|y)\s/);
+  });
+
   test("splitNameCell keeps the artifact name and a muted parent path", () => {
     const { nameText, parentText } = splitNameCell("dist", "apps/cli", 24);
     expect(nameText.trim()).toBe("dist");
@@ -125,6 +189,29 @@ describe("presentation formatters", () => {
     expect(clipped.startsWith("…")).toBe(false);
     expect(clipped).toContain("…");
     expect(clipped).toContain("root");
+  });
+
+  test("a partly queued group says how many of its items are queued", () => {
+    const header = (selectedCount: number) =>
+      plain(
+        buildGroupHeaderContent(
+          {
+            kind: "header",
+            groupKey: "apps/cli",
+            label: "apps/cli/",
+            itemCount: 3,
+            selectedCount,
+            collapsed: false,
+            bytes: 2048,
+          },
+          darkTheme,
+          artifactRowWidths(80),
+        ),
+      );
+    expect(header(3)).toContain("3 queued");
+    expect(header(3)).not.toContain(" of ");
+    expect(header(1)).toContain("1 of 3 queued");
+    expect(header(0)).not.toContain("queued");
   });
 
   test("a group heading puts bytes next to the count, not in place of the name", () => {

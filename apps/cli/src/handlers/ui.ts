@@ -64,10 +64,10 @@ function ensureBunRuntimeForUi(): boolean {
 
 /**
  * Runtime contract for the OpenTUI app. Declared locally so the Node CLI does
- * not type-depend on the React/JSX UI package — it is loaded dynamically.
+ * not type-depend on the React/JSX UI package - it is loaded dynamically.
  */
 type SweepUiOutcome =
-  | { type: "apply"; plan: ScanPlan }
+  | { type: "apply"; plan: ScanPlan; trash?: boolean }
   | { type: "rescan"; disabledPatterns: string[]; extraPatterns: string[] }
   | { type: "abort" };
 
@@ -175,6 +175,8 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     }
 
     const selectedPlan = outcome.plan;
+    // `--trash` or the confirm dialog's `t` toggle: either asks for reversible.
+    const useTrash = Boolean(opts.trash) || outcome.trash === true;
 
     if (selectedPlan.selectedCandidateIds.length === 0) {
       console.log("Nothing selected.");
@@ -191,7 +193,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(
       selectedPlan,
       engine,
-      opts.trash ? { trash: true } : {},
+      useTrash ? { trash: true } : {},
     );
 
     printCleanResult(

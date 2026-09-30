@@ -2,7 +2,7 @@
  * Dot-matrix loaders, after dot-matrix-animations.vercel.app.
  *
  * Same construction as the reference: a fixed grid of dots, one shared pulse
- * curve, and a per-dot delay map. Nothing moves — every dot sits still and only
+ * curve, and a per-dot delay map. Nothing moves - every dot sits still and only
  * its brightness animates, which is what keeps the figure readable at 5x5 and
  * costs nothing to redraw in a terminal.
  */
@@ -26,7 +26,7 @@ export function dotDelay(pattern: DotPattern, x: number, y: number): number {
 
   switch (pattern) {
     case "pulseRings": {
-      // Chebyshev distance from centre — concentric squares breathing outward.
+      // Chebyshev distance from centre - concentric squares breathing outward.
       const ring = Math.max(Math.abs(x - mid), Math.abs(y - mid));
       return (ring / (mid + 1)) % 1;
     }
@@ -52,7 +52,7 @@ export function dotDelay(pattern: DotPattern, x: number, y: number): number {
  */
 export function dotPulse(phase: number): number {
   const p = ((phase % 1) + 1) % 1;
-  // Fast attack, slow release — reads as a blink rather than a sine throb.
+  // Fast attack, slow release - reads as a blink rather than a sine throb.
   if (p < 0.18) return p / 0.18;
   if (p < 0.62) return 1 - (p - 0.18) / 0.44;
   return 0;

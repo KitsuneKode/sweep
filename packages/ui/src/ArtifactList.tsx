@@ -10,6 +10,7 @@ import {
   buildGroupHeaderContent,
   buildListColumnHeader,
   buildListRule,
+  type RowMetrics,
   type RowWidths,
 } from "./presentation.js";
 import type { UiDisplayRow } from "./rows.js";
@@ -22,6 +23,8 @@ export interface ArtifactListProps {
   candidatesById: Map<string, ScanCandidate>;
   selectedIds: Set<string>;
   currentRowIndex: number;
+  /** Rows (inclusive) covered by the visual-mode range, or null. */
+  visualRange?: { from: number; to: number } | null;
   focused: boolean;
   tokens: ThemeTokens;
   paneWidth?: number;
@@ -36,20 +39,17 @@ export interface ArtifactListProps {
 /**
  * Windowed artifact list.
  *
- * The old version mounted every row into a ScrollBox and let OpenTUI cull the
- * paint — so a 600-artifact plan still paid React mount + layout cost for 600
- * renderables per keystroke, and the mouse wheel scrolled the viewport while
- * the cursor (and `space`) stayed pointed at a row that was no longer on
- * screen. This version owns the window: React only ever sees the rows that fit
- * in the pane, the wheel moves the *cursor* (so the view and the selection can
- * never diverge), and the scrollbar is a 1-column indicator, not an
- * interactive track.
+ * React only ever sees the rows that fit in the pane, so render cost is
+ * O(viewport) rather than O(artifacts). The wheel moves the cursor, not a
+ * detached viewport, so `space` always acts on a row that is on screen. The
+ * scrollbar is a 1-column position indicator, not an interactive track.
  */
 export function ArtifactList({
   rows,
   candidatesById,
   selectedIds,
   currentRowIndex,
+  visualRange,
   focused,
   tokens,
   paneWidth,
@@ -69,6 +69,16 @@ export function ArtifactList({
     (paneWidth ?? Math.max(36, dimensions.width - (dimensions.width >= 72 ? 36 : 6))) - 2,
   );
   const widths = useMemo(() => artifactRowWidths(listWidth), [listWidth]);
+  // Age and size bars are relative to what is listed, and only change when the
+  // rows do, so the memoised rows below are not invalidated by a keystroke.
+  const metrics = useMemo<RowMetrics>(() => {
+    let maxBytes = 0;
+    for (const row of rows) {
+      if (row.kind !== "item") continue;
+      maxBytes = Math.max(maxBytes, candidatesById.get(row.candidateId)?.estimatedBytes ?? 0);
+    }
+    return { now: Date.now(), maxBytes };
+  }, [rows, candidatesById]);
 
   /**
    * Rows the pane can show at once. Seeded from the terminal size so the first
@@ -78,7 +88,7 @@ export function ArtifactList({
   const [viewportHeight, setViewportHeight] = useState(() => Math.max(1, dimensions.height - 9));
 
   // cmdk "nearest": scroll only when the cursor would leave the viewport.
-  // The window position is derived state — a ref records where the last
+  // The window position is derived state - a ref records where the last
   // committed window started, and each render recomputes from it. No render-
   // phase setState: the cursor row is always inside the painted window, and
   // React never has a scheduled update pending (which also keeps the test
@@ -102,7 +112,7 @@ export function ArtifactList({
   // a group whose own header has scrolled off the top, pin that header's line
   // under the column header so the scope of every visible row stays named.
   // When the real header is inside the window it renders in place and this
-  // line disappears — the handoff is at most a one-line pop.
+  // line disappears - the handoff is at most a one-line pop.
   const stickyHeader = useMemo(() => {
     const first = rows[appliedTop];
     if (!first || first.kind === "header") return null;
@@ -128,7 +138,7 @@ export function ArtifactList({
       const direction = event.scroll?.direction;
       if (direction !== "up" && direction !== "down") return;
       // ~3 rows per notch, matching browser/terminal scroll convention. The
-      // cursor moves — never the viewport alone — so space/enter always act on
+      // cursor moves - never the viewport alone - so space/enter always act on
       // a row the user can see.
       const delta = Math.max(1, Math.abs(event.scroll?.delta ?? 1)) * 3;
       onCursorDelta?.(direction === "up" ? -delta : delta);
@@ -204,9 +214,13 @@ export function ArtifactList({
                 index={index}
                 isSelected={selectedIds.has(candidate.id)}
                 isCurrent={isCurrent}
+                inVisualRange={
+                  visualRange ? index >= visualRange.from && index <= visualRange.to : false
+                }
                 focused={focused}
                 isHovered={isHovered}
                 widths={widths}
+                metrics={metrics}
                 tokens={tokens}
                 targetDir={targetDir}
                 groupLabel={row.groupLabel}
@@ -236,7 +250,7 @@ function scrollbarModel(
   scrollTop: number,
 ): ScrollbarModel | null {
   if (viewportHeight <= 0 || rowCount <= viewportHeight) return null;
-  // Minimum 2 cells — a 1-cell thumb reads as a stray accent, not a position.
+  // Minimum 2 cells - a 1-cell thumb reads as a stray accent, not a position.
   const thumbHeight = Math.max(2, Math.round((viewportHeight * viewportHeight) / rowCount));
   const maxTop = Math.max(1, rowCount - viewportHeight);
   const thumbTop = Math.round((scrollTop / maxTop) * (viewportHeight - thumbHeight));
@@ -329,12 +343,14 @@ interface ItemRowProps {
   index: number;
   isSelected: boolean;
   isCurrent: boolean;
+  inVisualRange: boolean;
   focused: boolean;
   isHovered: boolean;
   widths: RowWidths;
+  metrics: RowMetrics;
   tokens: ThemeTokens;
   targetDir?: string | undefined;
-  /** Owning group's label — the parent path is hidden when it repeats it. */
+  /** Owning group's label - the parent path is hidden when it repeats it. */
   groupLabel?: string | undefined;
   onSetCursor?: ((rowIndex: number) => void) | undefined;
   onToggleSelection?: ((candidateId: string) => void) | undefined;
@@ -351,9 +367,11 @@ const ItemRow = memo(function ItemRow({
   index,
   isSelected,
   isCurrent,
+  inVisualRange,
   focused,
   isHovered,
   widths,
+  metrics,
   tokens,
   targetDir,
   groupLabel,
@@ -365,9 +383,11 @@ const ItemRow = memo(function ItemRow({
     ? focused
       ? tokens.selectionBg
       : tokens.selectionSoftBg
-    : isHovered
-      ? tokens.hoverBg
-      : undefined;
+    : inVisualRange
+      ? tokens.selectionSoftBg
+      : isHovered
+        ? tokens.hoverBg
+        : undefined;
 
   const mouseProps = {
     selectable: true,
@@ -403,6 +423,7 @@ const ItemRow = memo(function ItemRow({
           tokens,
           targetDir,
           groupLabel,
+          metrics,
         )}
         wrapMode="none"
       />

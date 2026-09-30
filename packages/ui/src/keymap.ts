@@ -2,6 +2,7 @@ import type { SweepUiState } from "./state.js";
 import {
   allPatterns,
   applySidebarScope,
+  cancelVisual,
   clearSelection,
   escapeStep,
   expandAllGroups,
@@ -19,15 +20,11 @@ import {
   collapseScopeFolder,
   setPatternIndex,
   setFilter,
+  startVisual,
   toggleSidebarScopeSelection,
   type UiFocus,
 } from "./state.js";
-import {
-  buildDisplayRows,
-  firstSelectableRow,
-  lastSelectableRow,
-  snapRowIndexToItem,
-} from "./rows.js";
+import { buildDisplayRows, firstSelectableRow, lastSelectableRow } from "./rows.js";
 import { cycleThemeMode } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
 
@@ -41,7 +38,7 @@ export interface KeyInput {
 const DEFAULT_PAGE_ROWS = 12;
 
 /**
- * Ctrl+C — the terminal-wide "get me out" chord, honoured in every mode.
+ * Ctrl+C - the terminal-wide "get me out" chord, honoured in every mode.
  * Ctrl+D is deliberately excluded: it is bound to half-page-down here.
  */
 export function isQuitChord(key: KeyInput): boolean {
@@ -131,12 +128,20 @@ export interface KeymapActions {
   applyPlan: () => void;
   /** Restart the scan in place (streaming mode). Falls back to legacy rescan outcome. */
   requestRescan?: () => void;
-  /** Cycle artifact ordering between size and name. */
+  /** Cycle artifact ordering: size, name, age. */
   toggleSort?: () => void;
   /** Dismiss a scan-error modal without retrying. */
   dismissScanError?: () => void;
   /** Open/close the per-candidate inspect overlay. */
   setInspect?: (open: boolean) => void;
+  /** Flip "move to trash instead of deleting" inside the confirm dialog. */
+  toggleTrash?: () => void;
+  /** Write the reviewed plan (current queue) to a JSON file. */
+  exportPlan?: () => void;
+  /** Copy the cursor row's path to the clipboard. */
+  yankPath?: () => void;
+  /** Queue or unqueue the visual range, then leave visual mode. */
+  applyVisual?: () => void;
   /** Flash a one-line notice for a keypress that deliberately does nothing. */
   notify?: (message: string) => void;
 }
@@ -203,6 +208,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (pendingApply) {
+    if (key.name === "t") {
+      actions.toggleTrash?.();
+      return;
+    }
     if (key.name === "y") {
       actions.setPendingApply(false);
       actions.applyPlan();
@@ -251,7 +260,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     // Walk back through narrowed views; esc NEVER quits the app.
     const step = escapeStep(state);
     if (step) actions.mutate(() => step);
-    else actions.notify?.("nothing to unwind — ctrl-c quits");
+    else actions.notify?.("nothing to unwind: ctrl-c quits");
     return;
   }
 
@@ -277,6 +286,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
 
   if (key.name === "p") {
     actions.focusPanel(state.focus === "patterns" ? "list" : "patterns");
+    return;
+  }
+
+  // Shift+S must be claimed before plain `s` (safe-only queue) sees it.
+  if (key.name === "S" || (key.name === "s" && key.shift)) {
+    actions.exportPlan?.();
     return;
   }
 
@@ -322,7 +337,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (key.name === "space") {
-      // Queue/dequeue the whole scope — the tree row is a checkbox group, not
+      // Queue/dequeue the whole scope - the tree row is a checkbox group, not
       // just a filter. Blocked entries stay locked inside it.
       actions.mutate((s) => toggleSidebarScopeSelection(s));
       return;
@@ -392,7 +407,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     }
 
     if (key.name === "return") {
-      // Mouse clicks can park the cursor on a group header — enter there means
+      // Mouse clicks can park the cursor on a group header - enter there means
       // "fold this group" (same as space/l), never the destructive dialog.
       const row = buildDisplayRows(state)[state.rowIndex];
       if (row?.kind === "header") {
@@ -407,16 +422,31 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.setInspect?.(true);
       return;
     }
+
+    if (key.name === "y") {
+      actions.yankPath?.();
+      return;
+    }
+
+    if (key.name === "v") {
+      actions.mutate((s) => (s.visualAnchorId === null ? startVisual(s) : cancelVisual(s)));
+      return;
+    }
+  }
+
+  if (key.name === "space" && state.visualAnchorId !== null) {
+    actions.applyVisual?.();
+    return;
   }
 
   if (key.name === "space") {
-    // Blocked rows can't be queued — say so instead of silently swallowing
+    // Blocked rows can't be queued - say so instead of silently swallowing
     // the keypress (the ⊘ mark alone doesn't explain why nothing happened).
     const row = buildDisplayRows(state)[state.rowIndex];
     if (row?.kind === "item") {
       const candidate = state.candidates.find((c) => c.id === row.candidateId);
       if (candidate?.riskTier === "blocked") {
-        actions.notify?.("⊘ protected path — blocked items can't be queued");
+        actions.notify?.("⊘ protected path: blocked items can't be queued");
         return;
       }
     }

@@ -59,7 +59,7 @@ describe("buildDisplayRows", () => {
       ]),
     );
 
-    // A lone item with no heading reads as a member of the group above it —
+    // A lone item with no heading reads as a member of the group above it -
     // the heading is what keeps "which scope does this row belong to" stable.
     const rows = buildDisplayRows(state);
     expect(rows.map((row) => row.kind)).toEqual(["header", "item", "header", "item"]);
@@ -194,7 +194,7 @@ describe("pinned ordering during a live scan", () => {
     };
   }
 
-  /** Discovery order: c, a, b — deliberately not size or alpha order. */
+  /** Discovery order: c, a, b - deliberately not size or alpha order. */
   const discovered = [
     candidate("c", "apps/web", "node_modules", 0),
     candidate("a", "apps/cli", "node_modules", 0),
@@ -220,7 +220,7 @@ describe("pinned ordering during a live scan", () => {
     let state = scanningState();
     const before = itemIds(state);
 
-    // Sizing makes `b` by far the largest — unpinned this would jump to the top.
+    // Sizing makes `b` by far the largest - unpinned this would jump to the top.
     state = upsertCandidates(state, [
       { ...discovered[1]!, estimatedBytes: 5_000 },
       { ...discovered[2]!, estimatedBytes: 900_000 },

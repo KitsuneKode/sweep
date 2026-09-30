@@ -11,7 +11,7 @@ import type { ThemeTokens } from "./theme.js";
  *
  * The card is clamped to the viewport on both axes. A fixed-size box centered
  * in a terminal smaller than the box gets negative layout offsets on both
- * axes, and that combination crashes the native renderer outright — so the
+ * axes, and that combination crashes the native renderer outright - so the
  * clamp is a hard correctness requirement, not cosmetic. Content that does not
  * fit scrolls inside the card rather than overflowing it.
  */
@@ -61,7 +61,10 @@ export function Modal({
           width="100%"
           scrollX={false}
           stickyScroll={false}
-          contentOptions={{ flexDirection: "column" }}
+          // Reserve the scrollbar's column: content is laid out at the full
+          // scrollbox width, so without this the last cells of every line sit
+          // under the scrollbar and long rows clip instead of wrapping.
+          contentOptions={{ flexDirection: "column", paddingRight: 2 }}
         >
           {children}
         </scrollbox>
@@ -70,7 +73,7 @@ export function Modal({
   );
 }
 
-/** Vim-style statusline mode segment — inverse accent block. */
+/** Vim-style statusline mode segment - inverse accent block. */
 export function ModeChip({ label, tokens }: { label: string; tokens: ThemeTokens }) {
   return (
     <box backgroundColor={tokens.accent} paddingLeft={2} paddingRight={2} flexShrink={0}>
@@ -97,7 +100,7 @@ export function useDotFrame(active = true, intervalMs = 60): number {
   return active ? frame : 0;
 }
 
-/** The dot itself. Fixed glyph, animated brightness — the dots never move. */
+/** The dot itself. Fixed glyph, animated brightness - the dots never move. */
 const DOT = "•";
 
 /**

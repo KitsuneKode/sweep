@@ -1,8 +1,16 @@
 import type { MouseEvent, ScrollBoxRenderable } from "@opentui/core";
 import { bold, fg, t } from "@opentui/core";
+import { useTerminalDimensions } from "@opentui/react";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import { SelectableRow, useHoverState } from "./SelectableRow.js";
-import { buildMeter, buildSidebarLine, concatStyled, type ScopeRowState } from "./presentation.js";
+import { allocateBarCells, buildInsights, STALE_AFTER_DAYS, type Insights } from "./insights.js";
+import {
+  buildMeter,
+  buildSidebarLine,
+  concatStyled,
+  riskGlyph,
+  type ScopeRowState,
+} from "./presentation.js";
 import { isScopeAncestor } from "./scope-tree.js";
 import {
   buildScopeSidebarRows,
@@ -15,7 +23,7 @@ import {
 } from "./sidebar.js";
 import { nextScrollTop } from "./scroll.js";
 import type { SweepUiState } from "./state.js";
-import type { ThemeTokens } from "./theme.js";
+import { riskColor, type ThemeTokens } from "./theme.js";
 import { buildTreeGuides } from "./tree-line.js";
 
 export interface ScopeSidebarProps {
@@ -56,7 +64,6 @@ export function ScopeSidebar({
   const bytesWidth = useMemo(() => sidebarBytesWidth(rows), [rows]);
   const totalBytes = rows[0]?.bytes ?? 0;
   const selectedBytes = rows[0]?.selectedBytes ?? 0;
-  const totalCount = rows[0]?.count ?? 0;
   const cursorIndex = focused
     ? state.sidebarIndex
     : scopeFilterToSidebarIndex(state.scopeFilter, rows);
@@ -69,8 +76,15 @@ export function ScopeSidebar({
   }, [cursorIndex, focused]);
 
   const meterWidth = Math.max(10, paneWidth - 4);
+  const { height: screenHeight } = useTerminalDimensions();
+  // The insights panel is garnish: it yields to the scope list on short terminals.
+  const showInsights = screenHeight >= INSIGHTS_MIN_SCREEN_HEIGHT;
+  const insights = useMemo(
+    () => (showInsights ? buildInsights(state.candidates, Date.now()) : null),
+    [showInsights, state.candidates],
+  );
 
-  // Wheel must move the cursor, not the viewport — the scrollbox scrolling on
+  // Wheel must move the cursor, not the viewport - the scrollbox scrolling on
   // its own left the cursor pointed at a row that was no longer visible, so
   // `enter` applied a scope the user was not looking at. stopPropagation keeps
   // the event from ever reaching the scrollbox's own scroll handler.
@@ -91,7 +105,6 @@ export function ScopeSidebar({
         tokens={tokens}
         selectedBytes={selectedBytes}
         totalBytes={totalBytes}
-        totalCount={totalCount}
         width={meterWidth}
       />
       <scrollbox
@@ -125,9 +138,15 @@ export function ScopeSidebar({
           ))}
         </box>
       </scrollbox>
+      {insights && insights.tiers.length > 0 ? (
+        <InsightsPanel tokens={tokens} insights={insights} width={meterWidth} />
+      ) : null}
     </box>
   );
 }
+
+/** Below this terminal height the scope list keeps the whole sidebar. */
+const INSIGHTS_MIN_SCREEN_HEIGHT = 26;
 
 function scopeRowState(
   row: ScopeSidebarRow,
@@ -207,18 +226,16 @@ function ReclaimPanel({
   tokens,
   selectedBytes,
   totalBytes,
-  totalCount,
   width,
 }: {
   tokens: ThemeTokens;
   selectedBytes: number;
   totalBytes: number;
-  totalCount: number;
   width: number;
 }) {
   const hasSelection = selectedBytes > 0 && totalBytes > 0;
   const percent = totalBytes > 0 ? Math.round((selectedBytes / totalBytes) * 100) : 0;
-  const scanned = t`${fg(tokens.textDim)(compactBytesLabel(totalBytes))} ${fg(tokens.textDim)("·")} ${fg(tokens.textDim)(String(totalCount))}`;
+  const scanned = t`${fg(tokens.textDim)(`${compactBytesLabel(totalBytes)} found`)}`;
 
   if (!hasSelection) {
     return (
@@ -230,7 +247,7 @@ function ReclaimPanel({
         backgroundColor={tokens.bg}
         flexShrink={0}
       >
-        <text content={t`${bold(fg(tokens.textMuted)("queue"))}`} wrapMode="none" />
+        <text content={t`${bold(fg(tokens.textMuted)("nothing queued"))}`} wrapMode="none" />
         <text content={scanned} wrapMode="none" />
       </box>
     );
@@ -256,9 +273,71 @@ function ReclaimPanel({
         wrapMode="none"
       />
       <text
-        content={t`${fg(tokens.positive)(compactBytesLabel(selectedBytes))} ${fg(tokens.textDim)("of")} ${fg(tokens.textMuted)(compactBytesLabel(totalBytes))}`}
+        content={t`${fg(tokens.positive)(compactBytesLabel(selectedBytes))} ${fg(tokens.textMuted)("queued of")} ${fg(tokens.textMuted)(compactBytesLabel(totalBytes))}`}
         wrapMode="none"
       />
+    </box>
+  );
+}
+
+const TIER_LABEL = {
+  safe: "safe",
+  caution: "caution",
+  dangerous: "dangerous",
+  blocked: "blocked",
+} as const;
+
+/**
+ * What the scan found, by risk tier, and how much of it nobody has touched.
+ * Read-only context for the queue meter above it: the meter says what will
+ * go, this says what is out there.
+ */
+function InsightsPanel({
+  tokens,
+  insights,
+  width,
+}: {
+  tokens: ThemeTokens;
+  insights: Insights;
+  width: number;
+}) {
+  const colors = riskColor(tokens);
+  const cells = allocateBarCells(insights.tiers, width);
+  const bar = concatStyled(
+    ...insights.tiers.map(
+      (entry, index) => t`${fg(colors[entry.tier])("█".repeat(cells[index] ?? 0))}`,
+    ),
+  );
+  const labelWidth = Math.max(...insights.tiers.map((entry) => TIER_LABEL[entry.tier].length));
+  const bytesWidth = Math.max(
+    ...insights.tiers.map((entry) => compactBytesLabel(entry.bytes).length),
+    compactBytesLabel(insights.stale.bytes).length,
+  );
+  const showStale = insights.ageKnown && insights.stale.count > 0;
+
+  return (
+    <box
+      width="100%"
+      flexDirection="column"
+      paddingLeft={1}
+      paddingTop={1}
+      flexShrink={0}
+      height={insights.tiers.length + 2 + (showStale ? 1 : 0) + 1}
+    >
+      <text content={bar} wrapMode="none" />
+      {insights.tiers.map((entry) => (
+        <text
+          key={entry.tier}
+          wrapMode="none"
+          content={t`${fg(colors[entry.tier])(riskGlyph[entry.tier])} ${fg(tokens.textMuted)(TIER_LABEL[entry.tier].padEnd(labelWidth))} ${fg(tokens.textSecondary)(compactBytesLabel(entry.bytes).padStart(bytesWidth))}`}
+        />
+      ))}
+      {showStale ? (
+        <text
+          wrapMode="none"
+          content={t`${fg(tokens.textDim)(`untouched ${STALE_AFTER_DAYS}d+`)} ${fg(tokens.positive)(compactBytesLabel(insights.stale.bytes))}`}
+        />
+      ) : null}
     </box>
   );
 }

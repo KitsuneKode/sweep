@@ -3,6 +3,7 @@ import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-proto
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { bold, dim, fg, StyledText, t } from "@opentui/core";
+import { AGE_LABEL_WIDTH, describeAge, formatAge, isRecent, sizeBar } from "./age.js";
 import type { TextChunk } from "@opentui/core";
 import type { UiDisplayRow } from "./rows.js";
 import { buildDisplayRows } from "./rows.js";
@@ -15,7 +16,7 @@ function padCount(value: number, width = 2): string {
   return String(value).padStart(width, " ");
 }
 
-/** One-character risk glyphs — shape encodes meaning, color reinforces it. */
+/** One-character risk glyphs - shape encodes meaning, color reinforces it. */
 export const riskGlyph: Record<RiskTier, string> = {
   safe: "✓",
   caution: "!",
@@ -23,10 +24,10 @@ export const riskGlyph: Record<RiskTier, string> = {
   blocked: "⊘",
 };
 
-/** Selection markers — filled means queued for deletion. */
+/** Selection markers - filled means queued for deletion. */
 export const SELECTED_MARK = "●";
 export const UNSELECTED_MARK = "○";
-/** Hard-locked rows — neither queued nor queueable. */
+/** Hard-locked rows - neither queued nor queueable. */
 const BLOCKED_MARK = "⊘";
 
 /** Columns consumed before the artifact name: rail + gap + marker + gap. */
@@ -36,19 +37,53 @@ const SIZE_GAP = 2;
 /** Extra cells reserved so a scrollbar or wide glyph cannot wrap the row. */
 const WRAP_SAFETY = 2;
 
+const COLUMN_GAP = 1;
+const BAR_COLUMN_WIDTH = 4;
+/** Narrowest list pane that still has room for the age column. */
+const AGE_MIN_LIST_WIDTH = 56;
+/** Narrowest list pane that also has room for the size bar. */
+const BAR_MIN_LIST_WIDTH = 72;
+
 export interface RowWidths {
   nameWidth: number;
   sizeWidth: number;
+  /** 0 when the pane is too narrow to show the age column. */
+  ageWidth: number;
+  /** 0 when the pane is too narrow to show the size bar. */
+  barWidth: number;
 }
 
-/** Column math shared by rows and the column header so they always align. */
+/** Live values the row needs to draw age and size bars. */
+export interface RowMetrics {
+  now: number;
+  /** Largest artifact currently listed; the size bar scales against it. */
+  maxBytes: number;
+}
+
+function tailWidth(widths: RowWidths): number {
+  const age = widths.ageWidth > 0 ? COLUMN_GAP + widths.ageWidth : 0;
+  const bar = widths.barWidth > 0 ? COLUMN_GAP + widths.barWidth : 0;
+  return age + bar + SIZE_GAP + widths.sizeWidth;
+}
+
+/** Full character width of a row: rail, marker, name and every trailing column. */
+export function rowTotalWidth(widths: RowWidths): number {
+  return ROW_NAME_OFFSET + widths.nameWidth + tailWidth(widths);
+}
+
+/**
+ * Column math shared by rows and the column header so they always align.
+ * Detail is shed with width: the size bar goes first, then the age column.
+ */
 export function artifactRowWidths(listWidth: number): RowWidths {
   const usable = Math.max(24, listWidth - WRAP_SAFETY);
-  const tail = SIZE_COLUMN_WIDTH + SIZE_GAP;
-  return {
-    nameWidth: Math.max(12, usable - ROW_NAME_OFFSET - tail),
+  const shell: RowWidths = {
+    nameWidth: 0,
     sizeWidth: SIZE_COLUMN_WIDTH,
+    ageWidth: listWidth >= AGE_MIN_LIST_WIDTH ? AGE_LABEL_WIDTH : 0,
+    barWidth: listWidth >= BAR_MIN_LIST_WIDTH ? BAR_COLUMN_WIDTH : 0,
   };
+  return { ...shell, nameWidth: Math.max(12, usable - ROW_NAME_OFFSET - tailWidth(shell)) };
 }
 
 export function relativePath(root: string, path: string): string {
@@ -58,13 +93,15 @@ export function relativePath(root: string, path: string): string {
 export function buildListColumnHeader(widths: RowWidths, tokens: ThemeTokens): StyledText {
   const nameLabel = "Name";
   const namePad = " ".repeat(Math.max(0, widths.nameWidth - nameLabel.length));
+  const ageLabel =
+    widths.ageWidth > 0 ? `${" ".repeat(COLUMN_GAP)}${"Age".padStart(widths.ageWidth)}` : "";
+  const barGap = widths.barWidth > 0 ? " ".repeat(COLUMN_GAP + widths.barWidth) : "";
   const sizeLabel = "Size".padStart(widths.sizeWidth);
-  return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textDim)(nameLabel)}${namePad}${" ".repeat(SIZE_GAP)}${fg(tokens.textDim)(sizeLabel)}`;
+  return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textDim)(nameLabel)}${namePad}${fg(tokens.textDim)(ageLabel)}${barGap}${" ".repeat(SIZE_GAP)}${fg(tokens.textDim)(sizeLabel)}`;
 }
 
 export function buildListRule(widths: RowWidths, tokens: ThemeTokens): StyledText {
-  const width = ROW_NAME_OFFSET + widths.nameWidth + SIZE_GAP + widths.sizeWidth;
-  return t`${fg(tokens.border)("─".repeat(Math.max(8, width)))}`;
+  return t`${fg(tokens.border)("─".repeat(Math.max(8, rowTotalWidth(widths))))}`;
 }
 
 export function buildGroupHeaderContent(
@@ -74,12 +111,21 @@ export function buildGroupHeaderContent(
 ): StyledText {
   const glyph = row.collapsed ? fg(tokens.textDim)("▸") : fg(tokens.accent)("▾");
   const stats = `${row.itemCount} · ${compactBytesLabel(row.bytes)}`;
-  const queued = row.selectedCount > 0 ? ` · ${row.selectedCount} queued` : "";
-  const total = ROW_NAME_OFFSET + widths.nameWidth + SIZE_GAP + widths.sizeWidth;
+  // A partly queued group must not read like a fully queued one.
+  const fullyQueued = row.selectedCount === row.itemCount;
+  const queued =
+    row.selectedCount === 0
+      ? ""
+      : fullyQueued
+        ? ` · ${row.selectedCount} queued`
+        : ` · ${row.selectedCount} of ${row.itemCount} queued`;
+  const total = rowTotalWidth(widths);
   const labelWidth = Math.max(4, total - 2 - stats.length - queued.length - 1);
   const label = truncateScopeLabel(row.label, labelWidth);
   const statsStyled =
-    row.selectedCount > 0 ? fg(tokens.positive)(`${stats}${queued}`) : fg(tokens.textDim)(stats);
+    row.selectedCount === 0
+      ? fg(tokens.textDim)(stats)
+      : fg(fullyQueued ? tokens.positive : tokens.textSecondary)(`${stats}${queued}`);
   return t`${glyph} ${bold(fg(tokens.textMuted)(label))} ${statsStyled}`;
 }
 
@@ -91,6 +137,7 @@ export function buildArtifactRowContent(
   tokens: ThemeTokens,
   root?: string,
   groupLabel?: string,
+  metrics?: RowMetrics,
 ): StyledText {
   const colors = riskColor(tokens);
   const rail = isCurrent ? fg(tokens.accent)("▌") : fg(tokens.textDim)(" ");
@@ -98,7 +145,7 @@ export function buildArtifactRowContent(
   // One status cell carries both facts: shape = queued state, color = risk.
   // ● accent   queued, safe        ● warning  queued, caution
   // ● danger   queued, dangerous   ○ dim/tint unselected (tint = its risk)
-  // ⊘          blocked — locked out of queueing entirely
+  // ⊘          blocked - locked out of queueing entirely
   const markShape = blocked ? BLOCKED_MARK : selected ? SELECTED_MARK : UNSELECTED_MARK;
   const markColor = isCurrent
     ? tokens.selectionText
@@ -123,7 +170,7 @@ export function buildArtifactRowContent(
     widths.nameWidth,
   );
   // Name color is reserved for the tiers that need to shout: dangerous and
-  // blocked. Caution is the common case — the trailing glyph carries it, and
+  // blocked. Caution is the common case - the trailing glyph carries it, and
   // painting every caution name warning-colored would just make a 600-row
   // list into a wall of orange.
   const nameColor = isCurrent
@@ -145,11 +192,22 @@ export function buildArtifactRowContent(
       ? t`${fg(nameColor)(nameText)}${fg(parentColor)(parentText)}`
       : t`${fg(nameColor)(nameText)}`;
 
-  return joinStyled([
-    t`${rail} ${mark} `,
-    nameStyled,
-    t`${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}`,
-  ]);
+  const parts = [t`${rail} ${mark} `, nameStyled];
+  if (widths.ageWidth > 0) {
+    // Touched within the week reads as "probably in use": the one age the
+    // eye should catch before deleting.
+    const recent = metrics !== undefined && isRecent(candidate.modifiedMs, metrics.now);
+    const ageColor = isCurrent ? tokens.selectionText : recent ? tokens.warning : tokens.textDim;
+    const age = metrics ? formatAge(candidate.modifiedMs, metrics.now) : "";
+    parts.push(t`${" ".repeat(COLUMN_GAP)}${fg(ageColor)(age.padStart(widths.ageWidth))}`);
+  }
+  if (widths.barWidth > 0) {
+    const barColor = isCurrent ? tokens.selectionText : selected ? tokens.accent : tokens.textDim;
+    const bar = sizeBar(candidate.estimatedBytes, metrics?.maxBytes ?? 0, widths.barWidth);
+    parts.push(t`${" ".repeat(COLUMN_GAP)}${fg(barColor)(bar)}`);
+  }
+  parts.push(t`${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}`);
+  return joinStyled(parts);
 }
 
 /** Directory that contains the artifact, relative to the scan root. */
@@ -166,7 +224,7 @@ export function splitNameCell(
   parent: string,
   width: number,
 ): { nameText: string; parentText: string } {
-  // Filenames are attacker-controlled bytes — escape terminal controls before
+  // Filenames are attacker-controlled bytes - escape terminal controls before
   // they reach the cell buffer, or a hostile dirname injects ANSI into the TUI.
   name = sanitizeTerminalText(name);
   parent = sanitizeTerminalText(parent);
@@ -190,7 +248,7 @@ export function splitNameCell(
 }
 
 function formatSizeCell(bytes: number, width: number): string {
-  const label = bytes > 0 ? formatBytes(bytes) : "—";
+  const label = bytes > 0 ? formatBytes(bytes) : "-";
   return label.padStart(width);
 }
 
@@ -265,7 +323,7 @@ export function buildMeter(
 
 /** Brand header: diamond mark + wordmark on the left, stats composed separately. */
 export function buildBrandLine(tokens: ThemeTokens, width?: number): StyledText {
-  // Under ~44 cols the wordmark collides with the right-side stats — keep the
+  // Under ~44 cols the wordmark collides with the right-side stats - keep the
   // diamond as the mark and let the numbers have the space.
   if (width !== undefined && width < 44) {
     return t`${bold(fg(tokens.accent)("◆"))}`;
@@ -285,14 +343,14 @@ export function buildHeaderStats(
   const w = width ?? Number.POSITIVE_INFINITY;
   const parts: StyledText[] = [];
 
-  // Under ~100 cols the found count is the first thing to go — the queue is
+  // Under ~100 cols the found count is the first thing to go - the queue is
   // what a destructive keystroke acts on, so it always survives.
   if (w >= 100) {
     parts.push(t`${fg(tokens.textMuted)(`${padCount(summary.visibleCount)} found`)}`);
   }
 
   if (summary.selectedCount > 0) {
-    // The queue outliving the current view is the point — you narrow, queue,
+    // The queue outliving the current view is the point - you narrow, queue,
     // narrow again, then apply. Say when part of it is off screen, so a header
     // reading higher than the visible rows is explained rather than alarming.
     const hidden = summary.selectedCount - summary.visibleSelectedCount;
@@ -300,7 +358,7 @@ export function buildHeaderStats(
       hidden > 0 && w >= 100
         ? `${padCount(summary.selectedCount)} queued (${summary.visibleSelectedCount} shown)`
         : `${padCount(summary.selectedCount)} queued`;
-    // Under 84 cols the sidebar and statusline tally are both gone — fold the
+    // Under 84 cols the sidebar and statusline tally are both gone - fold the
     // reclaimable bytes into the queue chip so the number a destructive
     // keystroke acts on is never invisible.
     const queuedLabel = w >= 84 ? queued : `${queued} · ${formatBytes(summary.selectedBytes)}`;
@@ -311,7 +369,7 @@ export function buildHeaderStats(
   }
 
   if (trash) {
-    // Reversible mode changes what apply does — it must be visible before the
+    // Reversible mode changes what apply does - it must be visible before the
     // confirm dialog, not discovered after it.
     parts.push(t`${bold(fg(tokens.info)("TRASH"))}`);
   }
@@ -356,7 +414,7 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
 
   const candidate = getCurrentCandidate(state);
   if (!candidate) {
-    // Cursor can sit on a group header (mouse click / collapsed view) — the
+    // Cursor can sit on a group header (mouse click / collapsed view) - the
     // footer then describes the group, not a missing list.
     const row = buildDisplayRows(state)[state.rowIndex];
     if (row?.kind === "header") {
@@ -373,6 +431,11 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
   const glyph = fg(colors[candidate.riskTier])(riskGlyph[candidate.riskTier]);
   const kind = fg(tokens.textMuted)(candidate.kind);
   const size = fg(tokens.textSecondary)(formatBytes(candidate.estimatedBytes));
+  const now = Date.now();
+  const ageText = describeAge(candidate.modifiedMs, now);
+  const age = ageText
+    ? fg(isRecent(candidate.modifiedMs, now) ? tokens.warning : tokens.textMuted)(`  ${ageText}`)
+    : "";
   const path = fg(tokens.textSecondary)(truncateMiddle(sanitizeTerminalText(candidate.path), 64));
   const flag = candidate.isSymlink
     ? fg(tokens.warning)(" symlink")
@@ -380,7 +443,7 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
       ? fg(tokens.textMuted)(" stub")
       : "";
 
-  return t`${glyph}  ${kind}  ${size}  ${path}${flag}`;
+  return t`${glyph}  ${kind}  ${size}${age}  ${path}${flag}`;
 }
 
 /** Which key hints the statusline should show. Modals own the footer too. */
@@ -388,13 +451,14 @@ export type FooterContext =
   | { kind: "confirm" }
   | { kind: "help" }
   | { kind: "inspect" }
+  | { kind: "visual" }
   | { kind: "scanError" }
   | { kind: "pane"; focus: UiFocus };
 
 /**
  * Statusline key hints.
  *
- * Every reachable state names its own keys — including the overlays, which
+ * Every reachable state names its own keys - including the overlays, which
  * previously covered the footer and left the user with no visible way out.
  */
 export function buildFooterHints(
@@ -406,7 +470,7 @@ export function buildFooterHints(
   const hint = (label: string) => fg(tokens.textMuted)(label);
   const sep = dim(" · ");
 
-  // Narrow terminals: never clip a hint mid-word — swap to a minimal set.
+  // Narrow terminals: never clip a hint mid-word - swap to a minimal set.
   // Modal hints are already short enough to survive, so this only rewrites
   // the long pane hint rows.
   if (options.compact && context.kind === "pane") {
@@ -414,7 +478,7 @@ export function buildFooterHints(
   }
 
   if (context.kind === "confirm") {
-    return t`${key("y")} ${hint("confirm")}${sep}${key("n")} ${hint("cancel")}${sep}${key("esc")} ${hint("back")}${sep}${key("ctrl-c")} ${hint("quit")}`;
+    return t`${key("y")} ${hint("confirm")}${sep}${key("n")} ${hint("cancel")}${sep}${key("t")} ${hint("trash")}${sep}${key("esc")} ${hint("back")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
   if (context.kind === "help") {
@@ -423,6 +487,10 @@ export function buildFooterHints(
 
   if (context.kind === "inspect") {
     return t`${key("i")} ${hint("close")}${sep}${key("esc")} ${hint("close")}${sep}${key("q")} ${hint("close")}`;
+  }
+
+  if (context.kind === "visual") {
+    return t`${key("↑↓")} ${hint("extend")}${sep}${key("space")} ${hint("queue range")}${sep}${key("v")} ${hint("cancel")}${sep}${key("esc")} ${hint("cancel")}`;
   }
 
   if (context.kind === "scanError") {
@@ -446,8 +514,9 @@ export function buildFooterHints(
 }
 
 /** Statusline mode segment label for the focused panel. */
-export function modeLabel(focus: UiFocus, scanning = false): string {
+export function modeLabel(focus: UiFocus, scanning = false, visual = false): string {
   if (scanning) return "SCANNING";
+  if (visual) return "VISUAL";
   switch (focus) {
     case "search":
       return "SEARCH";
