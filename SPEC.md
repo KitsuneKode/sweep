@@ -1,330 +1,136 @@
-# sweep - Technical Specification
+# sweep — Technical Specification
 
-**Version**: 0.1.0  
-**Status**: In Development
-
----
+Implementation contract: behavioral guarantees, guardrails, and output shapes.
+User-facing install, flags, and TUI keys live in `README.md` — that table is the
+contract; this file is the reasoning behind it.
 
 ## Problem
 
-Every JS/TS/Rust/Java project accumulates gigabytes of regeneratable build artifacts -
-`node_modules`, `dist`, `.next`, `target`, etc. Cleaning these is manual, project-specific,
-and easy to get wrong (deleting the wrong thing, missing nested monorepo packages,
-or accidentally running in the wrong directory).
-
-Existing solutions:
-
-- `rm -rf node_modules dist` - manual, no safety net, no monorepo awareness
-- `npx rimraf` - single pattern, no config, no guardrails
-- `cargo clean` - language-specific
-
-**sweep** is the universal version: recursive, safe, configurable, globally installable.
-
----
+`rm -rf node_modules` does not scale. Developers keep dozens of projects and
+monorepos; build artifacts accumulate silently. `find -name node_modules | xargs rm`
+is unsafe (no depth guard, follows into the wrong tree) and `npx rimraf` /
+`cargo clean` clean one directory, not a project tree.
 
 ## Goals
 
-1. **Safe by default** - hard guardrails that prevent destroying system or home directories
-2. **Monorepo-first** - recursive scan finds `packages/*/node_modules` automatically
-3. **Universal** - works in any project, any language (JS, Rust, Java, Python, etc.)
-4. **Zero-config** - sensible defaults work for 90% of projects out of the box
-5. **Composable** - `sweep -y` in CI, `sweep --dry-run` for inspection, config file for project-specific rules
-6. **Fast** - single bundle, no startup overhead, parallel FS ops where safe
-
----
+1. **Safe by default** — hard guardrails, confirmation before deletion, and a
+   reversible `--trash` mode.
+2. **Recursive** — cleans every matching artifact below the target, not just the
+   root.
+3. **Monorepo-aware** — one pass handles nested packages.
+4. **Zero-config** — sensible defaults cover most projects out of the box.
+5. **Composable** — `-y` for CI, `--dry-run`/`--json`/`scan --json-stream` for
+   scripting, `.sweeprc` for project rules, `plan`/`apply` for deferred runs.
+6. **Fast** — single bundle, ~100ms startup, parallel filesystem work where safe,
+   optional Rust scan engine via `--engine rust|auto`.
 
 ## Non-Goals
 
-- Not a general-purpose `rm` replacement
-- Not a full disk analyzer (no treemap explorer) - use `sweep ui` for interactive review
-- Not a file watcher / auto-cleaner
-- Not responsible for cleaning git history or Docker images
+- Not a general-purpose `rm` replacement.
+- Not a full disk analyzer (no treemap explorer); `sweep ui` is the interactive
+  review surface.
+- Not a file watcher or auto-cleaner.
+- Not responsible for git history or Docker images.
 
----
-
-## User Stories
-
-### US1: Developer cleaning before git commit
-
-```bash
-cd ~/projects/myapp
-sweep
-# → Shows: 3 items, ~847 MB. Delete? [y/N]
-# → y
-# → ✓ Cleaned 3 items, 847.2 MB freed (1.2s)
-```
-
-### US2: Monorepo cleanup
-
-```bash
-sweep ~/projects/monorepo
-# Finds: packages/web/node_modules, packages/api/node_modules, packages/shared/dist
-# Shows summary, asks for confirmation
-```
-
-### US3: CI pipeline (no prompt)
-
-```bash
-sweep --yes --dry-run   # preview in CI logs
-sweep --yes             # actual cleanup in CI
-```
-
-### US4: Inspect before deleting
-
-```bash
-sweep --dry-run
-# Shows full list of what would be deleted, with paths and estimated sizes
-# Exits with code 0, no changes made
-```
-
-### US5: Project-specific ignores
-
-```json
-// .sweeprc in repo root
-{
-  "ignore": ["packages/vendor-patched"],
-  "patterns": [".custom-output"]
-}
-```
-
-```bash
-sweep  # respects .sweeprc automatically
-```
-
-### US6: Global install, used everywhere
-
-```bash
-npm install -g sweep-clean   # or: bun add -g sweep-clean
-sweep ~/Projects             # clean an entire projects folder
-```
-
----
-
-## CLI Specification
-
-### Synopsis
-
-```
-sweep [path] [options]
-```
-
-`path` defaults to `.` (current working directory).
-
-### Options
-
-| Flag                  | Short | Type     | Default | Description                          |
-| --------------------- | ----- | -------- | ------- | ------------------------------------ |
-| `--dry-run`           | `-n`  | bool     | false   | Preview only, no deletion            |
-| `--yes`               | `-y`  | bool     | false   | Skip confirmation prompt             |
-| `--force-large`       | -     | bool     | false   | Allow exceeding `maxSizeGB`          |
-| `--pattern`           | `-p`  | string[] | []      | Additional patterns (repeatable)     |
-| `--ignore`            | `-i`  | string[] | []      | Ignore patterns (repeatable)         |
-| `--select`            | -     | string   | default | Selection policy for plan generation |
-| `--include-dangerous` | -     | bool     | false   | Explicitly include dangerous matches |
-| `--depth`             | -     | number   | -1      | Max recursion depth (-1 = unlimited) |
-| `--config`            | -     | string   | -       | Explicit config file path            |
-| `--no-color`          | -     | bool     | false   | Disable color output                 |
-| `--version`           | `-V`  | -        | -       | Print version                        |
-| `--help`              | `-h`  | -        | -       | Print help                           |
-
-### Behavior Flow
+## Behavior flow (`clean`)
 
 ```
 1. Parse CLI args
 2. Resolve targetDir (absolute path)
-3. Assert guardrails on targetDir
-4. Load + merge config (global ← project ← CLI flags)
-5. Validate patterns (guardrail check)
+3. Assert guardrails on targetDir            → exit 2 on violation
+4. Load + merge config (defaults ← global ← project .sweeprc ← CLI flags)
+5. Validate patterns (assertSafePattern)      → exit 3 on bad pattern
 6. Scan targetDir recursively
-   - Collect matching entries
-   - Compute fast size estimate
-7. Print scan summary (colored, aligned)
-8. If entries.length === 0: exit 0 ("Nothing to clean")
-9. Assert size guardrail (< maxSizeGB or --force-large)
-10. Compile selection policy into explicit candidate ids
-11. If --dry-run: print notice, exit 0
-12. If selected set is empty: exit 0 with guidance for broader selection
-13. If !--yes: show confirmation prompt [y/N]
-    - 'n' or empty → "Aborted." → exit 1
-14. Revalidate selected candidates against the saved plan shape
-15. Delete each ready entry with progress output
-16. Print final summary (items deleted, bytes freed, duration)
-17. Exit 0 (or 4 if any deletions failed)
+   - lstat entries, never follow symlinks
+   - dedupe inode aliases (dev,ino), count unreadable dirs as skipped
+   - compute size estimates (du where available)
+7. Compile selection policy into explicit candidate ids
+8. If --dry-run / scan-only: print and exit 0
+9. If selected set empty: exit 0 with guidance
+10. Assert size guardrail (≤ maxSizeGB)       → exit 2 without --force-large
+11. If !--yes: confirmation prompt            → 'n'/empty aborts, exit 1
+12. Revalidate each selected path immediately before acting
+    - vanished paths, changed types, symlink escapes, containment breaks
+      skip that entry and are reported as failures
+13. Delete (rm -rf equivalent) or --trash (atomic rename into
+    .sweep-trash-<ts>/ with preserved relative path, realpath-containment
+    checked after mkdir)
+14. Append record to history.jsonl (0600 under 0700 config dir)
+15. Print summary; exit 0, or 4 if any deletions failed
 ```
 
-Plans and apply reports should carry enough structure for cross-engine parity:
+The TUI (`sweep ui`) is the same scan → select → revalidate → apply engine with
+an interactive selection layer; apply always confirms, and dangerous-tier items
+require a deliberate per-item toggle.
 
-- explicit selection policy
-- explicit selected candidate ids
-- stable risk tiers and reasons
-- structured failure records with stable failure codes
-- JSON Schema artifacts for `ScanPlan` and `ApplyReport`
+## Engine contract
 
----
+`scan → ScanPlan` and `apply plan → ApplyReport` are engine-boundary types in
+`packages/protocol`, with JSON Schema artifacts beside them. The JS engine is
+the reference implementation; the Rust engine (`crates/sweep-*`) must produce
+parity on the wire — same candidates, same order, same summary shape
+(`skippedDirs` is omitted at zero on both). Streaming `ScanEvent`s are emitted
+on `scan --json-stream` and consumed by the TUI.
 
-## Output Format
+## Guardrails
 
-### Scan Summary (TTY)
+### Hard-blocked `targetDir` (exit 2, not configurable)
 
-```
- sweep - artifact cleanup
+- `/` and any path resolving to fewer than 2 segments below root
+- `/home`, `/usr`, `/etc`, `/opt`, `/var`, `/bin`, `/sbin`, `/lib`, `/lib64`,
+  `/boot`, `/sys`, `/proc`
+- `os.homedir()` — the home root itself
+- Anything inside `.git`, `.svn`, `.hg`
 
-Scanned 47 directories in /home/user/projects/myapp
+### Deletion-time guarantees
 
-  ✗ node_modules    (/home/user/projects/myapp/node_modules)              ~412 MB
-  ✗ node_modules    (/home/user/projects/myapp/packages/web/node_modules) ~231 MB
-  ✗ dist            (/home/user/projects/myapp/packages/api/dist)         ~14 MB
-  ✗ .next           (/home/user/projects/myapp/apps/web/.next)            ~189 MB
+- `lstat` everywhere; symlinks are unlinked as entries, never followed.
+- Revalidation immediately before each delete/trash catches symlink swaps,
+  type changes, vanished paths, and containment breaks (canonical ancestors
+  must stay inside the target).
+- Size guardrail: over `maxSizeGB` (default 10) refuses without
+  `--force-large --yes`.
+- Trash moves are rename-only on the same filesystem; EXDEV is reported, never
+  silently copy-deleted.
+- Ctrl+C mid-apply stops scheduling, lets in-flight work finish, and reports
+  exactly what was removed.
 
-  4 items, ~846 MB estimated
+### Pattern safety (`assertSafePattern`)
 
-Delete 4 items (~846 MB)? [y/N]
-```
+- No `/` at start, no `..`, no NUL, no whitespace; ≤256 chars per pattern.
+- Merged pattern lists cap at 512 entries.
+- Custom patterns land the `dangerous` risk tier — they can never be
+  bulk-selected.
 
-### After Deletion
+### Config safety
 
-```
-✓ Cleaned 4 items, 846.4 MB freed (2.3s)
-```
+- `.sweeprc` must be a regular file (FIFOs/devices rejected before read) and
+  ≤1 MiB.
+- Discovery walks up from the target; later sources merge earlier.
+- `maxSizeGB`, `depth`, and other scalars are validated; `ignore` and
+  `disabledPatterns` can only narrow, never widen selection.
 
-### Dry Run
+## Output contract
 
-```
-[Scan summary as above]
-
-Dry run - no files deleted.
-```
-
-### CI / Non-TTY (no color, no spinner)
-
-```
-sweep: scanning /home/user/projects/myapp
-sweep: found 4 items (~846 MB)
-sweep: deleted node_modules (/home/user/projects/myapp/node_modules)
-sweep: deleted node_modules (/home/user/projects/myapp/packages/web/node_modules)
-sweep: deleted dist (/home/user/projects/myapp/packages/api/dist)
-sweep: deleted .next (/home/user/projects/myapp/apps/web/.next)
-sweep: done - 846.4 MB freed in 2.3s
-```
-
----
-
-## Config File Specification
-
-### Locations (in priority order)
-
-1. Path from `--config` flag
-2. `.sweeprc` - found by walking up from CWD (stops at FS root)
-3. `~/.config/sweep/config.json` - global user defaults
-
-### Schema
-
-```typescript
-interface SweepRcFile {
-  patterns?: string[]; // additional patterns (merged with defaults)
-  ignore?: string[]; // paths containing these strings are skipped
-  maxSizeGB?: number; // default: 10
-  depth?: number; // default: -1 (unlimited)
-}
-```
-
-All fields are optional. Missing fields fall back to the next config layer.
-
-### Pattern Merging
-
-`patterns` and `ignore` arrays are **merged across all config layers**, not replaced.
-If your project config adds `[".custom"]` and the global config adds `[".localdev"]`,
-the effective patterns list includes defaults + `.custom` + `.localdev`.
-
-To effectively remove a default pattern, use the `ignore` field:
-
-```json
-{ "ignore": ["dist"] } // won't delete anything named "dist"
-```
-
----
-
-## Guardrails Specification
-
-### Hard-Blocked Paths
-
-The following `targetDir` values are rejected with exit code 2:
-
-- `/` (filesystem root)
-- `/home` (home parent)
-- `/usr`, `/etc`, `/opt`, `/var`, `/bin`, `/sbin`, `/lib`, `/lib64`
-- `/boot`, `/sys`, `/proc`
-- `os.homedir()` (e.g., `/home/alice`) - home root itself is blocked
-
-Any path that resolves to fewer than 2 path segments below root is blocked.
-
-### Symlink Handling
-
-- Use `lstatSync` (not `statSync`) for all directory entry checks
-- Symlinks that match patterns: delete with `unlinkSync` (removes link entry only)
-- Never call `rmSync({ recursive: true })` on a symlink
-- Never follow symlinks during recursive scan
-
-### Size Limit
-
-- Default: 10 GB
-- If estimated total exceeds limit: print error, suggest `--force-large`, exit 2
-- `--force-large` must be combined with `--yes` (no interactive bypass for large deletes)
-
-### Pattern Safety
-
-Patterns must:
-
-- Not start with `/`
-- Not contain `..`
-- Be non-empty strings
-
----
+- `--json` produces stable machine-readable shapes (`scan`, `apply`, `doctor`,
+  `clean`); structured failures carry stable codes.
+- `scan --json-stream` emits newline-delimited `ScanEvent`s (`scan_progress`,
+  `scan_candidate`, `scan_completed`).
+- Exit codes: `0` success, `1` aborted, `2` guardrail, `3` config error,
+  `4` operation failed, `5` doctor warnings.
+- Non-TTY output disables color and spinners automatically.
 
 ## Distribution
 
-### Package
-
-- Name: `@kitsunekode/sweep`
-- Location: `apps/cli` (private monorepo root orchestrates workspaces)
-- Binary: `sweep`
-- Format: bundled ESM (`apps/cli/dist/sweep.js`) with `#!/usr/bin/env node` shebang; lazy UI bundle at `apps/cli/dist/sweep-ui.js`
-- Included in npm package: `dist/`, `README.md`, `LICENSE` (copied at prepack from repo root)
-
-### Install Methods
-
-```bash
-# Global (recommended)
-npm install -g @kitsunekode/sweep
-bun add -g @kitsunekode/sweep
-
-# One-shot (no install)
-npx @kitsunekode/sweep .
-bunx @kitsunekode/sweep .
-```
-
-### Runtime Requirements
-
-- Node.js ≥ 18.0.0
-- OR Bun (any recent version)
-- No native dependencies
-
----
+- npm: `@kitsunekode/sweep` (bundled ESM, Node ≥18 or Bun), optional native
+  engine packages `sweep-engine-*` per platform.
+- Standalone binaries on GitHub releases (Bun-compiled, `--minify`), each with
+  a `.sha256` sidecar; `install.sh` verifies the checksum before install.
+- Homebrew: `brew install kitsunekode/tap/sweep` — formula auto-bumped by the
+  binary release workflow.
+- Trusted publishing via OIDC (`id-token: write`); no long-lived npm token.
 
 ## Versioning
 
-Follows [Semantic Versioning](https://semver.org/):
-
-- PATCH: bug fixes, guardrail tweaks
-- MINOR: new flags, new default patterns, new config fields
-- MAJOR: breaking config schema changes, renamed binary
-
----
-
-## Security Considerations
-
-1. **Path injection**: All paths are resolved with `path.resolve()` before any check
-2. **Glob injection via config**: patterns are validated before use
-3. **Arbitrary file deletion**: guardrails are checked before ANY deletion, not just the first
-4. The tool never reads file contents - only paths and metadata
-5. `--config` flag path is also checked for `..` traversal before reading
+SemVer: patch = fixes/guardrail tweaks, minor = flags/patterns/config fields,
+major = breaking config schema or binary rename.

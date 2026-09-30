@@ -2,6 +2,10 @@
 
 > Safe, recursive artifact cleanup for any project tree.
 
+[![CI](https://github.com/KitsuneKode/sweep/actions/workflows/ci.yml/badge.svg)](https://github.com/KitsuneKode/sweep/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@kitsunekode/sweep)](https://www.npmjs.com/package/@kitsunekode/sweep)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 `sweep` deletes build artifacts - `node_modules`, `dist`, `.next`, `target`, and more - recursively across monorepos, with hard safety guardrails so you never accidentally wipe the wrong directory.
 
 Think [`npkill`](https://github.com/voidcosmos/npkill), but monorepo-aware, risk-tiered, scriptable, and with a live TUI that boots instantly and streams results as it scans.
@@ -21,7 +25,7 @@ Think [`npkill`](https://github.com/voidcosmos/npkill), but monorepo-aware, risk
     NORMAL  ↑↓ move · space queue · enter apply · / filter · ? help
 ```
 
-![sweep TUI demo - streaming scan, scope sidebar, queue and apply](assets/demo.gif)
+![sweep TUI demo - streaming scan, scope sidebar, queue and apply](https://raw.githubusercontent.com/KitsuneKode/sweep/main/assets/demo.gif)
 
 ---
 
@@ -35,7 +39,10 @@ bun add -g @kitsunekode/sweep
 npx @kitsunekode/sweep .
 bunx @kitsunekode/sweep .
 
-# Standalone binary (no Node/Bun needed)
+# Homebrew
+brew install kitsunekode/tap/sweep
+
+# Standalone binary (no Node/Bun needed, checksum-verified)
 curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
 ```
 
@@ -323,9 +330,3 @@ sweep doctor --json      # machine-readable health check
 ```
 
 Non-TTY environments disable color and spinners automatically.
-
----
-
-## License
-
-MIT
