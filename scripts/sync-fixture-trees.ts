@@ -19,6 +19,7 @@ const SCENARIOS = [
   { name: "monorepo", scenario: "monorepo" as const },
   { name: "workspace-matrix", scenario: "workspace-matrix" as const },
   { name: "risk-mix", scenario: "risk-mix-parity" as const },
+  { name: "opt-in-patterns", scenario: "opt-in-patterns" as const },
 ];
 
 function seedNodeModulesOnly(root: string): void {
@@ -47,6 +48,25 @@ function seedRiskMixParity(root: string): void {
   writeFileSync(join(root, "dist-target", ".gitkeep"), "");
 }
 
+/**
+ * Opt-in catalog coverage: `dist`, `build`, and a `*.egg-info` dir that only
+ * scan when `request.json` enables them, alongside a default `node_modules`.
+ * `dist`/`node_modules` names collide with .gitignore - this fixture exists
+ * only via generation, like the other ignored-name trees.
+ */
+function seedOptInPatterns(root: string): void {
+  mkdirSync(join(root, "dist"), { recursive: true });
+  mkdirSync(join(root, "build"), { recursive: true });
+  mkdirSync(join(root, "pkg.egg-info"), { recursive: true });
+  mkdirSync(join(root, "node_modules", "pkg"), { recursive: true });
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, "dist", "bundle.js"), 'console.log("bundled");\n');
+  writeFileSync(join(root, "build", "out.js"), "out\n");
+  writeFileSync(join(root, "pkg.egg-info", "PKG-INFO"), "Metadata-Version: 2.1\n");
+  writeFileSync(join(root, "node_modules", "pkg", "index.js"), "module.exports = {};\n");
+  writeFileSync(join(root, "src", "index.ts"), "export {};\n");
+}
+
 function ensureGitkeeps(root: string): void {
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     const path = join(root, entry.name);
@@ -72,6 +92,11 @@ function main(): void {
     if (scenario === "risk-mix-parity") {
       seedRiskMixParity(root);
       ensureGitkeeps(root);
+      continue;
+    }
+
+    if (scenario === "opt-in-patterns") {
+      seedOptInPatterns(root);
       continue;
     }
 
