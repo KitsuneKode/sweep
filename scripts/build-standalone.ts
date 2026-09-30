@@ -16,6 +16,7 @@ const args = [
   process.execPath, // the running bun binary
   "build",
   "--compile",
+  "--minify",
   entry,
   "--outfile",
   outfile,
