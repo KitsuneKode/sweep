@@ -1,5 +1,40 @@
 # @kitsunekode/sweep
 
+## 0.4.0
+
+### Minor Changes
+
+- b39b06b: Triage by age, in the TUI and in the plan format.
+  - Scan results now carry `modifiedMs`, the artifact's own last-modified time (optional in the plan schema, produced by both the JS and Rust engines). The list shows an Age column and a size bar, `o` cycles size, name and age (stalest first), and the cursor row says how long ago it changed. Anything touched in the last week is tinted as probably in use.
+  - The scope sidebar gains a risk breakdown and an "untouched 30d+" total, and its meter now reads "queued of found".
+  - Filter operators in `/`: `kind:target`, `risk:caution`, `path:crate`, `>100MB`, `<1GB`, `older:30d`, `newer:7d`, `is:queued`, `is:symlink`, and `!` to negate. Bare words still match as substrings, and every term must match.
+  - New keys: `v` queues a range of rows (never dangerous or blocked ones), `y` copies the row's path (OSC 52), `S` saves the queue as a plan file for `sweep apply --plan`, and `t` in the confirm dialog switches between deleting and moving to trash.
+  - Partly queued groups read "1 of 3 queued". Caution is now amber instead of an olive that was hard to tell from safe, dim text meets 4.5:1 contrast in both themes, the help screen wraps instead of clipping, and the panes no longer waste a row or a column.
+
+- d89cd74: Overhaul the interactive TUI and harden scanning:
+  - The artifact list is windowed, so navigation and rendering stay fast on
+    repositories with thousands of candidates; the mouse wheel moves the cursor
+    instead of a detached viewport, and scrollbars are passive indicators.
+  - Every apply now opens a confirmation step — safe queues get a standard
+    dialog, dangerous selections get the red confirmation.
+  - Streaming scans seed `selectedByDefault` candidates immediately and preserve
+    manual toggles; the final enriched plan is reconciled on completion.
+  - `scan --json` and `scan_completed` events now report `skippedDirs` when
+    directories could not be read; human output surfaces the same count in scan
+    summaries, grouped plans, and `doctor`.
+  - Traversal is safer: device/inode cycle detection defeats bind-mount loops,
+    unreadable roots fail loudly while nested unreadable directories are counted
+    and reported, and `.GIT`-style VCS dirs are blocked case-insensitively.
+  - Group headers always render so rows can't drift under the wrong scope,
+    narrow terminals shed chrome instead of truncating mid-word, modals clamp
+    to the viewport instead of crashing, and dead keys explain why they no-oped.
+
+- 8960f0d: Add `--trash` (reversible cleanup: candidates move to `.sweep-trash-<ts>/` inside the target instead of being deleted — atomic renames, original paths preserved, trash dirs auto-ignored by future scans), `sweep stats` (cleanup history + lifetime reclaimed total, JSONL at `~/.config/sweep/history.jsonl`, `SWEEP_CONFIG_DIR` to override), `sweep inspect --plan` (read-only plan provenance: counts, kinds, risk tiers, selected bytes), `sweep completions` for bash/zsh/fish, and a `curl | sh` installer script for standalone binaries (now including linux-arm64). Also: `clean --json` no longer mixes scan display text into stdout.
+
+### Patch Changes
+
+- 89da7e8: Harden the destructive and config paths: trash moves now verify the real destination stays inside the real trash dir (a preexisting symlink in the layout can no longer redirect a rename outside), `.sweeprc` must be a bounded regular file (a FIFO no longer hangs the scan, oversized configs are rejected), pattern strings and merged lists are length-bounded so a hostile repo config cannot burn scan CPU, `du` invocation uses `--` so dash-leading paths cannot be parsed as options on either engine, and the Rust engine subprocess output is byte-capped. Release binaries now ship `.sha256` sidecars and `install.sh` verifies the checksum before running.
+
 ## 0.3.1
 
 ### Patch Changes
