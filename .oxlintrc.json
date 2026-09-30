@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "eqeqeq": "error",
+    "no-var": "error",
+    "prefer-const": "error",
+    "no-debugger": "error",
+    "no-alert": "error",
+    "typescript/no-explicit-any": "error",
+    "react/react-in-jsx-scope": "off",
+    "no-await-in-loop": "off",
+    "unicorn/no-new-array": "off",
+    "unicorn/consistent-function-scoping": "off"
+  },
+  "ignorePatterns": ["dist/**", "node_modules/**", "coverage/**", "target/**"]
+}

@@ -20,7 +20,7 @@
     "test": "bun test src",
     "bench:large-stream": "bun run ./benchmarks/large-stream.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src",
+    "lint": "oxlint -c ../../.oxlintrc.json src",
     "fmt": "oxfmt src",
     "fmt:check": "oxfmt --check src"
   },

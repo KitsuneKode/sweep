@@ -9,7 +9,7 @@
   "scripts": {
     "transit": "exit 0",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src",
+    "lint": "oxlint -c ../../.oxlintrc.json src",
     "fmt": "oxfmt src",
     "fmt:check": "oxfmt --check src"
   },

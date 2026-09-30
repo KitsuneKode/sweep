@@ -7,7 +7,7 @@
   },
   "cacheMaxAge": "14d",
   "cacheMaxSize": "10GB",
-  "globalDependencies": [".oxfmtrc.json"],
+  "globalDependencies": [".oxfmtrc.json", ".oxlintrc.json"],
   "globalEnv": ["CI", "OS", "RUNNER_OS"],
   "globalPassThroughEnv": [
     "HOME",

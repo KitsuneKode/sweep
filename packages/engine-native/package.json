@@ -8,7 +8,7 @@
     "pack": "bun run ./scripts/pack.ts",
     "verify-binary": "bun run ./scripts/verify-binary.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint scripts",
+    "lint": "oxlint -c ../../.oxlintrc.json scripts",
     "fmt": "oxfmt scripts",
     "fmt:check": "oxfmt --check scripts"
   },

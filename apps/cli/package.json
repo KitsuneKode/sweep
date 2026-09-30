@@ -48,7 +48,7 @@
     "test": "bun test src scripts",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src scripts",
+    "lint": "oxlint -c ../../.oxlintrc.json src scripts",
     "fmt": "oxfmt src scripts",
     "fmt:check": "oxfmt --check src scripts"
   },
