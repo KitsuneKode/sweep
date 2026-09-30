@@ -11,8 +11,11 @@ const FIXTURE_ROOT_PLACEHOLDER: &str = "__FIXTURE_ROOT__";
 
 fn stable_candidate_id(path: &str, name: &str) -> String {
     let digest = Sha256::digest(format!("{path}:{name}").as_bytes());
-    let hex = format!("{digest:x}");
-    format!("cand_{}", &hex[..16])
+    let hex: String = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("cand_{hex}")
 }
 
 /// Repository-relative path to `tests/fixtures`.

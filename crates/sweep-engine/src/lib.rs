@@ -277,9 +277,13 @@ fn infer_reasons(path: &str, is_symlink: bool, kind: &str) -> Vec<String> {
 
 /// SHA-256 hash aligned with the JS reference (`planner.ts` `hashString`).
 fn hash_string(input: &str) -> String {
-    let result = Sha256::digest(input.as_bytes());
-    let hex = format!("{:x}", result);
-    hex[..16].to_string()
+    let digest = Sha256::digest(input.as_bytes());
+    // sha2 0.11 returns hybrid_array::Array, which dropped LowerHex; encode the
+    // eight bytes the 16-char prefix actually uses.
+    digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[cfg(test)]
