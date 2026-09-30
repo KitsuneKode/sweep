@@ -262,6 +262,8 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (key.name === "return") {
+      // Same owner as the search box: the keymap, not the <input>'s onSubmit.
+      // submitPatternDraft is idempotent if the input also emits onSubmit.
       if (state.patternInputMode === "add") {
         actions.submitPatternDraft?.();
       } else {
