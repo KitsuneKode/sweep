@@ -80,15 +80,16 @@ bun run scripts/generate-parity-fixture.ts -- tests/fixtures/node_modules-only
 
 ## Scan engines
 
-| `--engine`     | Behavior                                                                                   |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| `js` (default) | TypeScript scanner - deterministic, honors `.sweeprc` and CLI flags                        |
-| `rust`         | Rust subprocess; honors `.sweeprc` and CLI scan flags (`--pattern`, `--ignore`, `--depth`) |
-| `auto`         | Rust when a local `sweep-engine` binary exists, otherwise JS                               |
+| `--engine`       | Behavior                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------ |
+| `auto` (default) | Rust when a `sweep-engine` binary resolves, otherwise JS - no flags needed                 |
+| `rust`           | Rust subprocess; honors `.sweeprc` and CLI scan flags (`--pattern`, `--ignore`, `--depth`) |
+| `js`             | TypeScript scanner - deterministic, honors `.sweeprc` and CLI flags                        |
 
 Rust scan uses the native engine for progressive hooks (`onEntry` / `onEntrySized`) and exact
-sizing when the `sweep-engine` binary is available. `apply` defaults to the JS engine; pass `--engine rust` to use the
-native binary when available.
+sizing when the `sweep-engine` binary is available. `apply` resolves the same way; `--trash`
+always runs on the JS engine (Rust apply has no trash support) with a warning when it has to
+fall back.
 
 ```bash
 cargo build -p sweep-engine-cli

@@ -121,6 +121,17 @@ async function press(setup: Mounted, ...keys: string[]) {
   for (const key of keys) await send(setup, (mock) => mock.pressKey(key));
 }
 
+/** Same act split as `send`: input commits in the first act, paint in the second. */
+async function mouse(setup: Mounted, input: (mock: Mounted["mockMouse"]) => Promise<void>) {
+  await act(async () => {
+    await input(setup.mockMouse);
+    await setup.flush();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+}
+
 /** Every rendered line must fit the terminal: a wider line means clipped or wrapped chrome. */
 function expectFits(frame: string, width: number) {
   for (const line of frame.split("\n")) {
@@ -241,5 +252,112 @@ describe("triage keys", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("node_modules");
     expect(frame).not.toContain("vendor");
+  });
+});
+
+describe("scroll stability", () => {
+  // Enough grouped rows that the artifact pane is scrollable at 20 rows tall;
+  // the oscillation this guards against needed headers crossing the window edge.
+  function bigPlan(): ScanPlan {
+    const candidates = Array.from({ length: 30 }, (_, i) =>
+      candidate({
+        id: `big-${i}`,
+        name: "node_modules",
+        path: `/tmp/sweep-ui/pkg${Math.floor(i / 3)}/mod${i}/node_modules`,
+        estimatedBytes: (i + 1) * 1024 * 1024,
+      }),
+    );
+    return {
+      ...createPlan(),
+      candidates,
+      summary: {
+        ...createPlan().summary,
+        candidateCount: candidates.length,
+      },
+    };
+  }
+
+  async function mountBig(height = 20) {
+    const setup = await testRender(<SweepApp plan={bigPlan()} onDone={() => {}} />, {
+      width: 90,
+      height,
+    });
+    teardown = () => setup.renderer.destroy();
+    await act(async () => {
+      await setup.renderOnce();
+      await setup.flush();
+    });
+    return setup;
+  }
+
+  test("jumping the cursor to the end settles - the frame stops changing", async () => {
+    const setup = await mountBig();
+    await press(setup, "G");
+    const settled = setup.captureCharFrame();
+    // The sticky-header slot used to toggle the list height by one row at this
+    // boundary, which moved the window, which toggled the slot - an endless
+    // repaint. A second render must reproduce the first frame exactly.
+    await act(async () => {
+      await setup.renderOnce();
+      await setup.flush();
+    });
+    await act(async () => {
+      await setup.renderOnce();
+    });
+    expect(setup.captureCharFrame()).toBe(settled);
+  });
+
+  test("the sticky slot stays reserved for a scrollable list", async () => {
+    const setup = await mountBig();
+    const top = setup.captureCharFrame();
+    await press(setup, "G");
+    const bottom = setup.captureCharFrame();
+    // Same row count painted at both ends of the list: the sticky line being
+    // conditional used to add/remove a row and shift every row up or down.
+    expect(bottom.split("\n").length).toBe(top.split("\n").length);
+    // A pinned group header line is present once the real one scrolled off.
+    expect(bottom).toContain("pkg9");
+  });
+
+  // Locates the scrollbar track in a captured frame: the rightmost 1-column
+  // lane of block glyphs (░/█) inside the artifacts pane's right edge.
+  function scrollbarGeometry(frame: string) {
+    const lines = frame.split("\n");
+    let x = -1;
+    for (const line of lines) {
+      x = Math.max(x, line.lastIndexOf("░"), line.lastIndexOf("█"));
+    }
+    if (x === -1) throw new Error("no scrollbar lane found in frame");
+    const rows = lines
+      .map((line, y) => (/[░█]/.test(line[x] ?? "") ? y : -1))
+      .filter((y) => y !== -1);
+    if (rows.length === 0) throw new Error("no scrollbar lane found in frame");
+    return { x, top: rows[0]!, bottom: rows[rows.length - 1]! };
+  }
+
+  test("clicking the scrollbar track seeks the cursor", async () => {
+    const setup = await mountBig();
+    const { x, top, bottom } = scrollbarGeometry(setup.captureCharFrame());
+
+    // The lane's bottom-most cell sits on the hit-grid boundary and does not
+    // register in the test renderer, so seek one cell in from each edge.
+    await mouse(setup, (m) => m.click(x, bottom - 1));
+    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+[0-9.]+ MB/);
+    const mid = setup.captureCharFrame().match(/▌\s+○ node_modules\s+([0-9.]+) MB/);
+    expect(Number(mid![1])).toBeLessThan(10);
+
+    await mouse(setup, (m) => m.click(x, top));
+    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+30\.0 MB/);
+  });
+
+  test("dragging the scrollbar thumb seeks continuously", async () => {
+    const setup = await mountBig();
+    const frame = setup.captureCharFrame();
+    const { x, top, bottom } = scrollbarGeometry(frame);
+    expect(frame).toMatch(/▌\s+○ node_modules\s+30\.0 MB/);
+
+    await mouse(setup, (m) => m.drag(x, top, x, bottom - 1));
+    const landed = setup.captureCharFrame().match(/▌\s+○ node_modules\s+([0-9.]+) MB/);
+    expect(Number(landed![1])).toBeLessThan(10);
   });
 });

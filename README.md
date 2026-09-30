@@ -103,7 +103,7 @@ sweep doctor --json     # config + environment + dry-scan report
 | `--include-dangerous`    |       | Include dangerous custom matches                   |
 | `--depth <n>`            |       | Max recursion depth (`-1` = unlimited)             |
 | `--config <path>`        |       | Explicit config file                               |
-| `--engine <backend>`     |       | `js` (default), `rust`, or `auto`                  |
+| `--engine <backend>`     |       | `auto` (default), `rust`, or `js`                  |
 | `--no-color`             |       | Disable color output                               |
 | `--quiet`                | `-q`  | Suppress non-essential output                      |
 | `--verbose`              |       | Per-candidate scan progress                        |

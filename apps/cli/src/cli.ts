@@ -70,7 +70,11 @@ function addScanOptions<T extends Command>(command: T): T {
     .option("--select <mode>", "Default selection policy: default, safe, all, none", "default")
     .option("--include-dangerous", "Include dangerous candidates in selection", false)
     .option("--config <path>", "Explicit config file path")
-    .option("--engine <backend>", "Scan engine: js (default), rust, or auto", "js")
+    .option(
+      "--engine <backend>",
+      "Scan engine: auto (default - rust when its binary is available), rust, or js",
+      "auto",
+    )
     .option("--no-color", "Disable color output");
 }
 
@@ -139,7 +143,11 @@ export function makeProgram(): Command {
     .command("apply")
     .description("Apply a saved scan plan")
     .requiredOption("--plan <path>", "Path to a saved scan plan")
-    .option("--engine <backend>", "Apply engine: js (default), rust, or auto", "js")
+    .option(
+      "--engine <backend>",
+      "Apply engine: auto (default - rust when its binary is available), rust, or js",
+      "auto",
+    )
     .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
     .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
     .option("--json", "Emit JSON apply results", false)

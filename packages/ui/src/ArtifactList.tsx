@@ -44,7 +44,7 @@ export interface ArtifactListProps {
  * React only ever sees the rows that fit in the pane, so render cost is
  * O(viewport) rather than O(artifacts). The wheel moves the cursor, not a
  * detached viewport, so `space` always acts on a row that is on screen. The
- * scrollbar is a 1-column position indicator, not an interactive track.
+ * scrollbar is a real track: click or drag it to seek the list.
  */
 export function ArtifactList({
   rows,
@@ -125,9 +125,33 @@ export function ArtifactList({
     return owner?.kind === "header" ? owner : null;
   }, [rows, appliedTop]);
 
+  // The sticky slot must not toggle layout. If the line mounted only when a
+  // sticky header was active, the list below would shrink by one row exactly
+  // when the window needs it most - near the list end the new height can pull
+  // the owning header back into view, unmounting the slot, restoring the row,
+  // and looping forever (this was the scroll flicker). Reserving the line
+  // whenever the list can scroll makes the condition monotone: the slot only
+  // ever shrinks the viewport, so a scrollable list stays scrollable.
+  const reserveStickyRow = rows.length > viewportHeight;
+
+  // While the window is sliding under a static pointer, OpenTUI's post-render
+  // hit-test re-fires `over` on whatever row lands under it each frame - letting
+  // that set hover state means a React dispatch (and a row tint chasing the
+  // scroll) on every scroll frame. Freeze hover-set briefly after wheel input;
+  // `out` still clears, so nothing gets stuck.
+  const lastWheelAtRef = useRef(0);
+
   const handleHover = useCallback((index: number, hovered: boolean) => {
+    if (hovered && Date.now() - lastWheelAtRef.current < 120) return;
     setHoveredRowIndex((prev) => (hovered ? index : prev === index ? null : prev));
   }, []);
+
+  // The hovered index is meaningless across a row-set change (same index, new
+  // row): filters, collapses, and scan upserts clear it rather than paint a
+  // hover tint on a row the pointer never touched.
+  useEffect(() => {
+    setHoveredRowIndex(null);
+  }, [rows]);
 
   const handleSizeChange = useCallback(() => {
     const height = listRef.current?.height;
@@ -141,10 +165,11 @@ export function ArtifactList({
     (event: MouseEvent) => {
       const direction = event.scroll?.direction;
       if (direction !== "up" && direction !== "down") return;
-      // ~3 rows per notch, matching browser/terminal scroll convention. The
-      // cursor moves - never the viewport alone - so space/enter always act on
-      // a row the user can see.
-      const delta = Math.max(1, Math.abs(event.scroll?.delta ?? 1)) * 3;
+      lastWheelAtRef.current = Date.now();
+      // ~3 items per notch, matching browser/terminal scroll convention. The
+      // delta is 1 per SGR wheel event today, but cap it anyway so a terminal
+      // that reports aggregated deltas can't slingshot the cursor to the end.
+      const delta = Math.min(4, Math.max(1, Math.abs(event.scroll?.delta ?? 1))) * 3;
       onCursorDelta?.(direction === "up" ? -delta : delta);
     },
     [onCursorDelta],
@@ -160,9 +185,16 @@ export function ArtifactList({
       <box width="100%" flexShrink={0} flexDirection="column">
         <text content={buildListColumnHeader(widths, tokens)} wrapMode="none" />
         <text content={buildListRule(widths, tokens)} wrapMode="none" />
-        {stickyHeader ? (
+        {reserveStickyRow ? (
           <box width="100%" height={1} flexShrink={0} overflow="hidden">
-            <text content={buildGroupHeaderContent(stickyHeader, tokens, widths)} wrapMode="none" />
+            {stickyHeader ? (
+              <text
+                content={buildGroupHeaderContent(stickyHeader, tokens, widths)}
+                wrapMode="none"
+              />
+            ) : (
+              <text content=" " wrapMode="none" />
+            )}
           </box>
         ) : null}
       </box>
@@ -236,7 +268,13 @@ export function ArtifactList({
           })}
         </box>
         {scrollbar ? (
-          <ScrollbarColumn tokens={tokens} model={scrollbar} height={viewportHeight} />
+          <ScrollbarColumn
+            tokens={tokens}
+            model={scrollbar}
+            height={viewportHeight}
+            rowCount={rows.length}
+            onSeek={onSetCursor}
+          />
         ) : null}
       </box>
     </box>
@@ -261,16 +299,41 @@ function scrollbarModel(
   return { thumbTop, thumbHeight };
 }
 
-/** Passive 1-column scrollbar: track shows there is more; thumb shows where. */
+/**
+ * 1-column scrollbar. Click or drag the track to seek: the pointer's row in
+ * the column maps linearly onto the row index, and the cursor-coupled window
+ * follows. OpenTUI captures the renderable under the pointer on the first drag
+ * event, so once a drag starts on the track it keeps receiving drags even
+ * when the pointer strays off the lane.
+ */
 const ScrollbarColumn = memo(function ScrollbarColumn({
   tokens,
   model,
   height,
+  rowCount,
+  onSeek,
 }: {
   tokens: ThemeTokens;
   model: ScrollbarModel;
   height: number;
+  rowCount: number;
+  onSeek?: ((rowIndex: number) => void) | undefined;
 }) {
+  const trackRef = useRef<BoxRenderable | null>(null);
+
+  const seek = useCallback(
+    (event: MouseEvent) => {
+      const track = trackRef.current;
+      if (!track || rowCount <= 0 || !onSeek) return;
+      const rel = event.y - track.screenY;
+      const clamped = Math.min(Math.max(rel, 0), Math.max(0, height - 1));
+      const rowIndex =
+        height <= 1 ? 0 : Math.round((clamped / (height - 1)) * Math.max(0, rowCount - 1));
+      onSeek(rowIndex);
+    },
+    [height, rowCount, onSeek],
+  );
+
   const lines = useMemo(() => {
     const cells: boolean[] = [];
     for (let i = 0; i < height; i++) {
@@ -280,7 +343,15 @@ const ScrollbarColumn = memo(function ScrollbarColumn({
   }, [model, height]);
 
   return (
-    <box width={1} flexShrink={0} flexDirection="column" overflow="hidden">
+    <box
+      ref={trackRef}
+      width={1}
+      flexShrink={0}
+      flexDirection="column"
+      overflow="hidden"
+      onMouseDown={seek}
+      onMouseDrag={seek}
+    >
       {lines.map((inThumb, index) => (
         <text
           key={`sb-${index}`}
@@ -395,8 +466,13 @@ const ItemRow = memo(function ItemRow({
 
   const mouseProps = {
     selectable: true,
+    // `over`/`out` fire both on real pointer moves and when a repaint slides
+    // content under a static pointer (OpenTUI re-hit-tests dirty grids) - that
+    // second path is what keeps hover correct while scrolling. There is no
+    // `onMouseLeave` event in OpenTUI; `out` is it.
+    onMouseOver: () => onHover(index, true),
     onMouseMove: () => onHover(index, true),
-    onMouseLeave: () => onHover(index, false),
+    onMouseOut: () => onHover(index, false),
     // First click moves the cursor; clicking the focused row toggles it.
     onMouseDown: () => {
       if (isCurrent) {

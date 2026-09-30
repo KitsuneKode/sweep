@@ -67,7 +67,9 @@ a bug, not a loading state.
 ## 6. Mouse is a peer, not a fallback
 
 Rows scroll, hover, click-to-focus, and toggle on click. Headers collapse on
-click. Keyboard remains sufficient for every action.
+click. The scrollbar is a real track: click or drag it to seek the list - the
+pointer's position maps linearly onto the row index and the cursor follows.
+Keyboard remains sufficient for every action.
 
 ## 7. Feedback beats silence
 
@@ -79,10 +81,21 @@ that deliberately does nothing must say why via a one-line notice - e.g.
 ## 8. Cursor and viewport are one
 
 Wheel scrolling moves the _cursor_, not a detached viewport - `Space`/`Enter`
-always act on the row under the cursor, which is always visible. The scroll
-lane is a passive position indicator, not a drag target. The same rule holds
+always act on the row under the cursor, which is always visible. Scrollbar
+seeks move the cursor too: a click or drag lands the cursor on the
+corresponding row rather than sliding the view under it. The same rule holds
 in the scope sidebar (`scrollbox` is `focusable={false}`; an inner handler
 swallows wheel events and moves the cursor instead).
+
+Two corollaries that keep the list stable at boundaries:
+
+- The sticky group-header slot is reserved whenever the list can scroll. If
+  it mounted only when a header was pinned, its one row would shrink the
+  viewport, pull the owning header back into the window, unpin the slot, and
+  oscillate forever - this was the end-of-list flicker.
+- Hover state must not chase rows during wheel input: repaints slide content
+  under a static pointer and re-fire `over`/`out`, so hover-set is suppressed
+  briefly after each wheel event (`out` still clears, so nothing sticks).
 
 ## 9. Chrome fits the terminal
 

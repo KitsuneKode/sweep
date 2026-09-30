@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
@@ -16,7 +24,12 @@ import { normalizePlan } from "../support/normalize-plan.js";
 
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const FIXTURES_ROOT = join(REPO_ROOT, "tests/fixtures");
-const LOCAL_BINARY = join(REPO_ROOT, "target/debug/sweep-engine");
+// The resolver picks the freshest workspace build, so pin the expectation to
+// the same rule: a stale debug binary must not beat a newer release build.
+const LOCAL_BINARY = ["debug", "release"]
+  .map((profile) => join(REPO_ROOT, "target", profile, "sweep-engine"))
+  .filter((path) => existsSync(path))
+  .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
 
 interface FixtureRequest {
   exact?: boolean;
@@ -57,7 +70,7 @@ function loadFixtureCases(): Array<{ name: string; root: string; request: Fixtur
 }
 
 function rustAvailable(): boolean {
-  return process.env.SWEEP_ENGINE_FROM_NPM !== "1" && existsSync(LOCAL_BINARY);
+  return process.env.SWEEP_ENGINE_FROM_NPM !== "1" && LOCAL_BINARY !== undefined;
 }
 
 function assertMatchesGolden(actual: ScanPlan, fixtureRoot: string): void {
@@ -111,7 +124,8 @@ describe("engine contract fixtures", () => {
       }
 
       expect(isRustEngineAvailable()).toBe(true);
-      expect(resolveRustEngineBinary()).toBe(LOCAL_BINARY);
+      // rustAvailable() guarantees a local build exists.
+      expect(resolveRustEngineBinary()).toBe(LOCAL_BINARY!);
 
       const plan = await scanToPlanViaRust(fixture.root, {
         config: fixtureConfig(fixture.request),

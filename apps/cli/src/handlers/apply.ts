@@ -97,7 +97,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       }
     }
 
-    const engine = resolveEngineBackend({ engine: opts.engine ?? "js" });
+    const engine = resolveEngineBackend({ engine: opts.engine ?? "auto" });
 
     const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(plan, engine, {
       ...(opts.json ? { quiet: true } : {}),

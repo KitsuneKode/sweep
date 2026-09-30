@@ -6,14 +6,14 @@ describe("nextScrollTop", () => {
     expect(nextScrollTop(10, 20, 15)).toBe(10);
   });
 
-  test("scrolls up just enough to keep a row of context above the cursor", () => {
-    expect(nextScrollTop(10, 20, 10)).toBe(9);
-    expect(nextScrollTop(10, 20, 4)).toBe(3);
+  test("scrolls up just enough to keep two rows of context above the cursor", () => {
+    expect(nextScrollTop(10, 20, 11)).toBe(9);
+    expect(nextScrollTop(10, 20, 4)).toBe(2);
   });
 
-  test("scrolls down just enough to keep a row of context below the cursor", () => {
-    // Viewport covers rows 10..29; cursor at 29 needs 30 visible too.
-    expect(nextScrollTop(10, 20, 29)).toBe(11);
+  test("scrolls down just enough to keep two rows of context below the cursor", () => {
+    // Viewport covers rows 10..29; cursor at 28 needs 29 and 30 visible too.
+    expect(nextScrollTop(10, 20, 28)).toBe(11);
   });
 
   test("never scrolls above the top of the list", () => {
@@ -30,6 +30,6 @@ describe("nextScrollTop", () => {
     // The jitter this replaced came from recentering on every move.
     let top = 0;
     for (let cursor = 0; cursor < 40; cursor++) top = nextScrollTop(top, 20, cursor);
-    expect(top).toBe(21);
+    expect(top).toBe(22);
   });
 });

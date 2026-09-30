@@ -398,15 +398,25 @@ export async function applyPlanViaRust(plan: ScanPlan, signal?: AbortSignal): Pr
   }
 }
 
+/**
+ * Memoised: `auto` is the default engine flag, so this probe now runs on every
+ * command - it must not pay a subprocess spawn more than once per process.
+ */
+let rustEngineAvailable: boolean | undefined;
+
 export function isRustEngineAvailable(): boolean {
+  if (rustEngineAvailable !== undefined) return rustEngineAvailable;
   try {
     const binary = resolveRustEngineBinary();
     if (binary !== "sweep-engine" && !existsSync(binary)) {
+      rustEngineAvailable = false;
       return false;
     }
     const proc = spawnSync(binary, ["--version"], { encoding: "utf8" });
-    return proc.status === 0;
+    rustEngineAvailable = proc.status === 0;
+    return rustEngineAvailable;
   } catch {
+    rustEngineAvailable = false;
     return false;
   }
 }

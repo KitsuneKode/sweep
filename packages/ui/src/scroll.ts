@@ -1,5 +1,10 @@
-/** Rows of context kept between the cursor and the viewport edge. */
-export const SCROLL_MARGIN = 1;
+/**
+ * Rows of context kept between the cursor and the viewport edge. One row felt
+ * glued to the edge - the cursor visibly touched the boundary before the
+ * window moved. Two keeps a sliver of lookahead without drifting toward
+ * recenter-on-every-move.
+ */
+export const SCROLL_MARGIN = 2;
 
 /**
  * Viewport top after moving the cursor to `cursor`.
