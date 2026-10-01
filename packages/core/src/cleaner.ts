@@ -3,7 +3,11 @@ import { rename, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
 import { mapPool } from "./async-pool.js";
-import { isPathWithinRoot, isReparsePointOrSymlink } from "./guardrails.js";
+import {
+  isPathWithinRoot,
+  isReparsePointOrSymlink,
+  pathHasProtectedVcsSegment,
+} from "./guardrails.js";
 
 const DELETE_CONCURRENCY = 4;
 const CASE_FOLD_PATHS = process.platform === "darwin" || process.platform === "win32";
@@ -205,6 +209,11 @@ export async function clean(
               code: "EOUTSIDE",
             });
           }
+          if (pathHasProtectedVcsSegment(realParent)) {
+            throw Object.assign(new Error("parent resolves inside protected VCS metadata"), {
+              code: "EPROTECTED",
+            });
+          }
         }
         if (options.trashDir && options.trashRoot) {
           await moveToTrash(entry, options.trashDir, options.trashRoot);
@@ -257,6 +266,7 @@ function classifyFilesystemFailure(code: string | undefined): PathFailure["code"
   if (code === "EACCES" || code === "EPERM") return "permission_denied";
   if (code === "EBUSY") return "busy";
   if (code === "EOUTSIDE") return "outside_target";
+  if (code === "EPROTECTED") return "protected_path";
   if (code === "ECHANGED") return "changed_entry_type";
   if (code === "ESYMLINKCHANGED") return "changed_symlink_state";
   return "filesystem_error";

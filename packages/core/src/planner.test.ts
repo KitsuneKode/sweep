@@ -1,7 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { clean } from "./cleaner.js";
 import type { ScanEntry, ScanResult } from "@kitsunekode/sweep-protocol";
 import {
   buildPlan,
@@ -23,6 +32,32 @@ afterEach(() => {
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
 describe("planner", () => {
+  test.skipIf(process.platform === "win32")(
+    "protects symlink entries behind an alias into VCS metadata",
+    async () => {
+      mkdirSync(dir(".git"));
+      writeFileSync(dir("kept"), "keep");
+      symlinkSync(dir("kept"), dir(".git", "node_modules"));
+      symlinkSync(dir(".git"), dir("alias"), "dir");
+      const candidate = toCandidate({
+        path: dir("alias", "node_modules"),
+        name: "node_modules",
+        estimatedBytes: 0,
+        isSymlink: true,
+        entryType: "symlink",
+      });
+      const result = revalidateCandidates([candidate], tmpDir);
+      expect(result.ready).toEqual([]);
+      expect(result.failedPaths[0]?.code).toBe("protected_path");
+      // The worker repeats the parent protection at the destructive boundary.
+      const cleaned = await clean([candidate], { containmentRoot: tmpDir });
+      expect(cleaned.deleted).toEqual([]);
+      expect(cleaned.failedPaths[0]?.code).toBe("protected_path");
+      expect(lstatSync(dir(".git", "node_modules")).isSymbolicLink()).toBe(true);
+      expect(existsSync(dir("kept"))).toBe(true);
+    },
+  );
+
   test("buildPlan selects safe defaults and excludes dangerous custom patterns", () => {
     const safeEntry: ScanEntry = {
       path: dir("node_modules"),

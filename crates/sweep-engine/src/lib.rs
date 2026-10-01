@@ -5,14 +5,12 @@ mod guardrails;
 
 use camino::Utf8Path;
 use chrono::SecondsFormat;
-use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
 use sweep_errors::EngineError;
 use sweep_fs::{
-    apply_size_estimates, stat_fallback, walk_matched_entries_with_hooks, WalkConfig, WalkEntry,
-    WalkEntryType, WalkHooks,
+    apply_size_estimates, walk_matched_entries_with_hooks, WalkConfig, WalkEntry, WalkHooks,
 };
 use sweep_types::{
     ApplyReport, EntryType, RiskTier, ScanCandidate, ScanPlan, ScanPlanSummary, SelectionMode,
@@ -71,24 +69,56 @@ pub fn scan_to_plan_with_config(
     let on_entry_sized = options.hooks.on_entry_sized;
     let found = std::sync::atomic::AtomicU32::new(0);
 
-    // The sizer consumes discoveries over this channel while the walk is still
-    // running, so `on_entry_sized` fires as each `du` batch resolves instead of
-    // every candidate popping in one burst after traversal - the JS scanner's
-    // ProgressiveSizer shape, on real threads.
+    // Sizer workers consume discoveries over this channel while the walk is
+    // still running, so `on_entry_sized` fires as each in-process size job
+    // resolves instead of every candidate popping in one burst after
+    // traversal - the JS scanner's ProgressiveSizer shape, on real threads.
     let progressive = on_entry_sized.is_some();
-    // Bounded for backpressure: the walk stalls if it outruns the sizer by a
+    // Bounded for backpressure: the walk stalls if it outruns the sizers by a
     // few chunks instead of queueing every candidate in memory.
     let (entry_tx, entry_rx) = mpsc::sync_channel::<WalkEntry>(SIZER_QUEUE_BOUND);
     let shared = SizerShared {
         results: Mutex::new(HashMap::new()),
-        missed: Mutex::new(Vec::new()),
         emit_sized: on_entry_sized,
     };
+    // `std::mpsc` receivers are single-consumer, so the worker pool shares it
+    // behind a mutex; the lock is only held for the `recv` itself, never while
+    // sizing. Declared outside the scope so it outlives the spawned workers.
+    let sizer_rx = Mutex::new(entry_rx);
+    // Subtree sizing parallelizes internally - but it must never run on the
+    // global rayon pool the walk uses: pool threads blocked on a full send
+    // channel plus sizers blocked on queued pool tasks deadlocks the scan.
+    // A dedicated pool keeps the two workloads independent.
+    let size_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(sizer_workers())
+        .build()
+        .ok();
 
     let walk = std::thread::scope(|scope| {
-        let sizer = progressive.then(|| {
-            scope.spawn(|| run_progressive_sizer(scope, entry_rx, &shared, options.exact))
-        });
+        // A fixed pool pulls entries one at a time - self-balancing with no
+        // dispatcher thread or per-chunk thread spawns.
+        let size_pool = &size_pool;
+        let sizers: Vec<_> = if progressive {
+            (0..sizer_workers())
+                .map(|_| {
+                    scope.spawn(|| loop {
+                        let entry = {
+                            sizer_rx
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .recv()
+                        };
+                        match entry {
+                            Ok(entry) => size_entry_job(&entry, &shared, options.exact, size_pool),
+                            // Channel closed and drained - the walk is done.
+                            Err(_) => break,
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         // Scoped so the closures - and their borrow of `entry_tx` - drop before
         // the sender does below.
         let walk = {
@@ -97,7 +127,7 @@ pub fn scan_to_plan_with_config(
                 if let Some(cb) = on_entry {
                     cb(to_candidate(entry, 0));
                 }
-                // The found line is fully written before the entry reaches the
+                // The found line is fully buffered before the entry reaches a
                 // sizer - an update can never overtake its own discovery event.
                 if progressive {
                     let _ = entry_tx.send(entry.clone());
@@ -119,9 +149,9 @@ pub fn scan_to_plan_with_config(
             };
             walk_matched_entries_with_hooks(target_dir, walk_config, Some(&hooks))
         };
-        // Dropping the sender closes the channel so the sizer drains and exits.
+        // Dropping the sender closes the channel so the sizers drain and exit.
         drop(entry_tx);
-        if let Some(handle) = sizer {
+        for handle in sizers {
             let _ = handle.join();
         }
         walk
@@ -158,99 +188,46 @@ type OnSized<'a> = dyn Fn(ScanCandidate) + Sync + 'a;
 struct SizerShared<'a> {
     /// path -> resolved bytes; authoritative for the final plan's sizes.
     results: Mutex<HashMap<String, u64>>,
-    /// Entries `du` could not size (spawn failure, missing line, timeout) -
-    /// resolved with exact/stat fallbacks once the channel drains.
-    missed: Mutex<Vec<WalkEntry>>,
     emit_sized: Option<&'a OnSized<'a>>,
 }
 
-/// How many `du` jobs run at once - same bound as the JS `DU_MAX_INFLIGHT`.
-/// For `exact` mode each job is an in-process recursive walk instead.
-const SIZER_INFLIGHT: usize = 4;
-
-/// How many discovered entries can wait on the sizer channel before the walk
-/// blocks. Sized so the sizer stays fed without a large backlog.
-const SIZER_QUEUE_BOUND: usize = 256;
-/// Exact-mode jobs interleave tighter than du chunks so updates trickle
-/// faster on the CPU-bound path (JS `SIZE_CONCURRENCY`).
-const EXACT_JOB_GRANULARITY: usize = 8;
-
-/// Consume walk entries until the channel closes, dispatching size jobs to
-/// scoped worker threads bounded at `SIZER_INFLIGHT`.
-fn run_progressive_sizer<'scope>(
-    scope: &'scope std::thread::Scope<'scope, '_>,
-    rx: mpsc::Receiver<WalkEntry>,
-    shared: &'scope SizerShared,
-    exact: bool,
-) {
-    let mut workers: Vec<std::thread::ScopedJoinHandle<'scope, ()>> = Vec::new();
-    let mut pending: Vec<WalkEntry> = Vec::new();
-    // Chunk on argv byte budget the same way `chunk_paths_for_du` does, so a
-    // `du` argv never exceeds what the kernel accepts.
-    let mut pending_argv = 3usize; // "du" + flag + "--"
-    let chunk_limit = if exact {
-        EXACT_JOB_GRANULARITY
-    } else {
-        sweep_fs::DU_CHUNK_SIZE
-    };
-
-    let dispatch =
-        |entries: Vec<WalkEntry>, workers: &mut Vec<std::thread::ScopedJoinHandle<'scope, ()>>| {
-            workers.retain(|handle| !handle.is_finished());
-            while workers.len() >= SIZER_INFLIGHT {
-                // At capacity: block on the oldest job, then reap again.
-                let oldest = workers.remove(0);
-                let _ = oldest.join();
-                workers.retain(|handle| !handle.is_finished());
-            }
-            workers.push(scope.spawn(move || size_chunk_job(&entries, shared, exact)));
-        };
-
-    while let Ok(entry) = rx.recv() {
-        pending_argv += entry.path.as_str().len() + 1;
-        pending.push(entry);
-        if pending.len() >= chunk_limit || pending_argv >= sweep_fs::DU_ARGV_BUDGET {
-            pending_argv = 3;
-            dispatch(std::mem::take(&mut pending), &mut workers);
-        }
-    }
-    if !pending.is_empty() {
-        dispatch(pending, &mut workers);
-    }
-    for handle in workers {
-        let _ = handle.join();
-    }
+/// Sizing is `lstat`+`readdir` bound - threads spend their time parked on
+/// syscalls, so oversubscribing the core count is fine. The disk is the wall
+/// either way; a floor keeps tiny boxes parallel and a ceiling avoids hundreds
+/// of blocked threads on very wide machines.
+fn sizer_workers() -> usize {
+    std::thread::available_parallelism()
+        .map(std::num::NonZero::get)
+        .unwrap_or(4)
+        .clamp(4, 16)
 }
 
-/// One worker job: exact walks per entry, or a single `du` for the chunk.
-fn size_chunk_job(entries: &[WalkEntry], shared: &SizerShared, exact: bool) {
-    if exact {
-        for entry in entries {
-            record_sized(shared, entry, sweep_fs::exact_size(&entry.path));
-        }
-        return;
-    }
+/// How many discovered entries can wait on the sizer channel before the walk
+/// blocks. Sized so the sizers stay fed without a large backlog.
+const SIZER_QUEUE_BOUND: usize = 256;
 
-    let paths: Vec<&Utf8Path> = entries.iter().map(|entry| entry.path.as_path()).collect();
-    match sweep_fs::du_estimate_chunk(&paths) {
-        Some(map) => {
-            for entry in entries {
-                match map.get(entry.path.as_str()) {
-                    Some(&bytes) => record_sized(shared, entry, bytes),
-                    None => shared
-                        .missed
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .push(entry.clone()),
-                }
-            }
+/// One sizing job: a fully in-process `lstat` walk, no subprocess. `exact`
+/// sums file sizes (JS `exactSize` parity); the default reports `du -sb`
+/// apparent size including symlink entries. The subtree's internal par_iter
+/// runs on the dedicated `pool`, never the walk's global pool (see caller).
+fn size_entry_job(
+    entry: &WalkEntry,
+    shared: &SizerShared,
+    exact: bool,
+    pool: &Option<rayon::ThreadPool>,
+) {
+    let measure = || {
+        if exact {
+            sweep_fs::exact_size(&entry.path)
+        } else {
+            sweep_fs::apparent_size(&entry.path)
         }
-        None => shared
-            .missed
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .extend(entries.iter().cloned()),
-    }
+    };
+    let bytes = match pool {
+        Some(pool) => pool.install(measure),
+        None => measure(),
+    };
+    record_sized(shared, entry, bytes);
 }
 
 fn record_sized(shared: &SizerShared, entry: &WalkEntry, bytes: u64) {
@@ -264,48 +241,11 @@ fn record_sized(shared: &SizerShared, entry: &WalkEntry, bytes: u64) {
     }
 }
 
-/// Fold sizer results back into the walk entries: resolved paths take their
-/// `du`/exact size; entries `du` missed get the same fallbacks the batch path
-/// uses and emit their sized events now (last-in updates before completion).
+/// Fold sizer results back into the walk entries. Entries the sizer never
+/// reported (a worker that died before finishing its job) are sized inline
+/// with the same function and emit their updates now, so every candidate
+/// still gets exactly one size and the plan never ships a stale 0.
 fn apply_progressive_sizes(entries: &mut [WalkEntry], shared: &SizerShared, exact: bool) {
-    let missed = {
-        let mut guard = shared
-            .missed
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::take(&mut *guard)
-    };
-    if !missed.is_empty() {
-        let resolved: Vec<u64> = missed
-            .par_iter()
-            .map(|entry| {
-                if exact || entry.entry_type == WalkEntryType::Directory {
-                    sweep_fs::exact_size(&entry.path)
-                } else {
-                    stat_fallback(&entry.path)
-                }
-            })
-            .collect();
-        {
-            let mut results = shared
-                .results
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            for (entry, &bytes) in missed.iter().zip(&resolved) {
-                results.insert(entry.path.as_str().to_owned(), bytes);
-            }
-        }
-        // The JS scanner fires onEntrySized for fallback entries too, so
-        // listeners see the same per-candidate coverage either engine.
-        for (entry, &bytes) in missed.iter().zip(&resolved) {
-            if let Some(emit) = shared.emit_sized {
-                emit(to_candidate(entry, bytes));
-            }
-        }
-    }
-
-    // Entries the sizer never reported (channel edge cases) still need sizes -
-    // size them inline rather than shipping bytes=0 in the plan.
     let mut fell_back: Vec<usize> = Vec::new();
     {
         let results = shared
@@ -316,11 +256,10 @@ fn apply_progressive_sizes(entries: &mut [WalkEntry], shared: &SizerShared, exac
             match results.get(entry.path.as_str()) {
                 Some(&bytes) => entry.estimated_bytes = bytes,
                 None => {
-                    entry.estimated_bytes = if exact || entry.entry_type == WalkEntryType::Directory
-                    {
+                    entry.estimated_bytes = if exact {
                         sweep_fs::exact_size(&entry.path)
                     } else {
-                        stat_fallback(&entry.path)
+                        sweep_fs::apparent_size(&entry.path)
                     };
                     fell_back.push(index);
                 }
@@ -640,12 +579,12 @@ mod tests {
 
     /// Regression: sized events must interleave with discoveries, not burst at
     /// the end. Under the old post-walk sizing phase every `sized` landed after
-    /// the last `entry`. Timing alone can't pin this (a fast walk finishes
-    /// before a `du` spawn resolves), so the walk-side callback blocks once at
+    /// the last `entry`. Timing alone can't pin this (a fast walk can finish
+    /// before a size job resolves), so the walk-side callback blocks once at
     /// entry 30 until the sizer has emitted at least one update - if the old
     /// behavior returns, no update can fire while the walk is stalled and the
-    /// timeout fails the test. `exact` mode keeps sizing in-process so the
-    /// interleave doesn't depend on subprocess latency.
+    /// timeout fails the test. `exact` mode keeps sizing work tiny so the
+    /// interleave doesn't depend on filesystem latency.
     #[test]
     fn sized_events_interleave_with_discoveries() {
         use std::sync::{Condvar, Mutex as StdMutex};

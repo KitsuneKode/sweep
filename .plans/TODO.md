@@ -13,6 +13,10 @@
 
 ## Next
 
+- [ ] Execute [traversal engine](traversal-engine.md) — linear globs, a Rust
+      sizer that can beat JS+`du` on one fat artifact, one walk queue per
+      engine, then a truthful interrupted apply. Measure first. Do not start
+      FFI or a `rustix` walk unless the size gate fails.
 - [x] Execute [TUI + core audit fixes](tui-audit/README.md) — modal viewport
       clamp, patterns pane, streaming queue + always-confirm apply, density
       pass, engine/guardrail edge cases. All leftovers in

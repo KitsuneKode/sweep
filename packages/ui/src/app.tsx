@@ -536,15 +536,17 @@ export function SweepApp({
           if (gen !== generationRef.current || controller.signal.aborted) return;
           dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
         },
-        onProgress: ({ scannedDirs, skippedDirs, currentDir }) => {
+        onProgress: ({ scannedDirs, skippedDirs, currentDir, sizedCount }) => {
           if (gen !== generationRef.current || controller.signal.aborted) return;
           dispatch({
             type: "mutate",
-            fn: (s) =>
-              setScanCurrentDir(
+            fn: (s) => ({
+              ...setScanCurrentDir(
                 setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
                 currentDir ?? null,
               ),
+              scanSizedCount: sizedCount ?? s.scanSizedCount,
+            }),
           });
         },
         onDone: ({ scannedDirs, skippedDirs, plan: finalPlan }) => {
@@ -562,7 +564,9 @@ export function SweepApp({
             found !== undefined
               ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
               : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
-          setNotice(`${base} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}`);
+          setNotice(
+            `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}`,
+          );
           dispatch({
             type: "mutate",
             fn: (s) =>
@@ -660,6 +664,10 @@ export function SweepApp({
       setNotice("scan still running - wait or esc out");
       return;
     }
+    if (state.scanIncomplete) {
+      setNotice("scan incomplete: press r to retry before applying or saving");
+      return;
+    }
     if (summary.selectedCount === 0) {
       setNotice("nothing queued: space on a row queues it");
       return;
@@ -668,7 +676,7 @@ export function SweepApp({
     // dangerous tiers. The dialog tones down (no red banner) when nothing
     // dangerous is queued, but it is always there.
     setPendingApply(true);
-  }, [summary, state.scanning]);
+  }, [summary, state.scanning, state.scanIncomplete]);
 
   const focusPanel = useCallback(
     (focus: SweepUiState["focus"]) => {
@@ -693,6 +701,10 @@ export function SweepApp({
   const renderer = useRenderer();
 
   const exportPlan = useCallback(() => {
+    if (state.scanning || state.scanIncomplete) {
+      setNotice("scan incomplete: wait or press r to retry before saving");
+      return;
+    }
     if (summary.selectedCount === 0) {
       setNotice("nothing queued: space on a row queues it");
       return;
@@ -984,6 +996,8 @@ export function SweepApp({
       >
         {state.scanning ? (
           <ScanModeChip tokens={tokens} />
+        ) : state.scanIncomplete ? (
+          <ModeChip label=" INCOMPLETE " tokens={tokens} />
         ) : (
           <ModeChip label={` ${modeLabel(state.focus, false, visualActive)} `} tokens={tokens} />
         )}

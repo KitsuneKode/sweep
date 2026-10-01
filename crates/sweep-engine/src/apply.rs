@@ -113,6 +113,9 @@ fn revalidate_candidate(
     real_root: Option<&Path>,
 ) -> Result<ScanEntry, PathFailure> {
     let path = Path::new(candidate.entry.path.as_str());
+    if let Some(root) = real_root {
+        validate_real_parent(path, root)?;
+    }
     let meta = match fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(err) => {
@@ -314,25 +317,7 @@ fn delete_entry(entry: &ScanEntry, real_root: Option<&Path>) -> Result<(), PathF
         // symlink after revalidation redirects remove_dir_all outside the
         // target. Re-canonicalize the parent right before the delete - the
         // escape window shrinks to the syscall itself. JS parity.
-        if let Some(parent) = path.parent() {
-            match fs::canonicalize(parent) {
-                Ok(real_parent) if real_parent.starts_with(root) => {}
-                Ok(_) => {
-                    return Err(path_failure(
-                        &entry.path,
-                        FailureReasonCode::OutsideTarget,
-                        "parent resolves outside containment root".to_owned(),
-                    ));
-                }
-                Err(err) => {
-                    return Err(path_failure(
-                        &entry.path,
-                        classify_io_error(&err),
-                        err.to_string(),
-                    ));
-                }
-            }
-        }
+        validate_real_parent(path, root)?;
         // Type-flip check: a real dir swapped for a symlink since validation
         // must not be deleted through or unlinked as the wrong kind.
         match fs::symlink_metadata(path) {
@@ -389,6 +374,36 @@ fn delete_entry(entry: &ScanEntry, real_root: Option<&Path>) -> Result<(), PathF
     result.map_err(|err| path_failure(&entry.path, classify_io_error(&err), err.to_string()))
 }
 
+/// Unlink never follows a leaf symlink, but it does resolve its ancestors.
+/// Share this check between revalidation and the destructive boundary.
+fn validate_real_parent(path: &Path, root: &Path) -> Result<(), PathFailure> {
+    let display = path.to_string_lossy();
+    let parent = path.parent().ok_or_else(|| {
+        path_failure(
+            &display,
+            FailureReasonCode::OutsideTarget,
+            "candidate has no parent".to_owned(),
+        )
+    })?;
+    let real_parent = fs::canonicalize(parent)
+        .map_err(|err| path_failure(&display, classify_io_error(&err), err.to_string()))?;
+    if !real_parent.starts_with(root) {
+        return Err(path_failure(
+            &display,
+            FailureReasonCode::OutsideTarget,
+            "parent resolves outside containment root".to_owned(),
+        ));
+    }
+    if guardrails::path_has_protected_vcs_segment(&real_parent.to_string_lossy()) {
+        return Err(path_failure(
+            &display,
+            FailureReasonCode::ProtectedPath,
+            "parent resolves inside protected VCS metadata".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn path_failure(path: &str, code: FailureReasonCode, error: String) -> PathFailure {
     PathFailure {
         path: path.to_owned(),
@@ -422,6 +437,33 @@ mod tests {
     use super::*;
     use sweep_types::{RiskTier, ScanCandidate, ScanPlanSummary, SelectionPolicy};
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[test]
+    fn protect_symlink_candidates_beneath_vcs_aliases() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let git = dir.path().join(".git");
+        fs::create_dir(&git).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        let kept = dir.path().join("kept");
+        fs::write(&kept, "keep").unwrap_or_else(|err| panic!("write failed: {err}"));
+        std::os::unix::fs::symlink(&kept, git.join("node_modules"))
+            .unwrap_or_else(|err| panic!("symlink failed: {err}"));
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(&git, &alias)
+            .unwrap_or_else(|err| panic!("symlink failed: {err}"));
+        let path = alias.join("node_modules").to_string_lossy().into_owned();
+        let selected = candidate(&path, "node_modules", EntryType::Symlink, true);
+        let root =
+            fs::canonicalize(dir.path()).unwrap_or_else(|err| panic!("canonicalize failed: {err}"));
+        let validation = revalidate_candidate(&selected, Some(&root));
+        assert!(validation.is_err(), "VCS symlink passed revalidation");
+        assert!(
+            delete_entry(&selected.entry, Some(&root)).is_err(),
+            "VCS symlink passed delete-time checks"
+        );
+        assert!(fs::symlink_metadata(git.join("node_modules")).is_ok());
+        assert!(kept.exists());
+    }
 
     fn candidate(path: &str, name: &str, entry_type: EntryType, is_symlink: bool) -> ScanCandidate {
         ScanCandidate {

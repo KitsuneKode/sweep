@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
+import { dirname } from "node:path";
 import type {
   PathFailure,
   RiskTier,
@@ -197,6 +198,20 @@ export function revalidateCandidates(
           error: "candidate entry type changed since plan creation",
         });
         continue;
+      }
+
+      // Unlinking still follows ancestor directories. Validate the real parent
+      // for every entry, including links, without following the leaf itself.
+      if (realTarget) {
+        const realParent = realpathSync(dirname(candidate.path));
+        if (!isPathWithinRoot(realParent, realTarget) || pathHasProtectedVcsSegment(realParent)) {
+          failedPaths.push({
+            path: candidate.path,
+            code: isPathWithinRoot(realParent, realTarget) ? "protected_path" : "outside_target",
+            error: "candidate parent resolves outside the target or inside protected VCS metadata",
+          });
+          continue;
+        }
       }
 
       // Symlink candidates are unlinked (the link removed, never followed), so

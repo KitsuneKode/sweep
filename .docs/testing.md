@@ -217,6 +217,25 @@ materializes them with `bun run fixtures:sync` before engine tests run. Golden
 `expected.plan.json` files must use stable candidate ids (`bun run fixtures:validate-goldens`);
 regenerate with `bun run scripts/generate-parity-fixture.ts -- tests/fixtures/<name>`.
 
+## Engine latency benchmark
+
+Build the release binary, then compare the streaming APIs on generated small,
+wide and dense fixtures:
+
+```bash
+bun run engine:build
+bun run packages/core/benchmarks/engine-comparison.ts --samples 100 --warmups 3 --output /tmp/sweep-bench.json
+```
+
+`SWEEP_ENGINE_PATH` can pin a different binary. Runs alternate engine order,
+assert candidate and exact-byte parity, and record raw samples plus p50/p95/p99
+for completion, first discovery, first sized result, and a 5 ms event-loop
+heartbeat. Results use a warm filesystem cache and include Rust process startup
+and the native stream bridge. They exclude CLI startup, TUI rendering, apply,
+cold-cache behavior and memory measurement; an empirical p99 from 100 local
+samples is not a production latency guarantee. Use a quiet machine and report
+the runtime, CPU, platform, binary and fixture shape with any published result.
+
 ## Seeded scenarios
 
 `scripts/seed-fixture.ts` creates rich trees under `/tmp` for engine tests:

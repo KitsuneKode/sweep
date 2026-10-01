@@ -14,17 +14,21 @@ import { SweepApp, UiErrorBoundary } from "./app.js";
 import type { SweepUiOutcome } from "./outcome.js";
 import { openUiSession } from "./runtime.js";
 import type { SweepUiInitOptions } from "./state.js";
+import { StreamBatcher } from "./stream-batcher.js";
+
+export interface UiScanProgress {
+  scannedDirs: number;
+  skippedDirs: number;
+  currentDir?: string;
+  /** Unique artifacts whose size has resolved, including empty artifacts. */
+  sizedCount?: number;
+}
 
 /** Callbacks the app registers for one scan generation. */
 export interface UiScanHooks {
   /** Candidates discovered or resized since the last flush. */
   onBatch: (candidates: ScanCandidate[]) => void;
-  onProgress?: (meta: {
-    scannedDirs: number;
-    skippedDirs: number;
-    /** Directory being walked, relative to the target - for "scanning x/". */
-    currentDir?: string;
-  }) => void;
+  onProgress?: (meta: UiScanProgress) => void;
   /**
    * Scan finished. `plan` is the authoritative enriched result - the same
    * `buildPlan` output a non-streaming run produces, so workspace stubs and
@@ -108,68 +112,46 @@ export async function runSweepUiStreaming(
 
   const makeControl = (): UiScanControl => ({
     async start(hooks, signal) {
-      // Buffer discoveries so React sees batches, not per-entry renders.
-      const buffer = new Map<string, ScanCandidate>();
-      let timer: ReturnType<typeof setTimeout> | null = null;
-
-      let pendingProgress: {
-        scannedDirs: number;
-        skippedDirs: number;
-        currentDir?: string;
-      } | null = null;
-
-      const flush = () => {
-        timer = null;
-        if (signal.aborted) return;
-        // Progress rides the same 60ms window as discoveries - a hot scan emits
-        // a progress tick per directory batch, and each one is a dispatch +
-        // re-render, so without coalescing the strip alone can dominate the
-        // render budget on big trees.
-        if (pendingProgress) {
-          const progress = pendingProgress;
-          pendingProgress = null;
-          hooks.onProgress?.(progress);
-        }
-        if (buffer.size === 0) return;
-        const batch = [...buffer.values()];
-        buffer.clear();
-        hooks.onBatch(batch);
-      };
-      const schedule = () => {
-        if (timer === null && !signal.aborted) timer = setTimeout(flush, BATCH_FLUSH_MS);
+      let scannedDirs = 0;
+      let skippedDirs = 0;
+      let currentDir: string | undefined;
+      const sizedIds = new Set<string>();
+      const batcher = new StreamBatcher<ScanCandidate, UiScanProgress>(
+        (candidates, progress) => {
+          if (signal.aborted) return;
+          if (progress) hooks.onProgress?.(progress);
+          if (candidates.length > 0) hooks.onBatch(candidates);
+        },
+        BATCH_FLUSH_MS,
+        BATCH_FLUSH_CAP,
+      );
+      const cancel = () => batcher.cancel();
+      signal.addEventListener("abort", cancel, { once: true });
+      if (signal.aborted) batcher.cancel();
+      const reportProgress = (dirs: number, skipped: number, dir?: string) => {
+        scannedDirs = dirs;
+        skippedDirs = skipped;
+        currentDir = dir;
+        batcher.progress({
+          scannedDirs,
+          skippedDirs,
+          sizedCount: sizedIds.size,
+          ...(currentDir === undefined ? {} : { currentDir }),
+        });
       };
       const record = (entry: ScanEntry) => {
         if (signal.aborted) return;
         const candidate = candidateFromEntry(entry);
-        buffer.set(candidate.id, candidate); // sized upserts replace stubs
-        // First arrival of a generation flushes now - time-to-first-row is
-        // scanner latency, not scanner + a flush tick (opencode bypasses its
-        // batch window for hot deltas for the same reason). Bursts flush at
-        // the cap instead of queueing the whole window's worth.
-        if (buffer.size === 1 || buffer.size >= BATCH_FLUSH_CAP) {
-          if (timer !== null) {
-            clearTimeout(timer);
-            timer = null;
-          }
-          flush();
-        } else {
-          schedule();
-        }
+        batcher.record(candidate.id, candidate);
+      };
+      const recordSized = (entry: ScanEntry) => {
+        if (signal.aborted) return;
+        sizedIds.add(candidateFromEntry(entry).id);
+        reportProgress(scannedDirs, skippedDirs, currentDir);
+        record(entry);
       };
 
       try {
-        let scannedDirs = 0;
-        let skippedDirs = 0;
-        const reportProgress = (dirs: number, skipped: number, currentDir?: string) => {
-          scannedDirs = dirs;
-          skippedDirs = skipped;
-          pendingProgress = {
-            scannedDirs: dirs,
-            skippedDirs: skipped,
-            ...(currentDir === undefined ? {} : { currentDir }),
-          };
-          schedule();
-        };
         // The authoritative enriched plan - cross-candidate insights need the
         // whole set, so per-entry `candidateFromEntry` stubs are reconciled
         // against this when the scan ends.
@@ -181,17 +163,18 @@ export async function runSweepUiStreaming(
             selectionPolicy: options.selectionPolicy,
             exact: false,
             onEntry: record,
-            onEntrySized: record,
+            onEntrySized: recordSized,
             onProgress: ({ scannedDirs: dirs, skippedDirs: skipped, currentDir }) =>
               reportProgress(dirs, skipped, currentDir),
             signal,
           });
           scannedDirs = plan.summary.scannedDirs;
+          skippedDirs = plan.summary.skippedDirs ?? 0;
           finalPlan = plan;
         } else {
           const result = await scan(options.targetDir, currentConfig, false, {
             onEntry: record,
-            onEntrySized: record,
+            onEntrySized: recordSized,
             onProgress: ({ scannedDirs: dirs, skippedDirs: skipped, currentDir }) =>
               reportProgress(dirs, skipped, currentDir),
             signal,
@@ -201,11 +184,14 @@ export async function runSweepUiStreaming(
           finalPlan = buildPlan(options.targetDir, result, options.selectionPolicy);
         }
 
-        flush();
+        batcher.finish();
         if (!signal.aborted) hooks.onDone({ scannedDirs, skippedDirs, plan: finalPlan });
       } catch (error) {
-        flush();
+        batcher.finish();
         if (!signal.aborted) hooks.onError(error);
+      } finally {
+        batcher.cancel();
+        signal.removeEventListener("abort", cancel);
       }
     },
     syncPatterns(disabledPatterns, extraPatterns) {

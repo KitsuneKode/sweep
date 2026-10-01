@@ -1,15 +1,10 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ApplyReport,
-  ScanCandidate,
-  ScanCompletedEvent,
-  ScanEntry,
-  ScanEvent,
   ScanPlan,
   SelectionPolicy,
   SweepConfig,
@@ -17,10 +12,17 @@ import type {
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { GuardrailError } from "./guardrails.js";
 import { buildPlan } from "./planner.js";
-import { PlanValidationError, validateApplyReport, validatePlan } from "./plan.js";
+import {
+  PlanValidationError,
+  validateApplyReport,
+  validatePlan,
+  warmPlanValidator,
+} from "./plan.js";
 import type { ScanHooks } from "./scanner.js";
 import type { ScanToPlanOptions } from "./engine.js";
 import { nativePlatformForCurrentProcess } from "./native-platforms.js";
+import { NdjsonDecoder } from "./ndjson.js";
+import { RustScanStream } from "./rust-stream.js";
 
 export type EngineBackend = "js" | "rust";
 
@@ -194,7 +196,7 @@ async function runEngineAsync(
   return await new Promise<string>((resolvePromise, rejectPromise) => {
     let stdout = "";
     let stderr = "";
-    let lines: ReturnType<typeof createInterface> | undefined;
+    const lines = onLine ? new NdjsonDecoder(onLine, MAX_EVENT_LINE) : undefined;
     let settled = false;
 
     const settle = (fn: () => void) => {
@@ -207,19 +209,14 @@ async function runEngineAsync(
     proc.stderr.setEncoding("utf8");
 
     if (onLine) {
-      lines = createInterface({ input: proc.stdout });
-      lines.on("line", (line) => {
-        // One event is a candidate or a summary - a far longer line is not a
-        // legitimate payload, and bounding it keeps a broken engine from
-        // filling the readline buffer.
-        if (line.length > MAX_EVENT_LINE) {
+      proc.stdout.on("data", (chunk: string) => {
+        if (settled) return;
+        try {
+          lines?.push(chunk);
+        } catch (error) {
           terminateEngine(proc);
-          settle(() =>
-            rejectPromise(new Error(`rust engine event exceeded ${MAX_EVENT_LINE} bytes`)),
-          );
-          return;
+          settle(() => rejectPromise(error));
         }
-        if (line.length > 0) onLine(line);
       });
     } else {
       proc.stdout.on("data", (chunk: string) => {
@@ -242,19 +239,24 @@ async function runEngineAsync(
     });
 
     proc.on("error", (error) => {
-      lines?.close();
       settle(() =>
         rejectPromise(new Error(`failed to spawn rust engine at ${binary}: ${error.message}`)),
       );
     });
 
     proc.on("close", (code) => {
-      lines?.close();
+      if (settled) return;
       if (options.signal?.aborted) {
         settle(() => resolvePromise(stdout));
         return;
       }
       if (code === 0) {
+        try {
+          lines?.finish();
+        } catch (error) {
+          settle(() => rejectPromise(error));
+          return;
+        }
         settle(() => resolvePromise(stdout));
       } else {
         // The engine exits with the CLI's taxonomy (2 guardrail, 3 invalid
@@ -277,7 +279,13 @@ async function runEngineAsync(
       // Engine exiting early (bad config, bad args) can close the pipe while a
       // large payload is mid-write; swallow EPIPE here so the close-handler's
       // stderr-based error is what surfaces instead of an unhandled 'error'.
-      proc.stdin.on("error", () => {});
+      proc.stdin.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code === "EPIPE") return;
+        terminateEngine(proc);
+        settle(() =>
+          rejectPromise(new Error(`failed to send request to rust engine: ${error.message}`)),
+        );
+      });
       proc.stdin.write(stdin);
     }
     proc.stdin.end();
@@ -288,17 +296,6 @@ export interface RustScanOptions extends ScanHooks {
   config: SweepConfig;
   selectionPolicy: SelectionPolicy;
   exact?: boolean;
-}
-
-function scanEntryFromCandidate(candidate: ScanCandidate): ScanEntry {
-  return {
-    path: candidate.path,
-    name: candidate.name,
-    estimatedBytes: candidate.estimatedBytes,
-    ...(candidate.modifiedMs !== undefined ? { modifiedMs: candidate.modifiedMs } : {}),
-    isSymlink: candidate.isSymlink,
-    entryType: candidate.entryType,
-  };
 }
 
 /**
@@ -328,71 +325,25 @@ export async function scanToPlanViaRust(
   });
 
   if (!wantsStream) {
-    const stdout = await runEngineAsync(["scan", absoluteTarget], stdin, undefined, {
+    const scan = runEngineAsync(["scan", absoluteTarget], stdin, undefined, {
       signal: options.signal,
     });
+    // Compile the plan validator while the subprocess scans - the cold AJV
+    // compile (~100ms) hides entirely under the engine's walk.
+    warmPlanValidator();
+    const stdout = await scan;
+    if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
     return validatePlan(JSON.parse(stdout));
   }
 
-  const entriesByPath = new Map<string, ScanEntry>();
-  // Holder object: TS narrows plain `let` captures even when callbacks assign them.
-  const state: { summary: ScanCompletedEvent["summary"] | null } = { summary: null };
-  let exact = options.exact ?? false;
-
-  await runEngineAsync(
-    ["scan", absoluteTarget],
-    stdin,
-    (line) => {
-      let event: ScanEvent & { summary?: ScanCompletedEvent["summary"] & { exact?: boolean } };
-      try {
-        event = JSON.parse(line);
-      } catch {
-        return;
-      }
-
-      if (event.type === "candidate_found") {
-        const entry = scanEntryFromCandidate(event.candidate);
-        // Found-but-never-updated candidates must still reach the final plan;
-        // keying by path means a later candidate_updated replaces this stub.
-        entriesByPath.set(entry.path, entry);
-        options.onEntry?.(entry);
-      } else if (event.type === "candidate_updated") {
-        const entry = scanEntryFromCandidate(event.candidate);
-        entriesByPath.set(entry.path, entry);
-        options.onEntrySized?.(entry);
-      } else if (event.type === "scan_progress") {
-        options.onProgress?.({
-          scannedDirs: event.scannedDirs,
-          found: event.found,
-          skippedDirs: event.skippedDirs ?? 0,
-          ...(event.currentDir === undefined ? {} : { currentDir: event.currentDir }),
-        });
-      } else if (event.type === "scan_completed") {
-        state.summary = event.summary;
-        if (event.summary.exact !== undefined) {
-          exact = event.summary.exact;
-        }
-      }
-    },
-    { signal: options.signal },
-  );
-
-  const entries = [...entriesByPath.values()];
-  const completed = state.summary;
-  const estimatedTotalBytes =
-    completed?.estimatedTotalBytes ?? entries.reduce((sum, entry) => sum + entry.estimatedBytes, 0);
-
+  const stream = new RustScanStream(absoluteTarget, options, options.exact ?? false);
+  await runEngineAsync(["scan", absoluteTarget], stdin, (line) => stream.push(line), {
+    signal: options.signal,
+  });
+  if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
   return buildPlan(
     absoluteTarget,
-    {
-      entries,
-      estimatedTotalBytes,
-      scannedDirs: completed?.scannedDirs ?? 0,
-      // The Rust engine does not currently report skipped/unreadable dirs;
-      // forward-compatible with a future `skippedDirs` field on the event.
-      skippedDirs: completed?.skippedDirs ?? 0,
-      exact,
-    },
+    stream.finish(),
     options.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
   );
 }

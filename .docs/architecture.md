@@ -101,6 +101,30 @@ See [.docs/workspace-layout.md](workspace-layout.md) for the directory map and
 
 ## Performance direction
 
+### Implemented scan transport and UI lifecycle
+
+The native NDJSON bridge bounds each UTF-8 line before buffering it,
+structurally validates every event, and requires a matching start, discovered
+and sized candidates, and consistent completion counts and bytes. A malformed
+or truncated stream fails the scan instead of returning a partial executable
+plan. Cancellation and non-EPIPE request-write failures stop the child process.
+Engine emit is buffered: found/updated candidates batch into
+`candidates_found`/`candidates_updated` lines that flush on a 16 ms heartbeat,
+at 64 pending, immediately on the first batch, and once at completion.
+
+The TUI reveals the first candidate immediately, then coalesces discoveries and
+size updates by ID over a 60 ms window, flushing at 200 pending candidates. Each
+scan generation owns its timer and cancels it on abort or completion. Discovery
+order remains pinned until final enrichment, and manual selection decisions
+survive that reconciliation. The strip reports unresolved sizes separately from
+found artifacts. A failed generation stays incomplete after its error is
+dismissed; apply and plan export require successful finalization. A completed
+scan with skipped directories remains usable and is explicitly labeled partial.
+
+Queue totals cache by candidate, selection and visible-list identity, so cursor
+moves and progress ticks reuse totals. Selection changes still rebuild grouping
+and sorting; row windowing alone does not bound the entire interaction cost.
+
 - Optimize for time-to-first-result.
 - Keep memory bounded.
 - Prefer a single traversal stream with bounded worker pools.

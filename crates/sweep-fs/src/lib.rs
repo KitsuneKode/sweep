@@ -5,17 +5,8 @@ use rayon::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::Read;
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
-use std::thread;
-use std::time::{Duration, Instant};
-
-/// Maximum paths passed to a single `du` invocation (aligned with JS `DU_CHUNK_SIZE`).
-pub const DU_CHUNK_SIZE: usize = 50;
-/// Stay well under ARG_MAX even with deep monorepo paths (aligned with JS `DU_ARGV_BUDGET`).
-pub const DU_ARGV_BUDGET: usize = 96 * 1024;
 
 /// mtime of the path itself in epoch milliseconds, or `None` if it cannot be read.
 fn modified_ms(path: &Utf8Path) -> Option<u64> {
@@ -218,13 +209,38 @@ struct WalkCtx<'a> {
     /// `(dev, ino)` of directories already walked. A bind mount or hardlinked
     /// dir makes one filesystem object reachable under several paths; without
     /// this the walk would revisit it forever at depth -1.
-    visited: Option<&'a Mutex<HashSet<(u64, u64)>>>,
+    visited: Option<&'a VisitedDirs>,
 }
 
 /// Mirrors the JS scanner's `markDir`: false when the dir cannot be stat'd or
 /// was already walked under a different path. The not-a-real-dir refusal runs
 /// on every platform; only the (dev, ino) dedupe is unix-specific - Windows
 /// dedupes on (volume serial, file index) instead.
+/// Visited-directory set shared by all walk threads. One mutex per shard keeps
+/// a deep tree's per-dir `lstat`+insert off a single contended lock.
+struct VisitedDirs {
+    shards: [Mutex<HashSet<(u64, u64)>>; 16],
+}
+
+impl VisitedDirs {
+    fn new() -> Self {
+        Self {
+            shards: std::array::from_fn(|_| Mutex::new(HashSet::new())),
+        }
+    }
+
+    /// Returns false if `(dev, ino)` was already inserted - an inode alias
+    /// (bind mount, hardlinked dir) would otherwise loop the walk forever.
+    fn insert(&self, dev: u64, ino: u64) -> bool {
+        let shard = &self.shards[(ino as usize) & 15];
+        match shard.lock() {
+            Ok(mut guard) => guard.insert((dev, ino)),
+            // A poisoned lock degrades to no dedupe rather than aborting the scan.
+            Err(_) => true,
+        }
+    }
+}
+
 fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
     let meta = match fs::symlink_metadata(dir.as_std_path()) {
         Ok(meta) => meta,
@@ -248,22 +264,15 @@ fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
         if meta.ino() == 0 {
             return true;
         }
-        match visited.lock() {
-            Ok(mut guard) => guard.insert((meta.dev(), meta.ino())),
-            // A poisoned lock degrades to no dedupe rather than aborting the scan.
-            Err(_) => true,
-        }
+        visited.insert(meta.dev(), meta.ino())
     }
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
         match (meta.volume_serial_number(), meta.file_index()) {
-            (Some(vol), Some(idx)) if idx != 0 => match visited.lock() {
-                Ok(mut guard) => guard.insert((vol, idx)),
-                Err(_) => true,
-            },
             // Filesystems without file indices (some network drives) cannot
             // dedupe - links are refused above, so no revisit cycle can form.
+            (Some(vol), Some(idx)) if idx != 0 => visited.insert(vol, idx),
             _ => true,
         }
     }
@@ -289,7 +298,7 @@ pub fn walk_matched_entries_with_hooks(
     };
     let scanned = AtomicU32::new(0);
     let skipped = AtomicU32::new(0);
-    let visited = Mutex::new(HashSet::new());
+    let visited = VisitedDirs::new();
     let ctx = WalkCtx {
         root,
         config,
@@ -578,195 +587,207 @@ impl PatternMatcher {
     }
 }
 
-/// Tree-aware byte estimate aligned with the JS scanner (`du` fast path + walk fallback).
+/// Tree-aware byte estimate aligned with the JS scanner's `du` fast path.
 pub fn estimate_bytes(path: &Utf8Path) -> u64 {
-    batch_estimate_bytes(&[path])
-        .get(path.as_str())
-        .copied()
-        .unwrap_or_else(|| stat_fallback(path))
+    apparent_size(path)
 }
 
-/// Maximum `du` subprocesses in flight at once; matches the JS scanner's
-/// `DU_MAX_INFLIGHT`. `du` is I/O-bound - past a handful of concurrent
-/// processes the disk is the wall and extra spawns only add contention.
-const DU_MAX_INFLIGHT: usize = 4;
+/// How many in-process sizing walks run at once. `lstat`+`readdir` is I/O
+/// bound - past a handful of threads the disk is the wall and extra
+/// parallelism only adds contention, same bound reasoning as the JS
+/// `DU_MAX_INFLIGHT`.
+const SIZE_MAX_INFLIGHT: usize = 8;
 
-/// Batch `du` estimates for many paths (single subprocess per chunk of 50,
-/// chunks in flight concurrently like the JS `ProgressiveSizer`).
-pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
-    let mut result = HashMap::new();
-    if paths.is_empty() {
-        return result;
+/// Run `f` over `items` on a small dedicated pool instead of the global rayon
+/// pool, falling back to a sequential loop if the pool can't be built.
+fn run_bounded<T: Send + Sync, R: Send>(
+    items: &[T],
+    threads: usize,
+    f: impl Fn(&T) -> R + Sync,
+) -> Vec<R> {
+    match rayon::ThreadPoolBuilder::new().num_threads(threads).build() {
+        Ok(pool) => pool.install(|| items.par_iter().map(&f).collect()),
+        Err(_) => items.iter().map(f).collect(),
     }
+}
 
-    let chunks = chunk_paths_for_du(paths);
-    // A dedicated small pool bounds concurrency at DU_MAX_INFLIGHT instead of
-    // the global rayon pool's thread count - parallel `du` on the same volume
-    // thrashes disks long before cores are the limit.
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(DU_MAX_INFLIGHT)
-        .build();
-    let chunk_results: Vec<HashMap<String, u64>> = match pool {
-        Ok(pool) => pool.install(|| {
-            chunks
-                .par_iter()
-                .map(|chunk| du_estimate_chunk(chunk).unwrap_or_default())
-                .collect()
-        }),
-        Err(_) => chunks
-            .iter()
-            .map(|chunk| du_estimate_chunk(chunk).unwrap_or_default())
-            .collect(),
+/// Inside one candidate, only the first few levels get parallel descent -
+/// that is where the fan-out is. Deeper levels stay lazy and serial so a
+/// million tiny dirs never pay a Vec+task overhead per directory.
+const SIZE_PAR_DEPTH: u8 = 3;
+/// Fewer subdirs than this and spawning tasks costs more than the win.
+const SIZE_PAR_MIN_DIRS: usize = 4;
+
+/// Shared subtree walk for `apparent_size`/`exact_size`. `leaf` prices every
+/// non-directory inode met inside the walk - symlinks and reparse points are
+/// priced as themselves and never followed (descending a junction could walk
+/// upward into the tree - a cycle, not a subtree).
+fn dir_subtree_size(
+    dir: &Utf8Path,
+    leaf: &(dyn Fn(&fs::Metadata) -> u64 + Sync),
+    depth: u8,
+) -> u64 {
+    let Ok(read_dir) = fs::read_dir(dir.as_std_path()) else {
+        return 0;
     };
-    for chunk_map in chunk_results {
-        result.extend(chunk_map);
-    }
-
-    result
-}
-
-fn chunk_paths_for_du<'a>(paths: &'a [&'a Utf8Path]) -> Vec<&'a [&'a Utf8Path]> {
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    let mut used = 3usize;
-    for (index, path) in paths.iter().enumerate() {
-        let cost = path.as_str().len() + 1;
-        if index > start && (index - start >= DU_CHUNK_SIZE || used + cost > DU_ARGV_BUDGET) {
-            chunks.push(&paths[start..index]);
-            start = index;
-            used = 3;
+    let deep = depth >= SIZE_PAR_DEPTH;
+    let mut total = 0u64;
+    let mut subdirs: Vec<Utf8PathBuf> = Vec::new();
+    for item in read_dir.flatten() {
+        // Dirent answers the type for free on most filesystems; `lstat` is
+        // only paid when the leaf size or (Windows) the reparse bit needs it.
+        let Ok(file_type) = item.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() || !file_type.is_dir() {
+            let child = match Utf8PathBuf::from_path_buf(item.path()) {
+                Ok(child) => child,
+                Err(_) => continue,
+            };
+            let Ok(meta) = fs::symlink_metadata(child.as_std_path()) else {
+                continue;
+            };
+            // Some filesystems answer every dirent as DT_UNKNOWN - when the
+            // lstat disagrees with the dirent, the lstat wins: a real dir must
+            // still be descended or the subtree is priced at zero.
+            if meta.is_dir() && !meta.file_type().is_symlink() && !meta_is_reparse_point(&meta) {
+                if deep {
+                    total += dir_subtree_size(&child, leaf, depth + 1);
+                } else {
+                    subdirs.push(child);
+                }
+                continue;
+            }
+            total += leaf(&meta);
+            continue;
         }
-        used += cost;
+        // Junctions/reparse points must not be descended - they can point
+        // anywhere, including upward. Only Windows needs the attribute check;
+        // on unix a dirent `is_dir` is a real directory.
+        #[cfg(windows)]
+        let descendable = {
+            let child = match Utf8PathBuf::from_path_buf(item.path()) {
+                Ok(child) => child,
+                Err(_) => continue,
+            };
+            match fs::symlink_metadata(child.as_std_path()) {
+                Ok(meta) if meta_is_reparse_point(&meta) || !meta.is_dir() => {
+                    total += leaf(&meta);
+                    false
+                }
+                Ok(_) => true,
+                Err(_) => false,
+            }
+        };
+        #[cfg(not(windows))]
+        let descendable = true;
+
+        if descendable {
+            let Ok(child) = Utf8PathBuf::from_path_buf(item.path()) else {
+                continue;
+            };
+            if deep {
+                total += dir_subtree_size(&child, leaf, depth + 1);
+            } else {
+                subdirs.push(child);
+            }
+        }
     }
-    if start < paths.len() {
-        chunks.push(&paths[start..]);
+    if subdirs.is_empty() {
+        return total;
     }
-    chunks
+    if subdirs.len() >= SIZE_PAR_MIN_DIRS {
+        // Nested par_iter joins the global pool: an idle sizer tail picks up
+        // the work, saturated workers just run it inline.
+        total
+            + subdirs
+                .par_iter()
+                .map(|dir| dir_subtree_size(dir, leaf, depth + 1))
+                .sum::<u64>()
+    } else {
+        total
+            + subdirs
+                .iter()
+                .map(|dir| dir_subtree_size(dir, leaf, depth + 1))
+                .sum::<u64>()
+    }
 }
 
-/// Exact recursive size by walking all files under a path (aligned with JS `exactSize`).
+/// `du -sb`-equivalent apparent size, computed in-process: the sum of `lstat`
+/// size over every non-directory inode in the subtree (no cross-file hardlink
+/// dedup - du dedups inode bodies within one invocation, we price each link).
+pub fn apparent_size(path: &Utf8Path) -> u64 {
+    let meta = match fs::symlink_metadata(path.as_std_path()) {
+        Ok(meta) => meta,
+        Err(_) => return 0,
+    };
+    if meta.file_type().is_symlink() || meta_is_reparse_point(&meta) || !meta.is_dir() {
+        return meta.len();
+    }
+    dir_subtree_size(path, &|meta| meta.len(), 0)
+}
+
+/// Exact recursive size by walking all files under a path (aligned with JS
+/// `exactSize`: root links price as themselves, in-subtree links are skipped).
 pub fn exact_size(path: &Utf8Path) -> u64 {
     let meta = match fs::symlink_metadata(path.as_std_path()) {
         Ok(meta) => meta,
         Err(_) => return 0,
     };
-
-    if meta.file_type().is_symlink() {
-        return meta.len();
-    }
-    if meta.is_file() {
+    if meta.file_type().is_symlink() || meta.is_file() {
         return meta.len();
     }
     if !meta.is_dir() {
         return 0;
     }
-
-    walk_size(path)
+    dir_subtree_size(path, &|meta| if meta.is_file() { meta.len() } else { 0 }, 0)
 }
 
-/// Apply size estimates to walk entries, optionally using exact recursive sizing.
+/// In-process apparent sizes for many paths, computed on a bounded pool so a
+/// scan never pays a `du` subprocess spawn per chunk.
+pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
+    let sizes = run_bounded(paths, SIZE_MAX_INFLIGHT, |path| apparent_size(path));
+    paths
+        .iter()
+        .map(|path| path.as_str().to_owned())
+        .zip(sizes)
+        .collect()
+}
+
+/// Apply size estimates to walk entries on a bounded pool. `exact` uses the
+/// files-only walk (JS `exactSize` parity); the default uses `du -sb`
+/// semantics computed in-process - no subprocess per chunk.
 pub fn apply_size_estimates(entries: &mut [WalkEntry], exact: bool) {
     if entries.is_empty() {
         return;
     }
-
-    if exact {
-        for entry in entries.iter_mut() {
-            entry.estimated_bytes = exact_size(&entry.path);
-        }
-        return;
-    }
-
-    let path_refs: Vec<&Utf8Path> = entries.iter().map(|entry| entry.path.as_path()).collect();
-    let size_map = batch_estimate_bytes(&path_refs);
-
-    for entry in entries.iter_mut() {
-        entry.estimated_bytes = size_map
-            .get(entry.path.as_str())
-            .copied()
-            .unwrap_or_else(|| {
-                if entry.entry_type == WalkEntryType::Directory {
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(SIZE_MAX_INFLIGHT)
+        .build();
+    match pool {
+        Ok(pool) => pool.install(|| {
+            entries.par_iter_mut().for_each(|entry| {
+                entry.estimated_bytes = if exact {
                     exact_size(&entry.path)
                 } else {
-                    stat_fallback(&entry.path)
-                }
+                    apparent_size(&entry.path)
+                };
             });
-    }
-}
-
-const DU_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Size one chunk of paths with a single `du` subprocess.
-///
-/// Public so streaming consumers (the engine's progressive sizer) can issue
-/// chunks as paths arrive rather than waiting for the full set. `None` means
-/// `du` failed or is unsupported on this platform - callers fall back to
-/// `exact_size`/`stat_fallback` per path.
-pub fn du_estimate_chunk(paths: &[&Utf8Path]) -> Option<HashMap<String, u64>> {
-    if paths.is_empty() {
-        return Some(HashMap::new());
-    }
-
-    let (flag, multiplier) = match std::env::consts::OS {
-        "linux" => ("-sb", 1u64),
-        "macos" => ("-sk", 1024u64),
-        _ => return None,
-    };
-
-    let mut command = Command::new("du");
-    command.arg(flag);
-    // A path that begins with "-" must not be parsed as a du option.
-    command.arg("--");
-    for path in paths {
-        command.arg(path.as_str());
-    }
-    command.stdout(Stdio::piped()).stderr(Stdio::null());
-
-    let mut child = command.spawn().ok()?;
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if started.elapsed() >= DU_TIMEOUT {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                thread::sleep(Duration::from_millis(10));
+        }),
+        Err(_) => {
+            for entry in entries.iter_mut() {
+                entry.estimated_bytes = if exact {
+                    exact_size(&entry.path)
+                } else {
+                    apparent_size(&entry.path)
+                };
             }
-            Err(_) => return None,
         }
-    };
-
-    if !status.success() {
-        return None;
     }
-
-    let mut stdout = child.stdout.take()?;
-    let mut output = String::new();
-    stdout.read_to_string(&mut output).ok()?;
-
-    let mut result = HashMap::new();
-    for line in output.lines() {
-        if line.is_empty() {
-            continue;
-        }
-        let Some(tab) = line.find('\t') else {
-            continue;
-        };
-        let Some(raw) = line[..tab].trim().parse::<u64>().ok() else {
-            continue;
-        };
-        let path = line[tab + 1..].to_owned();
-        result.insert(path, raw * multiplier);
-    }
-
-    Some(result)
 }
 
 /// Size of the entry itself (lstat, so symlinks report the link). The
-/// no-recursion fallback when `du` misses a path.
+/// no-recursion fallback for paths that can't be walked.
 pub fn stat_fallback(path: &Utf8Path) -> u64 {
     // symlink_metadata, not metadata: a symlink candidate's size is the link
     // itself - following it would report the target and misreport freed bytes.
@@ -810,53 +831,44 @@ fn is_reparse_point_or_symlink(entry_path: &Utf8Path) -> bool {
     meta_is_reparse_point(&meta)
 }
 
-fn walk_size(path: &Utf8Path) -> u64 {
-    let meta = match fs::symlink_metadata(path.as_std_path()) {
-        Ok(meta) => meta,
-        Err(_) => return 0,
-    };
-
-    if meta.file_type().is_symlink() {
-        return meta.len();
-    }
-
-    // Reparse-point directories (junctions) must not be descended: they can
-    // point anywhere, including upward into the tree - that is a cycle, not
-    // a subtree. Report only the link's own footprint.
-    if meta_is_reparse_point(&meta) {
-        return meta.len();
-    }
-
-    if meta.is_file() {
-        return meta.len();
-    }
-
-    if !meta.is_dir() {
-        return 0;
-    }
-
-    let mut total = 0u64;
-    let read_dir = match fs::read_dir(path.as_std_path()) {
-        Ok(items) => items,
-        Err(_) => return 0,
-    };
-
-    for item in read_dir.flatten() {
-        let child = Utf8PathBuf::from_path_buf(item.path()).ok();
-        let Some(child) = child else { continue };
-        if item.file_type().map(|ft| ft.is_symlink()).unwrap_or(false) {
-            continue;
-        }
-        total += walk_size(&child);
-    }
-
-    total
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// `du -sb` semantics: files and symlinks count their own `lstat` size,
+    /// directories contribute only their children, links are never followed.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn apparent_size_matches_du_sb() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let tree = root.join("node_modules");
+        fs::create_dir_all(tree.join("nested/deep").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::write(tree.join("a.bin").as_std_path(), vec![0u8; 4096])
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+        fs::write(tree.join("nested/b.bin").as_std_path(), vec![0u8; 17])
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+        std::os::unix::fs::symlink("a.bin", tree.join("link").as_std_path())
+            .unwrap_or_else(|err| panic!("symlink failed: {err}"));
+
+        let output = std::process::Command::new("du")
+            .arg("-sb")
+            .arg("--")
+            .arg(tree.as_str())
+            .output()
+            .unwrap_or_else(|err| panic!("du failed: {err}"));
+        let du_bytes: u64 = String::from_utf8_lossy(&output.stdout)
+            .split('\t')
+            .next()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or_else(|| panic!("could not parse du output"));
+
+        assert_eq!(apparent_size(&tree), du_bytes);
+    }
 
     #[test]
     fn walk_matched_entries_finds_node_modules() {
@@ -1154,7 +1166,7 @@ mod tests {
         fs::create_dir_all(sub.as_std_path()).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
 
         let ctx_config = WalkConfig::default();
-        let visited = Mutex::new(HashSet::new());
+        let visited = VisitedDirs::new();
         let ctx = WalkCtx {
             root,
             config: &ctx_config,

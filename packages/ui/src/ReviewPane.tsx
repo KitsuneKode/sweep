@@ -151,6 +151,7 @@ export function ReviewPane({
           <ScanningStrip
             tokens={tokens}
             found={state.candidates.length}
+            pendingSizes={Math.max(0, state.candidates.length - state.scanSizedCount)}
             scannedDirs={state.scannedDirs}
             skippedDirs={state.skippedDirs}
             currentDir={state.scanCurrentDir}
@@ -279,6 +280,7 @@ function ScanningPanel({
 function ScanningStrip({
   tokens,
   found,
+  pendingSizes,
   scannedDirs,
   skippedDirs,
   currentDir,
@@ -287,6 +289,7 @@ function ScanningStrip({
 }: {
   tokens: ThemeTokens;
   found: number;
+  pendingSizes: number;
   scannedDirs: number;
   skippedDirs: number;
   currentDir: string | null;
@@ -309,6 +312,9 @@ function ScanningStrip({
         content={t`${bold(fg(tokens.accent)("scanning"))}  ${fg(tokens.textSecondary)(`${found} found`)}  ${dim("\u00b7")}  ${fg(tokens.textMuted)(dirs)}`}
         wrapMode="none"
       />
+      {pendingSizes > 0 ? (
+        <text content={t`${fg(tokens.textMuted)(`${pendingSizes} sizing`)}`} wrapMode="none" />
+      ) : null}
       {currentDir !== null ? (
         // ncdu's "current item" idiom - the path keeps moving even when the
         // counters stall, which is the proof-of-life a big tree needs.

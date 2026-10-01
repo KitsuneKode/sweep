@@ -61,6 +61,9 @@ export interface SweepUiState {
   patternsDirty: boolean;
   /** True while a streaming scan is still filling candidates. */
   scanning: boolean;
+  /** A failed or unfinished generation cannot be exported or applied. */
+  scanIncomplete: boolean;
+  scanSizedCount: number;
   /** Directories visited by the current/last scan (0 until the engine reports). */
   scannedDirs: number;
   /**
@@ -156,6 +159,8 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     themeMode: "auto",
     patternsDirty: false,
     scanning: false,
+    scanIncomplete: false,
+    scanSizedCount: plan.candidates.length,
     scannedDirs: plan.summary.scannedDirs,
     scanCurrentDir: null,
     sortBy: "size",
@@ -592,7 +597,14 @@ function snapToNearestItem(state: SweepUiState): SweepUiState {
 export function setScanning(state: SweepUiState, scanning: boolean): SweepUiState {
   if (state.scanning === scanning) return state;
   if (scanning) {
-    return { ...state, scanning: true, orderPinned: true, scanCurrentDir: null };
+    return {
+      ...state,
+      scanning: true,
+      scanIncomplete: true,
+      scanSizedCount: 0,
+      orderPinned: true,
+      scanCurrentDir: null,
+    };
   }
 
   // The scan is over (finished or failed): unpin and sort once.
@@ -613,7 +625,7 @@ export function setScanning(state: SweepUiState, scanning: boolean): SweepUiStat
 
   // The user moved the cursor, so that choice outranks the sort: the re-sort
   // renumbers every row, hold onto their artifact rather than its index.
-  return reanchor(state, { scanning: false, orderPinned: false });
+  return reanchor(state, { scanning: false, orderPinned: false, scanCurrentDir: null });
 }
 
 export function setScannedDirs(state: SweepUiState, scannedDirs: number): SweepUiState {
@@ -648,6 +660,11 @@ export function setSkippedDirs(state: SweepUiState, skippedDirs: number): SweepU
  * - everything else follows the plan's `selectedCandidateIds` policy set.
  */
 export function finalizeScan(state: SweepUiState, plan: ScanPlan | undefined): SweepUiState {
+  state = {
+    ...state,
+    scanIncomplete: false,
+    scanSizedCount: plan?.candidates.length ?? state.candidates.length,
+  };
   if (!plan) return setScanning(state, false);
 
   const policyIds = new Set(plan.selectedCandidateIds);
@@ -761,6 +778,8 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     scopeFilter: null,
     collapsedGroups: new Set<string>(),
     scanning: true,
+    scanIncomplete: true,
+    scanSizedCount: 0,
     orderPinned: true,
     scannedDirs: 0,
     scanCurrentDir: null,
@@ -836,13 +855,7 @@ export function toggleSelectionById(state: SweepUiState, candidateId: string): S
 }
 
 export function countSelectedDangerous(state: SweepUiState): number {
-  let count = 0;
-  for (const candidate of state.candidates) {
-    if (state.selectedIds.has(candidate.id) && candidate.riskTier === "dangerous") {
-      count += 1;
-    }
-  }
-  return count;
+  return getUiSummary(state).selectedRiskCounts.dangerous;
 }
 
 export function selectSafeOnly(state: SweepUiState): SweepUiState {
@@ -1031,8 +1044,24 @@ export function getCurrentCandidate(state: SweepUiState): ScanCandidate | undefi
   return candidateId ? candidateById(state, candidateId) : undefined;
 }
 
+// Cursor, elapsed ticks and scan progress change state without changing totals.
+// Key on the actual immutable inputs so those frames do no full-list counting.
+let summaryLast: {
+  candidates: ScanCandidate[];
+  selectedIds: ReadonlySet<string>;
+  visible: ScanCandidate[];
+  result: SweepUiSummary;
+} | null = null;
+
 export function getUiSummary(state: SweepUiState): SweepUiSummary {
   const visible = getVisibleCandidates(state);
+  if (
+    summaryLast?.candidates === state.candidates &&
+    summaryLast.selectedIds === state.selectedIds &&
+    summaryLast.visible === visible
+  ) {
+    return summaryLast.result;
+  }
   let visibleSelectedCount = 0;
   let dangerousVisibleCount = 0;
 
@@ -1054,7 +1083,7 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
     selectedRiskCounts[candidate.riskTier]++;
   }
 
-  return {
+  const result: SweepUiSummary = {
     visibleCount: visible.length,
     selectedCount,
     selectedBytes,
@@ -1062,9 +1091,14 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
     dangerousVisibleCount,
     selectedRiskCounts,
   };
+  summaryLast = { candidates: state.candidates, selectedIds: state.selectedIds, visible, result };
+  return result;
 }
 
 export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan {
+  if (state.scanning || state.scanIncomplete) {
+    throw new Error("scan incomplete: rescan successfully before applying or saving a plan");
+  }
   const selectedSet = new Set(state.selectedIds);
   const selectedCandidateIds: string[] = [];
   let totalBytes = 0;

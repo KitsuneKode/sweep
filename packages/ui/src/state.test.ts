@@ -247,6 +247,29 @@ describe("sweep ui state", () => {
     }
   });
 
+  test("incomplete scans cannot become executable plans until successful finalization", () => {
+    const plan = createPlan();
+    const running = setScanning(createUiState(plan), true);
+    expect(() => applyUiSelection(plan, running)).toThrow("scan incomplete");
+    const failed = setScanning(running, false);
+    expect(failed.scanning).toBe(false);
+    expect(() => applyUiSelection(plan, failed)).toThrow("scan incomplete");
+    const complete = finalizeScan(failed, plan);
+    expect(applyUiSelection(plan, complete).selectedCandidateIds).toEqual(
+      plan.selectedCandidateIds,
+    );
+  });
+
+  test("cursor and progress changes reuse queue totals while selection invalidates them", () => {
+    const state = createUiState(createPlan());
+    const summary = getUiSummary(state);
+    expect(getUiSummary(moveCursor(state, 1))).toBe(summary);
+    expect(getUiSummary({ ...state, scannedDirs: 100 })).toBe(summary);
+    const changed = toggleCurrentSelection(state);
+    expect(getUiSummary(changed)).not.toBe(summary);
+    expect(getUiSummary(changed).selectedCount).not.toBe(summary.selectedCount);
+  });
+
   test("applyUiSelection syncs selected ids back into a plan", () => {
     let state = selectVisible(createUiState(createPlan()), true);
     const nextPlan = applyUiSelection(createPlan(), state);

@@ -103,10 +103,13 @@ enum ScanStreamEvent {
         #[serde(rename = "targetDir")]
         target_dir: String,
     },
-    #[serde(rename = "candidate_found")]
-    CandidateFound { candidate: ScanCandidate },
-    #[serde(rename = "candidate_updated")]
-    CandidateUpdated { candidate: ScanCandidate },
+    /// Candidates stream out in batches: the emitter accumulates events and
+    /// flushes on a ~16ms cadence, so a busy scan costs a few dozen writes
+    /// (and reader-side parses) instead of one per candidate.
+    #[serde(rename = "candidates_found")]
+    CandidatesFound { candidates: Vec<ScanCandidate> },
+    #[serde(rename = "candidates_updated")]
+    CandidatesUpdated { candidates: Vec<ScanCandidate> },
     #[serde(rename = "scan_progress")]
     ScanProgress {
         #[serde(rename = "scannedDirs")]
@@ -202,6 +205,9 @@ fn run_scan() -> Result<(), CliFailure> {
         )
         .map_err(CliFailure::from)?;
 
+        // Drain pending candidates before the terminal event so completed
+        // stays last on the wire.
+        emitter.finish();
         if let Some(err) = emitter.into_error() {
             return Err(CliFailure::failure(err));
         }
@@ -236,35 +242,56 @@ fn run_scan() -> Result<(), CliFailure> {
 
 struct StreamEmitter {
     error: Mutex<Option<String>>,
+    state: Mutex<EmitterState>,
 }
+
+/// Pending stream output. Found and updated candidates accumulate into
+/// batches; progress events coalesce to the latest. A flush writes the batch
+/// lines then flushes the `BufWriter`, so each flush is one syscall burst.
+struct EmitterState {
+    out: io::BufWriter<io::Stdout>,
+    found: Vec<ScanCandidate>,
+    updated: Vec<ScanCandidate>,
+    progress: Option<(u32, u32, u32, Option<String>)>,
+    last_flush: std::time::Instant,
+    flushed_once: bool,
+}
+
+/// Flush once this many candidates are pending - bounds latency when the
+/// walk outpaces the progress heartbeat.
+const EMIT_BATCH_AT: usize = 64;
+/// Flush at most this often on progress heartbeats. The TUI coalesces into
+/// 60ms windows, so a faster cadence only buys syscalls, not freshness.
+const EMIT_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
 impl Default for StreamEmitter {
     fn default() -> Self {
         Self {
             error: Mutex::new(None),
+            state: Mutex::new(EmitterState {
+                out: io::BufWriter::with_capacity(64 * 1024, io::stdout()),
+                found: Vec::new(),
+                updated: Vec::new(),
+                progress: None,
+                last_flush: std::time::Instant::now(),
+                flushed_once: false,
+            }),
         }
     }
 }
 
 impl StreamEmitter {
     fn emit_found(&self, candidate: ScanCandidate) {
-        if self.has_error() {
-            return;
-        }
-        if let Err(err) = write_json_line(&ScanStreamEvent::CandidateFound { candidate }) {
-            self.set_error(err);
-        }
+        self.push(|state| state.found.push(candidate));
     }
 
     fn emit_updated(&self, candidate: ScanCandidate) {
-        if self.has_error() {
-            return;
-        }
-        if let Err(err) = write_json_line(&ScanStreamEvent::CandidateUpdated { candidate }) {
-            self.set_error(err);
-        }
+        self.push(|state| state.updated.push(candidate));
     }
 
+    /// Progress is the heartbeat: store the latest snapshot and flush if the
+    /// cadence window elapsed, so pending candidates ride each flush "time to
+    /// time" without a syscall per directory.
     fn emit_progress(
         &self,
         scanned_dirs: u32,
@@ -275,14 +302,84 @@ impl StreamEmitter {
         if self.has_error() {
             return;
         }
-        if let Err(err) = write_json_line(&ScanStreamEvent::ScanProgress {
-            scanned_dirs,
-            found,
-            skipped_dirs,
-            current_dir,
-        }) {
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        state.progress = Some((scanned_dirs, found, skipped_dirs, current_dir));
+        if state.last_flush.elapsed() >= EMIT_FLUSH_INTERVAL {
+            self.flush_locked(&mut state);
+        }
+    }
+
+    fn push(&self, f: impl FnOnce(&mut EmitterState)) {
+        if self.has_error() {
+            return;
+        }
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        f(&mut state);
+        // The very first candidates flush immediately so time-to-first-row is
+        // instant; afterwards batches accumulate to the size/cadence bounds.
+        if !state.flushed_once || state.found.len() + state.updated.len() >= EMIT_BATCH_AT {
+            self.flush_locked(&mut state);
+        }
+    }
+
+    /// Write pending events and flush the buffer before the caller emits the
+    /// terminal `scan_completed` line.
+    fn finish(&self) {
+        if self.has_error() {
+            return;
+        }
+        let mut state = match self.state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        self.flush_locked(&mut state);
+    }
+
+    /// Found batches always precede updated batches within a flush: a
+    /// candidate's found event is enqueued before its own update can be, so
+    /// stream order preserves the found-then-updated invariant.
+    fn flush_locked(&self, state: &mut EmitterState) {
+        let result = (|| -> Result<(), String> {
+            if !state.found.is_empty() {
+                let event = ScanStreamEvent::CandidatesFound {
+                    candidates: std::mem::take(&mut state.found),
+                };
+                write_json_line_to(&event, &mut state.out)?;
+            }
+            if !state.updated.is_empty() {
+                let event = ScanStreamEvent::CandidatesUpdated {
+                    candidates: std::mem::take(&mut state.updated),
+                };
+                write_json_line_to(&event, &mut state.out)?;
+            }
+            if let Some((scanned_dirs, found, skipped_dirs, current_dir)) = state.progress.take() {
+                write_json_line_to(
+                    &ScanStreamEvent::ScanProgress {
+                        scanned_dirs,
+                        found,
+                        skipped_dirs,
+                        current_dir,
+                    },
+                    &mut state.out,
+                )?;
+            }
+            state
+                .out
+                .flush()
+                .map_err(|err| format!("failed to flush stdout: {err}"))?;
+            Ok(())
+        })();
+        if let Err(err) = result {
             self.set_error(err);
         }
+        state.last_flush = std::time::Instant::now();
+        state.flushed_once = true;
     }
 
     fn has_error(&self) -> bool {

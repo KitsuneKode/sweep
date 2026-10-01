@@ -45,6 +45,38 @@
     {
       "type": "object",
       "additionalProperties": false,
+      "required": ["type", "candidates"],
+      "properties": {
+        "type": {
+          "const": "candidates_found"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "https://kitsunekode.dev/sweep/schemas/shared.schema.json#/$defs/scanCandidate"
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "candidates"],
+      "properties": {
+        "type": {
+          "const": "candidates_updated"
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "https://kitsunekode.dev/sweep/schemas/shared.schema.json#/$defs/scanCandidate"
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
       "required": ["type", "scannedDirs", "found"],
       "properties": {
         "type": {

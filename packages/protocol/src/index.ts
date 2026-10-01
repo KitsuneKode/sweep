@@ -145,6 +145,8 @@ export const SCAN_EVENT_TYPES = [
   "scan_started",
   "candidate_found",
   "candidate_updated",
+  "candidates_found",
+  "candidates_updated",
   "scan_progress",
   "warning",
   "scan_completed",
@@ -165,6 +167,22 @@ export interface CandidateFoundEvent {
 export interface CandidateUpdatedEvent {
   type: "candidate_updated";
   candidate: ScanCandidate;
+}
+
+/**
+ * Batched forms - the Rust emitter accumulates candidates and flushes on a
+ * ~16ms cadence so a busy scan costs a few dozen wire lines instead of one
+ * per candidate. Ordering per candidate is preserved: found always precedes
+ * its own update on the wire.
+ */
+export interface CandidatesFoundEvent {
+  type: "candidates_found";
+  candidates: ScanCandidate[];
+}
+
+export interface CandidatesUpdatedEvent {
+  type: "candidates_updated";
+  candidates: ScanCandidate[];
 }
 
 export interface ScanProgressEvent {
@@ -208,6 +226,8 @@ export type ScanEvent =
   | ScanStartedEvent
   | CandidateFoundEvent
   | CandidateUpdatedEvent
+  | CandidatesFoundEvent
+  | CandidatesUpdatedEvent
   | ScanProgressEvent
   | WarningEvent
   | ScanCompletedEvent;

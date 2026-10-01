@@ -3,7 +3,7 @@ import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
 import { SweepApp, type SweepUiOutcome } from "./app.js";
-import type { UiScanControl } from "./streaming.js";
+import type { UiScanControl, UiScanHooks } from "./streaming.js";
 
 function createPlan(): ScanPlan {
   return {
@@ -144,6 +144,132 @@ describe("sweep TUI render", () => {
     });
 
     expect(outcomes).toEqual([{ type: "abort" }]);
+  });
+
+  test("failed scan remains incomplete after dismissal and a successful retry restores apply", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    let hooks: UiScanHooks | undefined;
+    const control: UiScanControl = {
+      start: (next) => {
+        hooks = next;
+        return Promise.resolve();
+      },
+      syncPatterns: () => {},
+      setEngine: () => true,
+    };
+    const setup = await testRender(
+      <SweepApp
+        plan={createPlan()}
+        scan={control}
+        initiallyScanning
+        onDone={(outcome) => outcomes.push(outcome)}
+      />,
+      { width: 120, height: 32 },
+    );
+    teardown = () => setup.renderer.destroy();
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await setup.renderOnce();
+        });
+      }
+    };
+    await act(async () => {
+      await setup.flush();
+    });
+    await act(async () => {
+      hooks?.onError(new Error("scan transport failed"));
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("scan transport failed");
+    await act(async () => {
+      setup.mockInput.pressEscape();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await setup.flush();
+    });
+    await act(async () => {
+      setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("scan incomplete");
+    await settle();
+    expect(setup.captureCharFrame()).toContain("INCOMPLETE");
+    expect(outcomes).toEqual([]);
+    await act(async () => {
+      setup.mockInput.pressKey("S");
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("before saving");
+    await act(async () => {
+      setup.mockInput.pressKey("r");
+      await setup.flush();
+    });
+    await act(async () => {
+      hooks?.onBatch(createPlan().candidates);
+      hooks?.onDone({ scannedDirs: 3, skippedDirs: 0, plan: createPlan() });
+      await setup.flush();
+    });
+    await act(async () => {
+      setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("Permanently delete");
+    expect(outcomes).toEqual([]);
+  });
+
+  test("scan progress distinguishes pending sizes and refuses a premature plan export", async () => {
+    let hooks: UiScanHooks | undefined;
+    const setup = await testRender(
+      <SweepApp
+        plan={createPlan()}
+        initiallyScanning
+        scan={{
+          start: (next) => {
+            hooks = next;
+            return Promise.resolve();
+          },
+          syncPatterns: () => {},
+          setEngine: () => true,
+        }}
+        onDone={() => {}}
+      />,
+      { width: 120, height: 32 },
+    );
+    teardown = () => setup.renderer.destroy();
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await setup.renderOnce();
+        });
+      }
+    };
+    await act(async () => {
+      await setup.flush();
+    });
+    await act(async () => {
+      hooks?.onProgress?.({ scannedDirs: 4, skippedDirs: 0, sizedCount: 1 });
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("1 sizing");
+    await act(async () => {
+      setup.mockInput.pressKey("S");
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("before saving");
+    await act(async () => {
+      hooks?.onProgress?.({ scannedDirs: 5, skippedDirs: 0, sizedCount: 2 });
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).not.toContain("1 sizing");
   });
 
   test("select-all then enter still asks for confirmation before applying", async () => {
