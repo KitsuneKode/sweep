@@ -5,6 +5,7 @@ expression: "&actual"
 {
   "candidates": [
     {
+      "bytesKnown": true,
       "entryType": "directory",
       "estimatedBytes": 0,
       "id": "cand_a7288b1b2a18dedd",
@@ -19,6 +20,7 @@ expression: "&actual"
       "selectedByDefault": true
     },
     {
+      "bytesKnown": true,
       "entryType": "directory",
       "estimatedBytes": 0,
       "id": "cand_2a2d8f17594bd811",

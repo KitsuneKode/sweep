@@ -5,6 +5,7 @@ expression: "&actual"
 {
   "candidates": [
     {
+      "bytesKnown": true,
       "entryType": "directory",
       "estimatedBytes": 0,
       "id": "cand_621f8b69e4fcb0e6",
@@ -19,6 +20,7 @@ expression: "&actual"
       "selectedByDefault": false
     },
     {
+      "bytesKnown": true,
       "entryType": "directory",
       "estimatedBytes": 0,
       "id": "cand_2486f23ba12f32b3",
@@ -33,6 +35,7 @@ expression: "&actual"
       "selectedByDefault": false
     },
     {
+      "bytesKnown": true,
       "entryType": "directory",
       "estimatedBytes": 0,
       "id": "cand_83aa32d09099fa4d",
@@ -47,6 +50,7 @@ expression: "&actual"
       "selectedByDefault": true
     },
     {
+      "bytesKnown": true,
       "entryType": "directory",
       "estimatedBytes": 0,
       "id": "cand_da0d847cc3bed8b3",

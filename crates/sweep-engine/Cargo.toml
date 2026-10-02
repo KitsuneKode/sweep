@@ -8,7 +8,6 @@ license.workspace = true
 camino.workspace = true
 sweep-errors = { path = "../sweep-errors" }
 sweep-fs = { path = "../sweep-fs" }
-rayon.workspace = true
 sweep-types = { path = "../sweep-types" }
 sha2.workspace = true
 hex.workspace = true

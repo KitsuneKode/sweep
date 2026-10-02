@@ -1,12 +1,17 @@
 //! Filesystem traversal helpers for the sweep engine.
 
+mod budget;
+pub use budget::ResourceBudget;
+
 use camino::{Utf8Path, Utf8PathBuf};
+use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use rayon::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Condvar, Mutex, OnceLock};
 
 /// mtime of the path itself in epoch milliseconds, or `None` if it cannot be read.
 fn modified_ms(path: &Utf8Path) -> Option<u64> {
@@ -26,6 +31,10 @@ pub struct WalkEntry {
     pub is_symlink: bool,
     pub entry_type: WalkEntryType,
     pub estimated_bytes: u64,
+    /// `false` once sizing ran and part of the subtree was unreadable - the
+    /// byte count is a partial sum (protocol `bytesKnown`). Stays `false` on
+    /// discovery stubs: "not sized yet" is not "known".
+    pub bytes_known: bool,
     /// Own mtime in epoch milliseconds (`lstat`, so a symlink reports itself).
     pub modified_ms: Option<u64>,
 }
@@ -163,6 +172,16 @@ pub struct WalkResult {
     /// another path (bind mounts, inode aliases). Aligned with the JS
     /// scanner's `skippedDirs` - both failure and dedupe count here.
     pub skipped_dirs: u32,
+    pub resource_error: Option<String>,
+}
+
+impl WalkResult {
+    fn merge(&mut self, other: WalkResult) {
+        self.entries.extend(other.entries);
+        self.scanned_dirs += other.scanned_dirs;
+        self.skipped_dirs += other.skipped_dirs;
+        self.resource_error = self.resource_error.take().or(other.resource_error);
+    }
 }
 
 const SKIP_DIR_NAMES: &[&str] = &[
@@ -173,7 +192,7 @@ const SKIP_DIR_NAMES: &[&str] = &[
 /// protected directory as `.git` - compare lowercase there (JS parity).
 fn is_skip_dir_name(name: &str) -> bool {
     if case_insensitive_fs() {
-        SKIP_DIR_NAMES.contains(&name.to_ascii_lowercase().as_str())
+        SKIP_DIR_NAMES.contains(&name.to_lowercase().as_str())
     } else {
         SKIP_DIR_NAMES.contains(&name)
     }
@@ -193,7 +212,9 @@ pub struct WalkHooks<'a> {
 /// Recursively walk `root`, collecting entries whose names match `config.patterns`.
 ///
 /// Matched directories are not descended into (same semantics as the JS scanner).
-/// Sibling subtrees are walked in parallel via rayon.
+/// Sibling subtrees are walked on a bounded work-stealing pool - discovery
+/// order is therefore not lexicographic; callers that need stable output sort
+/// the plan by path (as `buildPlan` already does).
 pub fn walk_matched_entries(root: &Utf8Path, config: &WalkConfig) -> WalkResult {
     walk_matched_entries_with_hooks(root, config, None)
 }
@@ -210,6 +231,7 @@ struct WalkCtx<'a> {
     /// dir makes one filesystem object reachable under several paths; without
     /// this the walk would revisit it forever at depth -1.
     visited: Option<&'a VisitedDirs>,
+    budget: &'a ResourceBudget,
 }
 
 /// Mirrors the JS scanner's `markDir`: false when the dir cannot be stat'd or
@@ -231,10 +253,15 @@ impl VisitedDirs {
 
     /// Returns false if `(dev, ino)` was already inserted - an inode alias
     /// (bind mount, hardlinked dir) would otherwise loop the walk forever.
-    fn insert(&self, dev: u64, ino: u64) -> bool {
+    fn insert(&self, dev: u64, ino: u64, budget: &ResourceBudget) -> bool {
         let shard = &self.shards[(ino as usize) & 15];
         match shard.lock() {
-            Ok(mut guard) => guard.insert((dev, ino)),
+            Ok(mut guard) => {
+                if guard.contains(&(dev, ino)) {
+                    return false;
+                }
+                budget.identity() && guard.insert((dev, ino))
+            }
             // A poisoned lock degrades to no dedupe rather than aborting the scan.
             Err(_) => true,
         }
@@ -264,7 +291,7 @@ fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
         if meta.ino() == 0 {
             return true;
         }
-        visited.insert(meta.dev(), meta.ino())
+        visited.insert(meta.dev(), meta.ino(), ctx.budget)
     }
     #[cfg(windows)]
     {
@@ -272,7 +299,7 @@ fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
         match (meta.volume_serial_number(), meta.file_index()) {
             // Filesystems without file indices (some network drives) cannot
             // dedupe - links are refused above, so no revisit cycle can form.
-            (Some(vol), Some(idx)) if idx != 0 => visited.insert(vol, idx),
+            (Some(vol), Some(idx)) if idx != 0 => visited.insert(vol, idx, ctx.budget),
             _ => true,
         }
     }
@@ -285,10 +312,24 @@ fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
 
 /// Walk with live match/dir hooks. `on_match` fires as soon as an artifact is found,
 /// before size estimation, so a TUI can paint rows during the walk.
+///
+/// Discovery runs on one bounded worker pool over a work-stealing deque: each
+/// thread drains its own LIFO (depth-first - the shape ripgrep's walker moved
+/// to after BFS pinned ~1GB on wide trees), steals from the shared injector or
+/// sibling workers when idle, and accumulates matches locally with no locking.
 pub fn walk_matched_entries_with_hooks(
     root: &Utf8Path,
     config: &WalkConfig,
     hooks: Option<&WalkHooks<'_>>,
+) -> WalkResult {
+    walk_matched_entries_with_budget(root, config, hooks, &ResourceBudget::default())
+}
+
+pub fn walk_matched_entries_with_budget(
+    root: &Utf8Path,
+    config: &WalkConfig,
+    hooks: Option<&WalkHooks<'_>>,
+    budget: &ResourceBudget,
 ) -> WalkResult {
     let matcher = PatternMatcher::compile(&config.patterns);
     let ignore = if config.ignore.is_empty() {
@@ -308,13 +349,155 @@ pub fn walk_matched_entries_with_hooks(
         scanned: Some(&scanned),
         skipped: Some(&skipped),
         visited: Some(&visited),
+        budget,
     };
-    walk_dir(&ctx, root, 0)
+
+    // Directory reads are I/O bound - past ~8 threads the kernel caches, not
+    // the CPU, are the wall (same bound the sizing pool uses).
+    let worker_count = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .clamp(1, WALK_MAX_THREADS);
+
+    let injector = Injector::<DirJob>::new();
+    if !budget.directory(root.as_str().len()) {
+        return WalkResult {
+            resource_error: budget.error(),
+            ..WalkResult::default()
+        };
+    }
+    injector.push((root.to_path_buf(), 0));
+    let workers: Vec<Worker<DirJob>> = (0..worker_count).map(|_| Worker::new_lifo()).collect();
+    // Stealers are Sync handles; each Worker is moved into its own thread.
+    let stealers: Vec<Stealer<DirJob>> = workers.iter().map(Worker::stealer).collect();
+    // Jobs queued or in flight - zero means every queue is empty and no worker
+    // is mid-scan, which is the termination condition.
+    let pending = AtomicUsize::new(1);
+    let stopped = AtomicBool::new(false);
+    let stopped_ref = &stopped;
+
+    // Bind shared state as references up front so each spawned closure copies
+    // the `&` instead of trying to move the values into the map's FnMut.
+    let (ctx_ref, injector_ref, stealers_ref, pending_ref) = (&ctx, &injector, &stealers, &pending);
+    let mut result = WalkResult::default();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = workers
+            .into_iter()
+            .enumerate()
+            .map(|(index, local)| {
+                scope.spawn(move || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        walk_worker(
+                            ctx_ref,
+                            local,
+                            injector_ref,
+                            stealers_ref,
+                            pending_ref,
+                            stopped_ref,
+                            index,
+                        )
+                    }));
+                    match result {
+                        Ok(result) => result,
+                        Err(payload) => {
+                            stopped_ref.store(true, Ordering::Release);
+                            std::panic::resume_unwind(payload)
+                        }
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            match handle.join() {
+                Ok(piece) => result.merge(piece),
+                // Propagate worker panics instead of silently keeping a
+                // partial walk - the scan must not report "done" on a tree it
+                // only half-read.
+                Err(payload) => std::panic::resume_unwind(payload),
+            }
+        }
+    });
+    result
 }
 
-fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
+/// `(directory, depth)` unit of work for the walk pool.
+type DirJob = (Utf8PathBuf, i32);
+
+/// Cap on walk threads - directory listing is I/O bound, so extra threads buy
+/// contention, not throughput (matches `SIZE_MAX_INFLIGHT` reasoning).
+const WALK_MAX_THREADS: usize = 8;
+
+fn walk_worker(
+    ctx: &WalkCtx<'_>,
+    local: Worker<DirJob>,
+    injector: &Injector<DirJob>,
+    stealers: &[Stealer<DirJob>],
+    pending: &AtomicUsize,
+    stopped: &AtomicBool,
+    index: usize,
+) -> WalkResult {
+    let mut result = WalkResult::default();
+    let mut idle = 0u32;
+    loop {
+        if stopped.load(Ordering::Acquire) || ctx.budget.failed() {
+            break;
+        }
+        let job = local.pop().or_else(|| {
+            // Shared injector first (it feeds bursts of fresh work), then
+            // round-robin steals from siblings starting past ourselves.
+            match injector.steal_batch_and_pop(&local) {
+                Steal::Success(job) => return Some(job),
+                Steal::Retry | Steal::Empty => {}
+            }
+            let n = stealers.len();
+            for offset in 1..n {
+                match stealers[(index + offset) % n].steal() {
+                    Steal::Success(job) => return Some(job),
+                    Steal::Retry | Steal::Empty => continue,
+                }
+            }
+            None
+        });
+
+        let Some((dir, depth)) = job else {
+            // Every queue came up empty - the scan is over only when no task
+            // is still in flight (a worker mid-scan may yet push children).
+            if pending.load(Ordering::Acquire) == 0 {
+                break;
+            }
+            // Sparse tails need not burn seven CPU cores while one reader
+            // waits on the disk. Brief spins, then bounded sleep; stop and
+            // termination are rechecked on every iteration.
+            idle = idle.saturating_add(1);
+            if idle < 16 {
+                std::thread::yield_now();
+            } else {
+                std::thread::sleep(std::time::Duration::from_micros(100));
+            }
+            continue;
+        };
+
+        idle = 0;
+        ctx.budget.dequeue_directory();
+        let (piece, children) = scan_dir(ctx, &dir, depth);
+        // Children are queued and counted BEFORE the parent's slot releases:
+        // fetch_add-then-fetch_sub keeps `pending` from transiently reading
+        // zero while a thief could already hold one of these children.
+        pending.fetch_add(children.len(), Ordering::AcqRel);
+        for child in children {
+            local.push(child);
+        }
+        result.merge(piece);
+        pending.fetch_sub(1, Ordering::AcqRel);
+    }
+    result
+}
+
+/// Scan one directory: return its matches plus the descendable child dirs as
+/// fresh jobs. Never recurses - the worker pool owns the schedule.
+fn scan_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> (WalkResult, Vec<DirJob>) {
     if ctx.config.depth != -1 && depth > ctx.config.depth {
-        return WalkResult::default();
+        return (WalkResult::default(), Vec::new());
     }
 
     let skipped = |mut result: WalkResult| {
@@ -328,14 +511,24 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
     // Already visited via a bind mount / inode alias, or cannot even be
     // stat'd: nothing below this path is safe to read again.
     if !mark_dir(ctx, dir) {
-        return skipped(WalkResult::default());
+        return (skipped(WalkResult::default()), Vec::new());
     }
 
     let read_dir = match fs::read_dir(dir.as_std_path()) {
         Ok(items) => items,
-        Err(_) => return skipped(WalkResult::default()),
+        Err(_) => return (skipped(WalkResult::default()), Vec::new()),
     };
 
+    scan_dir_entries(ctx, dir, depth, read_dir)
+}
+
+fn scan_dir_entries(
+    ctx: &WalkCtx<'_>,
+    dir: &Utf8Path,
+    depth: i32,
+    entries: impl Iterator<Item = std::io::Result<fs::DirEntry>>,
+) -> (WalkResult, Vec<DirJob>) {
+    let mut incomplete = false;
     let mut result = WalkResult {
         scanned_dirs: 1,
         ..WalkResult::default()
@@ -351,14 +544,67 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
     }
     let mut subdirs: Vec<Utf8PathBuf> = Vec::new();
 
-    for item in read_dir.flatten() {
+    for item in entries {
+        if ctx.budget.failed() {
+            break;
+        }
+        let item = match item {
+            Ok(item) => item,
+            Err(_) => {
+                incomplete = true;
+                continue;
+            }
+        };
         // Lossy-decode invalid UTF-8 instead of dropping the entry - the JS
         // engine sees the same U+FFFD-mangled name. The mangled path cannot be
         // lstat'd, so the entry ends up counted skipped on both engines rather
-        // than invisible on Rust and skipped on JS.
-        let file_name = item.file_name().to_string_lossy().into_owned();
+        // than invisible on Rust and skipped on JS. `Cow` stays borrowed for
+        // valid names - the owned copy is paid only by entries we keep.
+        let file_name = item.file_name();
+        let file_name = file_name.to_string_lossy();
 
-        let full_path = dir.join(&file_name);
+        let file_type = match item.file_type() {
+            Ok(ft) => ft,
+            Err(_) => {
+                incomplete = true;
+                continue;
+            }
+        };
+
+        // Dirents report symlinks authoritatively on unix - an lstat here
+        // would only re-answer the same question. Junctions are the Windows
+        // hazard: they surface as plain dirs in dirents, so the reparse check
+        // stays an lstat there. A dir swapped for a link after readdir is
+        // caught by mark_dir's lstat before descent regardless.
+        #[cfg(windows)]
+        let (mut is_symlink, mut is_dir) = {
+            let is_symlink = file_type.is_symlink();
+            (is_symlink, file_type.is_dir() && !is_symlink)
+        };
+        #[cfg(not(windows))]
+        let (is_symlink, is_dir) = {
+            let is_symlink = file_type.is_symlink();
+            (is_symlink, file_type.is_dir() && !is_symlink)
+        };
+        let is_file = file_type.is_file() && !is_symlink;
+        let matched = ctx.matcher.matches(&file_name);
+
+        // Cheap reject before any path allocation: a leaf that matches no
+        // pattern produces nothing and descends nowhere, so ignore rules are
+        // irrelevant to it. `is_skip_dir_name` is a basename check - a skipped
+        // dir never needs its path either.
+        if !matched {
+            if is_file || is_symlink {
+                continue;
+            }
+            if is_dir && is_skip_dir_name(&file_name) {
+                continue;
+            }
+        }
+
+        // From here the entry is a candidate, a descent target, or a dirent
+        // the filesystem could not classify - all of which need the path.
+        let full_path = dir.join(file_name.as_ref());
         if ctx
             .ignore
             .is_some_and(|matcher| matcher.matches(ctx.root, &full_path, &file_name))
@@ -366,21 +612,16 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
             continue;
         }
 
-        let file_type = match item.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-
-        let mut is_symlink = file_type.is_symlink();
-        let mut is_dir = file_type.is_dir() && !is_symlink;
-        let is_file = file_type.is_file() && !is_symlink;
-
+        #[cfg(windows)]
         if is_dir && is_reparse_point_or_symlink(&full_path) {
             is_dir = false;
             is_symlink = true;
         }
 
-        if ctx.matcher.matches(&file_name) {
+        if matched {
+            if !ctx.budget.candidate(full_path.as_str().len()) {
+                break;
+            }
             let entry_type = if is_symlink {
                 WalkEntryType::Symlink
             } else if is_dir {
@@ -392,10 +633,11 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
             let modified_ms = modified_ms(&full_path);
             let entry = WalkEntry {
                 path: full_path,
-                name: file_name,
+                name: file_name.into_owned(),
                 is_symlink,
                 entry_type,
                 estimated_bytes: 0,
+                bytes_known: false,
                 modified_ms,
             };
             if let Some(on_match) = ctx.hooks.and_then(|h| h.on_match) {
@@ -405,9 +647,12 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
             continue;
         }
 
+        if ctx.config.depth != -1 && depth >= ctx.config.depth {
+            continue;
+        }
         if is_dir {
-            if is_skip_dir_name(&file_name) {
-                continue;
+            if !ctx.budget.directory(full_path.as_str().len()) {
+                break;
             }
             subdirs.push(full_path);
         } else if !is_file && !is_symlink {
@@ -419,24 +664,26 @@ fn walk_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> WalkResult {
                     if is_skip_dir_name(&file_name) {
                         continue;
                     }
+                    if !ctx.budget.directory(full_path.as_str().len()) {
+                        break;
+                    }
                     subdirs.push(full_path);
                 }
             }
         }
     }
 
-    let child_results: Vec<WalkResult> = subdirs
-        .par_iter()
-        .map(|subdir| walk_dir(ctx, subdir, depth + 1))
-        .collect();
-
-    for child in child_results {
-        result.entries.extend(child.entries);
-        result.scanned_dirs += child.scanned_dirs;
-        result.skipped_dirs += child.skipped_dirs;
+    if incomplete {
+        result.skipped_dirs += 1;
+        if let Some(counter) = ctx.skipped {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
-    result
+    (
+        result,
+        subdirs.into_iter().map(|dir| (dir, depth + 1)).collect(),
+    )
 }
 
 fn case_insensitive_fs() -> bool {
@@ -446,7 +693,7 @@ fn case_insensitive_fs() -> bool {
 struct IgnoreMatcher {
     names: PatternMatcher,
     prefixes: Vec<String>,
-    path_globs: Vec<regex_lite::Regex>,
+    path_globs: Vec<String>,
     case_insensitive: bool,
 }
 
@@ -464,19 +711,14 @@ impl IgnoreMatcher {
             }
             if pattern.contains('/') {
                 let source = if case_insensitive {
-                    pattern.to_ascii_lowercase()
+                    pattern.to_lowercase()
                 } else {
                     pattern.to_string()
                 };
                 if pattern.contains('*') || pattern.contains('?') {
-                    let escaped = regex_lite::escape(&source);
-                    // `?` is glob single-char (.) and `*` is .* - same mapping
-                    // as the JS compileIgnoreMatcher.
-                    let regex_pattern =
-                        format!("^{}$", escaped.replace("\\*", ".*").replace("\\?", "."));
-                    if let Ok(re) = regex_lite::Regex::new(&regex_pattern) {
-                        path_globs.push(re);
-                    }
+                    // Same linear `*`/`?` matcher as the scan patterns -
+                    // `?` means "one char" identically on both paths.
+                    path_globs.push(source);
                 } else {
                     prefixes.push(source);
                 }
@@ -514,7 +756,7 @@ impl IgnoreMatcher {
             Cow::Borrowed(rel)
         };
         let rel_key = if self.case_insensitive {
-            Cow::Owned(rel.to_ascii_lowercase())
+            Cow::Owned(rel.to_lowercase())
         } else {
             rel
         };
@@ -527,13 +769,57 @@ impl IgnoreMatcher {
                 return true;
             }
         }
-        self.path_globs.iter().any(|re| re.is_match(&rel_key))
+        self.path_globs
+            .iter()
+            .any(|glob| glob_match(glob, &rel_key))
     }
+}
+
+/// Linear `*`/`?` glob match - the two-pointer-with-star-backtracking shape
+/// libc `glob(3)` uses, so a hostile pattern can never put the walk into
+/// regex backtracking (audit A01). `*` matches any run including `/`; `?`
+/// matches exactly one unit. ASCII takes the byte slice (zero-alloc); the
+/// char path matches `?` per `char`, where JS matches per UTF-16 code unit -
+/// a lone `?` against an astral-plane name is the one defined divergence.
+fn glob_match(pattern: &str, name: &str) -> bool {
+    if pattern.is_ascii() && name.is_ascii() {
+        return glob_match_units(pattern.as_bytes(), name.as_bytes(), b'*', b'?');
+    }
+    let pattern: Vec<char> = pattern.chars().collect();
+    let name: Vec<char> = name.chars().collect();
+    glob_match_units(&pattern, &name, '*', '?')
+}
+
+fn glob_match_units<T: PartialEq + Copy>(pattern: &[T], name: &[T], star: T, question: T) -> bool {
+    let (mut p, mut s) = (0usize, 0usize);
+    // Last `*` position and the name offset it has consumed so far - on a
+    // mismatch the star resumes one unit further along the name.
+    let (mut star_p, mut star_s) = (usize::MAX, usize::MAX);
+    while s < name.len() {
+        if p < pattern.len() && (pattern[p] == question || pattern[p] == name[s]) {
+            p += 1;
+            s += 1;
+        } else if p < pattern.len() && pattern[p] == star {
+            star_p = p;
+            p += 1;
+            star_s = s;
+        } else if star_p != usize::MAX {
+            p = star_p + 1;
+            star_s += 1;
+            s = star_s;
+        } else {
+            return false;
+        }
+    }
+    while p < pattern.len() && pattern[p] == star {
+        p += 1;
+    }
+    p == pattern.len()
 }
 
 struct PatternMatcher {
     exact: std::collections::HashSet<String>,
-    globs: Vec<regex_lite::Regex>,
+    globs: Vec<String>,
     case_insensitive: bool,
 }
 
@@ -548,20 +834,12 @@ impl PatternMatcher {
 
         for pattern in patterns {
             let source = if case_insensitive {
-                pattern.to_ascii_lowercase()
+                pattern.to_lowercase()
             } else {
                 pattern.clone()
             };
             if source.contains('*') || source.contains('?') {
-                let escaped = regex_lite::escape(&source);
-                // `?` is glob single-char (.) - without this a raw `?` would be
-                // a regex quantifier on JS while Rust escaped it literally,
-                // making the same pattern mean different things per engine.
-                let regex_pattern =
-                    format!("^{}$", escaped.replace("\\*", ".*").replace("\\?", "."));
-                if let Ok(re) = regex_lite::Regex::new(&regex_pattern) {
-                    globs.push(re);
-                }
+                globs.push(source);
             } else {
                 exact.insert(source);
             }
@@ -576,20 +854,21 @@ impl PatternMatcher {
 
     fn matches(&self, name: &str) -> bool {
         let key = if self.case_insensitive {
-            Cow::Owned(name.to_ascii_lowercase())
+            Cow::Owned(name.to_lowercase())
         } else {
             Cow::Borrowed(name)
         };
         if self.exact.contains(key.as_ref()) {
             return true;
         }
-        self.globs.iter().any(|re| re.is_match(&key))
+        self.globs.iter().any(|glob| glob_match(glob, &key))
     }
 }
 
 /// Tree-aware byte estimate aligned with the JS scanner's `du` fast path.
+/// Returns just the bytes - callers needing completeness use `apparent_size`.
 pub fn estimate_bytes(path: &Utf8Path) -> u64 {
-    apparent_size(path)
+    apparent_size(path).bytes
 }
 
 /// How many in-process sizing walks run at once. `lstat`+`readdir` is I/O
@@ -598,192 +877,454 @@ pub fn estimate_bytes(path: &Utf8Path) -> u64 {
 /// `DU_MAX_INFLIGHT`.
 const SIZE_MAX_INFLIGHT: usize = 8;
 
-/// Run `f` over `items` on a small dedicated pool instead of the global rayon
-/// pool, falling back to a sequential loop if the pool can't be built.
-fn run_bounded<T: Send + Sync, R: Send>(
-    items: &[T],
-    threads: usize,
-    f: impl Fn(&T) -> R + Sync,
-) -> Vec<R> {
-    match rayon::ThreadPoolBuilder::new().num_threads(threads).build() {
-        Ok(pool) => pool.install(|| items.par_iter().map(&f).collect()),
-        Err(_) => items.iter().map(f).collect(),
+/// One sizing pool is shared by candidate jobs and subdivision jobs. Nested
+/// Rayon work stays on these eight threads instead of creating a pool per
+/// candidate or using the unbounded CPU-sized global pool.
+fn sizing_pool() -> Option<&'static rayon::ThreadPool> {
+    static POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(SIZE_MAX_INFLIGHT)
+            .build()
+            .ok()
+    })
+    .as_ref()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubtreeSize {
+    pub bytes: u64,
+    pub complete: bool,
+}
+
+impl SubtreeSize {
+    fn merge(&mut self, other: Self) {
+        match self
+            .bytes
+            .checked_add(other.bytes)
+            .filter(|&n| n <= 9_007_199_254_740_991)
+        {
+            Some(bytes) => self.bytes = bytes,
+            None => {
+                self.bytes = u64::MAX;
+                self.complete = false;
+            }
+        }
+        self.complete &= other.complete;
     }
 }
 
-/// Inside one candidate, only the first few levels get parallel descent -
-/// that is where the fan-out is. Deeper levels stay lazy and serial so a
-/// million tiny dirs never pay a Vec+task overhead per directory.
+struct SizeContext<'a> {
+    budget: &'a ResourceBudget,
+    exact: bool,
+    parallel: bool,
+    links: Mutex<HashSet<(u64, u64)>>,
+    dirs: Mutex<HashSet<(u64, u64)>>,
+}
+
+fn price_sizing_inode(meta: &fs::Metadata, ctx: &SizeContext<'_>) -> u64 {
+    let exact = ctx.exact;
+    let links = &ctx.links;
+    if exact {
+        return if meta.is_file() { meta.len() } else { 0 };
+    }
+    // GNU du's usable_st_size excludes directories and special inodes.
+    if !meta.is_file() && !meta.is_symlink() {
+        return 0;
+    }
+    if !meta.is_dir() && hardlink_candidate(meta) {
+        let mut seen = links.lock().unwrap_or_else(|p| p.into_inner());
+        let key = inode_id(meta);
+        if seen.contains(&key) {
+            return 0;
+        }
+        if !ctx.budget.identity() {
+            return 0;
+        }
+        seen.insert(key);
+    }
+    meta.len()
+}
+
+const SIZE_DIR_BATCH: usize = 64;
 const SIZE_PAR_DEPTH: u8 = 3;
-/// Fewer subdirs than this and spawning tasks costs more than the win.
-const SIZE_PAR_MIN_DIRS: usize = 4;
 
-/// Shared subtree walk for `apparent_size`/`exact_size`. `leaf` prices every
-/// non-directory inode met inside the walk - symlinks and reparse points are
-/// priced as themselves and never followed (descending a junction could walk
-/// upward into the tree - a cycle, not a subtree).
-fn dir_subtree_size(
-    dir: &Utf8Path,
-    leaf: &(dyn Fn(&fs::Metadata) -> u64 + Sync),
+fn size_children(
+    children: &mut Vec<std::path::PathBuf>,
+    ctx: &SizeContext<'_>,
     depth: u8,
-) -> u64 {
-    let Ok(read_dir) = fs::read_dir(dir.as_std_path()) else {
-        return 0;
+) -> SubtreeSize {
+    let initial = SubtreeSize {
+        bytes: 0,
+        complete: true,
     };
-    let deep = depth >= SIZE_PAR_DEPTH;
-    let mut total = 0u64;
-    let mut subdirs: Vec<Utf8PathBuf> = Vec::new();
-    for item in read_dir.flatten() {
-        // Dirent answers the type for free on most filesystems; `lstat` is
-        // only paid when the leaf size or (Windows) the reparse bit needs it.
-        let Ok(file_type) = item.file_type() else {
-            continue;
-        };
-        if file_type.is_symlink() || !file_type.is_dir() {
-            let child = match Utf8PathBuf::from_path_buf(item.path()) {
-                Ok(child) => child,
-                Err(_) => continue,
-            };
-            let Ok(meta) = fs::symlink_metadata(child.as_std_path()) else {
-                continue;
-            };
-            // Some filesystems answer every dirent as DT_UNKNOWN - when the
-            // lstat disagrees with the dirent, the lstat wins: a real dir must
-            // still be descended or the subtree is priced at zero.
-            if meta.is_dir() && !meta.file_type().is_symlink() && !meta_is_reparse_point(&meta) {
-                if deep {
-                    total += dir_subtree_size(&child, leaf, depth + 1);
-                } else {
-                    subdirs.push(child);
-                }
-                continue;
-            }
-            total += leaf(&meta);
-            continue;
-        }
-        // Junctions/reparse points must not be descended - they can point
-        // anywhere, including upward. Only Windows needs the attribute check;
-        // on unix a dirent `is_dir` is a real directory.
-        #[cfg(windows)]
-        let descendable = {
-            let child = match Utf8PathBuf::from_path_buf(item.path()) {
-                Ok(child) => child,
-                Err(_) => continue,
-            };
-            match fs::symlink_metadata(child.as_std_path()) {
-                Ok(meta) if meta_is_reparse_point(&meta) || !meta.is_dir() => {
-                    total += leaf(&meta);
-                    false
-                }
-                Ok(_) => true,
-                Err(_) => false,
-            }
-        };
-        #[cfg(not(windows))]
-        let descendable = true;
-
-        if descendable {
-            let Ok(child) = Utf8PathBuf::from_path_buf(item.path()) else {
-                continue;
-            };
-            if deep {
-                total += dir_subtree_size(&child, leaf, depth + 1);
-            } else {
-                subdirs.push(child);
-            }
-        }
-    }
-    if subdirs.is_empty() {
-        return total;
-    }
-    if subdirs.len() >= SIZE_PAR_MIN_DIRS {
-        // Nested par_iter joins the global pool: an idle sizer tail picks up
-        // the work, saturated workers just run it inline.
-        total
-            + subdirs
-                .par_iter()
-                .map(|dir| dir_subtree_size(dir, leaf, depth + 1))
-                .sum::<u64>()
+    let result = if ctx.parallel && depth < SIZE_PAR_DEPTH && children.len() >= 4 {
+        children
+            .par_iter()
+            .map(|path| size_directories(path, ctx, depth + 1))
+            .reduce(
+                || initial,
+                |mut a, b| {
+                    a.merge(b);
+                    a
+                },
+            )
     } else {
-        total
-            + subdirs
-                .iter()
-                .map(|dir| dir_subtree_size(dir, leaf, depth + 1))
-                .sum::<u64>()
-    }
-}
-
-/// `du -sb`-equivalent apparent size, computed in-process: the sum of `lstat`
-/// size over every non-directory inode in the subtree (no cross-file hardlink
-/// dedup - du dedups inode bodies within one invocation, we price each link).
-pub fn apparent_size(path: &Utf8Path) -> u64 {
-    let meta = match fs::symlink_metadata(path.as_std_path()) {
-        Ok(meta) => meta,
-        Err(_) => return 0,
+        children.iter().fold(initial, |mut total, path| {
+            total.merge(size_directories(path, ctx, SIZE_PAR_DEPTH));
+            total
+        })
     };
-    if meta.file_type().is_symlink() || meta_is_reparse_point(&meta) || !meta.is_dir() {
-        return meta.len();
-    }
-    dir_subtree_size(path, &|meta| meta.len(), 0)
+    children.clear();
+    result
 }
 
-/// Exact recursive size by walking all files under a path (aligned with JS
-/// `exactSize`: root links price as themselves, in-subtree links are skipped).
-pub fn exact_size(path: &Utf8Path) -> u64 {
-    let meta = match fs::symlink_metadata(path.as_std_path()) {
-        Ok(meta) => meta,
-        Err(_) => return 0,
+/// Read directory entries without retaining per-file paths. A DirEntry's
+/// metadata does not follow symlinks; on Unix it can use its directory fd.
+/// Child directories are subdivided in bounded batches at the first three
+/// levels; below that a local LIFO replaces recursion. Deep trees hold no fd
+/// per ancestor and cannot exhaust the stack just by increasing depth.
+fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSize {
+    let mut pending = vec![root.to_path_buf()];
+    let mut total = SubtreeSize {
+        bytes: 0,
+        complete: true,
     };
-    if meta.file_type().is_symlink() || meta.is_file() {
-        return meta.len();
-    }
-    if !meta.is_dir() {
-        return 0;
-    }
-    dir_subtree_size(path, &|meta| if meta.is_file() { meta.len() } else { 0 }, 0)
-}
-
-/// In-process apparent sizes for many paths, computed on a bounded pool so a
-/// scan never pays a `du` subprocess spawn per chunk.
-pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, u64> {
-    let sizes = run_bounded(paths, SIZE_MAX_INFLIGHT, |path| apparent_size(path));
-    paths
-        .iter()
-        .map(|path| path.as_str().to_owned())
-        .zip(sizes)
-        .collect()
-}
-
-/// Apply size estimates to walk entries on a bounded pool. `exact` uses the
-/// files-only walk (JS `exactSize` parity); the default uses `du -sb`
-/// semantics computed in-process - no subprocess per chunk.
-pub fn apply_size_estimates(entries: &mut [WalkEntry], exact: bool) {
-    if entries.is_empty() {
-        return;
-    }
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(SIZE_MAX_INFLIGHT)
-        .build();
-    match pool {
-        Ok(pool) => pool.install(|| {
-            entries.par_iter_mut().for_each(|entry| {
-                entry.estimated_bytes = if exact {
-                    exact_size(&entry.path)
-                } else {
-                    apparent_size(&entry.path)
-                };
+    while let Some(dir) = pending.pop() {
+        ctx.budget.dequeue_directory();
+        if ctx.budget.failed() {
+            total.complete = false;
+            break;
+        }
+        let meta = match fs::symlink_metadata(&dir) {
+            Ok(meta) => meta,
+            Err(_) => {
+                total.complete = false;
+                continue;
+            }
+        };
+        // Revalidate each queued directory. A directory replaced by a link
+        // is priced as the link and never deliberately followed. Pathname
+        // operations still have a residual swap window before read_dir.
+        if !meta.is_dir() || meta.is_symlink() || meta_is_reparse_point(&meta) {
+            total.merge(SubtreeSize {
+                bytes: price_sizing_inode(&meta, ctx),
+                complete: true,
             });
-        }),
-        Err(_) => {
-            for entry in entries.iter_mut() {
-                entry.estimated_bytes = if exact {
-                    exact_size(&entry.path)
+            continue;
+        }
+        if let Some(key) = directory_id(&meta) {
+            let mut dirs = ctx.dirs.lock().unwrap_or_else(|p| p.into_inner());
+            if dirs.contains(&key) {
+                total.complete = false;
+                continue;
+            }
+            if !ctx.budget.identity() {
+                total.complete = false;
+                break;
+            }
+            dirs.insert(key);
+        }
+        total.merge(SubtreeSize {
+            bytes: price_sizing_inode(&meta, ctx),
+            complete: true,
+        });
+        let items = match fs::read_dir(&dir) {
+            Ok(items) => items,
+            Err(_) => {
+                total.complete = false;
+                continue;
+            }
+        };
+        let mut children = Vec::with_capacity(SIZE_DIR_BATCH);
+        for item in items {
+            if ctx.budget.failed() {
+                total.complete = false;
+                break;
+            }
+            let item = match item {
+                Ok(item) => item,
+                Err(_) => {
+                    total.complete = false;
+                    continue;
+                }
+            };
+            let ft = match item.file_type() {
+                Ok(ft) => ft,
+                Err(_) => {
+                    total.complete = false;
+                    continue;
+                }
+            };
+            // On Unix a directory dirent needs no separate stat until its job
+            // starts. Windows must inspect reparse attributes first.
+            #[cfg(not(windows))]
+            if ft.is_dir() {
+                let path = item.path();
+                if !ctx.budget.directory(path.as_os_str().len()) {
+                    total.complete = false;
+                    break;
+                }
+                children.push(path);
+            }
+            #[cfg(windows)]
+            if ft.is_dir() {
+                match item.metadata() {
+                    Ok(meta) if !meta_is_reparse_point(&meta) => {
+                        let path = item.path();
+                        if !ctx.budget.directory(path.as_os_str().len()) {
+                            total.complete = false;
+                            break;
+                        }
+                        children.push(path);
+                    }
+                    Ok(meta) => {
+                        total.merge(SubtreeSize {
+                            bytes: price_sizing_inode(&meta, ctx),
+                            complete: true,
+                        });
+                    }
+                    Err(_) => total.complete = false,
+                }
+            }
+            if !ft.is_dir() {
+                match item.metadata() {
+                    Ok(meta)
+                        if meta.is_dir() && !meta.is_symlink() && !meta_is_reparse_point(&meta) =>
+                    {
+                        let path = item.path();
+                        if !ctx.budget.directory(path.as_os_str().len()) {
+                            total.complete = false;
+                            break;
+                        }
+                        children.push(path);
+                    }
+                    Ok(meta) => {
+                        total.merge(SubtreeSize {
+                            bytes: price_sizing_inode(&meta, ctx),
+                            complete: true,
+                        });
+                    }
+                    Err(_) => total.complete = false,
+                }
+            }
+            if children.len() >= SIZE_DIR_BATCH {
+                if depth < SIZE_PAR_DEPTH {
+                    total.merge(size_children(&mut children, ctx, depth));
                 } else {
-                    apparent_size(&entry.path)
-                };
+                    pending.append(&mut children);
+                }
             }
         }
+        if depth < SIZE_PAR_DEPTH {
+            total.merge(size_children(&mut children, ctx, depth));
+        } else {
+            pending.append(&mut children);
+        }
     }
+    if total.bytes > 9_007_199_254_740_991 {
+        ctx.budget.fail("byte counter overflow");
+    }
+    total.complete &= !ctx.budget.failed();
+    total
+}
+
+fn directory_id(meta: &fs::Metadata) -> Option<(u64, u64)> {
+    let key = inode_id(meta);
+    (key.1 != 0).then_some(key)
+}
+
+fn hardlink_candidate(meta: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        !meta.is_dir() && meta.nlink() > 1 && meta.ino() != 0
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        !meta.is_dir()
+            && meta.number_of_links().is_some_and(|n| n > 1)
+            && meta.file_index().is_some_and(|n| n != 0)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = meta;
+        false
+    }
+}
+
+fn inode_id(meta: &fs::Metadata) -> (u64, u64) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        (meta.dev(), meta.ino())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        (
+            u64::from(meta.volume_serial_number().unwrap_or(0)),
+            meta.file_index().unwrap_or(0),
+        )
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = meta;
+        (0, 0)
+    }
+}
+
+pub fn measure_size_with_budget(
+    path: &Utf8Path,
+    exact: bool,
+    budget: &ResourceBudget,
+) -> SubtreeSize {
+    if budget.failed() {
+        return SubtreeSize {
+            bytes: 0,
+            complete: false,
+        };
+    }
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(_) => {
+            return SubtreeSize {
+                bytes: 0,
+                complete: false,
+            }
+        }
+    };
+    if meta.is_symlink() || meta_is_reparse_point(&meta) || !meta.is_dir() {
+        if meta.len() > 9_007_199_254_740_991 {
+            budget.fail("byte counter overflow");
+            return SubtreeSize {
+                bytes: 0,
+                complete: false,
+            };
+        }
+        return SubtreeSize {
+            bytes: if exact && !meta.is_file() && !meta.is_symlink() {
+                0
+            } else {
+                meta.len()
+            },
+            complete: true,
+        };
+    }
+    if !budget.directory(path.as_str().len()) {
+        return SubtreeSize {
+            bytes: 0,
+            complete: false,
+        };
+    }
+    let ctx = SizeContext {
+        budget,
+        exact,
+        parallel: sizing_pool().is_some(),
+        links: Mutex::new(HashSet::new()),
+        dirs: Mutex::new(HashSet::new()),
+    };
+    let run = || size_directories(path.as_std_path(), &ctx, 0);
+    match sizing_pool() {
+        Some(pool) => pool.install(run),
+        None => run(),
+    }
+}
+
+/// GNU du -sb apparent size on Linux, counting repeated hard links once.
+pub fn apparent_size(path: &Utf8Path) -> SubtreeSize {
+    measure_size_with_budget(path, false, &ResourceBudget::default())
+}
+
+/// Files-only size with JS exactSize semantics: interior links are skipped.
+pub fn exact_size(path: &Utf8Path) -> SubtreeSize {
+    measure_size_with_budget(path, true, &ResourceBudget::default())
+}
+
+pub fn batch_estimate_bytes(paths: &[&Utf8Path]) -> HashMap<String, SubtreeSize> {
+    let run = || {
+        paths
+            .par_iter()
+            .map(|path| (path.as_str().to_owned(), apparent_size(path)))
+            .collect()
+    };
+    match sizing_pool() {
+        Some(pool) => pool.install(run),
+        None => paths
+            .iter()
+            .map(|path| (path.as_str().to_owned(), apparent_size(path)))
+            .collect(),
+    }
+}
+
+pub fn apply_size_estimates(entries: &mut [WalkEntry], exact: bool) {
+    apply_size_estimates_with_budget(entries, exact, &ResourceBudget::default());
+}
+
+pub fn apply_size_estimates_with_budget(
+    entries: &mut [WalkEntry],
+    exact: bool,
+    budget: &ResourceBudget,
+) {
+    let apply_one = |entry: &mut WalkEntry| {
+        let size = measure_size_with_budget(&entry.path, exact, budget);
+        entry.estimated_bytes = size.bytes;
+        entry.bytes_known = size.complete;
+    };
+    match sizing_pool() {
+        Some(pool) => pool.install(|| entries.par_iter_mut().for_each(apply_one)),
+        None => entries.iter_mut().for_each(apply_one),
+    }
+}
+
+/// Dispatcher runs outside the sizing pool, so waiting for discoveries or
+/// permits never parks one of its workers. In-flight candidate jobs are capped
+/// independently of the input channel; subdivision stays on the same pool.
+pub fn size_entries_progressively(
+    receiver: std::sync::mpsc::Receiver<WalkEntry>,
+    exact: bool,
+    on_sized: &(dyn Fn(&WalkEntry, SubtreeSize) + Sync),
+) {
+    size_entries_progressively_with_budget(receiver, exact, on_sized, &ResourceBudget::default());
+}
+
+pub fn size_entries_progressively_with_budget(
+    receiver: std::sync::mpsc::Receiver<WalkEntry>,
+    exact: bool,
+    on_sized: &(dyn Fn(&WalkEntry, SubtreeSize) + Sync),
+    budget: &ResourceBudget,
+) {
+    let Some(pool) = sizing_pool() else {
+        for entry in receiver {
+            on_sized(&entry, measure_size_with_budget(&entry.path, exact, budget));
+        }
+        return;
+    };
+    let pending = (Mutex::new(0usize), Condvar::new());
+    pool.in_place_scope(|scope| {
+        for entry in receiver {
+            let mut count = pending.0.lock().unwrap_or_else(|p| p.into_inner());
+            while *count >= 32 {
+                count = pending.1.wait(count).unwrap_or_else(|p| p.into_inner());
+            }
+            *count += 1;
+            drop(count);
+            let pending = &pending;
+            scope.spawn(move |_| {
+                struct Permit<'a>(&'a (Mutex<usize>, Condvar));
+                impl Drop for Permit<'_> {
+                    fn drop(&mut self) {
+                        let mut count = self.0 .0.lock().unwrap_or_else(|p| p.into_inner());
+                        *count -= 1;
+                        self.0 .1.notify_one();
+                    }
+                }
+                let _permit = Permit(pending);
+                on_sized(&entry, measure_size_with_budget(&entry.path, exact, budget));
+            });
+        }
+    });
 }
 
 /// Size of the entry itself (lstat, so symlinks report the link). The
@@ -813,6 +1354,8 @@ fn meta_is_reparse_point(_meta: &fs::Metadata) -> bool {
     false
 }
 
+/// Junction/reparse detection - only Windows surfaces links as dirent dirs.
+#[cfg(windows)]
 fn is_reparse_point_or_symlink(entry_path: &Utf8Path) -> bool {
     let meta = match fs::symlink_metadata(entry_path.as_std_path()) {
         Ok(meta) => meta,
@@ -835,6 +1378,102 @@ fn is_reparse_point_or_symlink(entry_path: &Utf8Path) -> bool {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn worker_callback_panic_does_not_strand_other_walkers() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+        fs::create_dir(dir.path().join("node_modules"))
+            .unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+        let root =
+            Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("fixture path not UTF-8"));
+        let callback = |_: &WalkEntry| panic!("injected callback failure");
+        let hooks = WalkHooks {
+            on_match: Some(&callback),
+            on_dir: None,
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            walk_matched_entries_with_hooks(root, &WalkConfig::default(), Some(&hooks));
+        }));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn apparent_inode_pricing_excludes_directory_metadata() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+        let meta = fs::symlink_metadata(dir.path())
+            .unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+        let mut ctx = SizeContext {
+            exact: false,
+            parallel: false,
+            budget: &ResourceBudget::default(),
+            links: Mutex::new(HashSet::new()),
+            dirs: Mutex::new(HashSet::new()),
+        };
+        assert_eq!(price_sizing_inode(&meta, &ctx), 0);
+        ctx.exact = true;
+        assert_eq!(price_sizing_inode(&meta, &ctx), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parallel_sizing_deduplicates_links_across_directory_batches() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let source = dir.path().join("source");
+        fs::write(&source, vec![0u8; 100]).unwrap_or_else(|err| panic!("write failed: {err}"));
+        for i in 0..140 {
+            let child = dir.path().join(format!("child-{i}"));
+            fs::create_dir(&child).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+            fs::hard_link(&source, child.join("shared"))
+                .unwrap_or_else(|err| panic!("link failed: {err}"));
+            fs::write(child.join("unique"), b"abc")
+                .unwrap_or_else(|err| panic!("write failed: {err}"));
+        }
+        let root =
+            Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("fixture path not UTF-8"));
+        assert_eq!(
+            apparent_size(root),
+            SubtreeSize {
+                bytes: 520,
+                complete: true
+            }
+        );
+        // Exact mode intentionally counts each regular file path, matching JS.
+        assert_eq!(
+            exact_size(root),
+            SubtreeSize {
+                bytes: 14520,
+                complete: true
+            }
+        );
+    }
+
+    #[test]
+    fn sizing_handles_deep_subtrees_and_non_utf8_files() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+        let root =
+            Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("fixture path not UTF-8"));
+        let mut path = dir.path().to_path_buf();
+        for _ in 0..300 {
+            path.push("d");
+            fs::create_dir(&path).unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+            fs::write(path.join("file"), b"abc")
+                .unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+        }
+        assert_eq!(
+            exact_size(root),
+            SubtreeSize {
+                bytes: 900,
+                complete: true
+            }
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            fs::write(path.join(std::ffi::OsStr::from_bytes(b"\xff")), b"abcd")
+                .unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+            assert_eq!(exact_size(root).bytes, 904);
+        }
+    }
 
     /// `du -sb` semantics: files and symlinks count their own `lstat` size,
     /// directories contribute only their children, links are never followed.
@@ -867,7 +1506,9 @@ mod tests {
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or_else(|| panic!("could not parse du output"));
 
-        assert_eq!(apparent_size(&tree), du_bytes);
+        let size = apparent_size(&tree);
+        assert_eq!(size.bytes, du_bytes);
+        assert!(size.complete);
     }
 
     #[test]
@@ -968,7 +1609,8 @@ mod tests {
             .unwrap_or_else(|err| panic!("write failed: {err}"));
 
         let size = exact_size(&artifact);
-        assert_eq!(size, 5 + 7);
+        assert_eq!(size.bytes, 5 + 7);
+        assert!(size.complete);
     }
 
     #[test]
@@ -984,6 +1626,47 @@ mod tests {
         let map = batch_estimate_bytes(&[artifact.as_path()]);
         if std::env::consts::OS == "linux" || std::env::consts::OS == "macos" {
             assert!(map.contains_key(artifact.as_str()));
+            assert!(map[artifact.as_str()].complete);
+        }
+    }
+
+    /// An unreadable subtree must not pretend to be fully priced: partial
+    /// bytes stay, `complete` flips false, and the wire field follows it.
+    #[test]
+    #[cfg(unix)]
+    fn unreadable_subtree_marks_size_incomplete() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let artifact = root.join("node_modules");
+        let locked = artifact.join("locked");
+        fs::create_dir_all(locked.as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::write(artifact.join("ok.bin").as_std_path(), vec![0u8; 100])
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+        fs::write(locked.join("hidden.bin").as_std_path(), vec![0u8; 50])
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+        fs::set_permissions(locked.as_std_path(), fs::Permissions::from_mode(0o000))
+            .unwrap_or_else(|err| panic!("chmod failed: {err}"));
+
+        // Root and ACL-less filesystems read right past the lock - there is
+        // nothing deterministic to assert when the platform ignores it.
+        if fs::read_dir(locked.as_std_path()).is_err() {
+            let apparent = apparent_size(&artifact);
+            let exact = exact_size(&artifact);
+            fs::set_permissions(locked.as_std_path(), fs::Permissions::from_mode(0o700))
+                .unwrap_or_else(|err| panic!("restore chmod failed: {err}"));
+
+            assert!(!apparent.complete);
+            assert!(!exact.complete);
+            assert_eq!(apparent.bytes, 100);
+            assert_eq!(exact.bytes, 100);
+        } else {
+            fs::set_permissions(locked.as_std_path(), fs::Permissions::from_mode(0o700))
+                .unwrap_or_else(|err| panic!("restore chmod failed: {err}"));
         }
     }
 
@@ -1064,6 +1747,73 @@ mod tests {
         } else {
             assert_eq!(result.skipped_dirs, 0);
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn apparent_size_dedups_hardlinks() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let artifact = root.join("node_modules");
+        fs::create_dir_all(artifact.join("nested").as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::write(artifact.join("original.bin").as_std_path(), vec![0u8; 4096])
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+        // pnpm-style: the same inode linked twice inside one subtree. `du -sb`
+        // counts it once; so do we.
+        fs::hard_link(
+            artifact.join("original.bin").as_std_path(),
+            artifact.join("nested/link.bin").as_std_path(),
+        )
+        .unwrap_or_else(|err| panic!("hardlink failed: {err}"));
+
+        assert_eq!(apparent_size(&artifact).bytes, 4096);
+        // Exact mode matches JS `exactSize`: statSync per file, no dedup.
+        assert_eq!(exact_size(&artifact).bytes, 4096 * 2);
+    }
+
+    #[test]
+    fn glob_match_is_linear_under_pathological_patterns() {
+        // Audit A01: a pattern of many stars against a long non-matching name
+        // must finish bounded - the old regexes could backtrack hard here.
+        let pattern = "*a".repeat(64) + "*b";
+        let name = "a".repeat(200);
+        let start = std::time::Instant::now();
+        let result = glob_match(&pattern, &name);
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(100),
+            "pathological glob took {:?}",
+            start.elapsed()
+        );
+        assert!(!result);
+    }
+
+    #[test]
+    fn unicode_case_folding_matches_the_js_policy() {
+        let matcher = PatternMatcher::compile_with_case(&["Ä*".to_owned(), "ΟΣ".to_owned()], true);
+        assert!(matcher.matches("ä-cache"));
+        assert!(matcher.matches("ος"));
+        assert!(glob_match("?", "🦊"));
+        assert!(!glob_match("??", "🦊"));
+    }
+
+    #[test]
+    fn glob_match_semantics() {
+        assert!(glob_match("dist*", "dist"));
+        assert!(glob_match("dist*", "dist-esm"));
+        assert!(glob_match("*.map", "app.js.map"));
+        assert!(glob_match("?", "x"));
+        assert!(glob_match("*", "anything/with/slashes"));
+        assert!(!glob_match("?", ""));
+        assert!(!glob_match("?", "xy"));
+        assert!(!glob_match("dist", "dist2"));
+        assert!(!glob_match("*.map", "app.map.js"));
+        assert!(glob_match("", ""));
+        assert!(glob_match("a*c*e", "abXcdYe"));
+        assert!(!glob_match("a*c*e", "abXcdYef"));
+        assert!(!glob_match("a*c*e", "abXcdYfx"));
     }
 
     #[test]
@@ -1153,6 +1903,31 @@ mod tests {
     }
 
     #[test]
+    fn directory_iterator_errors_are_reported_once() {
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("path encoding"));
+        let config = WalkConfig::default();
+        let matcher = PatternMatcher::compile(&config.patterns);
+        let skipped = AtomicU32::new(0);
+        let ctx = WalkCtx {
+            root,
+            config: &config,
+            matcher: &matcher,
+            ignore: None,
+            hooks: None,
+            scanned: None,
+            skipped: Some(&skipped),
+            visited: None,
+            budget: &ResourceBudget::default(),
+        };
+        let errors = (0..3).map(|_| Err(std::io::Error::other("injected iterator error")));
+        let (result, jobs) = scan_dir_entries(&ctx, root, 0, errors);
+        assert_eq!(result.skipped_dirs, 1);
+        assert_eq!(skipped.load(Ordering::Relaxed), 1);
+        assert!(jobs.is_empty());
+    }
+
+    #[test]
     #[cfg(unix)]
     fn dir_swapped_for_symlink_is_not_descended() {
         // mark_dir must refuse a path that turned into a symlink between
@@ -1176,6 +1951,7 @@ mod tests {
             scanned: None,
             skipped: None,
             visited: Some(&visited),
+            budget: &ResourceBudget::default(),
         };
 
         assert!(mark_dir(&ctx, &sub), "real dir should be visitable");

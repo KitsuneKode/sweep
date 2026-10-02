@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 camino.workspace = true
-regex-lite = "0.1"
+crossbeam-deque.workspace = true
 rayon.workspace = true
 sweep-types = { path = "../sweep-types" }
 

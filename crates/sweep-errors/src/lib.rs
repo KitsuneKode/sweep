@@ -41,12 +41,17 @@ pub enum GuardrailError {
     #[error("selection exceeds configured size limit: {selected_bytes} bytes")]
     SizeLimitExceeded { selected_bytes: u64 },
 
+    #[error("cannot verify current size at {path}; rescan or explicitly use --force-large")]
+    CurrentSizeUnavailable { path: String },
+
     #[error("plan protocol version {found} is not supported (expected {expected})")]
     UnsupportedProtocolVersion { found: String, expected: String },
 }
 
 #[derive(Debug, Error)]
 pub enum EngineError {
+    #[error("{message}")]
+    ResourceLimit { message: String },
     #[error(transparent)]
     Guardrail(#[from] GuardrailError),
 

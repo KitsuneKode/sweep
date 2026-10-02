@@ -70,6 +70,7 @@ pub fn run_rust_scan_normalized_with(name: &str, extra_patterns: &[&str]) -> Val
             sweep_engine::ScanOptions {
                 exact: false,
                 hooks: sweep_engine::ScanHooks::default(),
+                ..sweep_engine::ScanOptions::default()
             },
         )
     }

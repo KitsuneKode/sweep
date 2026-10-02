@@ -2,6 +2,31 @@
 
 pub const PROTOCOL_VERSION: &str = "1";
 
+/// Logical operation bounds. Defaults match the TypeScript protocol package.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct ScanLimits {
+    pub max_candidates: u32,
+    pub max_directories: u32,
+    pub max_queued_dirs: u32,
+    pub max_identities: u32,
+    pub max_path_bytes: u32,
+    pub max_retained_bytes: u32,
+}
+
+impl Default for ScanLimits {
+    fn default() -> Self {
+        Self {
+            max_candidates: 100_000,
+            max_directories: 250_000,
+            max_queued_dirs: 32_768,
+            max_identities: 500_000,
+            max_path_bytes: 64 * 1024 * 1024,
+            max_retained_bytes: 128 * 1024 * 1024,
+        }
+    }
+}
+
 /// Returns the active sweep protocol version string.
 pub fn protocol_version() -> &'static str {
     PROTOCOL_VERSION
@@ -59,6 +84,11 @@ pub struct ScanEntry {
     pub path: String,
     pub name: String,
     pub estimated_bytes: u64,
+    /// `Some(false)` when sizing hit unreadable inodes - `estimated_bytes` is
+    /// a partial sum. `None` on wire means an old producer (treated as known).
+    /// New scans always emit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_known: Option<bool>,
     /// Last-modified time of the artifact itself, in epoch milliseconds.
     /// Omitted from JSON when the stat failed, matching the TS protocol.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -158,6 +188,15 @@ pub struct PathFailure {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ApplyOutcome {
+    pub candidate_id: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub covered_by: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ApplyReport {
     pub protocol_version: String,
     pub target_dir: String,
@@ -166,6 +205,10 @@ pub struct ApplyReport {
     pub failed_count: u32,
     pub total_bytes_freed: u64,
     pub failed_paths: Vec<PathFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcomes: Option<Vec<ApplyOutcome>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupted: Option<bool>,
 }
 
 impl ApplyReport {
@@ -178,6 +221,8 @@ impl ApplyReport {
             failed_count: 0,
             total_bytes_freed: 0,
             failed_paths: Vec::new(),
+            outcomes: Some(Vec::new()),
+            interrupted: Some(false),
         }
     }
 }

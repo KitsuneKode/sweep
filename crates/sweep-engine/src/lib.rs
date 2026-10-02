@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
 use sweep_errors::EngineError;
 use sweep_fs::{
-    apply_size_estimates, walk_matched_entries_with_hooks, WalkConfig, WalkEntry, WalkHooks,
+    apply_size_estimates_with_budget, walk_matched_entries_with_budget, ResourceBudget, WalkConfig,
+    WalkEntry, WalkHooks,
 };
 use sweep_types::{
     ApplyReport, EntryType, RiskTier, ScanCandidate, ScanPlan, ScanPlanSummary, SelectionMode,
@@ -22,6 +23,7 @@ use sweep_types::{
 pub struct ScanOptions<'a> {
     pub exact: bool,
     pub hooks: ScanHooks<'a>,
+    pub limits: sweep_types::ScanLimits,
 }
 
 /// `(scanned_dirs, found, skipped_dirs, current_dir)` - aligned with the
@@ -64,6 +66,30 @@ pub fn scan_to_plan_with_config(
 
     guardrails::assert_safe_cwd(target_dir.as_str())?;
 
+    let meta = std::fs::symlink_metadata(target_dir).map_err(|err| EngineError::InvalidPlan {
+        message: format!("cannot read scan root {target_dir}: {err}"),
+    })?;
+    if !meta.is_dir() || meta.is_symlink() {
+        return Err(EngineError::InvalidPlan {
+            message: format!("scan root is not a real directory: {target_dir}"),
+        });
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 {
+            return Err(EngineError::InvalidPlan {
+                message: format!("scan root is a reparse point: {target_dir}"),
+            });
+        }
+    }
+    // Failure at the root is different from skipped subdirectories. Do not
+    // turn an unreadable root into a successful empty cleanup plan.
+    std::fs::read_dir(target_dir).map_err(|err| EngineError::InvalidPlan {
+        message: format!("cannot read scan root {target_dir}: {err}"),
+    })?;
+
+    let budget = ResourceBudget::new(options.limits);
     let on_entry = options.hooks.on_entry;
     let on_progress = options.hooks.on_progress;
     let on_entry_sized = options.hooks.on_entry_sized;
@@ -81,51 +107,38 @@ pub fn scan_to_plan_with_config(
         results: Mutex::new(HashMap::new()),
         emit_sized: on_entry_sized,
     };
-    // `std::mpsc` receivers are single-consumer, so the worker pool shares it
-    // behind a mutex; the lock is only held for the `recv` itself, never while
-    // sizing. Declared outside the scope so it outlives the spawned workers.
-    let sizer_rx = Mutex::new(entry_rx);
-    // Subtree sizing parallelizes internally - but it must never run on the
-    // global rayon pool the walk uses: pool threads blocked on a full send
-    // channel plus sizers blocked on queued pool tasks deadlocks the scan.
-    // A dedicated pool keeps the two workloads independent.
-    let size_pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(sizer_workers())
-        .build()
-        .ok();
-
     let walk = std::thread::scope(|scope| {
-        // A fixed pool pulls entries one at a time - self-balancing with no
-        // dispatcher thread or per-chunk thread spawns.
-        let size_pool = &size_pool;
-        let sizers: Vec<_> = if progressive {
-            (0..sizer_workers())
-                .map(|_| {
-                    scope.spawn(|| loop {
-                        let entry = {
-                            sizer_rx
-                                .lock()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                .recv()
-                        };
-                        match entry {
-                            Ok(entry) => size_entry_job(&entry, &shared, options.exact, size_pool),
-                            // Channel closed and drained - the walk is done.
-                            Err(_) => break,
-                        }
-                    })
-                })
-                .collect()
+        // A single dispatcher feeds the shared eight-thread sizing pool.
+        // Both candidate jobs and nested directory jobs use that pool; no
+        // size job parks a Rayon worker waiting for discovery or queue space.
+        let sizer = if progressive {
+            let shared_ref = &shared;
+            let exact = options.exact;
+            let budget = &budget;
+            Some(scope.spawn(move || {
+                sweep_fs::size_entries_progressively_with_budget(
+                    entry_rx,
+                    exact,
+                    &|entry, size| record_sized(shared_ref, entry, size),
+                    budget,
+                )
+            }))
         } else {
-            Vec::new()
+            None
         };
         // Scoped so the closures - and their borrow of `entry_tx` - drop before
         // the sender does below.
-        let walk = {
+        let walk = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let on_match = |entry: &WalkEntry| {
                 found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let Some(cb) = on_entry {
-                    cb(to_candidate(entry, 0));
+                    cb(to_candidate(
+                        entry,
+                        sweep_fs::SubtreeSize {
+                            bytes: 0,
+                            complete: false,
+                        },
+                    ));
                 }
                 // The found line is fully buffered before the entry reaches a
                 // sizer - an update can never overtake its own discovery event.
@@ -147,38 +160,57 @@ pub fn scan_to_plan_with_config(
                 on_match: Some(&on_match),
                 on_dir: Some(&on_dir),
             };
-            walk_matched_entries_with_hooks(target_dir, walk_config, Some(&hooks))
-        };
+            walk_matched_entries_with_budget(target_dir, walk_config, Some(&hooks), &budget)
+        }));
         // Dropping the sender closes the channel so the sizers drain and exit.
         drop(entry_tx);
-        for handle in sizers {
-            let _ = handle.join();
+        if let Some(handle) = sizer {
+            if let Err(payload) = handle.join() {
+                std::panic::resume_unwind(payload);
+            }
         }
-        walk
+        match walk {
+            Ok(walk) => walk,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     });
+    if let Some(message) = budget.error() {
+        return Err(EngineError::ResourceLimit { message });
+    }
     let mut entries = walk.entries;
     let scanned_dirs = walk.scanned_dirs;
     let skipped_dirs = walk.skipped_dirs;
 
     if progressive {
-        apply_progressive_sizes(&mut entries, &shared, options.exact);
+        apply_progressive_sizes(&mut entries, &shared)?;
     } else {
-        apply_size_estimates(&mut entries, options.exact);
+        apply_size_estimates_with_budget(&mut entries, options.exact, &budget);
     }
 
+    if let Some(message) = budget.error() {
+        return Err(EngineError::ResourceLimit { message });
+    }
     let candidates: Vec<ScanCandidate> = entries
-        .iter()
-        .map(|entry| to_candidate(entry, entry.estimated_bytes))
+        .into_iter()
+        .map(|entry| {
+            to_candidate(
+                &entry,
+                sweep_fs::SubtreeSize {
+                    bytes: entry.estimated_bytes,
+                    complete: entry.bytes_known,
+                },
+            )
+        })
         .collect();
 
-    Ok(build_plan(
+    build_plan(
         target_dir.as_str(),
-        &candidates,
+        candidates,
         scanned_dirs,
         skipped_dirs,
         selection_policy,
         options.exact,
-    ))
+    )
 }
 
 /// `(entry, bytes)` -> emit a sized candidate event.
@@ -186,94 +218,42 @@ type OnSized<'a> = dyn Fn(ScanCandidate) + Sync + 'a;
 
 /// Shared state between the sizer dispatcher and its scoped worker threads.
 struct SizerShared<'a> {
-    /// path -> resolved bytes; authoritative for the final plan's sizes.
-    results: Mutex<HashMap<String, u64>>,
+    /// path -> resolved size; authoritative for the final plan's sizes.
+    results: Mutex<HashMap<String, sweep_fs::SubtreeSize>>,
     emit_sized: Option<&'a OnSized<'a>>,
 }
 
-/// Sizing is `lstat`+`readdir` bound - threads spend their time parked on
-/// syscalls, so oversubscribing the core count is fine. The disk is the wall
-/// either way; a floor keeps tiny boxes parallel and a ceiling avoids hundreds
-/// of blocked threads on very wide machines.
-fn sizer_workers() -> usize {
-    std::thread::available_parallelism()
-        .map(std::num::NonZero::get)
-        .unwrap_or(4)
-        .clamp(4, 16)
-}
-
-/// How many discovered entries can wait on the sizer channel before the walk
-/// blocks. Sized so the sizers stay fed without a large backlog.
+/// Discoveries wait in a bounded channel before the dispatcher admits at
+/// most 32 candidate jobs onto the shared sizing pool.
 const SIZER_QUEUE_BOUND: usize = 256;
 
-/// One sizing job: a fully in-process `lstat` walk, no subprocess. `exact`
-/// sums file sizes (JS `exactSize` parity); the default reports `du -sb`
-/// apparent size including symlink entries. The subtree's internal par_iter
-/// runs on the dedicated `pool`, never the walk's global pool (see caller).
-fn size_entry_job(
-    entry: &WalkEntry,
-    shared: &SizerShared,
-    exact: bool,
-    pool: &Option<rayon::ThreadPool>,
-) {
-    let measure = || {
-        if exact {
-            sweep_fs::exact_size(&entry.path)
-        } else {
-            sweep_fs::apparent_size(&entry.path)
-        }
-    };
-    let bytes = match pool {
-        Some(pool) => pool.install(measure),
-        None => measure(),
-    };
-    record_sized(shared, entry, bytes);
-}
-
-fn record_sized(shared: &SizerShared, entry: &WalkEntry, bytes: u64) {
+fn record_sized(shared: &SizerShared, entry: &WalkEntry, size: sweep_fs::SubtreeSize) {
     shared
         .results
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(entry.path.as_str().to_owned(), bytes);
+        .insert(entry.path.as_str().to_owned(), size);
     if let Some(emit) = shared.emit_sized {
-        emit(to_candidate(entry, bytes));
+        emit(to_candidate(entry, size));
     }
 }
 
-/// Fold sizer results back into the walk entries. Entries the sizer never
-/// reported (a worker that died before finishing its job) are sized inline
-/// with the same function and emit their updates now, so every candidate
-/// still gets exactly one size and the plan never ships a stale 0.
-fn apply_progressive_sizes(entries: &mut [WalkEntry], shared: &SizerShared, exact: bool) {
-    let mut fell_back: Vec<usize> = Vec::new();
-    {
-        let results = shared
-            .results
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        for (index, entry) in entries.iter_mut().enumerate() {
-            match results.get(entry.path.as_str()) {
-                Some(&bytes) => entry.estimated_bytes = bytes,
-                None => {
-                    entry.estimated_bytes = if exact {
-                        sweep_fs::exact_size(&entry.path)
-                    } else {
-                        sweep_fs::apparent_size(&entry.path)
-                    };
-                    fell_back.push(index);
-                }
-            }
-        }
+/// Consume sizing results as entries are finalized, releasing duplicate paths.
+fn apply_progressive_sizes(
+    entries: &mut [WalkEntry],
+    shared: &SizerShared,
+) -> Result<(), EngineError> {
+    let mut results = shared.results.lock().unwrap_or_else(|p| p.into_inner());
+    for entry in entries {
+        let size = results
+            .remove(entry.path.as_str())
+            .ok_or_else(|| EngineError::InvalidPlan {
+                message: format!("sizer did not report {}", entry.path),
+            })?;
+        entry.estimated_bytes = size.bytes;
+        entry.bytes_known = size.complete;
     }
-    for index in fell_back {
-        if let Some(emit) = shared.emit_sized {
-            emit(to_candidate(
-                &entries[index],
-                entries[index].estimated_bytes,
-            ));
-        }
-    }
+    Ok(())
 }
 
 /// Scan with protocol [`SweepConfig`] and selection policy from the JS bridge.
@@ -297,42 +277,67 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
     apply::apply_plan(plan)
 }
 
+pub use apply::{apply_plan_controlled, apply_plan_controlled_with_limit};
+
 fn build_plan(
     target_dir: &str,
-    candidates: &[ScanCandidate],
+    candidates: Vec<ScanCandidate>,
     scanned_dirs: u32,
     skipped_dirs: u32,
     selection_policy: &SelectionPolicy,
     exact: bool,
-) -> ScanPlan {
-    let selected_candidate_ids = compile_selected_candidate_ids(candidates, selection_policy);
-    let estimated_total_bytes: u64 = candidates.iter().map(|c| c.entry.estimated_bytes).sum();
-    let risk_counts = count_risk_tiers(candidates);
+) -> Result<ScanPlan, EngineError> {
+    let selected_candidate_ids = compile_selected_candidate_ids(&candidates, selection_policy);
+    let estimated_total_bytes = candidates
+        .iter()
+        .try_fold(0u64, |total, c| {
+            total
+                .checked_add(c.entry.estimated_bytes)
+                .filter(|&n| n <= 9_007_199_254_740_991)
+        })
+        .ok_or_else(|| EngineError::ResourceLimit {
+            message: "byte counter overflow; scan is incomplete".to_owned(),
+        })?;
+    let risk_counts = count_risk_tiers(&candidates);
+    let candidate_count =
+        u32::try_from(candidates.len()).map_err(|_| EngineError::ResourceLimit {
+            message: "candidate counter overflow".to_owned(),
+        })?;
+    let selected_count =
+        u32::try_from(selected_candidate_ids.len()).map_err(|_| EngineError::ResourceLimit {
+            message: "selection counter overflow".to_owned(),
+        })?;
+    // `exact` advertises byte-accurate totals; a partial subtree silently
+    // undercounts, so unknown candidates demote the claim.
+    let exact = exact
+        && candidates
+            .iter()
+            .all(|c| c.entry.bytes_known != Some(false));
 
-    ScanPlan {
+    Ok(ScanPlan {
         protocol_version: PROTOCOL_VERSION.to_owned(),
         target_dir: target_dir.to_owned(),
         selection_policy: selection_policy.clone(),
-        candidates: candidates.to_vec(),
+        candidates,
         summary: ScanPlanSummary {
-            candidate_count: candidates.len() as u32,
+            candidate_count,
             estimated_total_bytes,
             scanned_dirs,
             skipped_dirs,
             exact,
-            selected_count: selected_candidate_ids.len() as u32,
+            selected_count,
             risk_counts,
         },
         selected_candidate_ids,
         created_at: iso_timestamp_now(),
-    }
+    })
 }
 
 fn iso_timestamp_now() -> String {
     chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
-fn to_candidate(entry: &WalkEntry, estimated_bytes: u64) -> ScanCandidate {
+fn to_candidate(entry: &WalkEntry, size: sweep_fs::SubtreeSize) -> ScanCandidate {
     let path = entry.path.as_str().to_owned();
     let id = format!("cand_{}", hash_string(&format!("{}:{}", path, entry.name)));
     let kind = candidate_kind_from_name(&entry.name);
@@ -344,7 +349,8 @@ fn to_candidate(entry: &WalkEntry, estimated_bytes: u64) -> ScanCandidate {
         entry: sweep_types::ScanEntry {
             path,
             name: entry.name.clone(),
-            estimated_bytes,
+            estimated_bytes: size.bytes,
+            bytes_known: Some(size.complete),
             modified_ms: entry.modified_ms,
             is_symlink: entry.is_symlink,
             entry_type: match entry.entry_type {
@@ -458,6 +464,42 @@ fn hash_string(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_scan_root_is_a_failure() {
+        let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let path = dir.path().join("missing");
+        let root = Utf8Path::from_path(&path).unwrap_or_else(|| panic!("fixture path not UTF-8"));
+        assert!(scan_to_plan(root).is_err());
+    }
+
+    #[test]
+    fn a_discovery_panic_closes_the_progressive_sizing_channel() {
+        let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        std::fs::create_dir(dir.path().join("node_modules"))
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        let root =
+            Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("fixture path not UTF-8"));
+        let on_entry = |_: ScanCandidate| panic!("injected discovery failure");
+        let on_sized = |_: ScanCandidate| {};
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = scan_to_plan_with_config(
+                root,
+                &WalkConfig::default(),
+                &SelectionPolicy::default(),
+                ScanOptions {
+                    exact: false,
+                    hooks: ScanHooks {
+                        on_entry: Some(&on_entry),
+                        on_entry_sized: Some(&on_sized),
+                        on_progress: None,
+                    },
+                    ..ScanOptions::default()
+                },
+            );
+        }));
+        assert!(result.is_err());
+    }
     use sweep_errors::GuardrailError;
     use tempfile::tempdir;
 
@@ -488,6 +530,59 @@ mod tests {
             hash_string(&format!("{}:node_modules", nm_path.as_str()))
         );
         assert_eq!(plan.candidates[0].id, expected_id);
+    }
+
+    /// A subtree the sizer cannot fully read keeps partial bytes but must
+    /// admit it: `bytes_known` flips false and `summary.exact` demotes, so the
+    /// host never presents an undercount as a byte-accurate total.
+    #[test]
+    #[cfg(unix)]
+    fn plan_marks_unreadable_subtree_size_unknown() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {
+            panic!("tempdir path is not valid UTF-8");
+        });
+        let nm = root.join("node_modules");
+        let locked = nm.join("locked");
+        std::fs::create_dir_all(locked.as_std_path())
+            .unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        std::fs::write(locked.join("hidden.bin").as_std_path(), vec![0u8; 32])
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+        std::fs::set_permissions(locked.as_std_path(), std::fs::Permissions::from_mode(0o000))
+            .unwrap_or_else(|err| panic!("chmod failed: {err}"));
+
+        // Root / ACL-less platforms ignore the lock - nothing to assert then.
+        if std::fs::read_dir(locked.as_std_path()).is_err() {
+            let options = ScanOptions {
+                exact: true,
+                ..ScanOptions::default()
+            };
+            let plan = scan_to_plan_with_config(
+                root,
+                &WalkConfig::default(),
+                &SelectionPolicy::default(),
+                options,
+            )
+            .unwrap_or_else(|err| panic!("scan failed: {err}"));
+            std::fs::set_permissions(locked.as_std_path(), std::fs::Permissions::from_mode(0o700))
+                .unwrap_or_else(|err| panic!("restore chmod failed: {err}"));
+
+            assert_eq!(plan.candidates.len(), 1);
+            assert_eq!(
+                plan.candidates[0].entry.bytes_known,
+                Some(false),
+                "partial subtree must report bytes_known=false"
+            );
+            assert!(
+                !plan.summary.exact,
+                "exact must demote when any candidate size is unknown"
+            );
+        } else {
+            std::fs::set_permissions(locked.as_std_path(), std::fs::Permissions::from_mode(0o700))
+                .unwrap_or_else(|err| panic!("restore chmod failed: {err}"));
+        }
     }
 
     #[test]
@@ -564,6 +659,7 @@ mod tests {
             ScanOptions {
                 exact: false,
                 hooks,
+                ..ScanOptions::default()
             },
         )
         .unwrap_or_else(|err| panic!("scan failed: {err}"));
@@ -612,8 +708,12 @@ mod tests {
             if let Ok(mut steps) = order.lock() {
                 steps.push("entry");
             }
-            // Park one producer mid-scan until the sizer proves it is live.
-            if entry_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1 == 30 {
+            // Once 30 discoveries are queued the sizer has work; park every
+            // producer (all rayon walk threads run this callback) until the
+            // sizer proves it is live. Gating a single thread lets sibling
+            // workers finish the walk anyway, which is exactly the regression
+            // this test exists to catch.
+            if entry_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1 >= 30 {
                 let gate = sized_gate
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -650,7 +750,11 @@ mod tests {
             root,
             &WalkConfig::default(),
             &SelectionPolicy::default(),
-            ScanOptions { exact: true, hooks },
+            ScanOptions {
+                exact: true,
+                hooks,
+                ..ScanOptions::default()
+            },
         )
         .unwrap_or_else(|err| panic!("scan failed: {err}"));
 
@@ -670,6 +774,59 @@ mod tests {
             "sized events arrived only after the walk finished (first sized at \
              {first_sized:?}, last entry at {last_entry:?})"
         );
+    }
+
+    #[test]
+    fn resource_failures_reject_both_streaming_and_final_scans() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("fixture: {e}"));
+        for name in ["node_modules", "target"] {
+            std::fs::create_dir(dir.path().join(name)).unwrap_or_else(|e| panic!("fixture: {e}"));
+        }
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("encoding"));
+        let sized = |_: ScanCandidate| {};
+        for progressive in [false, true] {
+            let result = scan_to_plan_with_config(
+                root,
+                &WalkConfig::default(),
+                &SelectionPolicy::default(),
+                ScanOptions {
+                    limits: sweep_types::ScanLimits {
+                        max_candidates: 1,
+                        ..sweep_types::ScanLimits::default()
+                    },
+                    hooks: ScanHooks {
+                        on_entry_sized: progressive.then_some(&sized),
+                        ..ScanHooks::default()
+                    },
+                    ..ScanOptions::default()
+                },
+            );
+            assert!(result.is_err_and(|e| e.to_string().contains("maxCandidates")));
+        }
+    }
+
+    #[test]
+    fn discovery_and_sizing_share_directory_budget() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("fixture: {e}"));
+        std::fs::create_dir_all(dir.path().join("node_modules/nested"))
+            .unwrap_or_else(|e| panic!("fixture: {e}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("encoding"));
+        for exact in [false, true] {
+            let result = scan_to_plan_with_config(
+                root,
+                &WalkConfig::default(),
+                &SelectionPolicy::default(),
+                ScanOptions {
+                    exact,
+                    limits: sweep_types::ScanLimits {
+                        max_directories: 2,
+                        ..sweep_types::ScanLimits::default()
+                    },
+                    ..ScanOptions::default()
+                },
+            );
+            assert!(result.is_err_and(|e| e.to_string().contains("maxDirectories")));
+        }
     }
 
     #[test]

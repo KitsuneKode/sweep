@@ -3,9 +3,13 @@
 use camino::Utf8Path;
 use serde::Deserialize;
 use serde::Serialize;
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use sweep_engine::{apply_plan, scan_to_plan_with_sweep_config, ScanHooks, ScanOptions};
+use sweep_engine::{
+    apply_plan, apply_plan_controlled_with_limit, scan_to_plan_with_sweep_config, ScanHooks,
+    ScanOptions,
+};
 use sweep_errors::EngineError;
 use sweep_types::{ApplyReport, ScanCandidate, ScanPlan, SelectionPolicy, SweepConfig};
 
@@ -51,6 +55,10 @@ impl From<EngineError> for CliFailure {
                 code: EXIT_INVALID_INPUT,
                 message: err.to_string(),
             },
+            EngineError::ResourceLimit { .. } => Self {
+                code: EXIT_GUARDRAIL,
+                message: err.to_string(),
+            },
             EngineError::Filesystem { .. } => Self::failure(err.to_string()),
         }
     }
@@ -67,6 +75,7 @@ fn run() -> Result<(), CliFailure> {
     match std::env::args().nth(1).as_deref() {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
+        Some("--capabilities") => write_json_stdout(&serde_json::json!({"applyControl": true})),
         Some("--version" | "-V") => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -93,6 +102,8 @@ struct ScanStdinOptions {
     exact: bool,
     #[serde(default)]
     json_stream: bool,
+    #[serde(default)]
+    limits: sweep_types::ScanLimits,
 }
 
 #[derive(Debug, Serialize)]
@@ -140,7 +151,7 @@ fn run_scan() -> Result<(), CliFailure> {
         .nth(2)
         .ok_or_else(|| CliFailure::invalid_input("scan requires a target directory argument"))?;
 
-    let (config, selection_policy, exact, json_stream) = match read_stdin_if_present()? {
+    let (config, selection_policy, exact, json_stream, limits) = match read_stdin_if_present()? {
         Some(input) => {
             let options: ScanStdinOptions = serde_json::from_str(&input).map_err(|err| {
                 CliFailure::invalid_input(format!(
@@ -152,6 +163,7 @@ fn run_scan() -> Result<(), CliFailure> {
                 options.selection_policy,
                 options.exact,
                 options.json_stream,
+                options.limits,
             )
         }
         None => (
@@ -159,8 +171,25 @@ fn run_scan() -> Result<(), CliFailure> {
             SelectionPolicy::default(),
             false,
             false,
+            sweep_types::ScanLimits::default(),
         ),
     };
+
+    // The JS side rejects patterns past this length at config load; the engine
+    // re-checks because stdin JSON is itself an untrusted boundary - nothing
+    // stops a caller from feeding a megabyte glob straight to the walk.
+    const MAX_PATTERN_LENGTH: usize = 128;
+    for pattern in config.patterns.iter().chain(config.ignore.iter()) {
+        if pattern.chars().count() > MAX_PATTERN_LENGTH {
+            return Err(CliFailure {
+                code: EXIT_GUARDRAIL,
+                message: format!(
+                    "pattern exceeds {MAX_PATTERN_LENGTH} characters: {:?}…",
+                    &pattern.chars().take(64).collect::<String>()
+                ),
+            });
+        }
+    }
 
     let target_utf8 = Utf8Path::new(&target_dir);
 
@@ -197,12 +226,33 @@ fn run_scan() -> Result<(), CliFailure> {
         };
 
         let scan_started_at = std::time::Instant::now();
-        let plan = scan_to_plan_with_sweep_config(
-            target_utf8,
-            &config,
-            &selection_policy,
-            ScanOptions { exact, hooks },
-        )
+        let plan = std::thread::scope(|scope| {
+            let (stop, receiver) = std::sync::mpsc::channel::<()>();
+            let emitter_ref = &emitter;
+            scope.spawn(move || {
+                while matches!(
+                    receiver.recv_timeout(EMIT_FLUSH_INTERVAL),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ) {
+                    emitter_ref.flush_if_due();
+                }
+            });
+            let plan = scan_to_plan_with_sweep_config(
+                target_utf8,
+                &config,
+                &selection_policy,
+                ScanOptions {
+                    exact,
+                    hooks,
+                    limits,
+                },
+            );
+            // Drop wakes the timer immediately on success or failure. A
+            // pending sparse update does not require another discovery or
+            // completed size job to reach stdout.
+            drop(stop);
+            plan
+        })
         .map_err(CliFailure::from)?;
 
         // Drain pending candidates before the terminal event so completed
@@ -234,22 +284,23 @@ fn run_scan() -> Result<(), CliFailure> {
         ScanOptions {
             exact,
             hooks: ScanHooks::default(),
+            limits,
         },
     )
     .map_err(CliFailure::from)?;
     write_json_stdout(&plan)
 }
 
-struct StreamEmitter {
+struct StreamEmitter<W: Write = io::Stdout> {
     error: Mutex<Option<String>>,
-    state: Mutex<EmitterState>,
+    state: Mutex<EmitterState<W>>,
 }
 
 /// Pending stream output. Found and updated candidates accumulate into
 /// batches; progress events coalesce to the latest. A flush writes the batch
 /// lines then flushes the `BufWriter`, so each flush is one syscall burst.
-struct EmitterState {
-    out: io::BufWriter<io::Stdout>,
+struct EmitterState<W: Write> {
+    out: io::BufWriter<W>,
     found: Vec<ScanCandidate>,
     updated: Vec<ScanCandidate>,
     progress: Option<(u32, u32, u32, Option<String>)>,
@@ -266,10 +317,16 @@ const EMIT_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_milli
 
 impl Default for StreamEmitter {
     fn default() -> Self {
+        Self::new(io::BufWriter::with_capacity(64 * 1024, io::stdout()))
+    }
+}
+
+impl<W: Write> StreamEmitter<W> {
+    fn new(out: io::BufWriter<W>) -> Self {
         Self {
             error: Mutex::new(None),
             state: Mutex::new(EmitterState {
-                out: io::BufWriter::with_capacity(64 * 1024, io::stdout()),
+                out,
                 found: Vec::new(),
                 updated: Vec::new(),
                 progress: None,
@@ -278,15 +335,25 @@ impl Default for StreamEmitter {
             }),
         }
     }
-}
 
-impl StreamEmitter {
     fn emit_found(&self, candidate: ScanCandidate) {
         self.push(|state| state.found.push(candidate));
     }
 
     fn emit_updated(&self, candidate: ScanCandidate) {
         self.push(|state| state.updated.push(candidate));
+    }
+
+    fn flush_if_due(&self) {
+        if self.has_error() {
+            return;
+        }
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if state.last_flush.elapsed() >= EMIT_FLUSH_INTERVAL
+            && (!state.found.is_empty() || !state.updated.is_empty() || state.progress.is_some())
+        {
+            self.flush_locked(&mut state);
+        }
     }
 
     /// Progress is the heartbeat: store the latest snapshot and flush if the
@@ -312,7 +379,7 @@ impl StreamEmitter {
         }
     }
 
-    fn push(&self, f: impl FnOnce(&mut EmitterState)) {
+    fn push(&self, f: impl FnOnce(&mut EmitterState<W>)) {
         if self.has_error() {
             return;
         }
@@ -323,7 +390,14 @@ impl StreamEmitter {
         f(&mut state);
         // The very first candidates flush immediately so time-to-first-row is
         // instant; afterwards batches accumulate to the size/cadence bounds.
-        if !state.flushed_once || state.found.len() + state.updated.len() >= EMIT_BATCH_AT {
+        // The cadence check also lives here (not only on progress heartbeats):
+        // once the walk ends, sizing tails produce no progress events, and
+        // without this a sparse tail would sit buffered until 64 pending or
+        // scan end (plan A09).
+        if !state.flushed_once
+            || state.found.len() + state.updated.len() >= EMIT_BATCH_AT
+            || state.last_flush.elapsed() >= EMIT_FLUSH_INTERVAL
+        {
             self.flush_locked(&mut state);
         }
     }
@@ -344,7 +418,7 @@ impl StreamEmitter {
     /// Found batches always precede updated batches within a flush: a
     /// candidate's found event is enqueued before its own update can be, so
     /// stream order preserves the found-then-updated invariant.
-    fn flush_locked(&self, state: &mut EmitterState) {
+    fn flush_locked(&self, state: &mut EmitterState<W>) {
         let result = (|| -> Result<(), String> {
             if !state.found.is_empty() {
                 let event = ScanStreamEvent::CandidatesFound {
@@ -412,11 +486,11 @@ fn default_sweep_config() -> SweepConfig {
     }
 }
 
-/// Same bound as the JS plan-file cap (256 MB) - far past any legitimate
+/// Same bound as the JS plan-file cap (64 MB) - far past any legitimate
 /// ScanPlan, and a runaway writer can't pin the engine in an unbounded read.
 /// +1 byte is the oversize probe: read_to_end alone can't tell a truncated
 /// stream from one exactly at the cap.
-const MAX_STDIN_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_STDIN_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Ok(None) means no stdin was piped; errors propagate - a failed or oversized
 /// read must not silently fall back to default options (user `ignore` patterns
@@ -450,6 +524,10 @@ fn read_stdin_if_present() -> Result<Option<String>, CliFailure> {
 }
 
 fn run_apply() -> Result<(), CliFailure> {
+    if std::env::args().nth(2).as_deref() == Some("--json-control") {
+        return run_apply_controlled();
+    }
+
     let input = read_stdin_if_present()?.ok_or_else(|| {
         CliFailure::invalid_input("apply requires a ScanPlan JSON document on stdin")
     })?;
@@ -460,6 +538,112 @@ fn run_apply() -> Result<(), CliFailure> {
 
     let report: ApplyReport = apply_plan(&plan).map_err(CliFailure::from)?;
     write_json_stdout(&report)
+}
+
+/// One-shot process: the detached stdin reader lives until main exits. Never
+/// join a reader waiting for an open host pipe after the final report.
+// One controlled apply per CLI process. Static lifetime also lets the Windows
+// console callback signal cancellation without pointers, allocation or locks.
+static APPLY_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(windows)]
+unsafe extern "system" fn console_control(event: u32) -> windows_sys::core::BOOL {
+    use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT};
+    if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
+        APPLY_CANCELLED.store(true, Ordering::Release);
+        return 1;
+    }
+    0
+}
+
+#[cfg(windows)]
+fn install_console_control() -> Result<(), CliFailure> {
+    use windows_sys::Win32::System::Console::SetConsoleCtrlHandler;
+    // SAFETY: callback has the documented ABI and static lifetime. It touches
+    // only a static atomic, never unwinds, and retains no borrowed data.
+    if unsafe { SetConsoleCtrlHandler(Some(console_control), 1) } != 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    // Headless processes have no console and cannot receive console events.
+    if error.raw_os_error() == Some(6) {
+        return Ok(());
+    }
+    Err(CliFailure::failure(format!(
+        "cannot install console cancellation: {error}"
+    )))
+}
+
+fn run_apply_controlled() -> Result<(), CliFailure> {
+    #[cfg(windows)]
+    install_console_control()?;
+    let mut reader = BufReader::new(io::stdin());
+    let mut line = Vec::new();
+    reader
+        .by_ref()
+        .take(MAX_STDIN_BYTES + 1)
+        .read_until(b'\n', &mut line)
+        .map_err(|e| CliFailure::invalid_input(e.to_string()))?;
+    if line.len() as u64 > MAX_STDIN_BYTES || line.last() != Some(&b'\n') {
+        return Err(CliFailure::invalid_input(
+            "apply control requires a bounded plan line",
+        ));
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Request {
+        plan: ScanPlan,
+        max_size_bytes: Option<u64>,
+    }
+    let request: Request = serde_json::from_slice(&line)
+        .map_err(|e| CliFailure::invalid_input(format!("invalid plan: {e}")))?;
+    // Establish the control stream explicitly. A closed/malformed initial
+    // channel must fail before any filesystem operation can start.
+    let mut start = Vec::new();
+    reader
+        .by_ref()
+        .take(1025)
+        .read_until(b'\n', &mut start)
+        .map_err(|e| CliFailure::invalid_input(e.to_string()))?;
+    if start.len() > 1024
+        || start.last() != Some(&b'\n')
+        || serde_json::from_slice::<serde_json::Value>(&start).ok()
+            != Some(serde_json::json!({"type":"start"}))
+    {
+        return Err(CliFailure::invalid_input(
+            "apply control requires a start message",
+        ));
+    }
+    let cancelled = &APPLY_CANCELLED;
+    let control = cancelled;
+    std::thread::spawn(move || {
+        let mut request = Vec::new();
+        // EOF, invalid control, or cancellation all stop further scheduling.
+        let _ = reader.take(1025).read_until(b'\n', &mut request);
+        control.store(true, Ordering::Release);
+    });
+    let report = apply_plan_controlled_with_limit(
+        &request.plan,
+        cancelled,
+        &mut |id| {
+            if write_json_line(&serde_json::json!({"type":"apply_begin", "candidateId":id}))
+                .is_err()
+            {
+                cancelled.store(true, Ordering::Release);
+            }
+        },
+        &mut |id| {
+            if write_json_line(&serde_json::json!({"type":"apply_deleted", "candidateId":id}))
+                .is_err()
+            {
+                cancelled.store(true, Ordering::Release);
+            }
+        },
+        request.max_size_bytes,
+    )
+    .map_err(CliFailure::from)?;
+    write_json_line(&serde_json::json!({"type":"apply_completed", "report": report}))
+        .map_err(CliFailure::failure)
 }
 
 fn write_json_stdout<T: Serialize>(value: &T) -> Result<(), CliFailure> {
@@ -490,4 +674,84 @@ fn write_json_line_to<T: Serialize, W: Write>(value: &T, writer: &mut W) -> Resu
         .write_all(b"\n")
         .map_err(|err| format!("failed to write stdout newline: {err}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sweep_types::{EntryType, RiskTier, ScanEntry};
+
+    fn candidate(name: &str) -> ScanCandidate {
+        ScanCandidate {
+            entry: ScanEntry {
+                path: format!("/tmp/sweep-emitter/{name}"),
+                name: name.to_owned(),
+                estimated_bytes: 1,
+                bytes_known: Some(true),
+                modified_ms: None,
+                is_symlink: false,
+                entry_type: EntryType::Directory,
+            },
+            id: format!("cand_{name}"),
+            kind: name.to_owned(),
+            risk_tier: RiskTier::Safe,
+            reasons: vec!["default-pattern".to_owned()],
+            selected_by_default: true,
+        }
+    }
+
+    fn emitter_lines(emitter: &StreamEmitter<Vec<u8>>) -> Vec<String> {
+        let state = emitter.state.lock().unwrap_or_else(|p| p.into_inner());
+        String::from_utf8_lossy(state.out.get_ref())
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// Plan A09: once the walk ends there are no progress heartbeats left to
+    /// carry a flush, so a sparse sizing tail must still drain updates on the
+    /// cadence check inside `push` - not at 64 pending or scan end.
+    #[test]
+    fn sparse_sizing_tail_flushes_on_cadence_without_progress() {
+        let emitter = StreamEmitter::new(io::BufWriter::new(Vec::new()));
+
+        emitter.emit_found(candidate("node_modules"));
+        // First batch bypasses buffering for instant time-to-first-row.
+        assert_eq!(emitter_lines(&emitter).len(), 1);
+
+        emitter.emit_updated(candidate("node_modules"));
+        assert_eq!(
+            emitter_lines(&emitter).len(),
+            1,
+            "update inside the cadence window stays buffered"
+        );
+
+        std::thread::sleep(EMIT_FLUSH_INTERVAL + std::time::Duration::from_millis(10));
+        emitter.emit_updated(candidate("dist"));
+        let lines = emitter_lines(&emitter);
+        assert_eq!(
+            lines.len(),
+            2,
+            "cadence-elapsed push must flush without a progress heartbeat, got {lines:?}"
+        );
+        assert!(lines[1].contains("candidates_updated"));
+    }
+
+    #[test]
+    fn timer_flushes_an_idle_pending_size_without_another_event() {
+        let emitter = StreamEmitter::new(io::BufWriter::new(Vec::new()));
+        emitter.emit_found(candidate("node_modules"));
+        emitter.emit_updated(candidate("node_modules"));
+        assert_eq!(emitter_lines(&emitter).len(), 1);
+        {
+            let mut state = emitter.state.lock().unwrap_or_else(|p| p.into_inner());
+            state.last_flush -= EMIT_FLUSH_INTERVAL;
+        }
+        emitter.flush_if_due();
+        let lines = emitter_lines(&emitter);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].contains("candidates_updated"));
+        emitter.flush_if_due();
+        assert_eq!(emitter_lines(&emitter).len(), 2);
+    }
 }

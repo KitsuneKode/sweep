@@ -148,11 +148,12 @@ pub fn assert_safe_pattern(pattern: &str) -> Result<(), EngineError> {
         .into());
     }
 
-    // Patterns are filenames, not essays - same 256-char bound as the JS side.
-    if pattern.len() > 256 {
+    // Patterns are filenames, not essays - same 128-char bound as the JS side
+    // (`MAX_PATTERN_LENGTH` in guardrails.ts) and the stdin parser.
+    if pattern.len() > 128 {
         return Err(GuardrailError::ProtectedPath {
             path: format!(
-                "Pattern exceeds 256 characters: \"{}…\"",
+                "Pattern exceeds 128 characters: \"{}…\"",
                 pattern.chars().take(64).collect::<String>()
             ),
         }
