@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./catalog": "./src/catalog.ts",
+    "./cold": "./src/cold.ts",
     "./config": "./src/config.ts",
     "./engine": "./src/engine.ts",
     "./guardrails": "./src/guardrails.ts",

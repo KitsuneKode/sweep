@@ -10,6 +10,7 @@ import type {
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
+import { isColdRequested } from "./cold.js";
 import { GuardrailError } from "./guardrails.js";
 import { buildPlan } from "./planner.js";
 import {
@@ -524,7 +525,9 @@ export function isRustEngineAvailable(): boolean {
       key += `:${file}`;
       key += `:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
     }
-    if (availability?.key === key) return availability.available;
+    // Cold runs pay the probe spawn every time - the memo would answer
+    // instantly and make dev timings read warmer than a real cold start.
+    if (!isColdRequested() && availability?.key === key) return availability.available;
     const proc = spawnSync(binary, ["--version"], {
       encoding: "utf8",
       timeout: 1000,

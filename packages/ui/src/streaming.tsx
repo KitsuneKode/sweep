@@ -1,3 +1,4 @@
+import { isColdRequested, tryDropPageCache } from "@kitsunekode/sweep-core/cold";
 import { buildRescanConfig } from "@kitsunekode/sweep-core/config";
 import { buildPlan, candidateFromEntry } from "@kitsunekode/sweep-core/planner";
 import { isRustEngineAvailable } from "@kitsunekode/sweep-core/rust-engine";
@@ -133,6 +134,10 @@ export async function runSweepUiStreaming(
 
   const makeControl = (): UiScanControl => ({
     async start(hooks, signal) {
+      // SWEEP_COLD: every scan - including `r` rescans - pays the cold costs
+      // a fresh user pays (probe respawns at resolve; page cache drops when
+      // permitted). Silent here: a stderr note would paint over the TUI.
+      if (isColdRequested()) tryDropPageCache();
       let scannedDirs = 0;
       let skippedDirs = 0;
       let currentDir: string | undefined;

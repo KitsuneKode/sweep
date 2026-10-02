@@ -104,6 +104,7 @@ sweep doctor --json     # config + environment + dry-scan report
 | `--depth <n>`            |       | Max recursion depth (`-1` = unlimited)             |
 | `--config <path>`        |       | Explicit config file                               |
 | `--engine <backend>`     |       | `auto` (default), `rust`, or `js`                  |
+| `--cold`                 |       | Dev: fresh engine probe + page-cache drop attempt  |
 | `--no-color`             |       | Disable color output                               |
 | `--quiet`                | `-q`  | Suppress non-essential output                      |
 | `--verbose`              |       | Per-candidate scan progress                        |
@@ -328,6 +329,7 @@ disk-reclaim measurement or a lifetime counter.
 | ------------------- | ------------------------------------------------------------------- |
 | `SWEEP_CONFIG_DIR`  | Overrides the config dir (`config.json`, `history.jsonl` live here) |
 | `SWEEP_ENGINE_PATH` | Points `--engine rust` / `auto` at a custom `sweep-engine` binary   |
+| `SWEEP_COLD`        | `1` = `--cold` behavior without the flag (dev cold-start runs)      |
 | `NO_COLOR`          | Disables all color output (same effect as `--no-color`)             |
 
 ---

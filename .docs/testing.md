@@ -113,7 +113,17 @@ bun run bench                                    # every tests/fixtures/ tree
 bun run bench -- path/to/tree --runs 9           # a specific tree
 bun run bench -- --synth /tmp/big                # synthesize a deep tree first
 bun run bench -- --json                          # machine-readable rows
+bun run bench -- --cold                          # drop page cache before each run
 ```
+
+`--cold` (also `SWEEP_COLD=1` on `sweep scan|clean|plan|ui`) does what a cold
+start can honestly do in-process: the engine probe memo is bypassed (a fresh
+`--version` spawn per resolution) and the page cache is dropped via
+`/proc/sys/vm/drop_caches` when the process is root. When the drop is not
+permitted the output says so - `drops:0/N` in the bench table, a `note:` on
+stderr for the CLI - so warm numbers never pose as cold. What it cannot do
+is un-warm JIT or module state; for process-cold numbers, spawn a fresh
+CLI per iteration.
 
 Runs are interleaved after one warmup each so page-cache bias lands evenly;
 the verdict line compares medians and the parity column hashes the sorted

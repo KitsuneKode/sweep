@@ -11,10 +11,12 @@
  *   bun run bench                          # every tests/fixtures/ tree, 5 runs
  *   bun run bench -- tests/fixtures/monorepo --runs 9
  *   bun run bench -- --json                # machine-readable rows on stdout
+ *   bun run bench -- --cold                # drop page cache before every run
  *   bun run bench -- --synth /tmp/big      # generate a big tree, then bench it
  */
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { tryDropPageCache } from "@kitsunekode/sweep-core/cold";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
 import { isRustEngineAvailable, scanToPlanViaRust } from "@kitsunekode/sweep-core/rust-engine";
@@ -32,6 +34,12 @@ interface BenchRow {
   scannedDirs: number;
   skippedDirs: number;
   runs: number;
+  /**
+   * Present under --cold: how many runs started on a genuinely dropped page
+   * cache. drops < runs means some "cold" rows still ran warm - read the
+   * numbers accordingly, the bench never relabels warm as cold.
+   */
+  coldDrops?: number;
 }
 
 const argv = process.argv.slice(2);
@@ -41,6 +49,7 @@ const flagValue = (name: string): string | undefined => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 const jsonOut = argv.includes("--json");
+const cold = argv.includes("--cold");
 const runs = Math.max(1, Number(flagValue("runs") ?? 5));
 const synthDir = flagValue("synth");
 const positional = argv.filter(
@@ -137,6 +146,7 @@ async function benchTree(tree: string, targetDir: string, rustOk: boolean): Prom
     "js" | "rust",
     {
       times: number[];
+      coldDrops: number;
       lastPlan: {
         candidates: Array<{ path: string }>;
         summary: { scannedDirs: number; skippedDirs?: number };
@@ -144,11 +154,16 @@ async function benchTree(tree: string, targetDir: string, rustOk: boolean): Prom
     }
   >();
   for (const [engine] of engines)
-    samples.set(engine, { times: [], lastPlan: { candidates: [], summary: { scannedDirs: 0 } } });
+    samples.set(engine, {
+      times: [],
+      coldDrops: 0,
+      lastPlan: { candidates: [], summary: { scannedDirs: 0 } },
+    });
 
   // Interleave so a warming cache doesn't belong to whichever engine ran first.
   for (let i = 0; i < runs; i++) {
     for (const [engine, run] of engines) {
+      if (cold && tryDropPageCache().dropped) samples.get(engine)!.coldDrops++;
       const { ms, plan } = await run();
       const bucket = samples.get(engine)!;
       bucket.times.push(ms);
@@ -156,7 +171,7 @@ async function benchTree(tree: string, targetDir: string, rustOk: boolean): Prom
     }
   }
 
-  return [...samples.entries()].map(([engine, { times, lastPlan }]) => ({
+  return [...samples.entries()].map(([engine, { times, coldDrops, lastPlan }]) => ({
     tree,
     engine,
     medianMs: Math.round(median(times)),
@@ -167,6 +182,7 @@ async function benchTree(tree: string, targetDir: string, rustOk: boolean): Prom
     scannedDirs: lastPlan.summary.scannedDirs,
     skippedDirs: lastPlan.summary.skippedDirs ?? 0,
     runs: times.length,
+    ...(cold ? { coldDrops } : {}),
   }));
 }
 
@@ -176,8 +192,14 @@ function printTable(rows: BenchRow[]): void {
     `${"tree".padEnd(24)} ${pad("engine", 6)} ${pad("median", 8)} ${pad("min", 8)} ${pad("max", 8)} ${pad("cands", 6)} ${pad("dirs", 6)} ${pad("runs", 4)}`,
   );
   for (const row of rows) {
+    const dropNote = row.coldDrops === undefined ? "" : ` drops:${row.coldDrops}/${row.runs}`;
     console.log(
-      `${row.tree.padEnd(24)} ${pad(row.engine, 6)} ${pad(`${row.medianMs}ms`, 8)} ${pad(`${row.minMs}ms`, 8)} ${pad(`${row.maxMs}ms`, 8)} ${pad(row.candidates, 6)} ${pad(row.scannedDirs, 6)} ${pad(row.runs, 4)}`,
+      `${row.tree.padEnd(24)} ${pad(row.engine, 6)} ${pad(`${row.medianMs}ms`, 8)} ${pad(`${row.minMs}ms`, 8)} ${pad(`${row.maxMs}ms`, 8)} ${pad(row.candidates, 6)} ${pad(row.scannedDirs, 6)} ${pad(row.runs, 4)}${dropNote}`,
+    );
+  }
+  if (cold && rows.some((r) => (r.coldDrops ?? 0) < r.runs)) {
+    console.error(
+      "note: --cold requested but some runs could not drop page cache (needs root on Linux); those timings are warm-cache",
     );
   }
   // Pair js/rust rows per tree for the verdict line.
@@ -202,6 +224,9 @@ function printTable(rows: BenchRow[]): void {
 }
 
 async function main(): Promise<void> {
+  // The argv flag also bridges to the env read sites so the engine probe
+  // memo stops answering from cache inside this process too.
+  if (cold) process.env.SWEEP_COLD = "1";
   if (synthDir) {
     const target = resolve(synthDir);
     synthTree(target);

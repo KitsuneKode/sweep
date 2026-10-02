@@ -12,6 +12,7 @@ import type {
   SelectionPolicy,
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
+import { isColdRequested, tryDropPageCache } from "@kitsunekode/sweep-core/cold";
 import { DEFAULT_CONFIG, loadConfig } from "@kitsunekode/sweep-core/config";
 import {
   applyPlanWithBackend,
@@ -123,6 +124,7 @@ export function warnIgnoredOptions(
     if (opts.depth !== undefined) ignored.add("--depth");
     if (opts.select !== undefined && opts.select !== "default") ignored.add("--select");
     if (opts.includeDangerous) ignored.add("--include-dangerous");
+    if (opts.cold) ignored.add("--cold");
   }
   if (!shape.applies) {
     if (opts.yes) ignored.add("--yes");
@@ -151,6 +153,16 @@ export async function runScanToPlan(
     projectConfig?: SweepConfig;
   } = {},
 ): Promise<{ result: ScanResult; plan: ScanPlan; engineUsed: "js" | "rust" }> {
+  // --cold/SWEEP_COLD: pay the cold costs a fresh user pays. The probe memo
+  // bypass lives at the probe itself; here we drop what the OS lets us and
+  // say so when it lets us drop nothing.
+  if (isColdRequested()) {
+    const drop = tryDropPageCache();
+    if (!drop.dropped) {
+      console.error(`note: cold run - ${drop.detail}; timings may still hit warm cache`);
+    }
+  }
+
   const projectConfig = options.projectConfig ?? DEFAULT_CONFIG;
 
   if (options.engine === "rust") {

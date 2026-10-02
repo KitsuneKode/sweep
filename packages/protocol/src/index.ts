@@ -126,6 +126,8 @@ export interface CliOptions {
   config?: string;
   color: boolean;
   engine: EngineBackend;
+  /** Dev flag: fresh engine probe + page-cache drop attempt before scanning. */
+  cold?: boolean;
   quiet?: boolean;
   verbose?: boolean;
   json?: boolean;

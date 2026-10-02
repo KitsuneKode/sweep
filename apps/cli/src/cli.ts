@@ -75,6 +75,11 @@ function addScanOptions<T extends Command>(command: T): T {
       "Scan engine: auto (default - rust when its binary is available), rust, or js",
       "auto",
     )
+    .option(
+      "--cold",
+      "Cold-start run: refresh the engine probe and drop OS page cache when permitted (dev)",
+      false,
+    )
     .option("--no-color", "Disable color output");
 }
 
@@ -101,6 +106,15 @@ export function makeProgram(): Command {
   addScanOptions(program);
   addOutputOptions(program);
   program.option("-y, --yes", "Skip confirmation prompt", false);
+
+  // The flag is a bridge: core read sites (engine probe, page-cache drop)
+  // check SWEEP_COLD so a TUI rescan honors it without plumbing through
+  // every layer.
+  program.hook("preAction", (thisCommand) => {
+    if (thisCommand.opts<{ cold?: boolean }>().cold === true) {
+      process.env.SWEEP_COLD = "1";
+    }
+  });
 
   addCleanAction(program);
 
