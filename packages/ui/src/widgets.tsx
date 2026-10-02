@@ -29,8 +29,10 @@ export function Modal({
   children: ReactNode;
 }) {
   const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
-  const modalWidth = Math.max(4, Math.min(width, Math.max(4, screenWidth - 2)));
-  const maxHeight = Math.max(3, screenHeight - 2);
+  // Floor at 1 cell, never more than the screen itself: a hard 4x3 floor
+  // still overflows a 3x2 terminal.
+  const modalWidth = Math.max(1, Math.min(width, Math.max(1, screenWidth - 2)));
+  const maxHeight = Math.max(1, screenHeight - 2);
 
   return (
     <box

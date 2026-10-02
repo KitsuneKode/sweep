@@ -19,7 +19,17 @@ export function planExportName(when: Date): string {
  * since a plan lists paths the user chose to delete.
  */
 export function writePlanExport(plan: ScanPlan, directory: string, when = new Date()): string {
-  const target = join(directory, planExportName(when));
-  writeFileSync(target, `${JSON.stringify(plan, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-  return target;
+  const base = planExportName(when).replace(/\.json$/, "");
+  // Second-resolution names collide when export fires twice in one second -
+  // bump a suffix like freshTrashDir does, never clobber an earlier export.
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const target = join(directory, attempt === 0 ? `${base}.json` : `${base}-${attempt}.json`);
+    try {
+      writeFileSync(target, `${JSON.stringify(plan, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+      return target;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  throw new Error(`could not find a free plan export name for ${base}`);
 }

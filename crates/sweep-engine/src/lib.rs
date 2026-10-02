@@ -63,6 +63,17 @@ pub fn scan_to_plan_with_config(
             message: "target directory must not be empty".to_owned(),
         });
     }
+    // JS parity: loadConfig rejects depth < -1. The walk would otherwise
+    // answer invalid input with a successful empty plan - the "nothing to
+    // clean" direction is the dangerous one.
+    if walk_config.depth < -1 {
+        return Err(EngineError::InvalidPlan {
+            message: format!(
+                "depth must be -1 or a non-negative integer (got {})",
+                walk_config.depth
+            ),
+        });
+    }
 
     guardrails::assert_safe_cwd(target_dir.as_str())?;
 

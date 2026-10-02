@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "./config.js";
+import { stubDirectoryEntriesForTest } from "./directory-reader.js";
 import { ResourceBudget } from "./resource-budget.js";
 import {
   exactSizeAsync,
@@ -561,4 +563,68 @@ test("sizing does not charge the scan-wide budget for transient dedup work", asy
   expect(size.complete).toBe(false); // dedup capped - partial, not fatal
   expect(size.bytes).toBeGreaterThan(0);
   expect(() => budget.check()).not.toThrow();
+});
+
+// DT_UNKNOWN dirents: some filesystems (NFSv3, CIFS/SMB, FUSE) report "?"
+// for every entry, so the only way to learn a type is lstat. The stub keeps
+// real names but lies about the type - exactly what those filesystems do.
+async function* allUnknownEntries(path: string | Buffer) {
+  for (const name of await readdir(path)) {
+    yield { name: Buffer.from(name as string | Buffer), type: "?" };
+  }
+}
+
+test("DT_UNKNOWN dirs are re-lstatted: matched entries and descent both work", async () => {
+  mkdirSync(dir("inner", "node_modules"), { recursive: true });
+  mkdirSync(dir("node_modules"));
+  writeFileSync(dir("node_modules", "f"), "x");
+
+  stubDirectoryEntriesForTest(allUnknownEntries);
+  try {
+    const result = await scan(tmpDir, DEFAULT_CONFIG);
+
+    // Without the fallback both real dirs stay invisible forever.
+    expect(result.entries.map((entry) => entry.path).sort()).toEqual([
+      dir("inner", "node_modules"),
+      dir("node_modules"),
+    ]);
+    // The type comes from the lstat, not the dirent - a "?" entry must not
+    // be stamped "file".
+    expect(result.entries.every((entry) => entry.entryType === "directory")).toBe(true);
+    expect(result.scannedDirs).toBeGreaterThanOrEqual(2);
+  } finally {
+    stubDirectoryEntriesForTest();
+  }
+});
+
+test("a DT_UNKNOWN dirent that cannot be lstat'd marks its dir incomplete", async () => {
+  mkdirSync(dir("node_modules"));
+
+  stubDirectoryEntriesForTest(async function* (path) {
+    yield* allUnknownEntries(path);
+    // The filesystem reported a dirent that cannot be stat'd at all
+    // (vanished mid-read / EIO) - the listing is incomplete, and the dir
+    // must count as skipped rather than looking fully scanned.
+    if (String(path) === tmpDir) {
+      yield { name: Buffer.from("ghost-entry"), type: "?" };
+    }
+  });
+  try {
+    const result = await scan(tmpDir, DEFAULT_CONFIG);
+    expect(result.skippedDirs).toBeGreaterThanOrEqual(1);
+    expect(result.entries.map((entry) => entry.name)).toEqual(["node_modules"]);
+  } finally {
+    stubDirectoryEntriesForTest();
+  }
+});
+
+test("a pre-aborted scan reports its unvisited queue as skipped, not complete", async () => {
+  mkdirSync(dir("node_modules"));
+  const controller = new AbortController();
+  controller.abort();
+  const result = await scan(tmpDir, DEFAULT_CONFIG, false, { signal: controller.signal });
+  expect(result.entries).toHaveLength(0);
+  // The root frame was queued but never walked - "looked at nothing" must
+  // not read as "found nothing".
+  expect(result.skippedDirs).toBeGreaterThanOrEqual(1);
 });

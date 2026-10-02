@@ -198,6 +198,9 @@ function scanResultFromPlan(plan: ScanPlan): ScanResult {
       name: candidate.name,
       estimatedBytes: candidate.estimatedBytes,
       ...(candidate.modifiedMs !== undefined ? { modifiedMs: candidate.modifiedMs } : {}),
+      // bytesKnown:false marks a lower-bound size - dropping it would let an
+      // undercounted entry present as exact downstream.
+      ...(candidate.bytesKnown !== undefined ? { bytesKnown: candidate.bytesKnown } : {}),
       isSymlink: candidate.isSymlink,
       entryType: candidate.entryType,
     })),

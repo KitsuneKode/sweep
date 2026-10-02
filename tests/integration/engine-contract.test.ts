@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -218,6 +219,37 @@ describe("engine contract fixtures", () => {
     });
 
     expect(plan.summary.exact).toBe(true);
+  });
+
+  test("non-streamed rust plan applies workspace-stub enrichment like js", async () => {
+    if (!rustAvailable()) {
+      return;
+    }
+
+    // One-shot (no hooks) rust plans used to skip enrichCandidates entirely:
+    // a tiny peer node_modules next to a real install must demote to
+    // caution and leave the default selection on both engines.
+    const root = mkdtempSync(join(tmpdir(), "sweep-stub-parity-"));
+    try {
+      mkdirSync(join(root, "a", "node_modules"), { recursive: true });
+      writeFileSync(join(root, "a", "node_modules", "fat.bin"), Buffer.alloc(2 * 1024 * 1024));
+      mkdirSync(join(root, "b", "node_modules"), { recursive: true });
+      writeFileSync(join(root, "b", "node_modules", "tiny.bin"), Buffer.alloc(128));
+
+      const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG, { exact: false });
+      const rustPlan = await scanToPlanViaRust(root, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+      });
+      const jsStub = jsPlan.candidates.find((c) => c.path.includes("/b/"));
+      const rustStub = rustPlan.candidates.find((c) => c.path.includes("/b/"));
+
+      expect(rustStub?.riskTier).toBe(jsStub?.riskTier);
+      expect(rustStub?.reasons).toEqual(jsStub?.reasons);
+      expect(rustPlan.selectedCandidateIds.sort()).toEqual(jsPlan.selectedCandidateIds.sort());
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

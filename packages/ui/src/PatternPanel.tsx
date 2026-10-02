@@ -35,20 +35,21 @@ export interface PatternPanelProps {
 function patternRowContent(row: PatternPanelRow, tokens: ThemeTokens, width: number): StyledText {
   const enabled = row.enabled === true;
   const mark = enabled ? fg(tokens.positive)("✓") : fg(tokens.textDim)("·");
-  const name = fg(enabled ? tokens.text : tokens.textSecondary)(
-    sanitizeTerminalText(row.pattern ?? ""),
-  );
+  // Sanitize before measuring: control chars render as \u{XXXX} escapes, so
+  // raw .length undercounts what actually lands on screen.
+  const safePattern = sanitizeTerminalText(row.pattern ?? "");
+  const name = fg(enabled ? tokens.text : tokens.textSecondary)(safePattern);
   const tagText = row.source === "custom" ? " custom" : row.source === "opt-in" ? " opt-in" : "";
   const tag = tagText ? fg(row.source === "custom" ? tokens.info : tokens.textDim)(tagText) : "";
 
   // Cells: "✓ " + name + tag + "  " before the note, 2 spare against the edge.
-  const fixedCells = 2 + (row.pattern ?? "").length + tagText.length + 2;
+  const fixedCells = 2 + safePattern.length + tagText.length + 2;
   const noteWidth = width - fixedCells - 2;
-  const raw = row.note ?? "";
+  const safeNote = sanitizeTerminalText(row.note ?? "");
   const note =
-    noteWidth > 4 && raw.length > 0
+    noteWidth > 4 && safeNote.length > 0
       ? fg(tokens.textMuted)(
-          `  ${sanitizeTerminalText(raw.length > noteWidth ? `${raw.slice(0, noteWidth - 1)}…` : raw)}`,
+          `  ${safeNote.length > noteWidth ? `${safeNote.slice(0, noteWidth - 1)}…` : safeNote}`,
         )
       : "";
   return t`${mark} ${name}${tag}${note}`;

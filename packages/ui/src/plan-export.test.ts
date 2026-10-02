@@ -51,9 +51,17 @@ describe("writePlanExport", () => {
     expect(statSync(written).mode & 0o077).toBe(0);
   });
 
-  test("never overwrites an existing file", () => {
+  test("never overwrites an existing file - colliding names get a suffix", () => {
     const when = new Date(2026, 8, 30, 14, 15, 3);
-    writePlanExport(plan, dir, when);
-    expect(() => writePlanExport(plan, dir, when)).toThrow(/EEXIST/);
+    const first = writePlanExport(plan, dir, when);
+    const second = writePlanExport(plan, dir, when);
+    const third = writePlanExport(plan, dir, when);
+    expect(second).toBe(join(dir, "sweep-plan-20260930-141503-1.json"));
+    expect(third).toBe(join(dir, "sweep-plan-20260930-141503-2.json"));
+    expect(first).not.toBe(second);
+    // All three plans survive - no export silently clobbers another.
+    for (const path of [first, second, third]) {
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(plan);
+    }
   });
 });

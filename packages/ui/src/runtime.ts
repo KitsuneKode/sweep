@@ -9,6 +9,20 @@ export interface UiSession {
   done: Promise<SweepUiOutcome>;
 }
 
+// The raw-stdin deadman below fires on a timer so the keymap - which sees
+// the same ETX byte - can own ctrl+c first (mid-apply abort, normal quit).
+// If the React tree is wedged nothing cancels the timer and the session
+// still exits; a handled chord clears it via noteCtrlCHandled.
+let pendingDeadman: ReturnType<typeof setTimeout> | undefined;
+
+/** Cancel a pending last-resort ctrl+c kill - the app handled the chord. */
+export function noteCtrlCHandled(): void {
+  if (pendingDeadman !== undefined) {
+    clearTimeout(pendingDeadman);
+    pendingDeadman = undefined;
+  }
+}
+
 /**
  * Own Ctrl+C / SIGTERM ourselves. OpenTUI's default `exitOnCtrlC` destroys the
  * renderer without aborting the scan subprocess, which leaves `sweep ui` hung.
@@ -32,6 +46,7 @@ export async function openUiSession(): Promise<UiSession> {
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
+    noteCtrlCHandled();
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
     process.stdin.off("data", onStdinData);
@@ -65,7 +80,15 @@ export async function openUiSession(): Promise<UiSession> {
    */
   const onStdinData = (chunk: Buffer | string) => {
     const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
-    if (bytes.includes(0x03)) finish({ type: "abort" });
+    if (!bytes.includes(0x03)) return;
+    // Defer: the same byte also reaches the keymap, where ctrl+c during an
+    // apply means "stop the delete and stay". An immediate finish() would
+    // sever the apply mid-syscall with no report and no history entry.
+    pendingDeadman ??= setTimeout(() => {
+      pendingDeadman = undefined;
+      finish({ type: "abort" });
+    }, 750);
+    pendingDeadman.unref?.();
   };
 
   process.on("SIGINT", onSignal);

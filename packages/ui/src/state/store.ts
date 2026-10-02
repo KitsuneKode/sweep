@@ -660,12 +660,15 @@ export function setSkippedDirs(state: SweepUiState, skippedDirs: number): SweepU
  * - everything else follows the plan's `selectedCandidateIds` policy set.
  */
 export function finalizeScan(state: SweepUiState, plan: ScanPlan | undefined): SweepUiState {
+  // onDone without a plan leaves the streamed stubs unreconciled - the scan
+  // is NOT complete and apply/export must stay locked. In-repo callers always
+  // pass the final plan; the flag guards a custom UiScanControl.
+  if (!plan) return setScanning({ ...state, scanIncomplete: true }, false);
   state = {
     ...state,
     scanIncomplete: false,
-    scanSizedCount: plan?.candidates.length ?? state.candidates.length,
+    scanSizedCount: plan.candidates.length,
   };
-  if (!plan) return setScanning(state, false);
 
   const policyIds = new Set(plan.selectedCandidateIds);
   const selectedIds = new Set<string>();
@@ -703,15 +706,26 @@ export function toggleGroup(state: SweepUiState, groupKey: string): SweepUiState
     collapsedGroups.add(groupKey);
   }
   invalidateSelectorCache();
-  // Collapsing may remove the focused row; re-anchor to a visible item.
-  return snapToNearestItem({ ...state, collapsedGroups });
+  // Collapsing a group ABOVE the cursor used to re-interpret the same rowIndex
+  // against shorter rows - the cursor jumped to a different artifact. Re-anchor
+  // by id; only if the focused row itself was hidden do we snap to nearest.
+  const cursorId = getCurrentCandidate(state)?.id;
+  const merged = { ...state, collapsedGroups };
+  if (cursorId === undefined) return snapToNearestItem(merged);
+  const rows = buildDisplayRows(merged);
+  const stillVisible = rows.some((row) => row.kind === "item" && row.candidateId === cursorId);
+  return stillVisible ? reanchor(merged, undefined, cursorId) : snapToNearestItem(merged);
 }
 
 /** Expand every scope group. */
 export function expandAllGroups(state: SweepUiState): SweepUiState {
   if (state.collapsedGroups.size === 0) return state;
   invalidateSelectorCache();
-  return snapToNearestItem({ ...state, collapsedGroups: new Set<string>() });
+  // Rows only get longer - the focused item always survives. Anchor on the
+  // id captured BEFORE merging: the stale rowIndex already points at a
+  // different row once headers/items reappear above it.
+  const cursorId = getCurrentCandidate(state)?.id;
+  return reanchor({ ...state, collapsedGroups: new Set<string>() }, undefined, cursorId);
 }
 
 /**
@@ -1231,13 +1245,16 @@ export function mergeApplyReport(
       ? null
       : state.visualAnchorId;
 
-  const next = snapToNearestItem({
-    ...state,
-    candidates,
-    selectedIds,
-    selectionTouched,
-    visualAnchorId,
-  });
+  const merged = { ...state, candidates, selectedIds, selectionTouched, visualAnchorId };
+  // Keep the cursor on the same artifact by id: every row removed above it
+  // shifts the list up, so a positional snap would land on a different
+  // candidate - the worst possible surprise right after a destructive apply.
+  // When the cursor's own row left, fall back to the nearest surviving item.
+  const cursorId = getCurrentCandidate(state)?.id;
+  const next =
+    cursorId !== undefined && !removedIds.has(cursorId)
+      ? reanchor(merged, undefined, cursorId)
+      : snapToNearestItem(merged);
   return {
     state: next,
     removedIds: [...removedIds],

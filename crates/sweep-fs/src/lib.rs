@@ -360,7 +360,7 @@ pub fn walk_matched_entries_with_budget(
         .clamp(1, WALK_MAX_THREADS);
 
     let injector = Injector::<DirJob>::new();
-    if !budget.directory(root.as_str().len()) {
+    if !budget.queue_dir(root.as_str().len()) {
         return WalkResult {
             resource_error: budget.error(),
             ..WalkResult::default()
@@ -513,6 +513,13 @@ fn scan_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path, depth: i32) -> (WalkResult, Vec<D
     if !mark_dir(ctx, dir) {
         return (skipped(WalkResult::default()), Vec::new());
     }
+    // Only an admitted directory draws on maxDirectories - an alias that
+    // failed mark_dir is a skip, not a lifetime admission. JS parity: the
+    // charge follows markDir, so alias-dense trees can't exhaust the walk
+    // budget before real dirs even start.
+    if !ctx.budget.admit_directory() {
+        return (WalkResult::default(), Vec::new());
+    }
 
     let read_dir = match fs::read_dir(dir.as_std_path()) {
         Ok(items) => items,
@@ -582,7 +589,7 @@ fn scan_dir_entries(
             (is_symlink, file_type.is_dir() && !is_symlink)
         };
         #[cfg(not(windows))]
-        let (is_symlink, is_dir) = {
+        let (mut is_symlink, mut is_dir) = {
             let is_symlink = file_type.is_symlink();
             (is_symlink, file_type.is_dir() && !is_symlink)
         };
@@ -618,6 +625,28 @@ fn scan_dir_entries(
             is_symlink = true;
         }
 
+        // DT_UNKNOWN dirents (NFSv3, CIFS/SMB, FUSE) classify nothing - lstat
+        // once so the candidate entry_type AND the descent decision both see
+        // the real type. A failed lstat means the entry vanished or is
+        // unreadable: the listing is incomplete either way (JS parity: the
+        // "?" arm marks midReadError the same).
+        if !is_symlink && !is_dir && !is_file {
+            match fs::symlink_metadata(full_path.as_std_path()) {
+                Ok(meta) => {
+                    let ft = meta.file_type();
+                    is_symlink = ft.is_symlink();
+                    is_dir = ft.is_dir() && !is_symlink;
+                    // Entry_type below reads "everything else is a file" -
+                    // after the lstat a socket/fifo still lands on File,
+                    // matching the JS entryType fallback.
+                }
+                Err(_) => {
+                    incomplete = true;
+                    continue;
+                }
+            }
+        }
+
         if matched {
             if !ctx.budget.candidate(full_path.as_str().len(), 0) {
                 break;
@@ -650,26 +679,14 @@ fn scan_dir_entries(
         if ctx.config.depth != -1 && depth >= ctx.config.depth {
             continue;
         }
-        if is_dir {
-            if !ctx.budget.directory(full_path.as_str().len()) {
+        // The skip-name check repeats here, not only in the dirent-type fast
+        // path above: a DT_UNKNOWN dirent only learns it is a dir from the
+        // lstat, and its name was never checked.
+        if is_dir && !is_skip_dir_name(&file_name) {
+            if !ctx.budget.queue_dir(full_path.as_str().len()) {
                 break;
             }
             subdirs.push(full_path);
-        } else if !is_file && !is_symlink {
-            if let Ok(meta) = fs::symlink_metadata(full_path.as_std_path()) {
-                if meta.is_symlink() {
-                    continue;
-                }
-                if meta.is_dir() {
-                    if is_skip_dir_name(&file_name) {
-                        continue;
-                    }
-                    if !ctx.budget.directory(full_path.as_str().len()) {
-                        break;
-                    }
-                    subdirs.push(full_path);
-                }
-            }
         }
     }
 

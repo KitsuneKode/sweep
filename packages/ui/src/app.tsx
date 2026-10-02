@@ -22,7 +22,7 @@ import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
 import { writePlanExport } from "./plan-export.js";
-import { openUiSession } from "./runtime.js";
+import { noteCtrlCHandled, openUiSession } from "./runtime.js";
 import {
   buildBrandLine,
   buildContextLine,
@@ -544,57 +544,68 @@ export function SweepApp({
     scanStartRef.current = startedAt;
     setScanError(null);
     dispatch({ type: "mutate", fn: (s) => setScanning(s, true) });
-    scan.start(
-      {
-        onBatch: (candidates) => {
-          if (gen !== generationRef.current || controller.signal.aborted) return;
-          dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
+    // Deliberately floating: a rejecting UiScanControl still becomes an
+    // unhandled rejection - funnel it through the same path as onError.
+    void Promise.resolve(
+      scan.start(
+        {
+          onBatch: (candidates) => {
+            if (gen !== generationRef.current || controller.signal.aborted) return;
+            dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
+          },
+          onProgress: ({ scannedDirs, skippedDirs, currentDir, sizedCount }) => {
+            if (gen !== generationRef.current || controller.signal.aborted) return;
+            dispatch({
+              type: "mutate",
+              fn: (s) => ({
+                ...setScanCurrentDir(
+                  setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
+                  currentDir ?? null,
+                ),
+                scanSizedCount: sizedCount ?? s.scanSizedCount,
+              }),
+            });
+          },
+          onDone: ({ scannedDirs, skippedDirs, plan: finalPlan }) => {
+            if (gen !== generationRef.current || controller.signal.aborted) return;
+            // Monotonic elapsed for this generation - excludes UI idle time and
+            // any earlier aborted run, so js-vs-rust comparisons stay honest.
+            const elapsedMs = Math.max(0, performance.now() - startedAt);
+            scanDurationsRef.current = { ...scanDurationsRef.current, [engineForRun]: elapsedMs };
+            setScanDurations(scanDurationsRef.current);
+            // The scan chip quietly flipping to NORMAL is the only signal today
+            // - say what landed so the end of a long scan is legible at a
+            // glance, with the engine comparison the E-toggle is for.
+            const found = finalPlan?.candidates.length;
+            const base =
+              found !== undefined
+                ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
+                : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
+            setNotice(
+              `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}${isColdRequested() ? " · cold" : ""}`,
+            );
+            dispatch({
+              type: "mutate",
+              fn: (s) =>
+                finalizeScan(
+                  setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
+                  finalPlan,
+                ),
+            });
+          },
+          onError: (error) => {
+            if (gen !== generationRef.current || controller.signal.aborted) return;
+            dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
+            setScanError(error instanceof Error ? error.message : String(error));
+          },
         },
-        onProgress: ({ scannedDirs, skippedDirs, currentDir, sizedCount }) => {
-          if (gen !== generationRef.current || controller.signal.aborted) return;
-          dispatch({
-            type: "mutate",
-            fn: (s) => ({
-              ...setScanCurrentDir(
-                setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
-                currentDir ?? null,
-              ),
-              scanSizedCount: sizedCount ?? s.scanSizedCount,
-            }),
-          });
-        },
-        onDone: ({ scannedDirs, skippedDirs, plan: finalPlan }) => {
-          if (gen !== generationRef.current || controller.signal.aborted) return;
-          // Monotonic elapsed for this generation - excludes UI idle time and
-          // any earlier aborted run, so js-vs-rust comparisons stay honest.
-          const elapsedMs = Math.max(0, performance.now() - startedAt);
-          scanDurationsRef.current = { ...scanDurationsRef.current, [engineForRun]: elapsedMs };
-          setScanDurations(scanDurationsRef.current);
-          // The scan chip quietly flipping to NORMAL is the only signal today
-          // - say what landed so the end of a long scan is legible at a
-          // glance, with the engine comparison the E-toggle is for.
-          const found = finalPlan?.candidates.length;
-          const base =
-            found !== undefined
-              ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
-              : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
-          setNotice(
-            `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}${isColdRequested() ? " · cold" : ""}`,
-          );
-          dispatch({
-            type: "mutate",
-            fn: (s) =>
-              finalizeScan(setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs), finalPlan),
-          });
-        },
-        onError: (error) => {
-          if (gen !== generationRef.current || controller.signal.aborted) return;
-          dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
-          setScanError(error instanceof Error ? error.message : String(error));
-        },
-      },
-      controller.signal,
-    );
+        controller.signal,
+      ),
+    ).catch((error: unknown) => {
+      if (gen !== generationRef.current || controller.signal.aborted) return;
+      dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
+      setScanError(error instanceof Error ? error.message : String(error));
+    });
   }, [scan, activeEngine]);
 
   useEffect(() => {
@@ -824,6 +835,9 @@ export function SweepApp({
   }, [pendingSingleId, plan, scan, finalize, trashMode, dryRun]);
 
   const abortApply = useCallback(() => {
+    // The runtime's raw-stdin deadman saw the same ETX byte and scheduled a
+    // last-resort kill - the keymap owns this chord, so cancel it first.
+    noteCtrlCHandled();
     applyAbortRef.current?.abort();
   }, []);
 

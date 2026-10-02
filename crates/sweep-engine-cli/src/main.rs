@@ -71,8 +71,22 @@ fn main() {
     }
 }
 
+/// `std::env::args()` panics on non-UTF-8 argv - a hostile or mangled
+/// argument must produce an invalid_input error, not an abort.
+fn arg(n: usize) -> Result<Option<String>, CliFailure> {
+    match std::env::args_os().nth(n) {
+        Some(os) => match os.to_str() {
+            Some(s) => Ok(Some(s.to_owned())),
+            None => Err(CliFailure::invalid_input(format!(
+                "argument {n} is not valid UTF-8"
+            ))),
+        },
+        None => Ok(None),
+    }
+}
+
 fn run() -> Result<(), CliFailure> {
-    match std::env::args().nth(1).as_deref() {
+    match arg(1)?.as_deref() {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
         Some("--capabilities") => write_json_stdout(&serde_json::json!({"applyControl": true})),
@@ -151,8 +165,7 @@ struct ScanCompletedSummary {
 }
 
 fn run_scan() -> Result<(), CliFailure> {
-    let target_dir = std::env::args()
-        .nth(2)
+    let target_dir = arg(2)?
         .ok_or_else(|| CliFailure::invalid_input("scan requires a target directory argument"))?;
 
     let (config, selection_policy, exact, json_stream, limits) = match read_stdin_if_present()? {
@@ -343,14 +356,24 @@ const EMIT_BATCH_AT: usize = 64;
 /// mid-scan, so batches also flush on a byte budget well under the cap.
 const EMIT_BATCH_BYTES: usize = 1024 * 1024;
 
-/// Serialized-size estimate good enough to bound the line under the host cap.
+/// Exact serialized size of one candidate. An estimate that counts raw
+/// string lengths undercounts escape-heavy names (a `"` costs 2 wire bytes,
+/// a C0 control 6) and a full batch could sail past the host's per-line cap
+/// while the estimate stayed green. The extra serialize per candidate is
+/// microseconds against a flush that syscalls anyway.
 fn candidate_wire_bytes(candidate: &ScanCandidate) -> usize {
-    candidate.id.len()
-        + candidate.entry.path.len()
-        + candidate.entry.name.len()
-        + candidate.kind.len()
-        + candidate.reasons.iter().map(|r| r.len()).sum::<usize>()
-        + 256
+    serde_json::to_string(candidate)
+        .map(|s| s.len() + 1)
+        .unwrap_or_else(|_| {
+            // Serialization can't fail in practice; fall back to a safe upper
+            // bound (8x escaping) rather than zero if it ever does.
+            8 * (candidate.id.len()
+                + candidate.entry.path.len()
+                + candidate.entry.name.len()
+                + candidate.kind.len()
+                + candidate.reasons.iter().map(|r| r.len()).sum::<usize>())
+                + 256
+        })
 }
 /// Flush at most this often on progress heartbeats. The TUI coalesces into
 /// 60ms windows, so a faster cadence only buys syscalls, not freshness.
@@ -536,7 +559,9 @@ fn default_sweep_config() -> SweepConfig {
     SweepConfig {
         patterns: sweep_fs::default_patterns(),
         disabled_patterns: Vec::new(),
-        ignore: Vec::new(),
+        // Parity with DEFAULT_CONFIG.ignore in config.ts: sweep's own trash
+        // dirs must never surface as candidates on a bare engine scan.
+        ignore: vec![".sweep-trash-*".to_owned()],
         max_size_gb: 10.0,
         depth: -1,
     }
@@ -811,6 +836,21 @@ mod tests {
         assert_eq!(emitter_lines(&emitter).len(), 2);
     }
 
+    /// The wire-byte estimate must measure the escaped form - a raw-len
+    /// estimate undercounts quote/backslash/control-heavy names by ~2x.
+    #[test]
+    fn candidate_wire_bytes_counts_escaped_size_not_raw_len() {
+        let hostile = "a\"b\\c\nd".repeat(64);
+        let mut escaped = candidate(&hostile);
+        escaped.id = hostile.clone();
+        escaped.entry.path = format!("/t/{hostile}");
+        let exact = serde_json::to_string(&escaped)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        assert!(exact > hostile.len() * 2);
+        assert!(candidate_wire_bytes(&escaped) > exact);
+    }
+
     /// The progress event carries `sizedCount` so hosts can draw an honest
     /// sizing meter; without it the only number available was queue coverage,
     /// which reads 100% while work is still in flight.
@@ -825,7 +865,10 @@ mod tests {
         emitter.flush_if_due();
         let lines = emitter_lines(&emitter);
         assert_eq!(lines.len(), 1);
-        let event: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        let event: serde_json::Value = match serde_json::from_str(&lines[0]) {
+            Ok(event) => event,
+            Err(err) => panic!("emitted line is not valid JSON: {err}"),
+        };
         assert_eq!(event["type"], "scan_progress");
         assert_eq!(event["sizedCount"], 1);
         assert_eq!(event["scannedDirs"], 10);

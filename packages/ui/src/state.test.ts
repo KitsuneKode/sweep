@@ -10,6 +10,7 @@ import {
   clearSelection,
   createUiState,
   escapeStep,
+  expandAllGroups,
   finalizeScan,
   getCurrentCandidate,
   getUiSummary,
@@ -110,6 +111,58 @@ function createPlan(): ScanPlan {
     },
     selectedCandidateIds: ["cand_safe"],
     createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Two scope groups: `pkg-a` (one big artifact, sorts first under size order)
+ * and `pkg-b` (two artifacts). Collapsing or expanding `pkg-a` shifts every
+ * row of `pkg-b` - the scenario that used to slide the cursor sideways.
+ */
+function createMultiScopePlan(): ScanPlan {
+  const plan = createPlan();
+  return {
+    ...plan,
+    candidates: [
+      {
+        id: "cand_a",
+        path: "/tmp/sweep-ui/pkg-a/node_modules",
+        name: "node_modules",
+        kind: "node_modules",
+        estimatedBytes: 4096,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+      },
+      {
+        id: "cand_b1",
+        path: "/tmp/sweep-ui/pkg-b/node_modules",
+        name: "node_modules",
+        kind: "node_modules",
+        estimatedBytes: 2048,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+      },
+      {
+        id: "cand_b2",
+        path: "/tmp/sweep-ui/pkg-b/dist",
+        name: "dist",
+        kind: "dist",
+        estimatedBytes: 512,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+      },
+    ],
+    summary: { ...plan.summary, candidateCount: 3 },
+    selectedCandidateIds: ["cand_a", "cand_b1", "cand_b2"],
   };
 }
 
@@ -505,6 +558,51 @@ describe("sweep ui state", () => {
     expect(buildDisplayRows(state).filter((row) => row.kind === "item")).toHaveLength(3);
   });
 
+  test("toggleGroup keeps the cursor on its candidate when a group above folds", () => {
+    // Rows: header(pkg-a), cand_a, header(pkg-b), cand_b1, cand_b2.
+    let state = createUiState(createMultiScopePlan());
+    const b1Index = buildDisplayRows(state).findIndex(
+      (row) => row.kind === "item" && row.candidateId === "cand_b1",
+    );
+    state = setRowIndex(state, b1Index);
+    expect(getCurrentCandidate(state)?.id).toBe("cand_b1");
+
+    state = toggleGroup(state, "pkg-a");
+
+    // Keeping the raw rowIndex would land on cand_b2; the id anchor holds.
+    expect(getCurrentCandidate(state)?.id).toBe("cand_b1");
+  });
+
+  test("toggleGroup snaps to a neighbor when the cursor's own group folds", () => {
+    let state = createUiState(createMultiScopePlan());
+    const aIndex = buildDisplayRows(state).findIndex(
+      (row) => row.kind === "item" && row.candidateId === "cand_a",
+    );
+    state = setRowIndex(state, aIndex);
+
+    state = toggleGroup(state, "pkg-a");
+
+    // cand_a left the display - the cursor must still rest on a real item.
+    const current = getCurrentCandidate(state);
+    expect(current).toBeDefined();
+    expect(current?.id).not.toBe("cand_a");
+    const rows = buildDisplayRows(state);
+    expect(rows[state.rowIndex]?.kind).toBe("item");
+  });
+
+  test("expandAllGroups keeps the cursor on its candidate", () => {
+    let state = createUiState(createMultiScopePlan());
+    state = toggleGroup(state, "pkg-a");
+    const b1Index = buildDisplayRows(state).findIndex(
+      (row) => row.kind === "item" && row.candidateId === "cand_b1",
+    );
+    state = setRowIndex(state, b1Index);
+
+    state = expandAllGroups(state);
+
+    expect(getCurrentCandidate(state)?.id).toBe("cand_b1");
+  });
+
   test("escape ladder unwinds filters before scopes before text search", () => {
     let state = createUiState(createPlan());
     state = setFilter(state, "node_modules");
@@ -700,6 +798,20 @@ describe("sweep ui state", () => {
       const done = finalizeScan(state, { ...createPlan(), candidates: [] });
       expect(done.selectedIds.size).toBe(0);
       expect(done.candidates).toHaveLength(0);
+    });
+
+    test("finalizeScan without a plan keeps the scan incomplete", () => {
+      // A stream that ends without its final plan leaves stub candidates
+      // unreconciled - marking it complete would unlock apply/export on
+      // provisional data.
+      let state = createUiState({ ...createPlan(), candidates: [] });
+      state = setScanning(state, true);
+      state = upsertCandidates(state, [discovery("ghost")]);
+
+      const done = finalizeScan(state, undefined);
+
+      expect(done.scanning).toBe(false);
+      expect(done.scanIncomplete).toBe(true);
     });
 
     test("a mid-scan clear keeps later discoveries and the policy pass out of the queue", () => {
@@ -1074,7 +1186,30 @@ describe("mergeApplyReport", () => {
     const merged = mergeApplyReport(state, { ...baseReport });
     expect(merged.removedIds).toEqual(["cand_safe"]);
     expect(merged.state.candidates.map((c) => c.id)).not.toContain("cand_safe");
+  });
 
+  test("cursor keeps its candidate when rows above it leave", () => {
+    // Size order: cand_dangerous(2048), cand_safe(1024), cand_blocked(512) -
+    // cursor on cand_safe while the apply deletes the row above it.
+    let state = createUiState(createPlan());
+    const safeIndex = buildDisplayRows(state).findIndex(
+      (row) => row.kind === "item" && row.candidateId === "cand_safe",
+    );
+    state = setRowIndex(state, safeIndex);
+    expect(getCurrentCandidate(state)?.id).toBe("cand_safe");
+
+    const merged = mergeApplyReport(state, {
+      ...baseReport,
+      selectedCandidateIds: ["cand_dangerous"],
+      outcomes: [{ candidateId: "cand_dangerous", status: "deleted" }],
+    });
+
+    // Keeping the raw rowIndex would land on cand_blocked.
+    expect(getCurrentCandidate(merged.state)?.id).toBe("cand_safe");
+  });
+
+  test("a legacy report that only failed removes nothing", () => {
+    const state = createUiState(createPlan());
     const failedOnly = mergeApplyReport(state, {
       ...baseReport,
       deletedCount: 0,

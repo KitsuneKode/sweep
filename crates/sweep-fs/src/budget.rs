@@ -109,18 +109,32 @@ impl ResourceBudget {
         )
     }
 
-    pub fn directory(&self, path_bytes: usize) -> bool {
+    /// Charge a queued directory job: live queue slot plus retained path
+    /// bytes. Runs at discovery push; `dequeue_directory` releases the slot
+    /// when the job is popped.
+    pub fn queue_dir(&self, path_bytes: usize) -> bool {
         self.charge(
-            &self.directories,
-            1,
-            self.limits.max_directories,
-            "maxDirectories",
-        ) && self.charge(
             &self.queued,
             1,
             self.limits.max_queued_dirs,
             "maxQueuedDirs",
         ) && self.path(path_bytes, 128)
+    }
+
+    /// Charge the cumulative maxDirectories counter. Runs only after the
+    /// (dev,ino) dedup admits a dir - JS parity: an inode alias is a skip,
+    /// not an admission, so it must not drain the lifetime budget.
+    pub fn admit_directory(&self) -> bool {
+        self.charge(
+            &self.directories,
+            1,
+            self.limits.max_directories,
+            "maxDirectories",
+        )
+    }
+
+    pub fn directory(&self, path_bytes: usize) -> bool {
+        self.queue_dir(path_bytes) && self.admit_directory()
     }
 
     pub fn dequeue_directory(&self) {

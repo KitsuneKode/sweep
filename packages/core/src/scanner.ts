@@ -516,10 +516,25 @@ export async function scan(
     const childDepth = depth + 1;
     const childrenAllowed = config.depth === -1 || childDepth <= config.depth;
 
+    // A reader error after the first batch (mid-listing ENOENT/EIO, a dying
+    // NFS/FUSE mount) degrades this dir to skipped instead of failing the
+    // whole scan - Rust parity: incomplete dir + skippedDirs increment.
+    let midReadError = false;
     async function* openedEntries() {
       try {
         if (!first.done) yield first.value;
-        yield* items;
+        while (true) {
+          let next: Awaited<ReturnType<typeof items.next>>;
+          try {
+            next = await items.next();
+          } catch (error) {
+            if (error instanceof ResourceLimitError) throw error;
+            midReadError = true;
+            return;
+          }
+          if (next.done) return;
+          yield next.value;
+        }
       } finally {
         await items.return(undefined);
       }
@@ -541,14 +556,23 @@ export async function scan(
       if (isIgnored?.(fullPath, item.name)) continue;
 
       let isLink = item.isSymbolicLink();
-      if (!isLink && item.isDirectory() && needsReparseCheck) {
+      // DT_UNKNOWN filesystems (some NFSv3, CIFS/SMB, FUSE) report "?" for
+      // every dirent - lstat is the only way to learn what it actually is.
+      // Without this a real dir is silently never descended AND never
+      // counted skipped - "found nothing" masquerading as "nothing there".
+      let rawIsDir = item.isDirectory();
+      if (!isLink && rawIsDir && needsReparseCheck) {
         isLink = isReparsePointOrSymlink(fullPath);
       }
-      if (!isLink && !item.isFile() && !item.isDirectory()) {
+      if (!isLink && !item.isFile() && !rawIsDir) {
         try {
           const stat = await lstat(fullPath);
           isLink = stat.isSymbolicLink();
+          rawIsDir = stat.isDirectory();
         } catch {
+          // Vanished or unlstatable - the listing is incomplete either way
+          // (Rust parity: Err(item) / Err(file_type) mark it incomplete).
+          midReadError = true;
           continue;
         }
       }
@@ -562,7 +586,7 @@ export async function scan(
           bytesKnown: false,
           ...(modifiedMs !== undefined ? { modifiedMs } : {}),
           isSymlink: isLink,
-          entryType: isLink ? "symlink" : item.isDirectory() ? "directory" : "file",
+          entryType: isLink ? "symlink" : rawIsDir ? "directory" : "file",
         };
         budget.candidate(fullPath);
         entries.push(entry);
@@ -571,7 +595,7 @@ export async function scan(
         continue;
       }
 
-      if (childrenAllowed && item.isDirectory() && !isLink && !skipDirName(item.name)) {
+      if (childrenAllowed && rawIsDir && !isLink && !skipDirName(item.name)) {
         // Already visited (bind mount / inode alias), or gone - either way
         // there is nothing to safely read under this path.
         if (await markDir(fullPath)) {
@@ -581,6 +605,9 @@ export async function scan(
         }
       }
     }
+    // A dir whose listing died partway is an incomplete read - count it as
+    // skipped so the summary never reports "everything looked at" (F6).
+    if (midReadError) skipDir();
   }
 
   // One shared work queue with a hard cap on in-flight directory reads - the
@@ -640,6 +667,9 @@ export async function scan(
       }),
     );
     if (scanError !== undefined) throw scanError;
+    // An aborted walk leaves queued frames unvisited - count them skipped so
+    // the result can never present a partial tree as a complete scan (F7).
+    if (signal?.aborted && queue.length > 0) skippedDirs += queue.length;
     emitProgress(".", true);
 
     if (sizer) {

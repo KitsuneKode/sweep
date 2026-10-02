@@ -193,8 +193,14 @@ export function disposeDirectoryReader(budget: ResourceBudget): void {
   workers.delete(budget);
 }
 
+export type DirectoryEntrySource = (
+  path: string | Buffer,
+  budget: ResourceBudget,
+  signal?: AbortSignal,
+) => AsyncGenerator<{ name: Buffer; type: string }>;
+
 /** Real bounded enumeration, including under Bun's array-backed fs.Dir. */
-export async function* directoryEntries(
+async function* enumerateDirectory(
   path: string | Buffer,
   budget: ResourceBudget,
   signal?: AbortSignal,
@@ -223,4 +229,20 @@ export async function* directoryEntries(
   } finally {
     await handle.close();
   }
+}
+
+// Test seam: nothing on a normal filesystem can mint a DT_UNKNOWN dirent, so
+// coverage for the "?" arm needs a reader that lies about types.
+let entrySource: DirectoryEntrySource = enumerateDirectory;
+
+export function stubDirectoryEntriesForTest(source?: DirectoryEntrySource): void {
+  entrySource = source ?? enumerateDirectory;
+}
+
+export async function* directoryEntries(
+  path: string | Buffer,
+  budget: ResourceBudget,
+  signal?: AbortSignal,
+): AsyncGenerator<{ name: Buffer; type: string }> {
+  yield* entrySource(path, budget, signal);
 }

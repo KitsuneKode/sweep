@@ -148,9 +148,11 @@ pub fn assert_safe_pattern(pattern: &str) -> Result<(), EngineError> {
         .into());
     }
 
-    // Patterns are filenames, not essays - same 128-char bound as the JS side
-    // (`MAX_PATTERN_LENGTH` in guardrails.ts) and the stdin parser.
-    if pattern.len() > 128 {
+    // Patterns are filenames, not essays - same bound as the JS side
+    // (`MAX_PATTERN_LENGTH` in guardrails.ts): <=128 code points and <=256
+    // UTF-16 units. `pattern.len()` would count UTF-8 bytes and reject ~70
+    // CJK chars the JS engine accepts.
+    if pattern.chars().count() > 128 || pattern.encode_utf16().count() > 256 {
         return Err(GuardrailError::ProtectedPath {
             path: format!(
                 "Pattern exceeds 128 characters: \"{}…\"",
@@ -222,20 +224,10 @@ fn blocked_roots() -> HashSet<PathBuf> {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            return Some(PathBuf::from(home));
-        }
-    }
-    #[cfg(windows)]
-    {
-        if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            if !userprofile.is_empty() {
-                return Some(PathBuf::from(userprofile));
-            }
-        }
-    }
-    None
+    // std::env::home_dir mirrors os.homedir(): env vars first, then the
+    // passwd/registry fallback - so $HOME-unset scans still get home-dir
+    // protection. JS parity.
+    std::env::home_dir()
 }
 
 fn normalize_path(path: &str) -> PathBuf {

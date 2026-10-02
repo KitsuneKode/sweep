@@ -12,7 +12,7 @@ import type {
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { isColdRequested } from "./cold.js";
 import { GuardrailError } from "./guardrails.js";
-import { buildPlan } from "./planner.js";
+import { applyPlanInsights, buildPlan } from "./planner.js";
 import {
   PlanValidationError,
   validateApplyReport,
@@ -380,7 +380,11 @@ export async function scanToPlanViaRust(
         `Invalid plan JSON from engine: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    return validatePlan(parsed);
+    // The streamed path reaches buildPlan -> applyPlanInsights, which demotes
+    // workspace stubs and symlink aliases and recomputes the selection set.
+    // The engine's one-shot plan does none of that - run the same pass here
+    // so `--engine rust` and streamed/JS plans select identical ids.
+    return applyPlanInsights(validatePlan(parsed));
   }
 
   const stream = new RustScanStream(absoluteTarget, options, options.exact ?? false);

@@ -263,7 +263,10 @@ function ReclaimPanel({
       >
         <text
           content={concatStyled(
-            buildMeter(sizedCount, Math.max(1, foundCount), barWidth, tokens),
+            // Feed the clamped percent, not the raw ratio - a sized==found
+            // frame before onDone would otherwise draw a full bar next to
+            // a "99%" label.
+            buildMeter(percent, 100, barWidth, tokens),
             t` ${fg(tokens.info)(percentLabel)}`,
           )}
           wrapMode="none"
