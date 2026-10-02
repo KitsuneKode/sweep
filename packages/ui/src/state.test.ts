@@ -4,6 +4,8 @@ import { buildRescanConfig, DEFAULT_CONFIG } from "@kitsunekode/sweep-core/confi
 import {
   allPatterns,
   applyUiSelection,
+  planForCandidateIds,
+  mergeApplyReport,
   applyVisualRange,
   clearSelection,
   createUiState,
@@ -951,5 +953,117 @@ describe("visual range", () => {
     const filtered = { ...anchored, filter: "zzz" };
     expect(visualRange(filtered)).toBeNull();
     expect(applyVisualRange(filtered).state.selectedIds.size).toBe(0);
+  });
+});
+
+describe("planForCandidateIds", () => {
+  test("builds a plan scoped to exactly the given ids", () => {
+    const plan = createPlan();
+    const state = createUiState(plan);
+    const single = planForCandidateIds(plan, state, ["cand_dangerous"]);
+    expect(single.selectedCandidateIds).toEqual(["cand_dangerous"]);
+    expect(single.summary.selectedCount).toBe(1);
+    // Every candidate still travels with the plan - the engine looks entries
+    // up by id, and the count reflects the real tree, not the request.
+    expect(single.candidates.length).toBe(plan.candidates.length);
+    expect(single.summary.candidateCount).toBe(3);
+  });
+
+  test("never lets a blocked id into a plan", () => {
+    const plan = createPlan();
+    const scoped = planForCandidateIds(plan, createUiState(plan), ["cand_blocked"]);
+    expect(scoped.selectedCandidateIds).toEqual([]);
+  });
+});
+
+describe("mergeApplyReport", () => {
+  const baseReport = {
+    protocolVersion: "1" as const,
+    targetDir: "/tmp/sweep-ui",
+    selectedCandidateIds: ["cand_safe"],
+    deletedCount: 1,
+    failedCount: 0,
+    totalBytesFreed: 1024,
+    failedPaths: [],
+  };
+
+  test("deleted outcomes drop the row and unqueue it", () => {
+    const state = createUiState(createPlan());
+    const merged = mergeApplyReport(state, {
+      ...baseReport,
+      outcomes: [{ candidateId: "cand_safe", status: "deleted" }],
+    });
+    expect(merged.removedIds).toEqual(["cand_safe"]);
+    expect(merged.freedBytes).toBe(1024);
+    expect(merged.state.candidates.map((c) => c.id)).toEqual(["cand_dangerous", "cand_blocked"]);
+    expect(merged.state.selectedIds.has("cand_safe")).toBe(false);
+    // Cursor still lands on a real item row, not the row that just left.
+    expect(getCurrentCandidate(merged.state)?.id).toBeDefined();
+  });
+
+  test("covered outcomes drop rows that lived inside the deleted candidate", () => {
+    const plan = createPlan();
+    const state = createUiState(plan);
+    const merged = mergeApplyReport(state, {
+      ...baseReport,
+      selectedCandidateIds: ["cand_safe", "cand_dangerous"],
+      deletedCount: 2,
+      outcomes: [
+        { candidateId: "cand_safe", status: "deleted" },
+        { candidateId: "cand_dangerous", status: "covered", coveredBy: "cand_safe" },
+      ],
+    });
+    expect(merged.removedIds.sort()).toEqual(["cand_dangerous", "cand_safe"]);
+    expect(merged.state.candidates.map((c) => c.id)).toEqual(["cand_blocked"]);
+  });
+
+  test("failed outcomes keep the row and surface the first reason", () => {
+    const state = createUiState(createPlan());
+    const merged = mergeApplyReport(state, {
+      ...baseReport,
+      deletedCount: 0,
+      failedCount: 1,
+      failedPaths: [
+        { path: "/tmp/sweep-ui/node_modules", code: "missing" as const, error: "path vanished" },
+      ],
+      outcomes: [{ candidateId: "cand_safe", status: "failed" }],
+    });
+    expect(merged.removedIds).toEqual([]);
+    expect(merged.failed).toBe(1);
+    expect(merged.firstFailure).toBe("path vanished");
+    expect(merged.state.candidates.length).toBe(3);
+  });
+
+  test("unattempted and interrupted stay honest", () => {
+    const state = createUiState(createPlan());
+    const merged = mergeApplyReport(state, {
+      ...baseReport,
+      interrupted: true,
+      outcomes: [
+        { candidateId: "cand_safe", status: "deleted" },
+        { candidateId: "cand_dangerous", status: "unattempted" },
+      ],
+    });
+    expect(merged.interrupted).toBe(true);
+    expect(merged.unattempted).toBe(1);
+    expect(merged.state.candidates.map((c) => c.id)).toContain("cand_dangerous");
+  });
+
+  test("legacy reports without outcomes infer removals minus failures", () => {
+    const state = createUiState(createPlan());
+    const merged = mergeApplyReport(state, { ...baseReport });
+    expect(merged.removedIds).toEqual(["cand_safe"]);
+    expect(merged.state.candidates.map((c) => c.id)).not.toContain("cand_safe");
+
+    const failedOnly = mergeApplyReport(state, {
+      ...baseReport,
+      deletedCount: 0,
+      failedCount: 1,
+      failedPaths: [
+        { path: "/tmp/sweep-ui/node_modules", code: "missing" as const, error: "gone" },
+      ],
+    });
+    expect(failedOnly.removedIds).toEqual([]);
+    expect(failedOnly.state.candidates.length).toBe(3);
   });
 });

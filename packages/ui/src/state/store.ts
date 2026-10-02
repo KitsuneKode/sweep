@@ -1095,11 +1095,21 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
   return result;
 }
 
-export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan {
+/**
+ * Build an apply plan carrying exactly `ids` - the base for both the queued
+ * apply (enter) and a scoped single-row apply (x). Blocked ids never enter a
+ * plan no matter who asks: the engine refuses them, and dropping them here
+ * keeps the plan honest about what it will attempt.
+ */
+export function planForCandidateIds(
+  plan: ScanPlan,
+  state: SweepUiState,
+  ids: ReadonlySet<string> | readonly string[],
+): ScanPlan {
   if (state.scanning || state.scanIncomplete) {
     throw new Error("scan incomplete: rescan successfully before applying or saving a plan");
   }
-  const selectedSet = new Set(state.selectedIds);
+  const wanted = ids instanceof Set ? ids : new Set(ids);
   const selectedCandidateIds: string[] = [];
   let totalBytes = 0;
   const riskCounts: ScanPlan["summary"]["riskCounts"] = {
@@ -1112,7 +1122,7 @@ export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan 
   for (const candidate of state.candidates) {
     totalBytes += candidate.estimatedBytes;
     riskCounts[candidate.riskTier] += 1;
-    if (selectedSet.has(candidate.id) && candidate.riskTier !== "blocked") {
+    if (wanted.has(candidate.id) && candidate.riskTier !== "blocked") {
       selectedCandidateIds.push(candidate.id);
     }
   }
@@ -1129,6 +1139,102 @@ export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan 
       estimatedTotalBytes: totalBytes,
       riskCounts,
     },
+  };
+}
+
+export function applyUiSelection(plan: ScanPlan, state: SweepUiState): ScanPlan {
+  return planForCandidateIds(plan, state, state.selectedIds);
+}
+
+export interface ApplyMergeResult {
+  state: SweepUiState;
+  /** Candidate ids actually gone - deleted outright or covered by a removed parent. */
+  removedIds: string[];
+  freedBytes: number;
+  failed: number;
+  /** First failure reason for the notice line, when there is one. */
+  firstFailure?: string;
+  unattempted: number;
+  interrupted: boolean;
+}
+
+/**
+ * Fold an apply report back into live state after an in-session apply.
+ *
+ * `deleted` and `covered` outcomes drop their rows (a covered row lived inside
+ * a deleted parent - removing it is not deleting anything else, it already
+ * went with the candidate the user chose). `failed` and `unattempted` rows
+ * stay so the user can inspect what happened.
+ */
+export function mergeApplyReport(
+  state: SweepUiState,
+  report: import("@kitsunekode/sweep-protocol").ApplyReport,
+): ApplyMergeResult {
+  const removedIds = new Set<string>();
+  let unattempted = 0;
+
+  if (report.outcomes) {
+    for (const outcome of report.outcomes) {
+      if (outcome.status === "deleted" || outcome.status === "covered") {
+        removedIds.add(outcome.candidateId);
+      } else if (outcome.status === "unattempted") {
+        unattempted += 1;
+      }
+    }
+  } else {
+    // Legacy engines carry no per-candidate outcomes: infer removals as the
+    // request minus reported failures, matched by path.
+    const failedPaths = new Set(report.failedPaths.map((failure) => failure.path));
+    const byId = candidateIndex(state.candidates);
+    for (const id of report.selectedCandidateIds) {
+      const candidate = byId.get(id);
+      if (candidate && !failedPaths.has(candidate.path)) removedIds.add(id);
+    }
+  }
+
+  const failed = report.failedCount;
+  const firstFailure = report.failedPaths[0]?.error;
+
+  if (removedIds.size === 0) {
+    return {
+      state,
+      removedIds: [],
+      freedBytes: report.totalBytesFreed,
+      failed,
+      ...(firstFailure === undefined ? {} : { firstFailure }),
+      unattempted,
+      interrupted: report.interrupted === true,
+    };
+  }
+
+  invalidateSelectorCache();
+  const candidates = state.candidates.filter((candidate) => !removedIds.has(candidate.id));
+  const selectedIds = new Set(state.selectedIds);
+  const selectionTouched = new Set(state.selectionTouched);
+  for (const id of removedIds) {
+    selectedIds.delete(id);
+    selectionTouched.delete(id);
+  }
+  const visualAnchorId =
+    state.visualAnchorId !== null && removedIds.has(state.visualAnchorId)
+      ? null
+      : state.visualAnchorId;
+
+  const next = snapToNearestItem({
+    ...state,
+    candidates,
+    selectedIds,
+    selectionTouched,
+    visualAnchorId,
+  });
+  return {
+    state: next,
+    removedIds: [...removedIds],
+    freedBytes: report.totalBytesFreed,
+    failed,
+    ...(firstFailure === undefined ? {} : { firstFailure }),
+    unattempted,
+    interrupted: report.interrupted === true,
   };
 }
 

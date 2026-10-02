@@ -8,12 +8,15 @@ export type {
   VisualRange,
   PatternInputMode,
   PatternPanelRow,
+  ApplyMergeResult,
 } from "./state/store.js";
 export {
   activePatterns,
   allPatterns,
   isCustomPattern,
   applyUiSelection,
+  planForCandidateIds,
+  mergeApplyReport,
   clearSelection,
   createUiState,
   finalizeScan,

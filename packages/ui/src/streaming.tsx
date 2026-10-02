@@ -11,7 +11,7 @@ import type {
 } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
 import { SweepApp, UiErrorBoundary } from "./app.js";
-import type { SweepUiOutcome } from "./outcome.js";
+import type { SweepUiOutcome, UiApplyResult } from "./outcome.js";
 import { openUiSession } from "./runtime.js";
 import type { SweepUiInitOptions } from "./state.js";
 import { StreamBatcher } from "./stream-batcher.js";
@@ -55,6 +55,16 @@ export interface UiScanControl {
    * current selection untouched.
    */
   setEngine(engine: "js" | "rust"): boolean;
+  /**
+   * Apply a scoped plan without leaving the session (single-row `x`). Runs
+   * on the engine `E` last selected; absent when the host provides no apply
+   * channel (static plans, tests) - the app falls back to an exit-apply.
+   */
+  apply?: (request: {
+    plan: ScanPlan;
+    trash: boolean;
+    signal: AbortSignal;
+  }) => Promise<UiApplyResult>;
 }
 
 export interface SweepUiStreamingOptions {
@@ -66,6 +76,17 @@ export interface SweepUiStreamingOptions {
   dryRun?: boolean;
   /** Trash mode - the apply dialog says "move" and a TRASH chip shows. */
   trash?: boolean;
+  /**
+   * In-session apply channel - the host runs the engine's apply with the
+   * same revalidation/containment/history as an exit apply. The `engine`
+   * argument follows the E toggle so a flipped scan engine applies too.
+   */
+  apply?: (request: {
+    plan: ScanPlan;
+    engine: "js" | "rust";
+    trash: boolean;
+    signal: AbortSignal;
+  }) => Promise<UiApplyResult>;
   init?: SweepUiInitOptions;
 }
 
@@ -206,6 +227,12 @@ export async function runSweepUiStreaming(
       activeEngine = engine;
       return true;
     },
+    ...(options.apply
+      ? {
+          apply: (request: { plan: ScanPlan; trash: boolean; signal: AbortSignal }) =>
+            options.apply!({ ...request, engine: activeEngine }),
+        }
+      : {}),
   });
 
   try {

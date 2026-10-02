@@ -434,3 +434,98 @@ describe("handleKeymap", () => {
     expect(actionsCtrlD.mutate).toHaveBeenCalled();
   });
 });
+
+describe("single-row apply (x/d)", () => {
+  function makeContext(overrides: Partial<KeymapContext> = {}): KeymapContext {
+    return {
+      key: { name: "x" },
+      state: createUiState(mockPlan()),
+      showHelp: false,
+      pendingApply: false,
+      showSidebar: true,
+      pageRows: 10,
+      ...overrides,
+    };
+  }
+
+  function makeActions(): KeymapActions {
+    return {
+      finalize: mock(() => {}),
+      mutate: mock((fn) => fn),
+      focusPanel: mock(() => {}),
+      setShowHelp: mock(() => {}),
+      setPendingApply: mock(() => {}),
+      requestApply: mock(() => {}),
+      applyPlan: mock(() => {}),
+    };
+  }
+
+  test("x and d on an item row request the scoped confirm", () => {
+    const state = { ...createUiState(mockPlan()), focus: "list" as const };
+    for (const name of ["x", "d"]) {
+      const actions = makeActions();
+      actions.requestSingleApply = mock(() => {});
+      handleKeymap(makeContext({ key: { name }, state }), actions);
+      expect(actions.requestSingleApply).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  test("x never reaches single apply from other panes", () => {
+    for (const focus of ["patterns", "sidebar", "search"] as const) {
+      const actions = makeActions();
+      actions.requestSingleApply = mock(() => {});
+      handleKeymap(makeContext({ state: { ...createUiState(mockPlan()), focus } }), actions);
+      expect(actions.requestSingleApply).not.toHaveBeenCalled();
+    }
+  });
+
+  test("y inside a single-scoped confirm calls confirmSingle, not applyPlan", () => {
+    const actions = makeActions();
+    actions.confirmSingle = mock(() => {});
+    handleKeymap(
+      makeContext({ key: { name: "y" }, pendingApply: true, pendingSingle: true }),
+      actions,
+    );
+    expect(actions.confirmSingle).toHaveBeenCalledTimes(1);
+    expect(actions.applyPlan).not.toHaveBeenCalled();
+    expect(actions.setPendingApply).toHaveBeenCalledWith(false);
+  });
+
+  test("y inside a queue-scoped confirm still calls applyPlan", () => {
+    const actions = makeActions();
+    actions.confirmSingle = mock(() => {});
+    handleKeymap(
+      makeContext({ key: { name: "y" }, pendingApply: true, pendingSingle: false }),
+      actions,
+    );
+    expect(actions.applyPlan).toHaveBeenCalledTimes(1);
+    expect(actions.confirmSingle).not.toHaveBeenCalled();
+  });
+
+  test("an in-flight apply traps every key except ctrl-c", () => {
+    const actions = makeActions();
+    actions.abortApply = mock(() => {});
+    actions.requestSingleApply = mock(() => {});
+    for (const name of ["j", "x", "space", "return", "escape", "r"]) {
+      handleKeymap(makeContext({ key: { name }, applying: true }), actions);
+    }
+    expect(actions.mutate).not.toHaveBeenCalled();
+    expect(actions.requestSingleApply).not.toHaveBeenCalled();
+    expect(actions.finalize).not.toHaveBeenCalled();
+    expect(actions.abortApply).not.toHaveBeenCalled();
+  });
+
+  test("ctrl-c during apply aborts the apply, not the session", () => {
+    const actions = makeActions();
+    actions.abortApply = mock(() => {});
+    handleKeymap(makeContext({ key: { name: "c", ctrl: true }, applying: true }), actions);
+    expect(actions.abortApply).toHaveBeenCalledTimes(1);
+    expect(actions.finalize).not.toHaveBeenCalled();
+  });
+
+  test("ctrl-c quits normally when no apply is in flight", () => {
+    const actions = makeActions();
+    handleKeymap(makeContext({ key: { name: "c", ctrl: true } }), actions);
+    expect(actions.finalize).toHaveBeenCalledWith({ type: "abort" });
+  });
+});

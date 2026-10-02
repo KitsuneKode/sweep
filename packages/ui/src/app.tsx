@@ -43,6 +43,8 @@ import {
   finalizeScan,
   getCurrentCandidate,
   getUiSummary,
+  mergeApplyReport,
+  planForCandidateIds,
   resetForRescan,
   rescanConfigFromState,
   setFocus,
@@ -160,7 +162,8 @@ const HELP_QUEUE: ReadonlyArray<HelpRow> = [
   ["space", "queue / unqueue row"],
   ["v", "visual range - space queues"],
   ["a · s · u", "queue visible · safe · clear"],
-  ["enter", "apply (always confirms)"],
+  ["x · d", "delete just this row"],
+  ["enter", "apply queue (always confirms)"],
 ];
 
 const HELP_VIEW: ReadonlyArray<HelpRow> = [
@@ -488,7 +491,14 @@ export function SweepApp({
 }: SweepAppProps) {
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) => createUiState(p, init));
   const [showHelp, setShowHelp] = useState(false);
-  const [pendingApply, setPendingApply] = useState(false);
+  const [pendingApply, setPendingApplyState] = useState(false);
+  // Non-null while the confirm dialog is scoped to one row (x/d): the same
+  // dialog renders, but `y` applies only that candidate.
+  const [pendingSingleId, setPendingSingleId] = useState<string | null>(null);
+  // An in-session apply is running: keys trap (except ctrl-c = stop), and the
+  // report merges back into the list instead of ending the session.
+  const [applying, setApplying] = useState<string | null>(null);
+  const applyAbortRef = useRef<AbortController | null>(null);
   const [showInspect, setShowInspect] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   // One-line feedback for keys that deliberately do nothing (esc with nothing
@@ -701,6 +711,115 @@ export function SweepApp({
     });
   }, [finalize, plan, state, trashMode]);
 
+  // The keymap's dismiss path calls this for both dialog scopes - clearing
+  // the dialog always drops a single-row scope too, or a later y would apply
+  // a candidate the user stopped looking at.
+  const setPendingApply = useCallback((pending: boolean) => {
+    setPendingApplyState(pending);
+    if (!pending) setPendingSingleId(null);
+  }, []);
+
+  /**
+   * `x`/`d` on a row: confirm an apply scoped to exactly that candidate.
+   * Same gates as the queued apply - a running or incomplete scan means the
+   * row under the cursor is not the row the engine would see.
+   */
+  const requestSingleApply = useCallback(() => {
+    const s = stateRef.current;
+    if (s.scanning) {
+      setNotice("scan still running - wait or esc out");
+      return;
+    }
+    if (s.scanIncomplete) {
+      setNotice("scan incomplete: press r to retry before applying");
+      return;
+    }
+    const candidate = getCurrentCandidate(s);
+    if (!candidate) {
+      // Header rows and empty lists land here - x is per-artifact only.
+      setNotice("x deletes one artifact - space queues, enter applies the queue");
+      return;
+    }
+    if (candidate.riskTier === "blocked") {
+      setNotice("⊘ protected path - blocked items can't be deleted");
+      return;
+    }
+    setPendingSingleId(candidate.id);
+    setPendingApplyState(true);
+  }, []);
+
+  const confirmSingle = useCallback(() => {
+    const id = pendingSingleId;
+    setPendingSingleId(null);
+    if (!id) return;
+    const candidate = stateRef.current.candidates.find((c) => c.id === id);
+    if (!candidate) {
+      setNotice("row already left the list - nothing to delete");
+      return;
+    }
+    const singlePlan = planForCandidateIds(plan, stateRef.current, [id]);
+    const applyFn = scan?.apply;
+    if (!applyFn) {
+      // Static-plan mode has no in-session channel: exit through the same
+      // apply outcome a queued apply takes - identical safety pipeline.
+      finalize({ type: "apply", plan: singlePlan, ...(trashMode ? { trash: true } : {}) });
+      return;
+    }
+    if (dryRun) {
+      setNotice(
+        `dry run - would ${trashMode ? "move" : "delete"} ${sanitizeTerminalText(relativePath(stateRef.current.targetDir, candidate.path))} (${formatBytes(candidate.estimatedBytes)})`,
+      );
+      return;
+    }
+
+    const controller = new AbortController();
+    applyAbortRef.current = controller;
+    const name = sanitizeTerminalText(
+      relativePath(stateRef.current.targetDir, candidate.path) || candidate.name,
+    );
+    setApplying(name);
+    void (async () => {
+      try {
+        const result = await applyFn({
+          plan: singlePlan,
+          trash: trashMode,
+          signal: controller.signal,
+        });
+        const merged = mergeApplyReport(stateRef.current, result.report);
+        dispatch({ type: "replace", state: merged.state });
+        const verb = result.trashDir ? "moved to trash" : "deleted";
+        if (merged.failed > 0 && merged.removedIds.length === 0) {
+          setNotice(
+            `couldn't ${trashMode ? "move" : "delete"} ${name}: ${sanitizeTerminalText(merged.firstFailure ?? "revalidation failed")}`,
+          );
+        } else {
+          const extra =
+            merged.removedIds.length > 1 ? ` (+${merged.removedIds.length - 1} nested)` : "";
+          const stopped =
+            merged.interrupted || merged.unattempted > 0
+              ? ` - stopped early, ${merged.unattempted} left`
+              : "";
+          const failures = merged.failed > 0 ? ` · ${merged.failed} failed` : "";
+          setNotice(
+            `${verb} ${name}${extra} · freed ${formatBytes(merged.freedBytes)}${failures}${stopped}`,
+          );
+        }
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        setNotice(
+          `couldn't ${trashMode ? "move" : "delete"} ${name}: ${sanitizeTerminalText(reason)}`,
+        );
+      } finally {
+        applyAbortRef.current = null;
+        setApplying(null);
+      }
+    })();
+  }, [pendingSingleId, plan, scan, finalize, trashMode, dryRun]);
+
+  const abortApply = useCallback(() => {
+    applyAbortRef.current?.abort();
+  }, []);
+
   const renderer = useRenderer();
 
   const exportPlan = useCallback(() => {
@@ -815,6 +934,8 @@ export function SweepApp({
         showSidebar,
         scanError,
         inspectOpen: showInspect,
+        pendingSingle: pendingSingleId !== null,
+        applying: applying !== null,
         // Measured list rows once the pane has laid out; the height-minus-
         // chrome estimate only seeds the first frame before a size event.
         pageRows: viewportRowsRef.current ?? Math.max(6, dimensions.height - 10),
@@ -839,6 +960,9 @@ export function SweepApp({
         applyScopeToggle,
         writeSweeprc,
         submitPatternDraft,
+        requestSingleApply,
+        confirmSingle,
+        abortApply,
         notify: setNotice,
       },
     );
@@ -906,17 +1030,23 @@ export function SweepApp({
   // way out of a modal.
   const visualActive = state.focus === "list" && visualRange(state) !== null;
 
-  const footerContext: FooterContext = scanError
-    ? { kind: "scanError" }
-    : pendingApply
-      ? { kind: "confirm" }
-      : showInspect
-        ? { kind: "inspect" }
-        : showHelp
-          ? { kind: "help" }
-          : visualActive
-            ? { kind: "visual" }
-            : { kind: "pane", focus: state.focus };
+  const pendingSingleCandidate =
+    pendingSingleId === null ? undefined : candidatesById.get(pendingSingleId);
+
+  const footerContext: FooterContext =
+    applying !== null
+      ? { kind: "applying" }
+      : scanError
+        ? { kind: "scanError" }
+        : pendingApply
+          ? { kind: "confirm" }
+          : showInspect
+            ? { kind: "inspect" }
+            : showHelp
+              ? { kind: "help" }
+              : visualActive
+                ? { kind: "visual" }
+                : { kind: "pane", focus: state.focus };
 
   const footerContent = buildFooterHints(footerContext, tokens, {
     ...(dryRun ? { dryRun: true } : {}),
@@ -1034,15 +1164,47 @@ export function SweepApp({
 
       {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
       {pendingApply ? (
-        <ConfirmOverlay
-          tokens={tokens}
-          selectedCount={summary.selectedCount}
-          selectedBytes={summary.selectedBytes}
-          dangerousCount={dangerousSelected}
-          previewPaths={confirmPreview}
-          {...(dryRun ? { dryRun: true } : {})}
-          {...(trashMode ? { trash: true } : {})}
-        />
+        pendingSingleCandidate ? (
+          <ConfirmOverlay
+            tokens={tokens}
+            selectedCount={1}
+            selectedBytes={pendingSingleCandidate.estimatedBytes}
+            dangerousCount={pendingSingleCandidate.riskTier === "dangerous" ? 1 : 0}
+            previewPaths={[
+              sanitizeTerminalText(
+                relativePath(state.targetDir, pendingSingleCandidate.path).replaceAll("\\", "/"),
+              ),
+            ]}
+            {...(dryRun ? { dryRun: true } : {})}
+            {...(trashMode ? { trash: true } : {})}
+          />
+        ) : (
+          <ConfirmOverlay
+            tokens={tokens}
+            selectedCount={summary.selectedCount}
+            selectedBytes={summary.selectedBytes}
+            dangerousCount={dangerousSelected}
+            previewPaths={confirmPreview}
+            {...(dryRun ? { dryRun: true } : {})}
+            {...(trashMode ? { trash: true } : {})}
+          />
+        )
+      ) : null}
+      {applying !== null ? (
+        <Modal tokens={tokens} title=" applying " titleColor={tokens.info} width={52}>
+          <text
+            content={t`${fg(tokens.text)("Removing ")}${bold(fg(tokens.text)(applying))}`}
+            wrapMode="none"
+          />
+          <text content="" />
+          <text
+            content={t`${fg(tokens.textMuted)("in-flight work finishes; no new deletes schedule")}`}
+            wrapMode="none"
+          />
+          <text
+            content={t`${bold(fg(tokens.text)("ctrl-c"))} ${fg(tokens.textMuted)("stop now - the report still lands")}`}
+          />
+        </Modal>
       ) : null}
       {showInspect && inspectCandidate ? (
         <InspectOverlay

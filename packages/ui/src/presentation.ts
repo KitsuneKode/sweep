@@ -498,6 +498,7 @@ export type FooterContext =
   | { kind: "inspect" }
   | { kind: "visual" }
   | { kind: "scanError" }
+  | { kind: "applying" }
   | { kind: "pane"; focus: UiFocus };
 
 /**
@@ -543,6 +544,10 @@ export function buildFooterHints(
     return t`${key("r")} ${hint("retry")}${sep}${key("esc")} ${hint("dismiss")}${sep}${key("q")} ${hint("quit")}`;
   }
 
+  if (context.kind === "applying") {
+    return t`${key("ctrl-c")} ${hint("stop scheduling - report still lands")}`;
+  }
+
   if (context.focus === "patterns") {
     const rescan = options.patternsDirty ? "rescan*" : "rescan";
     return t`${key("space")} ${hint("toggle")}${sep}${key("/")} ${hint("find")}${sep}${key("a")} ${hint("add")}${sep}${key("d")} ${hint("del custom")}${sep}${key("w")} ${hint("save .sweeprc")}${sep}${key("r")} ${hint(rescan)}${sep}${key("esc")} ${hint("back")}`;
@@ -560,7 +565,7 @@ export function buildFooterHints(
     return t`${key("enter")} ${hint("list")}${sep}${key("esc")} ${hint("clear")}${sep}${key("tab")} ${hint("panes")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
-  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("enter")} ${hint(options.dryRun ? "done" : "apply")}${sep}${key("i")} ${hint("inspect")}${sep}${key("/")} ${hint("filter")}${sep}${key("?")} ${hint("help")}`;
+  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("x")} ${hint("delete row")}${sep}${key("enter")} ${hint(options.dryRun ? "done" : "apply")}${sep}${key("i")} ${hint("inspect")}${sep}${key("/")} ${hint("filter")}${sep}${key("?")} ${hint("help")}`;
 }
 
 /** Statusline mode segment label for the focused panel. */

@@ -393,7 +393,14 @@ function freshTrashDir(targetDir: string): string {
 export async function executePlanDeletion(
   plan: ScanPlan,
   engine: EngineBackend,
-  options: { quiet?: boolean; trash?: boolean; maxSizeGB?: number; forceLarge?: boolean } = {},
+  options: {
+    quiet?: boolean;
+    trash?: boolean;
+    maxSizeGB?: number;
+    forceLarge?: boolean;
+    /** External cancel (in-session TUI apply): stops scheduling like SIGINT. */
+    signal?: AbortSignal;
+  } = {},
 ): Promise<{
   report: ApplyReport;
   cleanResult: import("@kitsunekode/sweep-protocol").CleanResult;
@@ -443,10 +450,12 @@ export async function executePlanDeletion(
 
   // Ctrl+C during apply must not vanish the report: stop scheduling new
   // deletions, let in-flight rm calls finish, then report the partial state.
-  // A second SIGINT (no listener left) force-kills as usual.
+  // A second SIGINT (no listener left) force-kills as usual. An external
+  // signal (the TUI's in-session apply) stops scheduling the same way.
   const controller = new AbortController();
   const onSigint = () => controller.abort();
   process.once("SIGINT", onSigint);
+  options.signal?.addEventListener("abort", onSigint, { once: true });
 
   const verb = trashDir ? "moving" : "deleting";
   const paintDeletion = () => {
@@ -514,6 +523,7 @@ export async function executePlanDeletion(
   } finally {
     if (progressTimer) clearInterval(progressTimer);
     process.removeListener("SIGINT", onSigint);
+    options.signal?.removeEventListener("abort", onSigint);
     clearDeletionProgress();
     if (trashDir) {
       // rmdir only removes an empty dir - when every move failed the trash

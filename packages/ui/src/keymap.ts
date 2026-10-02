@@ -149,6 +149,12 @@ export interface KeymapActions {
   yankPath?: () => void;
   /** Queue or unqueue the visual range, then leave visual mode. */
   applyVisual?: () => void;
+  /** Ask for the confirm dialog on just the row under the cursor (x/d). */
+  requestSingleApply?: () => void;
+  /** Confirm the scoped single-row apply (y while a single confirm is open). */
+  confirmSingle?: () => void;
+  /** Abort an in-session apply: stop scheduling, keep the report. */
+  abortApply?: () => void;
   /** Queue or unqueue the scope under the sidebar cursor, then report skips. */
   applyScopeToggle?: () => void;
   /** Persist the pattern pane's edits as a project .sweeprc (w key). */
@@ -171,6 +177,13 @@ export interface KeymapContext {
   scanError?: string | null;
   /** Candidate-inspect overlay is open; traps keys until dismissed. */
   inspectOpen?: boolean;
+  /**
+   * The confirm dialog is scoped to one row (x/d), not the whole queue.
+   * Only meaningful while pendingApply is true.
+   */
+  pendingSingle?: boolean;
+  /** An in-session apply is in flight - keys wait for the report. */
+  applying?: boolean;
 }
 
 /** Dispatch keyboard input by modal state and focused panel. */
@@ -181,9 +194,20 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   // no SIGINT is generated for us: if a modal or the filter input swallows this
   // key there is no other way out and `sweep ui` hangs.
   if (isQuitChord(key)) {
+    // Mid-apply ctrl-c means "stop the delete", not "leave with an unknown
+    // tree state": the engine stops scheduling, reports what already ran,
+    // and the session stays up to show it. A second ctrl-c exits as usual.
+    if (ctx.applying) {
+      actions.abortApply?.();
+      return;
+    }
     actions.finalize({ type: "abort" });
     return;
   }
+
+  // While an in-session apply runs, every other key waits: the list the keys
+  // would act on is being mutated by the engine.
+  if (ctx.applying) return;
 
   const isShiftTab = (key.name === "tab" && key.shift) || key.name === "shift+tab";
   const isTab = key.name === "tab" && !key.shift;
@@ -217,10 +241,15 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     }
     if (key.name === "y") {
       actions.setPendingApply(false);
-      actions.applyPlan();
+      if (ctx.pendingSingle) {
+        actions.confirmSingle?.();
+      } else {
+        actions.applyPlan();
+      }
     } else if (key.name === "n" || key.name === "escape" || key.name === "q") {
       // q dismisses like every other modal - quitting while a destructive
-      // confirm is up would be one keystroke from intent to exit.
+      // confirm is up would be one keystroke from intent to exit. Clearing
+      // pendingApply also clears a single-row scope (the app owns both).
       actions.setPendingApply(false);
     }
     return;
@@ -515,6 +544,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
         return;
       case "w":
         actions.mutate(collapseAllGroups);
+        return;
+      case "x":
+      case "d":
+        // Single-row apply: confirm dialog scoped to the cursor's candidate.
+        // The app decides what a header row means (nothing to delete there).
+        actions.requestSingleApply?.();
         return;
       default:
         break;

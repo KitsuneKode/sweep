@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 import { fileURLToPath } from "node:url";
-import type { CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { ApplyReport, CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { CATALOG_PATTERNS, DEFAULT_PATTERN_SET } from "@kitsunekode/sweep-core/catalog";
 import { GuardrailError, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
@@ -81,6 +81,17 @@ export interface SweepUiModule {
     dryRun?: boolean;
     trash?: boolean;
     yes?: boolean;
+    /**
+     * In-session apply channel for single-row deletes (x). Runs the full
+     * engine apply pipeline quietly - the TUI owns the screen, so progress
+     * lines must not print. History is appended inside the channel.
+     */
+    apply?: (request: {
+      plan: ScanPlan;
+      engine: "js" | "rust";
+      trash: boolean;
+      signal: AbortSignal;
+    }) => Promise<{ report: ApplyReport; interrupted: boolean; trashDir?: string }>;
     init?: {
       catalogPatterns?: string[];
       disabledPatterns?: string[];
@@ -161,6 +172,22 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       engine,
       ...(opts.dryRun ? { dryRun: true } : {}),
       ...(opts.trash ? { trash: true } : {}),
+      // Single-row deletes (x) run through the same apply pipeline as the
+      // exit path - revalidation, containment, outcomes, history - just
+      // quietly, because the TUI owns the screen. Trash on rust resolves to
+      // the js engine here so the stderr warning never paints over it.
+      apply: (request) =>
+        executePlanDeletion(
+          request.plan,
+          request.trash && request.engine === "rust" ? "js" : request.engine,
+          {
+            quiet: true,
+            trash: request.trash,
+            maxSizeGB: scanConfig.maxSizeGB,
+            forceLarge: opts.forceLarge,
+            signal: request.signal,
+          },
+        ),
       init: {
         // The pane lists the whole curated catalog; extraPatterns carries what
         // is enabled beyond defaults (opt-in catalog picks + customs alike).
