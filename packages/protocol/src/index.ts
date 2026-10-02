@@ -5,6 +5,25 @@ import SCAN_PLAN_SCHEMA_JSON from "../schemas/scan-plan.schema.json";
 
 export const PROTOCOL_VERSION = "1" as const;
 
+/** Logical scan bounds, shared by discovery and metadata sizing. */
+export interface ScanLimits {
+  maxCandidates: number;
+  maxDirectories: number;
+  maxQueuedDirs: number;
+  maxIdentities: number;
+  maxPathBytes: number;
+  maxRetainedBytes: number;
+}
+
+export const DEFAULT_SCAN_LIMITS: Readonly<ScanLimits> = Object.freeze({
+  maxCandidates: 100_000,
+  maxDirectories: 250_000,
+  maxQueuedDirs: 32_768,
+  maxIdentities: 500_000,
+  maxPathBytes: 64 * 1024 * 1024,
+  maxRetainedBytes: 128 * 1024 * 1024,
+});
+
 export type RiskTier = "safe" | "caution" | "dangerous" | "blocked";
 export type SelectionMode = "default" | "safe" | "all" | "none";
 export type FailureReasonCode =
@@ -50,6 +69,13 @@ export interface ScanEntry {
   path: string;
   name: string;
   estimatedBytes: number;
+  /**
+   * `false` when sizing hit unreadable inodes — `estimatedBytes` is then a
+   * partial lower bound, not the subtree's real size. Absent on plans from
+   * producers that predate the field (treated as complete). Found events in a
+   * stream report `false` until their update lands.
+   */
+  bytesKnown?: boolean;
   /**
    * Last-modified time of the artifact itself (epoch ms), from a single
    * `lstat` on the matched path. It is the directory's own mtime, so it moves
@@ -251,6 +277,12 @@ export interface ScanPlan {
   createdAt: string;
 }
 
+export interface ApplyOutcome {
+  candidateId: string;
+  status: "deleted" | "failed" | "covered" | "unattempted";
+  coveredBy?: string;
+}
+
 export interface ApplyReport {
   protocolVersion: typeof PROTOCOL_VERSION;
   targetDir: string;
@@ -259,4 +291,7 @@ export interface ApplyReport {
   failedCount: number;
   totalBytesFreed: number;
   failedPaths: PathFailure[];
+  /** Actual operations and covered/unattempted selections. Absent on legacy engines. */
+  outcomes?: ApplyOutcome[];
+  interrupted?: boolean;
 }

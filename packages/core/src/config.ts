@@ -9,6 +9,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, parse, relative, resolve } from "node:path";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
+import { globMatch } from "./glob-match.js";
 import { assertSafePattern } from "./guardrails.js";
 
 export class ConfigParseError extends Error {
@@ -367,27 +368,22 @@ export function compileIgnoreMatcher(targetDir: string, ignore: string[]): Ignor
 
   const root = resolve(targetDir);
   const isCaseInsensitive = process.platform === "darwin" || process.platform === "win32";
-  const flags = isCaseInsensitive ? "i" : undefined;
   const exactNames = new Set<string>();
-  const nameGlobs: RegExp[] = [];
+  const nameGlobs: string[] = [];
   const pathPrefixes: string[] = [];
-  const pathGlobs: RegExp[] = [];
+  const pathGlobs: string[] = [];
 
   for (const raw of ignore) {
     const pattern = raw.replace(/\/+$/, "");
     if (pattern.length === 0) continue;
     const key = isCaseInsensitive ? pattern.toLowerCase() : pattern;
     if (pattern.includes("*") || pattern.includes("?")) {
-      // `?` is glob single-char, not a regex quantifier - escape then convert.
-      const escaped = pattern
-        .replace(/[.+^${}()|[\]\\?]/g, "\\$&")
-        .replace(/\*/g, ".*")
-        .replace(/\\\?/g, ".");
-      const re = new RegExp(`^${escaped}$`, flags);
+      // `*`/`?` globs go through the linear matcher - same matching the scan
+      // patterns use, so `?` means "one char" identically on both paths.
       if (pattern.includes("/")) {
-        pathGlobs.push(re);
+        pathGlobs.push(key);
       } else {
-        nameGlobs.push(re);
+        nameGlobs.push(key);
       }
     } else if (pattern.includes("/")) {
       pathPrefixes.push(key);
@@ -399,7 +395,7 @@ export function compileIgnoreMatcher(targetDir: string, ignore: string[]): Ignor
   return (entryPath, entryName) => {
     const nameKey = isCaseInsensitive ? entryName.toLowerCase() : entryName;
     if (exactNames.has(nameKey)) return true;
-    if (nameGlobs.some((re) => re.test(entryName))) return true;
+    if (nameGlobs.some((glob) => globMatch(glob, nameKey))) return true;
     if (pathPrefixes.length === 0 && pathGlobs.length === 0) return false;
 
     let rel = relative(root, entryPath).replace(/\\/g, "/");
@@ -408,7 +404,7 @@ export function compileIgnoreMatcher(targetDir: string, ignore: string[]): Ignor
     for (const prefix of pathPrefixes) {
       if (rel === prefix || rel.startsWith(`${prefix}/`)) return true;
     }
-    return pathGlobs.some((re) => re.test(rel));
+    return pathGlobs.some((glob) => globMatch(glob, rel));
   };
 }
 

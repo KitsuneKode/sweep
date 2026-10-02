@@ -1,14 +1,13 @@
-import { execFile } from "node:child_process";
-import { lstatSync, readdirSync, statSync } from "node:fs";
-import { lstat, readdir } from "node:fs/promises";
-import { join, relative } from "node:path";
-import { promisify } from "node:util";
-import type { ScanEntry, ScanResult, SweepConfig } from "@kitsunekode/sweep-protocol";
+import { lstatSync } from "node:fs";
+import { lstat } from "node:fs/promises";
+import { join, relative, sep } from "node:path";
+import type { ScanEntry, ScanResult, SweepConfig, ScanLimits } from "@kitsunekode/sweep-protocol";
+import { ResourceBudget, ResourceLimitError, checkedBytes } from "./resource-budget.js";
+import { directoryEntries, disposeDirectoryReader } from "./directory-reader.js";
 import { mapPool } from "./async-pool.js";
 import { compileIgnoreMatcher } from "./config.js";
+import { compileGlobMatchers } from "./glob-match.js";
 import { isReparsePointOrSymlink } from "./guardrails.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface ScanHooks {
   /** Fired as soon as a matching entry is discovered (bytes may be 0 until sized). */
@@ -25,6 +24,8 @@ export interface ScanHooks {
   }) => void;
   /** Optional cancellation signal for long-running scans. */
   signal?: AbortSignal;
+  /** Optional resource bounds; defaults protect ordinary scans. */
+  limits?: Partial<ScanLimits>;
 }
 
 /** VCS/metadata dirs - never descend (major win on large trees). */
@@ -39,45 +40,24 @@ const skipDirName = (name: string): boolean =>
 
 const TRAVERSAL_CONCURRENCY = 16;
 const SIZE_CONCURRENCY = 8;
-/** Max du subprocesses in flight at once while the walk continues. */
-const DU_MAX_INFLIGHT = 4;
+/** Max sizing batches in flight while the walk continues. */
+const SIZE_MAX_INFLIGHT = 4;
 
 // ─── Pattern matching ─────────────────────────────────────────────────────────
 
 function compileMatcher(patterns: string[]): (name: string) => boolean {
   const isCaseInsensitive = process.platform === "darwin" || process.platform === "win32";
-  const exact = new Set<string>(
-    patterns.filter((p) => !p.includes("*")).map((p) => (isCaseInsensitive ? p.toLowerCase() : p)),
-  );
-  const regexes: RegExp[] = [];
-
-  for (const p of patterns) {
-    if (p.includes("*") || p.includes("?")) {
-      // `?` is escaped first so it survives as \?, then becomes . - a raw `?`
-      // would be a regex quantifier, silently mis-matching ("foo?" → "fo").
-      const escaped = p
-        .replace(/[.+^${}()|[\]\\?]/g, "\\$&")
-        .replace(/\*/g, ".*")
-        .replace(/\\\?/g, ".");
-      regexes.push(new RegExp(`^${escaped}$`, isCaseInsensitive ? "i" : undefined));
-    }
-  }
-
-  if (regexes.length === 0) {
-    return (name) => exact.has(isCaseInsensitive ? name.toLowerCase() : name);
-  }
-  return (name) => {
-    const key = isCaseInsensitive ? name.toLowerCase() : name;
-    return exact.has(key) || regexes.some((re) => re.test(name));
-  };
+  // Linear `*`/`?` matcher, not RegExp - a hostile pattern cannot put the
+  // walk into regex backtracking before it starts (audit A01).
+  return compileGlobMatchers(patterns, isCaseInsensitive);
 }
 
 // ─── Size estimation ──────────────────────────────────────────────────────────
 
 const platform = process.platform;
-const DU_CHUNK_SIZE = 50;
-/** Stay well under ARG_MAX even with deep monorepo paths. */
-const DU_ARGV_BUDGET = 96 * 1024;
+const SIZE_BATCH_SIZE = 50;
+/** Bound a sizing batch by total path bytes so deep monorepo paths split sooner. */
+const SIZE_BATCH_PATH_BUDGET = 96 * 1024;
 
 /** mtime of the path itself (not its target), or undefined when it cannot be read. */
 async function modifiedTimeMs(path: string): Promise<number | undefined> {
@@ -89,20 +69,21 @@ async function modifiedTimeMs(path: string): Promise<number | undefined> {
   }
 }
 
-function argvCost(paths: string[]): number {
-  let bytes = 3; // "du" + flag
+function batchPathCost(paths: string[]): number {
+  let bytes = 3; // fixed batch overhead
   for (const path of paths) bytes += path.length + 1;
   return bytes;
 }
 
-function splitEntriesByArgvBudget(entries: ScanEntry[]): ScanEntry[][] {
+function splitEntriesByPathBudget(entries: ScanEntry[]): ScanEntry[][] {
   const chunks: ScanEntry[][] = [];
   let current: ScanEntry[] = [];
   for (const entry of entries) {
     const next = [...current, entry];
     if (
       current.length > 0 &&
-      (next.length > DU_CHUNK_SIZE || argvCost(next.map((item) => item.path)) > DU_ARGV_BUDGET)
+      (next.length > SIZE_BATCH_SIZE ||
+        batchPathCost(next.map((item) => item.path)) > SIZE_BATCH_PATH_BUDGET)
     ) {
       chunks.push(current);
       current = [entry];
@@ -114,159 +95,149 @@ function splitEntriesByArgvBudget(entries: ScanEntry[]): ScanEntry[][] {
   return chunks;
 }
 
-function isExecTooBig(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const code = "code" in error ? error.code : undefined;
-  return code === "E2BIG" || code === "ERR_SPAWN_E2BIG";
+interface SubtreeSize {
+  bytes: number;
+  /** `false` when part of the subtree could not be read - `bytes` is a floor. */
+  complete: boolean;
 }
 
-/** Size one batch via a single du subprocess. Splits and retries on ARG_MAX. */
-async function batchEstimateAsync(
-  paths: string[],
-  signal?: AbortSignal,
-): Promise<Map<string, number>> {
-  const result = new Map<string, number>();
-  if (paths.length === 0 || signal?.aborted || (platform !== "linux" && platform !== "darwin")) {
-    return result;
-  }
-
-  const flag = platform === "linux" ? "-sb" : "-sk";
-  const multiplier = platform === "linux" ? 1 : 1024;
-
-  try {
-    const { stdout } = await execFileAsync("du", [flag, "--", ...paths], {
-      timeout: 30_000,
-      encoding: "utf8",
-      signal,
-    });
-
-    for (const line of stdout.split("\n")) {
-      if (!line) continue;
-      const tab = line.indexOf("\t");
-      if (tab === -1) continue;
-      const raw = Number.parseInt(line.slice(0, tab), 10);
-      const path = line.slice(tab + 1);
-      if (!Number.isNaN(raw)) {
-        result.set(path, raw * multiplier);
-      }
-    }
-  } catch (error) {
-    if (signal?.aborted) return result;
-    if (isExecTooBig(error) && paths.length > 1) {
-      const mid = Math.ceil(paths.length / 2);
-      const left = await batchEstimateAsync(paths.slice(0, mid), signal);
-      const right = await batchEstimateAsync(paths.slice(mid), signal);
-      for (const [key, value] of left) result.set(key, value);
-      for (const [key, value] of right) result.set(key, value);
-    }
-  }
-
-  return result;
-}
-
-function statFallback(entryPath: string): number {
+function statFallback(entryPath: string): SubtreeSize {
   try {
     // lstat, not stat: a symlink candidate's size is the link itself - stat
     // would report the target, misreporting freed bytes by the target's size.
-    return lstatSync(entryPath).size;
-  } catch {
-    return 0;
+    return { bytes: checkedBytes(0, lstatSync(entryPath).size), complete: true };
+  } catch (error) {
+    if (error instanceof ResourceLimitError) throw error;
+    return { bytes: 0, complete: false };
   }
-}
-
-/** Exact recursive size by walking all files under a path. Synchronous - tests and tiny helpers. */
-export function exactSize(entryPath: string): number {
-  let total = 0;
-
-  function walk(p: string): void {
-    let items: import("node:fs").Dirent<string>[];
-    try {
-      items = readdirSync(p, { withFileTypes: true, encoding: "utf8" });
-    } catch {
-      return;
-    }
-    for (const item of items) {
-      const full = join(p, item.name);
-      if (item.isSymbolicLink()) continue;
-      if (process.platform === "win32" && isReparsePointOrSymlink(full)) continue;
-      if (item.isDirectory()) {
-        walk(full);
-      } else {
-        try {
-          total += statSync(full).size;
-        } catch {
-          // skip
-        }
-      }
-    }
-  }
-
-  try {
-    const st = lstatSync(entryPath);
-    if (st.isSymbolicLink()) return st.size;
-    if (st.isFile()) return st.size;
-  } catch {
-    return 0;
-  }
-
-  walk(entryPath);
-  return total;
 }
 
 /** Async exact size so fallback walks yield to the event loop and honor abort. */
 export async function exactSizeAsync(entryPath: string, signal?: AbortSignal): Promise<number> {
-  if (signal?.aborted) return 0;
-
-  try {
-    const st = await lstat(entryPath);
-    if (st.isSymbolicLink() || st.isFile()) return st.size;
-  } catch {
-    return 0;
-  }
-
-  let total = 0;
-  const stack = [entryPath];
-  let yielded = 0;
-
-  while (stack.length > 0) {
-    if (signal?.aborted) return total;
-    const current = stack.pop();
-    if (!current) break;
-
-    let items: import("node:fs").Dirent<string>[];
-    try {
-      items = await readdir(current, { withFileTypes: true, encoding: "utf8" });
-    } catch {
-      continue;
-    }
-
-    for (const item of items) {
-      const full = join(current, item.name);
-      if (item.isSymbolicLink()) continue;
-      if (process.platform === "win32" && isReparsePointOrSymlink(full)) continue;
-      if (item.isDirectory()) {
-        stack.push(full);
-      } else {
-        try {
-          total += (await lstat(full)).size;
-        } catch {
-          // skip
-        }
-      }
-    }
-
-    yielded += 1;
-    if (yielded % 32 === 0) {
-      await new Promise<void>((resolveYield) => setImmediate(resolveYield));
-    }
-  }
-
-  return total;
+  return (await exactSizeDetailed(entryPath, signal)).bytes;
 }
 
-async function applyFallbackSizeAsync(entry: ScanEntry, signal?: AbortSignal): Promise<number> {
+/**
+ * Exact size with completeness: `complete` is `false` when any part of the
+ * subtree could not be read, so `bytes` is a partial lower bound.
+ */
+export async function exactSizeDetailed(
+  entryPath: string,
+  signal?: AbortSignal,
+  budget = new ResourceBudget(),
+): Promise<SubtreeSize> {
+  return metadataSize(entryPath, true, signal, budget);
+}
+
+/** Per-artifact hard links are counted once in apparent mode. */
+export async function apparentSizeDetailed(
+  entryPath: string,
+  signal?: AbortSignal,
+  budget = new ResourceBudget(),
+): Promise<SubtreeSize> {
+  return metadataSize(entryPath, false, signal, budget);
+}
+
+async function metadataSize(
+  entryPath: string,
+  exact: boolean,
+  signal: AbortSignal | undefined,
+  budget: ResourceBudget,
+): Promise<SubtreeSize> {
+  let bytes = 0;
+  let complete = true;
+  const links = new Set<string>();
+  const dirs = new Set<string>();
+  const stack: (string | Buffer)[] = [];
+  const price = (stat: import("node:fs").BigIntStats | import("node:fs").Stats, root = false) => {
+    if (!stat.isFile() && !(stat.isSymbolicLink() && (!exact || root))) return;
+    if (!exact && stat.nlink > 1n && stat.ino !== 0n) {
+      const id = `${stat.dev}:${stat.ino}`;
+      if (links.has(id)) return;
+      budget.identity();
+      links.add(id);
+    }
+    bytes = checkedBytes(bytes, Number(stat.size));
+  };
+  budget.directory(entryPath);
+  stack.push(entryPath);
+  while (stack.length) {
+    budget.check();
+    if (signal?.aborted) return { bytes, complete: false };
+    const path = stack.pop()!;
+    budget.dequeueDirectory();
+    try {
+      const stat = await lstat(path, { bigint: true });
+      if (
+        !stat.isDirectory() ||
+        stat.isSymbolicLink() ||
+        (platform === "win32" && isReparsePointOrSymlink(path.toString()))
+      ) {
+        price(stat, path === entryPath);
+        continue;
+      }
+      if (stat.ino !== 0n) {
+        const id = `${stat.dev}:${stat.ino}`;
+        if (dirs.has(id)) {
+          complete = false;
+          continue;
+        }
+        budget.identity();
+        dirs.add(id);
+      }
+      const parent = Buffer.concat([Buffer.from(path), Buffer.from(sep)]);
+      const processNames = async (names: Buffer[]) => {
+        await mapPool(names, SIZE_CONCURRENCY, async (name) => {
+          budget.check();
+          if (signal?.aborted) {
+            complete = false;
+            return;
+          }
+          const child = Buffer.concat([parent, name]);
+          try {
+            // Ordinary leaves do not retain inode IDs. Avoid allocating a
+            // BigInt for every metadata field; only hardlink identity needs it.
+            let childStat: import("node:fs").Stats | import("node:fs").BigIntStats =
+              await lstat(child);
+            if (childStat.isDirectory() && !childStat.isSymbolicLink()) {
+              budget.directory(child);
+              stack.push(child);
+            } else {
+              if (!exact && childStat.nlink > 1) childStat = await lstat(child, { bigint: true });
+              price(childStat);
+            }
+          } catch (error) {
+            if (error instanceof ResourceLimitError) throw error;
+            complete = false;
+          }
+        });
+      };
+      let names: Buffer[] = [];
+      for await (const { name } of directoryEntries(path, budget, signal)) {
+        names.push(name);
+        if (names.length === 32) {
+          await processNames(names);
+          names = [];
+        }
+        if (signal?.aborted) break;
+      }
+      await processNames(names);
+    } catch (error) {
+      if (error instanceof ResourceLimitError) throw error;
+      complete = false;
+    }
+  }
+  budget.check();
+  return { bytes, complete: complete && !signal?.aborted };
+}
+
+async function applyFallbackSizeAsync(
+  entry: ScanEntry,
+  signal?: AbortSignal,
+  budget = new ResourceBudget(),
+): Promise<SubtreeSize> {
   return entry.entryType === "directory"
-    ? exactSizeAsync(entry.path, signal)
+    ? apparentSizeDetailed(entry.path, signal, budget)
     : statFallback(entry.path);
 }
 
@@ -300,41 +271,78 @@ class Semaphore {
 }
 
 /**
- * Streaming size estimator for du-backed platforms.
+ * Streaming metadata size estimator with bounded concurrent batches.
  *
- * Batches discovered paths into du subprocess calls while the directory walk
- * is still running (bounded by DU_MAX_INFLIGHT), so sizes stream in instead of
- * waiting for traversal to finish. Entries du could not size fall back to
- * exact/stat walks after all batches settle.
+ * Batches discovered paths into in-process metadata size jobs while the
+ * directory walk is still running (bounded by SIZE_MAX_INFLIGHT), so sizes
+ * stream in instead of waiting for traversal to finish. Entries a batch
+ * could not size fall back to exact/stat walks after all batches settle.
  */
-class ProgressiveSizer {
+/** @internal Exported for lifecycle regression tests; not a package API. */
+export class ProgressiveSizer {
   private readonly pending: ScanEntry[] = [];
   private readonly inflight = new Set<Promise<void>>();
   private readonly unsized: ScanEntry[] = [];
-  private readonly slots = new Semaphore(DU_MAX_INFLIGHT);
+  private readonly slots = new Semaphore(SIZE_MAX_INFLIGHT);
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private readonly controller = new AbortController();
+  private readonly signal: AbortSignal;
+  private stopped = false;
+  private failure: unknown;
 
   constructor(
     private readonly hooks: ScanHooks,
-    private readonly signal?: AbortSignal,
-  ) {}
+    signal?: AbortSignal,
+    private readonly budget = new ResourceBudget(hooks.limits),
+  ) {
+    this.signal = signal
+      ? AbortSignal.any([signal, this.controller.signal])
+      : this.controller.signal;
+  }
+
+  private flushPending(): void {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    if (this.pending.length > 0 && !this.stopped)
+      this.launch(this.pending.splice(0, this.pending.length));
+  }
+
+  async dispose(): Promise<void> {
+    this.stopped = true;
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.pending.length = 0;
+    this.controller.abort();
+    await Promise.all(this.inflight);
+  }
 
   /** Queue an entry as soon as it is discovered; launches a batch when one fills. */
   add(entry: ScanEntry): void {
+    if (this.stopped || this.signal.aborted) return;
     this.pending.push(entry);
     const pendingPaths = this.pending.map((item) => item.path);
-    if (this.pending.length >= DU_CHUNK_SIZE || argvCost(pendingPaths) >= DU_ARGV_BUDGET) {
-      this.launch(this.pending.splice(0, this.pending.length));
+    if (
+      this.pending.length >= SIZE_BATCH_SIZE ||
+      batchPathCost(pendingPaths) >= SIZE_BATCH_PATH_BUDGET
+    ) {
+      this.flushPending();
+    } else {
+      this.timer ??= setTimeout(() => this.flushPending(), 16);
     }
   }
 
-  /** Spawn one bounded du batch without blocking the walk. */
+  /** Admit one bounded metadata batch without blocking the walk. */
   private launch(batch: ScanEntry[]): void {
-    for (const entries of splitEntriesByArgvBudget(batch)) {
+    for (const entries of splitEntriesByPathBudget(batch)) {
       if (entries.length === 0) continue;
       const task = this.runBatch(entries);
-      const tracked = task.then(() => {
-        this.inflight.delete(tracked);
-      });
+      const tracked = task
+        .catch((error: unknown) => {
+          this.failure ??= error;
+        })
+        .then(() => {
+          this.inflight.delete(tracked);
+        });
       this.inflight.add(tracked);
     }
   }
@@ -343,19 +351,12 @@ class ProgressiveSizer {
     await this.slots.acquire();
     try {
       if (this.signal?.aborted) return;
-      const sizes = await batchEstimateAsync(
-        batch.map((entry) => entry.path),
-        this.signal,
-      );
-      for (const entry of batch) {
-        const bytes = sizes.get(entry.path);
-        if (bytes !== undefined) {
-          entry.estimatedBytes = bytes;
-          this.hooks.onEntrySized?.(entry);
-        } else if (!this.signal?.aborted) {
-          this.unsized.push(entry);
-        }
-      }
+      await mapPool(batch, 2, async (entry) => {
+        const size = await apparentSizeDetailed(entry.path, this.signal, this.budget);
+        entry.estimatedBytes = size.bytes;
+        entry.bytesKnown = size.complete;
+        if (!this.signal.aborted) this.hooks.onEntrySized?.(entry);
+      });
     } finally {
       this.slots.release();
     }
@@ -363,17 +364,18 @@ class ProgressiveSizer {
 
   /** Flush leftovers and apply fallbacks; resolves when every entry is sized. */
   async finish(): Promise<void> {
-    if (this.pending.length > 0) {
-      this.launch(this.pending.splice(0, this.pending.length));
-    }
+    this.flushPending();
     await Promise.all(this.inflight);
+    if (this.failure !== undefined) throw this.failure;
     if (this.signal?.aborted) return;
 
     const remaining = [...this.unsized];
     this.unsized.length = 0;
     await mapPool(remaining, SIZE_CONCURRENCY, async (entry) => {
       if (this.signal?.aborted) return;
-      entry.estimatedBytes = await applyFallbackSizeAsync(entry, this.signal);
+      const size = await applyFallbackSizeAsync(entry, this.signal, this.budget);
+      entry.estimatedBytes = size.bytes;
+      entry.bytesKnown = size.complete;
       this.hooks.onEntrySized?.(entry);
     });
   }
@@ -384,8 +386,8 @@ class ProgressiveSizer {
 /**
  * Recursively scan targetDir for entries matching config.patterns.
  *
- * Emits `onEntry` during the walk (time-to-first-result). On du-backed
- * platforms size estimation streams concurrently with traversal and
+ * Emits `onEntry` during the walk (time-to-first-result). Metadata
+ * sizing streams concurrently with traversal and
  * `onEntrySized` fires as each batch resolves.
  */
 export async function scan(
@@ -416,16 +418,17 @@ export async function scan(
   const matches = compileMatcher(config.patterns);
   // Compiled once per scan - the hot loop must not re-resolve paths per entry.
   const isIgnored = compileIgnoreMatcher(targetDir, config.ignore);
-  const signal = hooks.signal;
+  const controller = new AbortController();
+  const signal = hooks.signal
+    ? AbortSignal.any([hooks.signal, controller.signal])
+    : controller.signal;
+  const budget = new ResourceBudget(hooks.limits);
   // Reparse-point/junction detection is a Windows-only concern; Dirent already
   // reports symlinks authoritatively on POSIX platforms.
   const needsReparseCheck = platform === "win32";
-  // du-backed platforms size entries progressively during the walk; other
-  // platforms and --exact mode fall back to post-walk estimation.
-  const sizer =
-    !exact && (platform === "linux" || platform === "darwin")
-      ? new ProgressiveSizer(hooks, signal)
-      : null;
+  // Apparent metadata sizing streams during discovery. Exact mode sizes
+  // after discovery using the same resource budget.
+  const sizer = !exact ? new ProgressiveSizer(hooks, signal, budget) : null;
 
   type Frame = { dir: string; depth: number };
 
@@ -441,46 +444,61 @@ export async function scan(
 
   const markDir = async (dir: string): Promise<boolean> => {
     try {
-      const stat = await lstat(dir);
+      // bigint: a `number` inode already lost precision past 2^53 - wrapping
+      // it in BigInt afterwards would not get it back (phase-3 A03 note).
+      const stat = await lstat(dir, { bigint: true });
       // A dir swapped for a symlink between readdir and here would make
       // readdir follow it outside the target - refuse anything that is no
       // longer a real directory. (Narrows, not eliminates, the swap window.)
       if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
-      if (stat.ino === 0) return true; // no inode identity, cannot dedupe
+      if (stat.ino === 0n) return true; // no inode identity, cannot dedupe
       const key = `${stat.dev}:${stat.ino}`;
       if (visitedDirs.has(key)) return false;
+      budget.identity();
       visitedDirs.add(key);
       return true;
-    } catch {
+    } catch (error) {
+      if (error instanceof ResourceLimitError) throw error;
       return false;
     }
   };
 
-  async function walkDir(frame: Frame): Promise<void> {
-    if (signal?.aborted) {
-      return;
-    }
+  async function scanDir(frame: Frame): Promise<void> {
     const { dir, depth } = frame;
-    if (config.depth !== -1 && depth > config.depth) {
-      return;
-    }
 
-    let items: import("node:fs").Dirent<string>[];
+    const items = directoryEntries(dir, budget, signal);
+    let first: Awaited<ReturnType<typeof items.next>>;
     try {
-      items = await readdir(dir, { withFileTypes: true, encoding: "utf8" });
+      first = await items.next();
     } catch (error) {
       // An unreadable scan root must not silently produce an empty result -
       // that reads as "nothing to clean" when the truth is "couldn't look".
-      if (depth === 0) throw error;
+      if (depth === 0 || error instanceof ResourceLimitError) throw error;
       skipDir();
       return;
     }
 
     scannedDirs++;
     emitProgress(relative(targetDir, dir) || ".");
-    const childDirs: Frame[] = [];
+    const childDepth = depth + 1;
+    const childrenAllowed = config.depth === -1 || childDepth <= config.depth;
 
-    for (const item of items) {
+    async function* openedEntries() {
+      try {
+        if (!first.done) yield first.value;
+        yield* items;
+      } finally {
+        await items.return(undefined);
+      }
+    }
+    for await (const raw of openedEntries()) {
+      const item = {
+        name: raw.name.toString("utf8"),
+        isDirectory: () => raw.type === "d",
+        isFile: () => raw.type === "f",
+        isSymbolicLink: () => raw.type === "l",
+      };
+      budget.check();
       if (signal?.aborted) {
         return;
       }
@@ -508,64 +526,126 @@ export async function scan(
           path: fullPath,
           name: item.name,
           estimatedBytes: 0,
+          bytesKnown: false,
           ...(modifiedMs !== undefined ? { modifiedMs } : {}),
           isSymlink: isLink,
           entryType: isLink ? "symlink" : item.isDirectory() ? "directory" : "file",
         };
+        budget.candidate(fullPath);
         entries.push(entry);
         hooks.onEntry?.(entry);
         sizer?.add(entry);
         continue;
       }
 
-      if (item.isDirectory() && !isLink && !skipDirName(item.name)) {
+      if (childrenAllowed && item.isDirectory() && !isLink && !skipDirName(item.name)) {
         // Already visited (bind mount / inode alias), or gone - either way
         // there is nothing to safely read under this path.
         if (await markDir(fullPath)) {
-          childDirs.push({ dir: fullPath, depth: depth + 1 });
+          pushDir({ dir: fullPath, depth: childDepth });
         } else {
           skipDir();
         }
       }
     }
-
-    if (childDirs.length > 0) {
-      await mapPool(childDirs, TRAVERSAL_CONCURRENCY, (child) => walkDir(child));
-    }
   }
 
-  await markDir(targetDir);
-  await walkDir({ dir: targetDir, depth: 0 });
-  emitProgress(".", true);
-
-  if (sizer) {
-    await sizer.finish();
-  } else {
-    await applySizeEstimatesPostWalk(entries, exact, hooks);
-  }
-
-  return {
-    entries,
-    estimatedTotalBytes: entries.reduce((sum, e) => sum + e.estimatedBytes, 0),
-    scannedDirs,
-    skippedDirs,
-    exact,
+  // One shared work queue with a hard cap on in-flight directory reads - the
+  // old per-directory mapPool let concurrency multiply by depth (A03). The
+  // waiter list is a cursor over the queue plus a wake set, not Array.shift.
+  const queue: Frame[] = [];
+  let pending = 0;
+  let scanError: unknown;
+  let waiters: (() => void)[] = [];
+  const wakeWaiters = () => {
+    const woken = waiters;
+    waiters = [];
+    for (const resolve of woken) resolve();
   };
+  const pushDir = (frame: Frame) => {
+    budget.directory(frame.dir);
+    queue.push(frame);
+    pending++;
+    wakeWaiters();
+  };
+
+  // A scan root that is a symlink (or not a dir at all) is refused before any
+  // work is queued - markDir both classifies and registers the root inode.
+  if (!(await markDir(targetDir))) {
+    throw new Error(`target directory is not a real directory: ${targetDir}`);
+  }
+  pushDir({ dir: targetDir, depth: 0 });
+  // An abort must wake workers parked on an empty queue or they hang forever.
+  signal?.addEventListener("abort", wakeWaiters, { once: true });
+  try {
+    await Promise.all(
+      Array.from({ length: TRAVERSAL_CONCURRENCY }, async () => {
+        while (true) {
+          while (queue.length > 0 && !signal?.aborted && scanError === undefined) {
+            // LIFO favors depth-first locality and releases completed frames.
+            const frame = queue.pop();
+            if (frame === undefined) continue;
+            budget.dequeueDirectory();
+            try {
+              await scanDir(frame);
+            } catch (error) {
+              // Keep the first failure; wake everyone so nothing waits on work
+              // that will never arrive. Promise.all still resolves - the error
+              // throws after the pool drains.
+              scanError ??= error;
+              controller.abort();
+              pending--;
+              wakeWaiters();
+              return;
+            }
+            pending--;
+            if (pending === 0) wakeWaiters();
+          }
+          if (pending === 0 || signal?.aborted || scanError !== undefined) return;
+          await new Promise<void>((resolve) => waiters.push(resolve));
+        }
+      }),
+    );
+    if (scanError !== undefined) throw scanError;
+    emitProgress(".", true);
+
+    if (sizer) {
+      await sizer.finish();
+    } else {
+      await applySizeEstimatesPostWalk(entries, exact, { ...hooks, signal }, budget);
+    }
+
+    return {
+      entries,
+      estimatedTotalBytes: entries.reduce((sum, e) => checkedBytes(sum, e.estimatedBytes), 0),
+      scannedDirs,
+      skippedDirs,
+      // A partial candidate cannot support an exact byte claim.
+      exact: exact && !entries.some((e) => e.bytesKnown === false),
+    };
+  } finally {
+    signal?.removeEventListener("abort", wakeWaiters);
+    await sizer?.dispose();
+    disposeDirectoryReader(budget);
+  }
 }
 
-/** Post-walk sizing for --exact mode and platforms without du. */
+/** Post-walk sizing for --exact mode and scans without streaming hooks. */
 async function applySizeEstimatesPostWalk(
   entries: ScanEntry[],
   exact: boolean,
   hooks: ScanHooks,
+  budget: ResourceBudget,
 ): Promise<void> {
   const signal = hooks.signal;
 
   await mapPool(entries, SIZE_CONCURRENCY, async (entry) => {
     if (signal?.aborted) return;
-    entry.estimatedBytes = exact
-      ? await exactSizeAsync(entry.path, signal)
-      : await applyFallbackSizeAsync(entry, signal);
+    const size = exact
+      ? await exactSizeDetailed(entry.path, signal, budget)
+      : await applyFallbackSizeAsync(entry, signal, budget);
+    entry.estimatedBytes = size.bytes;
+    entry.bytesKnown = size.complete;
     hooks.onEntrySized?.(entry);
   });
 }

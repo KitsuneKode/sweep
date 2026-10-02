@@ -25,6 +25,32 @@ const complete = {
 const send = (stream: RustScanStream, event: unknown) => stream.push(JSON.stringify(event));
 
 describe("Rust scan stream contract", () => {
+  test("a native stream cannot exceed the host candidate budget", () => {
+    let revealed = 0;
+    const stream = new RustScanStream(target, {
+      limits: { maxCandidates: 1 },
+      onEntry: () => revealed++,
+    });
+    send(stream, start);
+    send(stream, found);
+    expect(() =>
+      send(stream, {
+        type: "candidate_found",
+        candidate: { ...candidate, id: "other", path: `${target}/other` },
+      }),
+    ).toThrow("maxCandidates");
+    expect(revealed).toBe(1);
+    expect(() => stream.finish()).toThrow("incomplete");
+  });
+
+  test("unsafe byte counters are rejected before UI feedback", () => {
+    const stream = new RustScanStream(target);
+    send(stream, start);
+    expect(() =>
+      send(stream, { ...found, candidate: { ...candidate, estimatedBytes: 2 ** 53 } }),
+    ).toThrow("Invalid scan event");
+  });
+
   test("reveals discovery and size updates progressively and completes consistently", () => {
     const bytes: number[] = [];
     const stream = new RustScanStream(target, {
@@ -89,6 +115,23 @@ describe("Rust scan stream contract", () => {
         candidates: [{ ...candidate, estimatedBytes: 5 }],
       }),
     ).toThrow("discovery");
+  });
+
+  test("carries bytesKnown from sized updates into result entries", () => {
+    const stream = new RustScanStream(target);
+    send(stream, start);
+    send(stream, found);
+    send(stream, {
+      type: "candidate_updated",
+      candidate: { ...candidate, estimatedBytes: 64, bytesKnown: false },
+    });
+    send(stream, {
+      type: "scan_completed",
+      summary: { candidateCount: 1, estimatedTotalBytes: 64, scannedDirs: 2, exact: false },
+    });
+    const result = stream.finish();
+    expect(result.entries[0]?.estimatedBytes).toBe(64);
+    expect(result.entries[0]?.bytesKnown).toBe(false);
   });
 
   test("rejects malformed JSON and invalid event fields", () => {

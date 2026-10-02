@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync 
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "./config.js";
-import { exactSize, exactSizeAsync, scan } from "./scanner.js";
+import {
+  exactSizeAsync,
+  exactSizeDetailed,
+  apparentSizeDetailed,
+  scan,
+  ProgressiveSizer,
+} from "./scanner.js";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
@@ -33,6 +39,120 @@ afterEach(() => {
 });
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
+
+test("resource exhaustion rejects without presenting a partial scan as complete", async () => {
+  mkdirSync(dir("node_modules"));
+  mkdirSync(dir("dist"));
+  let discovered = 0;
+  await expect(
+    scan(tmpDir, { ...DEFAULT_CONFIG, patterns: ["node_modules", "dist"] }, false, {
+      limits: { maxCandidates: 1 },
+      onEntry: () => discovered++,
+    }),
+  ).rejects.toThrow("maxCandidates");
+  expect(discovered).toBe(1);
+});
+
+test("sizing and discovery share the directory admission budget", async () => {
+  mkdirSync(dir("node_modules", "nested"), { recursive: true });
+  writeFileSync(dir("node_modules", "nested", "file"), "hello");
+  for (const exact of [false, true]) {
+    await expect(
+      scan(tmpDir, DEFAULT_CONFIG, exact, {
+        limits: { maxDirectories: 2 },
+      }),
+    ).rejects.toThrow("maxDirectories");
+  }
+});
+
+test("a large flat directory is enumerated incrementally with bounded metadata batches", async () => {
+  // Keep the wide fixture on the checkout filesystem: /tmp may have a small
+  // per-user quota even when statvfs reports plenty of global capacity.
+  rmSync(tmpDir, { recursive: true, force: true });
+  tmpDir = mkdtempSync(join(import.meta.dir, "../../../.plans/sweep-flat-test-"));
+  mkdirSync(dir("node_modules"));
+  for (let i = 0; i < 4096; i++) writeFileSync(dir("node_modules", `${i}`), "x");
+  const result = await scan(tmpDir, DEFAULT_CONFIG, true, { limits: { maxQueuedDirs: 2 } });
+  expect(result.estimatedTotalBytes).toBe(4096);
+  expect(result.exact).toBe(true);
+});
+
+test("a budget failure drains workers and allows a later scan", async () => {
+  for (let i = 0; i < 64; i++) mkdirSync(dir(`${i}`, "node_modules"), { recursive: true });
+  for (let i = 0; i < 3; i++) {
+    await expect(
+      scan(tmpDir, DEFAULT_CONFIG, true, { limits: { maxDirectories: 2 } }),
+    ).rejects.toThrow("maxDirectories");
+  }
+  expect((await scan(tmpDir, DEFAULT_CONFIG, true)).entries).toHaveLength(64);
+});
+
+test("streaming sizing preserves filenames that are not valid UTF-8", async () => {
+  if (process.platform === "win32") return;
+  const artifact = dir("node_modules");
+  mkdirSync(artifact);
+  writeFileSync(Buffer.concat([Buffer.from(`${artifact}/`), Buffer.from([0xff])]), "hello");
+  for (const size of [exactSizeDetailed, apparentSizeDetailed])
+    expect(await size(artifact)).toEqual({ bytes: 5, complete: true });
+});
+
+test("sparse sizing delivers a result while the traversal is still idle", async () => {
+  if (process.platform !== "linux" && process.platform !== "darwin") return;
+  mkdirSync(dir("node_modules"));
+  writeFileSync(dir("node_modules", "file"), "hello");
+  let resolveSize!: () => void;
+  const delivered = new Promise<void>((resolve) => {
+    resolveSize = resolve;
+  });
+  const sizer = new ProgressiveSizer({ onEntrySized: resolveSize });
+  sizer.add({
+    path: dir("node_modules"),
+    name: "node_modules",
+    entryType: "directory",
+    isSymlink: false,
+    estimatedBytes: 0,
+  });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      delivered,
+      new Promise<void>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("sparse size was buffered until walk end")),
+          750,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+    await sizer.finish();
+  }
+});
+
+test("a traversal hook failure rejects and removes its abort listener", async () => {
+  mkdirSync(dir("node_modules"));
+  const controller = new AbortController();
+  let activeListeners = 0;
+  const add = controller.signal.addEventListener.bind(controller.signal);
+  const remove = controller.signal.removeEventListener.bind(controller.signal);
+  controller.signal.addEventListener = (...args: Parameters<typeof add>) => {
+    activeListeners++;
+    add(...args);
+  };
+  controller.signal.removeEventListener = (...args: Parameters<typeof remove>) => {
+    activeListeners--;
+    remove(...args);
+  };
+  await expect(
+    scan(tmpDir, DEFAULT_CONFIG, true, {
+      signal: controller.signal,
+      onEntry: () => {
+        throw new Error("injected hook failure");
+      },
+    }),
+  ).rejects.toThrow("injected hook failure");
+  expect(activeListeners).toBe(0);
+});
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -346,7 +466,7 @@ describe("scanner: size estimation", () => {
     writeFileSync(dir("outside.txt"), "some content");
     symlinkSync(dir("outside.txt"), dir("node_modules", "link.txt"));
 
-    const size = exactSize(dir("node_modules"));
+    const size = await exactSizeAsync(dir("node_modules"));
     expect(size).toBe(5 + 7 + 5);
     expect(await exactSizeAsync(dir("node_modules"))).toBe(size);
   });
@@ -375,4 +495,17 @@ describe("scanner: size estimation", () => {
     });
     expect(result.entries.length).toBeGreaterThanOrEqual(0);
   });
+});
+
+test("apparent bytes are complete and deduplicate hard links per artifact", async () => {
+  const { linkSync } = await import("node:fs");
+  mkdirSync(dir("a", "node_modules"), { recursive: true });
+  mkdirSync(dir("b", "node_modules"), { recursive: true });
+  writeFileSync(dir("a", "node_modules", "shared"), Buffer.alloc(1000));
+  linkSync(dir("a", "node_modules", "shared"), dir("a", "node_modules", "again"));
+  linkSync(dir("a", "node_modules", "shared"), dir("b", "node_modules", "shared"));
+  const result = await scan(tmpDir, DEFAULT_CONFIG);
+  expect(result.estimatedTotalBytes).toBe(2000);
+  expect(result.entries.map((entry) => entry.estimatedBytes)).toEqual([1000, 1000]);
+  expect(result.entries.every((entry) => entry.bytesKnown === true)).toBe(true);
 });

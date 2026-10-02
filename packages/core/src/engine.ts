@@ -1,4 +1,5 @@
 import type {
+  ApplyOutcome,
   ApplyReport,
   CleanResult,
   PathFailure,
@@ -9,12 +10,15 @@ import type {
   SelectionPolicy,
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
+import { dirname } from "node:path";
+import { assertPlanResources, checkedBytes, ResourceBudget } from "./resource-budget.js";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
-import { clean, deduplicateNestedEntries } from "./cleaner.js";
+import { clean, deduplicateNestedEntries, dedupeKey } from "./cleaner.js";
 import type { ScanHooks } from "./scanner.js";
-import { scan } from "./scanner.js";
+import { scan, apparentSizeDetailed, exactSizeDetailed } from "./scanner.js";
+import { mapPool } from "./async-pool.js";
 import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./planner.js";
-import { GuardrailError, assertSafeCwd } from "./guardrails.js";
+import { GuardrailError, assertSafeCwd, assertSizeLimit } from "./guardrails.js";
 import { applyPlanViaRust, type EngineBackend } from "./rust-engine.js";
 
 export interface ScanToPlanOptions extends ScanHooks {
@@ -49,10 +53,15 @@ export function scanToPlan(
 }
 
 export interface ApplyPlanOptions {
+  /** Refreshed observation ceiling, checked before the first removal. */
+  maxSizeGB?: number;
+  forceLarge?: boolean;
+  /** Path about to be removed or moved, before the slow call. */
+  onBegin?: (entry: ScanEntry) => void;
   onDeleted?: (entry: ScanEntry) => void;
   /** JS engine: checked before each delete; true stops scheduling new work. */
   isCancelled?: () => boolean;
-  /** Rust engine: aborting kills the engine subprocess. */
+  /** Stop scheduling removals and drain the native final report. */
   signal?: AbortSignal;
   /** Move candidates into this dir instead of deleting (JS engine only). */
   trashDir?: string;
@@ -73,6 +82,7 @@ export async function applyPlan(
     );
   }
   assertSafeCwd(plan.targetDir);
+  assertPlanResources(plan);
   const selected = resolveSelectedCandidates(plan);
 
   if (selected.length === 0) {
@@ -90,11 +100,34 @@ export async function applyPlan(
   // Dedupe up front so `interrupted` compares against the real work set -
   // entries deduped away are never attempted and must not read as skipped.
   const workSet = deduplicateNestedEntries(ready);
+  if (options.maxSizeGB !== undefined && !options.forceLarge && !options.signal?.aborted) {
+    const budget = new ResourceBudget();
+    const sizes = await mapPool(workSet, 8, async (entry) => {
+      const size = await (plan.summary.exact ? exactSizeDetailed : apparentSizeDetailed)(
+        entry.path,
+        options.signal,
+        budget,
+      );
+      if (!size.complete && !options.signal?.aborted)
+        throw new GuardrailError(
+          "Cannot verify current size; rescan or explicitly use --force-large",
+        );
+      return size.bytes;
+    });
+    assertSizeLimit(
+      sizes.reduce((sum, size) => checkedBytes(sum, size), 0),
+      options.maxSizeGB,
+      false,
+    );
+  }
   const cleanResult = await clean(workSet, {
+    onBegin: (entry) => {
+      options.onBegin?.(entry);
+    },
     onProgress: (entry) => {
       options.onDeleted?.(entry);
     },
-    isCancelled: options.isCancelled,
+    isCancelled: () => (options.signal?.aborted ?? false) || (options.isCancelled?.() ?? false),
     trashDir: options.trashDir,
     trashRoot: options.trashRoot,
     containmentRoot: plan.targetDir,
@@ -103,6 +136,41 @@ export async function applyPlan(
   // Skipped (unattempted) entries land in neither list - that's the interrupt signal.
   const interrupted = cleanResult.deleted.length + cleanResult.failedPaths.length < workSet.length;
 
+  const firstByPath = new Map(
+    workSet.map((entry) => [dedupeKey(entry.path), entry as ScanCandidate]),
+  );
+  const readySet = new Set(ready);
+  const failedIds = new Set(
+    selected.filter((candidate) => !readySet.has(candidate)).map((candidate) => candidate.id),
+  );
+  for (const failure of cleanResult.failedPaths) {
+    const candidate = firstByPath.get(dedupeKey(failure.path));
+    if (candidate) failedIds.add(candidate.id);
+  }
+  const removed = new Map<string, string>();
+  const removedDirs = new Map<string, string>();
+  for (const entry of cleanResult.deleted) {
+    const key = dedupeKey(entry.path);
+    const id = firstByPath.get(key)!.id;
+    removed.set(key, id);
+    if (entry.entryType === "directory" && !entry.isSymlink) removedDirs.set(key, id);
+  }
+  const outcomes: ApplyOutcome[] = selected.map((candidate) => {
+    if (failedIds.has(candidate.id)) return { candidateId: candidate.id, status: "failed" };
+    const key = dedupeKey(candidate.path);
+    let coveredBy = removed.get(key);
+    if (coveredBy === candidate.id) return { candidateId: candidate.id, status: "deleted" };
+    let parent = dirname(key);
+    while (!coveredBy && parent !== key) {
+      coveredBy = removedDirs.get(parent);
+      const next = dirname(parent);
+      if (next === parent) break;
+      parent = next;
+    }
+    return coveredBy
+      ? { candidateId: candidate.id, status: "covered", coveredBy }
+      : { candidateId: candidate.id, status: "unattempted" };
+  });
   return {
     report: {
       protocolVersion: PROTOCOL_VERSION,
@@ -112,6 +180,8 @@ export async function applyPlan(
       failedCount: allFailures.length,
       totalBytesFreed: cleanResult.totalBytesFreed,
       failedPaths: allFailures,
+      outcomes,
+      interrupted,
     },
     cleanResult,
     selected,
@@ -127,6 +197,8 @@ function emptyApplyPlanResult(plan: ScanPlan): ApplyPlanResult {
       protocolVersion: PROTOCOL_VERSION,
       targetDir: plan.targetDir,
       selectedCandidateIds: [],
+      outcomes: [],
+      interrupted: false,
       deletedCount: 0,
       failedCount: 0,
       totalBytesFreed: 0,
@@ -161,6 +233,7 @@ export async function applyPlanWithBackend(
   }
 
   assertSafeCwd(plan.targetDir);
+  assertPlanResources(plan);
   const selected = resolveSelectedCandidates(plan);
   if (selected.length === 0) {
     return emptyApplyPlanResult(plan);
@@ -168,8 +241,28 @@ export async function applyPlanWithBackend(
 
   // The Rust engine revalidates per entry itself (containment, protected
   // paths, symlink/type state); forged candidates come back as failures.
-  const report = await applyPlanViaRust(plan, options.signal);
-  const failedPathSet = new Set(report.failedPaths.map((failure) => failure.path));
+  const startedAt = performance.now();
+  const byId = new Map(selected.map((candidate) => [candidate.id, candidate]));
+  const report = await applyPlanViaRust(
+    plan,
+    options.signal,
+    (id) => {
+      const candidate = byId.get(id);
+      if (candidate) options.onDeleted?.(candidate);
+    },
+    options.maxSizeGB === undefined || options.forceLarge
+      ? undefined
+      : Math.floor(options.maxSizeGB * 1024 ** 3),
+    (id) => {
+      const candidate = byId.get(id);
+      if (candidate) options.onBegin?.(candidate);
+    },
+  );
+  const deletedIds = new Set(
+    report.outcomes
+      ?.filter((outcome) => outcome.status === "deleted")
+      .map((outcome) => outcome.candidateId),
+  );
   const revalidationCodes = new Set<PathFailure["code"]>([
     "missing",
     "changed_symlink_state",
@@ -180,20 +273,15 @@ export async function applyPlanWithBackend(
   const revalidationFailures = report.failedPaths.filter((failure) =>
     revalidationCodes.has(failure.code),
   );
-  const deleted = selected.filter((candidate) => !failedPathSet.has(candidate.path));
-  const ready = selected.filter(
-    (candidate) => !revalidationFailures.some((failure) => failure.path === candidate.path),
-  );
-
-  for (const candidate of deleted) {
-    options.onDeleted?.(candidate);
-  }
+  const deleted = selected.filter((candidate) => deletedIds.has(candidate.id));
+  const failedRevalidationPaths = new Set(revalidationFailures.map((failure) => failure.path));
+  const ready = selected.filter((candidate) => !failedRevalidationPaths.has(candidate.path));
 
   const cleanResult: CleanResult = {
     deleted,
     failedPaths: report.failedPaths,
     totalBytesFreed: report.totalBytesFreed,
-    durationMs: 0,
+    durationMs: Math.round(performance.now() - startedAt),
   };
 
   return {
@@ -202,6 +290,6 @@ export async function applyPlanWithBackend(
     selected,
     ready,
     revalidationFailures,
-    interrupted: options.signal?.aborted ?? false,
+    interrupted: report.interrupted ?? false,
   };
 }

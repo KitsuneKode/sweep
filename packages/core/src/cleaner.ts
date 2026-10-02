@@ -3,6 +3,7 @@ import { rename, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
 import { mapPool } from "./async-pool.js";
+import { checkedBytes } from "./resource-budget.js";
 import {
   isPathWithinRoot,
   isReparsePointOrSymlink,
@@ -13,6 +14,8 @@ const DELETE_CONCURRENCY = 4;
 const CASE_FOLD_PATHS = process.platform === "darwin" || process.platform === "win32";
 
 export interface CleanOptions {
+  /** Fires immediately before the remove or trash rename, while that path is in flight. */
+  onBegin?: ((entry: ScanEntry, index: number, total: number) => void) | undefined;
   onProgress?: ((entry: ScanEntry, index: number, total: number) => void) | undefined;
   /**
    * JS engine: checked before each delete; true stops scheduling new work.
@@ -47,7 +50,7 @@ export interface CleanOptions {
  * filesystem folds. A forged plan can smuggle duplicates through spelling
  * variants (`a/../b`, `\\`, case) that byte-order compare differently.
  */
-function dedupeKey(path: string): string {
+export function dedupeKey(path: string): string {
   const normalized = normalize(resolve(path));
   return CASE_FOLD_PATHS ? normalized.toLowerCase() : normalized;
 }
@@ -215,6 +218,11 @@ export async function clean(
             });
           }
         }
+        try {
+          options.onBegin?.(entry, index, deduplicated.length);
+        } catch {
+          // A throwing progress sink must not abort the delete loop.
+        }
         if (options.trashDir && options.trashRoot) {
           await moveToTrash(entry, options.trashDir, options.trashRoot);
         } else if (
@@ -253,7 +261,7 @@ export async function clean(
   return {
     deleted,
     failedPaths,
-    totalBytesFreed: deleted.reduce((sum, e) => sum + e.estimatedBytes, 0),
+    totalBytesFreed: deleted.reduce((sum, e) => checkedBytes(sum, e.estimatedBytes), 0),
     durationMs: Date.now() - startTime,
   };
 }

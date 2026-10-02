@@ -403,7 +403,7 @@ describe("config hardening", () => {
   test("rejects a pattern longer than the bound", () => {
     mkdirSync(dir("long-pattern"), { recursive: true });
     writeConfig(dir("long-pattern"), { patterns: ["x".repeat(300)] });
-    expect(() => loadConfig(dir("long-pattern"))).toThrow(/exceeds 256 characters/);
+    expect(() => loadConfig(dir("long-pattern"))).toThrow(/exceeds 128 characters/);
   });
 
   test("rejects a merged pattern list past the bound", () => {

@@ -1,6 +1,7 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
+import { assertPlanResources } from "./resource-budget.js";
 import type { ApplyReport, ScanCandidate, ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   APPLY_REPORT_SCHEMA,
@@ -67,6 +68,7 @@ function formatValidationErrors(errors: ErrorObject[] | null | undefined): strin
 export function validatePlan(value: unknown): ScanPlan {
   const validator = getValidator();
   if (validator(value)) {
+    assertPlanResources(value as ScanPlan);
     return value as ScanPlan;
   }
 
@@ -113,9 +115,13 @@ export function validateScanEvent(value: unknown): ScanEvent {
       typeof c.path === "string" &&
       typeof c.name === "string" &&
       typeof c.estimatedBytes === "number" &&
-      Number.isInteger(c.estimatedBytes) &&
+      Number.isSafeInteger(c.estimatedBytes) &&
       c.estimatedBytes >= 0 &&
-      (c.modifiedMs === undefined || (typeof c.modifiedMs === "number" && c.modifiedMs >= 0)) &&
+      (c.bytesKnown === undefined || typeof c.bytesKnown === "boolean") &&
+      (c.modifiedMs === undefined ||
+        (typeof c.modifiedMs === "number" &&
+          Number.isSafeInteger(c.modifiedMs) &&
+          c.modifiedMs >= 0)) &&
       typeof c.isSymlink === "boolean" &&
       (c.entryType === "file" || c.entryType === "directory" || c.entryType === "symlink") &&
       typeof c.kind === "string" &&
@@ -129,7 +135,7 @@ export function validateScanEvent(value: unknown): ScanEvent {
     );
   };
 
-  const uint = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 0;
+  const uint = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 
   switch (event.type) {
     case "scan_started":
@@ -174,30 +180,40 @@ export function validateScanEvent(value: unknown): ScanEvent {
   return event as unknown as ScanEvent;
 }
 
-/**
- * Plans embed one JSON object per candidate - a few hundred bytes each.
- * 256 MB is far past any legitimate plan (≈1M candidates) and stops a
- * hostile or corrupt file from pinning the process in JSON.parse.
- */
-const MAX_PLAN_FILE_BYTES = 256 * 1024 * 1024;
+/** Bound raw bytes as well as semantic candidate/path counts after parsing. */
+const MAX_PLAN_FILE_BYTES = 64 * 1024 * 1024;
 
 export function loadPlan(planPath: string): ScanPlan {
-  let stat;
+  let handle: number;
   try {
-    stat = statSync(planPath);
+    handle = openSync(planPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch {
-    throw new PlanValidationError(`Plan file not found: ${sanitizeTerminalText(planPath)}`);
-  }
-  if (!stat.isFile()) {
-    throw new PlanValidationError(`Plan path is not a file: ${sanitizeTerminalText(planPath)}`);
-  }
-  if (stat.size > MAX_PLAN_FILE_BYTES) {
     throw new PlanValidationError(
-      `Plan file exceeds the 256 MB limit: ${sanitizeTerminalText(planPath)}`,
+      `Plan file not found or cannot be opened: ${sanitizeTerminalText(planPath)}`,
     );
   }
-
-  const raw = readFileSync(planPath, "utf8");
+  let raw: string;
+  try {
+    const stat = fstatSync(handle);
+    if (!stat.isFile())
+      throw new PlanValidationError(`Plan path is not a file: ${sanitizeTerminalText(planPath)}`);
+    if (stat.size > MAX_PLAN_FILE_BYTES)
+      throw new PlanValidationError("Plan file exceeds the 64 MB limit");
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    while (true) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, MAX_PLAN_FILE_BYTES + 1 - bytes));
+      const n = readSync(handle, chunk, 0, chunk.length, null);
+      if (n === 0) break;
+      bytes += n;
+      if (bytes > MAX_PLAN_FILE_BYTES)
+        throw new PlanValidationError("Plan file exceeds the 64 MB limit");
+      chunks.push(chunk.subarray(0, n));
+    }
+    raw = Buffer.concat(chunks, bytes).toString("utf8");
+  } finally {
+    closeSync(handle);
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

@@ -21,7 +21,12 @@ import {
   WORKSPACE_STUB_REASON,
 } from "./candidate-insights.js";
 import { catalogMatchFor } from "./catalog.js";
-import { isPathWithinRoot, isSameResolvedPath, pathHasProtectedVcsSegment } from "./guardrails.js";
+import {
+  GuardrailError,
+  isPathWithinRoot,
+  isSameResolvedPath,
+  pathHasProtectedVcsSegment,
+} from "./guardrails.js";
 
 export function buildPlan(
   targetDir: string,
@@ -118,6 +123,10 @@ export function candidateFromEntry(entry: ScanEntry): ScanCandidate {
 
 export function resolveSelectedCandidates(plan: ScanPlan): ScanCandidate[] {
   const selectedIds = new Set(plan.selectedCandidateIds);
+  const known = new Set(plan.candidates.map((candidate) => candidate.id));
+  if (known.size !== plan.candidates.length || [...selectedIds].some((id) => !known.has(id))) {
+    throw new GuardrailError("Plan has duplicate candidate IDs or unknown selected IDs");
+  }
   return plan.candidates.filter((candidate) => selectedIds.has(candidate.id));
 }
 

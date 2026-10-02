@@ -9,6 +9,8 @@
  * user wrote themselves, and a cleanup tool must never presume otherwise.
  */
 
+import { compileGlobMatchers } from "./glob-match.js";
+
 export interface CatalogEntry {
   /** Directory/file name or glob (`*`, `?`). */
   pattern: string;
@@ -141,35 +143,15 @@ export function catalogEntryFor(pattern: string): CatalogEntry | undefined {
 // artifact safe to presume: `node_modules` matched via a custom `*` glob is
 // still dependency output, while `dist` stays ambiguous no matter how it was
 // found. Matching uses the same glob semantics as the scanner (`*` any,
-// `?` single char, case-folded where the filesystem is).
+// `?` one Unicode scalar, case-folded where the filesystem is) - literally
+// the same `globMatch` implementation, not a parallel regex compile.
 
 export type CatalogMatch = "default" | "opt-in";
 
 const NAME_MATCH_CASE_FOLD = process.platform === "darwin" || process.platform === "win32";
 
-function compileNameMatcher(patterns: readonly string[]): (name: string) => boolean {
-  const exact = new Set<string>();
-  const globs: RegExp[] = [];
-  for (const pattern of patterns) {
-    const source = NAME_MATCH_CASE_FOLD ? pattern.toLowerCase() : pattern;
-    if (source.includes("*") || source.includes("?")) {
-      const escaped = source
-        .replace(/[.+^${}()|[\]\\?]/g, "\\$&")
-        .replace(/\*/g, ".*")
-        .replace(/\\\?/g, ".");
-      globs.push(new RegExp(`^${escaped}$`, NAME_MATCH_CASE_FOLD ? "i" : undefined));
-    } else {
-      exact.add(source);
-    }
-  }
-  return (name) => {
-    const key = NAME_MATCH_CASE_FOLD ? name.toLowerCase() : name;
-    return exact.has(key) || globs.some((re) => re.test(name));
-  };
-}
-
-const defaultNameMatcher = compileNameMatcher(DEFAULT_PATTERNS);
-const optInNameMatcher = compileNameMatcher(OPT_IN_PATTERNS);
+const defaultNameMatcher = compileGlobMatchers(DEFAULT_PATTERNS, NAME_MATCH_CASE_FOLD);
+const optInNameMatcher = compileGlobMatchers(OPT_IN_PATTERNS, NAME_MATCH_CASE_FOLD);
 
 /**
  * Classify a scanned entry name against the catalog: `"default"` for names a

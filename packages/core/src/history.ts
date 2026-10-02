@@ -1,11 +1,18 @@
 import {
-  appendFileSync,
+  constants,
+  closeSync,
+  fstatSync,
+  fchmodSync,
   mkdirSync,
-  readFileSync,
+  lstatSync,
+  openSync,
+  readSync,
+  readdirSync,
   renameSync,
-  statSync,
-  writeFileSync,
+  unlinkSync,
+  writeSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { sweepConfigDir } from "./config.js";
 
@@ -33,89 +40,151 @@ export interface HistorySummary {
 const HISTORY_FILE = "history.jsonl";
 /** Cap history reads - stats stay cheap no matter how long the log gets. */
 const MAX_READ_BYTES = 8 * 1024 * 1024;
-/** Rotates once past this size; the tail half is kept. */
+/** Rotate whole files; never rewrite a concurrently appended log. */
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_ARCHIVES = 4;
+const ARCHIVE = /^history\.\d{13}\.[a-f0-9-]+\.jsonl$/;
 
 export function historyFilePath(): string {
   return join(sweepConfigDir(), HISTORY_FILE);
 }
 
-/**
- * Best-effort append - history is a nicety, never a reason to fail an apply.
- * Returns false when the write could not be completed.
- */
+function archiveNames(): string[] {
+  return readdirSync(sweepConfigDir())
+    .filter((name) => ARCHIVE.test(name))
+    .sort()
+    .reverse();
+}
+
+/** Best-effort private append. Rotation moves whole files, preserving writes
+ * from processes already holding an append descriptor to the renamed inode. */
 export function appendHistory(entry: CleanupHistoryEntry): boolean {
+  let fd: number | undefined;
   try {
+    if (!validEntry(entry)) return false;
+    const payload = Buffer.from(`\n${JSON.stringify(entry)}\n`);
+    if (payload.length > 64 * 1024) return false;
     const dir = sweepConfigDir();
-    // History records real directory names - keep it user-private.
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const filePath = join(dir, HISTORY_FILE);
-    appendFileSync(filePath, `${JSON.stringify(entry)}\n`, {
-      encoding: "utf-8",
-      mode: 0o600,
-    });
-    rotateIfNeeded(filePath);
+    const file = historyFilePath();
+    try {
+      if (!lstatSync(file).isFile()) return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+    }
+    fd = openSync(
+      file,
+      constants.O_WRONLY |
+        constants.O_APPEND |
+        constants.O_CREAT |
+        constants.O_NONBLOCK |
+        (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    const handle = fstatSync(fd);
+    if (!handle.isFile() || handle.nlink > 1) return false;
+    if (process.platform !== "win32") fchmodSync(fd, 0o600);
+    if (writeSync(fd, payload) !== payload.length) return false;
+    const size = fstatSync(fd).size;
+    closeSync(fd);
+    fd = undefined;
+    if (size > MAX_FILE_BYTES) {
+      // Unique names prevent concurrent rotators from overwriting archives.
+      // A competing writer may create a fresh active log: moving that whole
+      // file too is safe; no accepted record is lost to a tail rewrite.
+      try {
+        renameSync(file, join(dir, `history.${Date.now()}.${randomUUID()}.jsonl`));
+      } catch {
+        /* another rotator */
+      }
+      for (const name of archiveNames().slice(MAX_ARCHIVES)) {
+        try {
+          unlinkSync(join(dir, name));
+        } catch {
+          /* concurrent retention */
+        }
+      }
+    }
     return true;
   } catch {
     return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
-/**
- * Trim the log once it passes MAX_FILE_BYTES - history is a running tally,
- * not an audit archive, so dropping the oldest half is fine. The rewrite goes
- * through a sibling file + rename so a crash cannot leave a torn log.
- */
-function rotateIfNeeded(filePath: string): void {
-  try {
-    if (statSync(filePath).size <= MAX_FILE_BYTES) return;
-    const raw = readFileSync(filePath, "utf-8");
-    const tail = raw.slice(raw.length - MAX_FILE_BYTES / 2);
-    const firstNewline = tail.indexOf("\n");
-    const kept = firstNewline === -1 ? tail : tail.slice(firstNewline + 1);
-    const tmp = `${filePath}.tmp`;
-    writeFileSync(tmp, kept, { encoding: "utf-8", mode: 0o600 });
-    renameSync(tmp, filePath);
-  } catch {
-    // Rotation is best-effort - the read cap keeps stats fast regardless.
-  }
+function validEntry(value: unknown): value is CleanupHistoryEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const e = value as CleanupHistoryEntry;
+  return (
+    typeof e.ts === "string" &&
+    Number.isFinite(Date.parse(e.ts)) &&
+    typeof e.targetDir === "string" &&
+    typeof e.engine === "string" &&
+    [e.deleted, e.bytesFreed, e.failed].every((n) => Number.isSafeInteger(n) && n >= 0) &&
+    typeof e.interrupted === "boolean" &&
+    (e.trashDir === undefined || typeof e.trashDir === "string")
+  );
 }
 
-/**
- * Read history oldest-first. Malformed lines are skipped. Files larger than
- * MAX_READ_BYTES are tail-sliced - the first partial line is dropped because
- * every entry is a complete JSON document on its own line.
- */
-export function readHistory(limit = 200): CleanupHistoryEntry[] {
-  let raw: string;
+/** Open/fstat/read the same regular handle; allocate only the bounded tail. */
+function readTail(file: string, budget: number): { data: Buffer; read: number } {
+  let fd: number | undefined;
   try {
-    const filePath = historyFilePath();
-    raw = readFileSync(filePath, "utf-8");
-    if (statSync(filePath).size > MAX_READ_BYTES) {
-      raw = raw.slice(raw.length - MAX_READ_BYTES);
+    const before = lstatSync(file, { bigint: true });
+    if (!before.isFile()) return { data: Buffer.alloc(0), read: 0 };
+    fd = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
+    const stat = fstatSync(fd);
+    const identity = fstatSync(fd, { bigint: true });
+    if (!stat.isFile() || identity.dev !== before.dev || identity.ino !== before.ino)
+      return { data: Buffer.alloc(0), read: 0 };
+    const start = Math.max(0, stat.size - budget);
+    const buffer = Buffer.alloc(Math.min(budget, stat.size));
+    let read = 0;
+    while (read < buffer.length) {
+      const count = readSync(fd, buffer, read, buffer.length - read, start + read);
+      if (!count) break;
+      read += count;
     }
+    const tail = buffer.subarray(0, read);
+    if (!start) return { data: tail, read };
+    const newline = tail.indexOf(10);
+    return { data: newline < 0 ? Buffer.alloc(0) : tail.subarray(newline + 1), read };
+  } catch {
+    return { data: Buffer.alloc(0), read: 0 };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/** Retained history, oldest first. Read at most 8 MiB across active/archives;
+ * oversized, partial, malformed and unsafe records never become totals. */
+export function readHistory(limit = 200): CleanupHistoryEntry[] {
+  if (!Number.isSafeInteger(limit) || limit <= 0) return [];
+  let names: string[];
+  try {
+    names = [HISTORY_FILE, ...archiveNames().slice(0, MAX_ARCHIVES)];
   } catch {
     return [];
   }
-
+  let budget = MAX_READ_BYTES;
   const entries: CleanupHistoryEntry[] = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as CleanupHistoryEntry;
-      if (
-        typeof parsed.ts === "string" &&
-        typeof parsed.targetDir === "string" &&
-        typeof parsed.deleted === "number" &&
-        typeof parsed.bytesFreed === "number"
-      ) {
-        entries.push(parsed);
+  for (const name of names) {
+    if (budget <= 0) break;
+    const raw = readTail(join(sweepConfigDir(), name), budget);
+    // Charge the requested tail, including discarded partial-line bytes.
+    budget -= raw.read;
+    for (const line of raw.data.toString("utf8").split("\n")) {
+      if (!line || Buffer.byteLength(line) > 64 * 1024) continue;
+      try {
+        const parsed: unknown = JSON.parse(line);
+        if (validEntry(parsed)) entries.push(parsed);
+      } catch {
+        /* malformed record */
       }
-    } catch {
-      // Corrupt line - skip it.
     }
   }
+  entries.sort((a, b) => a.ts.localeCompare(b.ts));
   return entries.slice(-limit);
 }
 

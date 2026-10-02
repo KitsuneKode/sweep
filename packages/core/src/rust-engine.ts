@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ApplyReport,
@@ -27,6 +27,13 @@ import { RustScanStream } from "./rust-stream.js";
 export type EngineBackend = "js" | "rust";
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+
+let embeddedEngine: (() => string) | undefined;
+
+/** Standalone entrypoint supplies a lazy, private native asset extraction. */
+export function registerEmbeddedEngine(resolver: () => string): void {
+  embeddedEngine = resolver;
+}
 
 /**
  * Root of the published `@kitsunekode/sweep` npm package (`apps/cli`), or the monorepo in dev.
@@ -95,6 +102,7 @@ export function resolveRustEngineBinary(): string {
   if (fromEnv && fromEnv.length > 0) {
     return fromEnv;
   }
+  if (embeddedEngine) return embeddedEngine();
 
   const packageRoot = sweepPackageRoot();
   const binaryName = process.platform === "win32" ? "sweep-engine.exe" : "sweep-engine";
@@ -141,10 +149,11 @@ export function resolveRustEngineBinary(): string {
 interface RunEngineOptions {
   cwd?: string | undefined;
   signal?: AbortSignal | undefined;
+  cooperativeApply?: boolean;
 }
 
 /** A plan with 100k candidates is ~20 MB; this bound leaves generous room. */
-const MAX_ENGINE_STDOUT = 256 * 1024 * 1024;
+const MAX_ENGINE_STDOUT = 64 * 1024 * 1024;
 /** stderr only matters for the error message - the tail is what we print. */
 const MAX_ENGINE_STDERR = 64 * 1024;
 /** Streamed scan events are one JSON object per line; this is generous. */
@@ -181,22 +190,17 @@ async function runEngineAsync(
   const proc = spawn(binary, args, {
     cwd: options.cwd ?? process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
+    // Terminal Ctrl+C must reach the host, not kill apply before its report.
+    // Keep the child referenced and its pipes open; this is not a daemon.
+    detached: options.cooperativeApply === true && process.platform !== "win32",
   });
-
-  if (options.signal) {
-    if (options.signal.aborted) {
-      terminateEngine(proc);
-    } else {
-      const onAbort = () => terminateEngine(proc);
-      options.signal.addEventListener("abort", onAbort, { once: true });
-      proc.on("close", () => options.signal?.removeEventListener("abort", onAbort));
-    }
-  }
 
   return await new Promise<string>((resolvePromise, rejectPromise) => {
     let stdout = "";
     let stderr = "";
-    const lines = onLine ? new NdjsonDecoder(onLine, MAX_EVENT_LINE) : undefined;
+    const lines = onLine
+      ? new NdjsonDecoder(onLine, options.cooperativeApply ? MAX_ENGINE_STDOUT : MAX_EVENT_LINE)
+      : undefined;
     let settled = false;
 
     const settle = (fn: () => void) => {
@@ -246,7 +250,7 @@ async function runEngineAsync(
 
     proc.on("close", (code) => {
       if (settled) return;
-      if (options.signal?.aborted) {
+      if (options.signal?.aborted && !options.cooperativeApply) {
         settle(() => resolvePromise(stdout));
         return;
       }
@@ -288,7 +292,31 @@ async function runEngineAsync(
       });
       proc.stdin.write(stdin);
     }
-    proc.stdin.end();
+    if (!options.cooperativeApply) proc.stdin.end();
+    const onAbort = () => {
+      if (!options.cooperativeApply) {
+        terminateEngine(proc);
+        return;
+      }
+      // Finish the current removal and drain an authoritative outcome report.
+      proc.stdin.end('{"type":"cancel"}\n');
+      const watchdog = setTimeout(() => {
+        proc.kill("SIGKILL");
+        settle(() =>
+          rejectPromise(
+            new GuardrailError(
+              "Apply cancellation timed out. Outcomes are unknown; inspect the tree before retrying.",
+              1,
+            ),
+          ),
+        );
+      }, 30_000);
+      watchdog.unref();
+      proc.once("close", () => clearTimeout(watchdog));
+    };
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    proc.once("close", () => options.signal?.removeEventListener("abort", onAbort));
+    if (options.signal?.aborted) onAbort();
   });
 }
 
@@ -317,6 +345,7 @@ export async function scanToPlanViaRust(
     config: options.config,
     selectionPolicy: options.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
     exact: options.exact ?? false,
+    limits: options.limits,
     // No live hooks means nobody is watching candidates arrive - the engine
     // emits the whole plan in one write instead of serializing an event per
     // candidate. On big trees per-entry JSON was the dominant cost, not the
@@ -349,15 +378,120 @@ export async function scanToPlanViaRust(
 }
 
 /** Apply via the Rust `sweep-engine` subprocess. */
-export async function applyPlanViaRust(plan: ScanPlan, signal?: AbortSignal): Promise<ApplyReport> {
-  const stdout = await runEngineAsync(["apply"], JSON.stringify(plan), undefined, { signal });
+export async function applyPlanViaRust(
+  plan: ScanPlan,
+  signal?: AbortSignal,
+  onDeleted?: (id: string) => void,
+  maxSizeBytes?: number,
+  onBegin?: (id: string) => void,
+): Promise<ApplyReport> {
+  const selected = new Set(plan.selectedCandidateIds);
+  if (signal?.aborted) {
+    return {
+      protocolVersion: plan.protocolVersion,
+      targetDir: plan.targetDir,
+      selectedCandidateIds: [...selected],
+      deletedCount: 0,
+      failedCount: 0,
+      totalBytesFreed: 0,
+      failedPaths: [],
+      interrupted: true,
+      outcomes: [...selected].map((candidateId) => ({ candidateId, status: "unattempted" })),
+    };
+  }
+  const binary = resolveRustEngineBinary();
+  const capabilities = spawnSync(binary, ["--capabilities"], {
+    encoding: "utf8",
+    timeout: 1000,
+    killSignal: "SIGKILL",
+    maxBuffer: 4096,
+  });
+  let controlled = false;
   try {
-    return validateApplyReport(JSON.parse(stdout));
+    controlled = capabilities.status === 0 && JSON.parse(capabilities.stdout).applyControl === true;
+  } catch {
+    /* older engine */
+  }
+  if (!controlled)
+    throw new GuardrailError(
+      "This Rust engine lacks safe apply cancellation. Update the native package or use --engine js.",
+    );
+  let report: ApplyReport | undefined;
+  const progress = new Set<string>();
+  const began = new Set<string>();
+  try {
+    await runEngineAsync(
+      ["apply", "--json-control"],
+      `${JSON.stringify({ plan, maxSizeBytes })}\n{"type":"start"}\n`,
+      (line) => {
+        const event = JSON.parse(line) as { type?: string; candidateId?: string; report?: unknown };
+        if (report) throw new PlanValidationError("Apply event after completion");
+        if (event.type === "apply_begin") {
+          if (
+            typeof event.candidateId !== "string" ||
+            !selected.has(event.candidateId) ||
+            began.has(event.candidateId)
+          )
+            throw new PlanValidationError("Invalid apply begin identity");
+          began.add(event.candidateId);
+          onBegin?.(event.candidateId);
+        } else if (event.type === "apply_deleted") {
+          if (
+            typeof event.candidateId !== "string" ||
+            !began.has(event.candidateId) ||
+            progress.has(event.candidateId)
+          ) {
+            throw new PlanValidationError("Invalid apply progress identity");
+          }
+          progress.add(event.candidateId);
+          onDeleted?.(event.candidateId);
+        } else if (event.type === "apply_completed") {
+          report = validateApplyReport(event.report);
+        } else throw new PlanValidationError("Invalid apply event");
+      },
+      { signal, cooperativeApply: true },
+    );
+    if (!report?.outcomes || report.targetDir !== plan.targetDir)
+      throw new PlanValidationError("Missing authoritative apply report");
+    const ids = new Set(report.outcomes.map((outcome) => outcome.candidateId));
+    const deleted = new Set(
+      report.outcomes
+        .filter((outcome) => outcome.status === "deleted")
+        .map((outcome) => outcome.candidateId),
+    );
+    const candidatesById = new Map(plan.candidates.map((candidate) => [candidate.id, candidate]));
+    const estimatedRemoved = [...deleted].reduce(
+      (sum, id) => sum + (candidatesById.get(id)?.estimatedBytes ?? 0),
+      0,
+    );
+    if (
+      report.totalBytesFreed !== estimatedRemoved ||
+      ids.size !== report.outcomes.length ||
+      report.selectedCandidateIds.length !== selected.size ||
+      new Set(report.selectedCandidateIds).size !== selected.size ||
+      report.selectedCandidateIds.some((id) => !selected.has(id)) ||
+      ids.size !== selected.size ||
+      [...ids].some((id) => !selected.has(id)) ||
+      report.deletedCount !== deleted.size ||
+      report.failedCount !== report.failedPaths.length ||
+      report.outcomes.filter((outcome) => outcome.status === "failed").length !==
+        report.failedCount ||
+      deleted.size !== progress.size ||
+      [...deleted].some((id) => !progress.has(id)) ||
+      report.outcomes.some((outcome) =>
+        outcome.status === "covered"
+          ? !outcome.coveredBy || !deleted.has(outcome.coveredBy)
+          : outcome.coveredBy !== undefined,
+      )
+    ) {
+      throw new PlanValidationError("Inconsistent apply outcome partition");
+    }
+    return report;
   } catch (error) {
-    if (signal?.aborted) {
-      // The engine was killed mid-run - partial deletions may have landed.
+    if (began.size > 0) {
+      const detail = error instanceof Error ? error.message : String(error);
       throw new GuardrailError(
-        "Apply interrupted. The engine was stopped mid-run; some deletions may have completed.",
+        `Native apply did not return a trusted outcome report. Outcomes are unknown; inspect the tree before retrying. ${detail}`,
         1,
       );
     }
@@ -365,25 +499,43 @@ export async function applyPlanViaRust(plan: ScanPlan, signal?: AbortSignal): Pr
   }
 }
 
-/**
- * Memoised: `auto` is the default engine flag, so this probe now runs on every
- * command - it must not pay a subprocess spawn more than once per process.
- */
-let rustEngineAvailable: boolean | undefined;
-
+// Cache only the last resolved binary; replacements and environment changes
+// invalidate the probe. Bound runtime/output even for user-supplied binaries.
+let availability: { key: string; available: boolean } | undefined;
 export function isRustEngineAvailable(): boolean {
-  if (rustEngineAvailable !== undefined) return rustEngineAvailable;
+  const binary = resolveRustEngineBinary();
+  let key = `${binary}:${process.cwd()}:${process.env.PATH ?? ""}:${process.env.PATHEXT ?? ""}`;
+  const extensions =
+    process.platform === "win32" ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD").split(";")] : [""];
+  const file =
+    binary.includes("/") || binary.includes("\\")
+      ? resolve(binary)
+      : (process.env.PATH ?? "")
+          .split(delimiter)
+          .flatMap((dir) => extensions.map((ext) => join(dir, binary + ext)))
+          .find((path) => existsSync(path));
   try {
-    const binary = resolveRustEngineBinary();
-    if (binary !== "sweep-engine" && !existsSync(binary)) {
-      rustEngineAvailable = false;
+    if (!file) {
+      availability = { key, available: false };
       return false;
     }
-    const proc = spawnSync(binary, ["--version"], { encoding: "utf8" });
-    rustEngineAvailable = proc.status === 0;
-    return rustEngineAvailable;
+    if (file) {
+      const stat = statSync(file, { bigint: true });
+      key += `:${file}`;
+      key += `:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    }
+    if (availability?.key === key) return availability.available;
+    const proc = spawnSync(binary, ["--version"], {
+      encoding: "utf8",
+      timeout: 1000,
+      killSignal: "SIGKILL",
+      maxBuffer: 4096,
+    });
+    const available = proc.status === 0;
+    availability = { key, available };
+    return available;
   } catch {
-    rustEngineAvailable = false;
+    availability = { key, available: false };
     return false;
   }
 }

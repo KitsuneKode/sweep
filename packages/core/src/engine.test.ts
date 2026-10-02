@@ -265,3 +265,251 @@ describe("core engine", () => {
     expect(plan.summary.selectedCount).toBeGreaterThan(0);
   });
 });
+
+for (const backend of ["js", "rust"] as const) {
+  test(`${backend}: duplicate paths report only actual deletion operations`, async () => {
+    if (backend === "rust" && !isRustEngineAvailable()) return;
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const original = plan.candidates[0]!;
+    plan.candidates.push({ ...original, id: "duplicate" });
+    plan.selectedCandidateIds.push("duplicate");
+    const callbacks: string[] = [];
+    const applied = await applyPlanWithBackend(plan, backend, {
+      onDeleted: (entry) => callbacks.push(entry.path),
+    });
+    expect(applied.report.deletedCount).toBe(1);
+    expect(applied.cleanResult.deleted).toHaveLength(1);
+    expect(callbacks).toHaveLength(1);
+  });
+  test(`${backend}: pre-aborted apply does not remove anything`, async () => {
+    if (backend === "rust" && !isRustEngineAvailable()) return;
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const applied = await applyPlanWithBackend(plan, backend, { signal: AbortSignal.abort() });
+    expect(existsSync(dir("node_modules"))).toBe(true);
+    expect(applied.report.deletedCount).toBe(0);
+    expect(applied.interrupted).toBe(true);
+  });
+}
+
+for (const backend of ["js", "rust"] as const) {
+  test(`${backend}: changed sizes cannot bypass the configured apply ceiling`, async () => {
+    if (backend === "rust" && !isRustEngineAvailable()) return;
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    writeFileSync(dir("node_modules", "grown"), Buffer.alloc(2048));
+    await expect(
+      applyPlanWithBackend(plan, backend, { maxSizeGB: 1024 / 1024 ** 3 }),
+    ).rejects.toThrow();
+    expect(existsSync(dir("node_modules", "grown"))).toBe(true);
+    const applied = await applyPlanWithBackend(plan, backend, {
+      maxSizeGB: 1024 / 1024 ** 3,
+      forceLarge: true,
+    });
+    expect(applied.report.deletedCount).toBe(1);
+  });
+}
+
+test("rust: live cancellation drains actual outcomes and deletion callbacks", async () => {
+  if (!isRustEngineAvailable()) return;
+  for (const name of ["a", "b", "c", "d"]) {
+    mkdirSync(dir(name, "node_modules"), { recursive: true });
+    if (name === "b")
+      for (let i = 0; i < 4096; i++) writeFileSync(dir(name, "node_modules", `${i}`), "x");
+  }
+  const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+  const cancel = new AbortController();
+  const deleted: string[] = [];
+  const applied = await applyPlanWithBackend(plan, "rust", {
+    signal: cancel.signal,
+    onDeleted: (entry) => {
+      deleted.push(entry.path);
+      cancel.abort();
+    },
+  });
+  expect(applied.interrupted).toBe(true);
+  expect(applied.report.deletedCount).toBeGreaterThanOrEqual(1);
+  expect(applied.report.deletedCount).toBeLessThan(4);
+  expect(applied.report.deletedCount).toBe(deleted.length);
+  expect(applied.report.outcomes).toHaveLength(4);
+  for (const candidate of plan.candidates) {
+    const outcome = applied.report.outcomes!.find((item) => item.candidateId === candidate.id)!;
+    expect(existsSync(candidate.path)).toBe(outcome.status !== "deleted");
+  }
+});
+
+for (const backend of ["js", "rust"] as const) {
+  test(`${backend}: outcome IDs survive conflicting types on duplicate paths`, async () => {
+    if (backend === "rust" && !isRustEngineAvailable()) return;
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const original = plan.candidates[0]!;
+    plan.candidates.push({ ...original, id: "valid" });
+    plan.selectedCandidateIds.push("valid");
+    original.entryType = "file";
+    const applied = await applyPlanWithBackend(plan, backend);
+    expect(applied.report.deletedCount).toBe(1);
+    expect(applied.report.failedCount).toBe(1);
+    expect(applied.report.outcomes).toEqual([
+      { candidateId: original.id, status: "failed" },
+      { candidateId: "valid", status: "deleted" },
+    ]);
+  });
+}
+
+test("rust: closed initial control channel cannot start deletion", async () => {
+  if (!isRustEngineAvailable()) return;
+  const { spawnSync } = await import("node:child_process");
+  mkdirSync(dir("node_modules"));
+  const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+  const result = spawnSync(resolveRustEngineBinary(), ["apply", "--json-control"], {
+    input: `${JSON.stringify({ plan })}\n`,
+    timeout: 5000,
+  });
+  expect(result.status).toBe(3);
+  expect(existsSync(dir("node_modules"))).toBe(true);
+});
+
+for (const failure of ["exit", "bad-report"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `rust: ${failure} after apply starts reports unknown outcomes`,
+    async () => {
+      const { chmodSync } = await import("node:fs");
+      mkdirSync(dir("node_modules"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      const binary = dir("failed-engine");
+      writeFileSync(
+        binary,
+        `#!/usr/bin/env bun
+if (process.argv[2] === "--capabilities") {
+  process.stdout.write('{"applyControl":true}\\n');
+  process.exit(0);
+}
+process.stdout.write(${JSON.stringify(JSON.stringify({ type: "apply_begin", candidateId: plan.selectedCandidateIds[0] }) + "\n")});
+${failure === "exit" ? "process.exit(4);" : "process.stdout.write('invalid JSON\\n'); process.exit(0);"}
+`,
+      );
+      chmodSync(binary, 0o700);
+      const previous = process.env.SWEEP_ENGINE_PATH;
+      process.env.SWEEP_ENGINE_PATH = binary;
+      try {
+        await expect(applyPlanWithBackend(plan, "rust")).rejects.toThrow(/Outcomes are unknown/);
+        expect(existsSync(dir("node_modules"))).toBe(true);
+      } finally {
+        if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
+        else process.env.SWEEP_ENGINE_PATH = previous;
+      }
+    },
+  );
+}
+
+test.skipIf(process.platform === "win32")(
+  "rust: stuck cancellation reports unknown outcomes without retrying",
+  async () => {
+    const { chmodSync } = await import("node:fs");
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const binary = dir("stuck-engine");
+    writeFileSync(
+      binary,
+      `#!/usr/bin/env bun
+if (process.argv[2] === "--capabilities") {
+  process.stdout.write('{"applyControl":true}\\n');
+  process.exit(0);
+}
+setInterval(() => {}, 1000);
+let data = "";
+let announced = false;
+process.stdin.on("data", chunk => {
+  data += chunk.toString();
+  if (!announced && data.includes("\\n")) {
+    announced = true;
+    const request = JSON.parse(data.slice(0, data.indexOf("\\n")));
+    process.stdout.write(JSON.stringify({type:"apply_begin",candidateId:request.plan.selectedCandidateIds[0]}) + "\\n");
+  }
+});
+`,
+    );
+    chmodSync(binary, 0o700);
+    const previous = process.env.SWEEP_ENGINE_PATH;
+    const cancel = new AbortController();
+    process.env.SWEEP_ENGINE_PATH = binary;
+    try {
+      await expect(
+        applyPlanWithBackend(plan, "rust", {
+          signal: cancel.signal,
+          onBegin: () => cancel.abort(),
+        }),
+      ).rejects.toThrow(/Outcomes are unknown/);
+      expect(existsSync(dir("node_modules"))).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previous;
+    }
+  },
+  35_000,
+);
+
+test.skipIf(process.platform === "win32")(
+  "rust: foreground SIGINT reaches the host without killing its apply child",
+  async () => {
+    const { spawn } = await import("node:child_process");
+    for (const name of ["a", "b", "c"]) {
+      mkdirSync(dir(name, "node_modules"), { recursive: true });
+      if (name === "b")
+        for (let i = 0; i < 4096; i++) writeFileSync(dir(name, "node_modules", `${i}`), "x");
+    }
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const helper = dir("signal-host.ts");
+    const engineModule = new URL("./engine.ts", import.meta.url).pathname;
+    writeFileSync(
+      helper,
+      `import { applyPlanWithBackend } from ${JSON.stringify(engineModule)};
+const plan = ${JSON.stringify(plan)};
+const control = new AbortController();
+process.once("SIGINT", () => control.abort());
+let sent = false;
+const deleted = [];
+const result = await applyPlanWithBackend(plan, "rust", {
+  signal: control.signal,
+  onBegin: () => { if (!sent) { sent = true; process.kill(-process.pid, "SIGINT"); } },
+  onDeleted: entry => deleted.push(entry.path),
+});
+console.log(JSON.stringify({report: result.report, deleted}));
+`,
+    );
+    const child = spawn(process.execPath, [helper], {
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "",
+      stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const watchdog = setTimeout(() => child.kill("SIGKILL"), 5000);
+    let code;
+    try {
+      code = await new Promise<number | null>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", resolve);
+      });
+    } finally {
+      clearTimeout(watchdog);
+    }
+    expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+    const result = JSON.parse(stdout) as {
+      report: import("@kitsunekode/sweep-protocol").ApplyReport;
+      deleted: string[];
+    };
+    expect(result.report.outcomes).toHaveLength(3);
+    expect(result.deleted.length).toBe(result.report.deletedCount);
+    expect(plan.candidates.filter((candidate) => !existsSync(candidate.path)).length).toBe(
+      result.report.deletedCount,
+    );
+  },
+);

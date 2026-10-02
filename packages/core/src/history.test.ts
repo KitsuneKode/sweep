@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  openSync,
+  closeSync,
+  ftruncateSync,
+  symlinkSync,
+  existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendHistory, readHistory, summarizeHistory } from "./history.js";
@@ -85,4 +94,91 @@ describe("history", () => {
     expect(readHistory()).toEqual([]);
     expect(summarizeHistory([]).sessions).toBe(0);
   });
+
+  test("a torn final record does not swallow the next completed append", () => {
+    sandbox = mkdtempSync(join(tmpdir(), "sweep-history-"));
+    process.env.XDG_CONFIG_HOME = sandbox;
+    const entry = {
+      ts: "2025-01-01T00:00:00.000Z",
+      targetDir: "/tmp/completed",
+      engine: "js" as const,
+      deleted: 1,
+      bytesFreed: 123,
+      failed: 0,
+      interrupted: false,
+    };
+    expect(appendHistory(entry)).toBe(true);
+    writeFileSync(join(sandbox, "sweep", "history.jsonl"), '{"ts":"unfinished', { flag: "a" });
+    expect(appendHistory({ ...entry, targetDir: "/tmp/next" })).toBe(true);
+    expect(readHistory().map((record) => record.targetDir)).toEqual([
+      "/tmp/completed",
+      "/tmp/next",
+    ]);
+  });
+  test("reads only the bounded tail of a sparse oversized log", () => {
+    sandbox = mkdtempSync(join(tmpdir(), "sweep-history-"));
+    process.env.XDG_CONFIG_HOME = sandbox;
+    const entry = {
+      ts: "2025-01-01T00:00:00.000Z",
+      targetDir: "/tmp/🦊",
+      engine: "js",
+      deleted: 1,
+      bytesFreed: 4,
+      failed: 0,
+      interrupted: false,
+    };
+    appendHistory(entry);
+    const file = join(sandbox, "sweep", "history.jsonl");
+    const fd = openSync(file, "w");
+    ftruncateSync(fd, 128 * 1024 * 1024);
+    closeSync(fd);
+    writeFileSync(file, `\n${JSON.stringify(entry)}\n`, { flag: "a" });
+    expect(readHistory()).toEqual([entry]);
+    expect(readHistory(0)).toEqual([]);
+  });
+  test("rotation preserves the existing log as a private archive", () => {
+    sandbox = mkdtempSync(join(tmpdir(), "sweep-history-"));
+    process.env.XDG_CONFIG_HOME = sandbox;
+    const entry = {
+      ts: "2025-01-01T00:00:00.000Z",
+      targetDir: "/tmp/a",
+      engine: "js",
+      deleted: 1,
+      bytesFreed: 4,
+      failed: 0,
+      interrupted: false,
+    };
+    appendHistory(entry);
+    const file = join(sandbox, "sweep", "history.jsonl");
+    const fd = openSync(file, "a");
+    ftruncateSync(fd, 17 * 1024 * 1024);
+    closeSync(fd);
+    expect(appendHistory(entry)).toBe(true);
+    expect(existsSync(file)).toBe(false);
+    expect(readHistory()).toEqual([entry]);
+  });
+  test.skipIf(process.platform === "win32")(
+    "never reads or appends through a history symlink",
+    () => {
+      sandbox = mkdtempSync(join(tmpdir(), "sweep-history-"));
+      process.env.XDG_CONFIG_HOME = sandbox;
+      const entry = {
+        ts: "2025-01-01T00:00:00.000Z",
+        targetDir: "/tmp/a",
+        engine: "js",
+        deleted: 1,
+        bytesFreed: 4,
+        failed: 0,
+        interrupted: false,
+      };
+      appendHistory(entry);
+      const file = join(sandbox, "sweep", "history.jsonl");
+      const outside = join(sandbox, "outside");
+      writeFileSync(outside, JSON.stringify(entry) + "\n");
+      rmSync(file);
+      symlinkSync(outside, file);
+      expect(readHistory()).toEqual([]);
+      expect(appendHistory(entry)).toBe(false);
+    },
+  );
 });

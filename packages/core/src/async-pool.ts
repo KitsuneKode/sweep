@@ -15,10 +15,11 @@ export async function mapPool<T, R>(
 
   const results = new Array<R>(items.length);
   let nextIndex = 0;
+  let failed = false;
 
   async function runWorker(): Promise<void> {
     while (true) {
-      if (isCancelled?.()) {
+      if (failed || isCancelled?.()) {
         return;
       }
       const index = nextIndex;
@@ -30,11 +31,20 @@ export async function mapPool<T, R>(
       if (item === undefined) {
         return;
       }
-      results[index] = await worker(item, index);
+      try {
+        results[index] = await worker(item, index);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
     }
   }
 
   const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker());
-  await Promise.all(workers);
+  // Do not reject while sibling work still owns resources. Stop claiming
+  // jobs on first failure, drain every admitted worker, then surface it.
+  const settled = await Promise.allSettled(workers);
+  const rejection = settled.find((result) => result.status === "rejected");
+  if (rejection?.status === "rejected") throw rejection.reason;
   return results;
 }

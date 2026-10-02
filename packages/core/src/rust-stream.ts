@@ -7,12 +7,14 @@ import type {
 import { isPathWithinRoot } from "./guardrails.js";
 import { PlanValidationError, validateScanEvent } from "./plan.js";
 import type { ScanHooks } from "./scanner.js";
+import { ResourceBudget, checkedBytes } from "./resource-budget.js";
 
 function entryFrom(candidate: ScanCandidate): ScanEntry {
   return {
     path: candidate.path,
     name: candidate.name,
     estimatedBytes: candidate.estimatedBytes,
+    ...(candidate.bytesKnown === undefined ? {} : { bytesKnown: candidate.bytesKnown }),
     ...(candidate.modifiedMs === undefined ? {} : { modifiedMs: candidate.modifiedMs }),
     isSymlink: candidate.isSymlink,
     entryType: candidate.entryType,
@@ -26,12 +28,15 @@ export class RustScanStream {
   private readonly candidates = new Map<string, ScanCandidate>();
   private readonly ids = new Set<string>();
   private readonly sized = new Set<string>();
+  private readonly budget: ResourceBudget;
 
   constructor(
     private readonly target: string,
     private readonly hooks: ScanHooks = {},
     private readonly exact = false,
-  ) {}
+  ) {
+    this.budget = new ResourceBudget(hooks.limits);
+  }
 
   push(line: string): void {
     let value: unknown;
@@ -73,7 +78,7 @@ export class RustScanStream {
         throw new PlanValidationError("scan incomplete: candidate sizes missing");
       }
       const total = [...this.candidates.values()].reduce(
-        (sum, candidate) => sum + candidate.estimatedBytes,
+        (sum, candidate) => checkedBytes(sum, candidate.estimatedBytes),
         0,
       );
       if (
@@ -95,6 +100,7 @@ export class RustScanStream {
       if (prior || this.ids.has(candidate.id)) {
         throw new PlanValidationError("duplicate scan candidate");
       }
+      this.budget.candidate(candidate.path);
       this.ids.add(candidate.id);
       this.candidates.set(candidate.path, candidate);
       this.hooks.onEntry?.(entryFrom(candidate));

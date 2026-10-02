@@ -74,11 +74,16 @@
         },
         "estimatedBytes": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "bytesKnown": {
+          "type": "boolean"
         },
         "modifiedMs": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "isSymlink": {
           "type": "boolean"
@@ -128,26 +133,31 @@
       "properties": {
         "candidateCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "estimatedTotalBytes": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "scannedDirs": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "skippedDirs": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "exact": {
           "type": "boolean"
         },
         "elapsedMs": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       }
     }

@@ -43,22 +43,26 @@
       "properties": {
         "candidateCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "estimatedTotalBytes": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "scannedDirs": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "exact": {
           "type": "boolean"
         },
         "selectedCount": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "riskCounts": {
           "type": "object",
@@ -67,25 +71,30 @@
           "properties": {
             "safe": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "caution": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "dangerous": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "blocked": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           }
         },
         "skippedDirs": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       }
     },
@@ -142,11 +151,16 @@
         },
         "estimatedBytes": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "bytesKnown": {
+          "type": "boolean"
         },
         "modifiedMs": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 9007199254740991
         },
         "isSymlink": {
           "type": "boolean"
