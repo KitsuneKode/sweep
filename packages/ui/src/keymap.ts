@@ -163,6 +163,20 @@ export interface KeymapActions {
   submitPatternDraft?: () => void;
   /** Flash a one-line notice for a keypress that deliberately does nothing. */
   notify?: (message: string) => void;
+  /**
+   * Read state post-commit (flushes queued mutations first). ctx.state is the
+   * last *rendered* snapshot: a multi-key stdin drain (paste, tmux send-keys,
+   * SSH coalescing) runs several keys through one snapshot, so any branch
+   * that picks a row or pattern must read fresh or act on a stale cursor.
+   */
+  readState?: () => SweepUiState;
+  /**
+   * Whether the confirm dialog has painted long enough for its destructive
+   * keys to count as deliberate. Evaluated live at keypress time - a `y`/`t`
+   * byte in the same stdin drain as the dialog's opener is leftover burst,
+   * not an answer. Absent means "always armed" (tests, non-burst callers).
+   */
+  isConfirmArmed?: () => boolean;
 }
 
 export interface KeymapContext {
@@ -235,11 +249,19 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (pendingApply) {
+    // Consequential keys (confirm, mode flip) need the dialog to have been
+    // *seen*: a non-bracketed paste or scripted burst can carry y/t bytes
+    // that arrive while the dialog is milliseconds old. The arm check runs
+    // live at keypress time because the ctx snapshot predates the paint.
+    // Dismissal keys stay live - closing a dialog early is always safe,
+    // confirming early isn't.
+    const confirmUnarmed = actions.isConfirmArmed !== undefined && !actions.isConfirmArmed();
     if (key.name === "t") {
-      actions.toggleTrash?.();
+      if (!confirmUnarmed) actions.toggleTrash?.();
       return;
     }
     if (key.name === "y") {
+      if (confirmUnarmed) return;
       actions.setPendingApply(false);
       if (ctx.pendingSingle) {
         actions.confirmSingle?.();
@@ -315,9 +337,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "escape") {
-    // Walk back through narrowed views; esc NEVER quits the app.
-    const step = escapeStep(state);
-    if (step) actions.mutate(() => step);
+    // Walk back through narrowed views; esc NEVER quits the app. Decide on
+    // post-commit state AND re-derive the step inside the mutation - a step
+    // captured from the pre-burst snapshot would wholesale-replace fresh
+    // state, reverting selections the user made in the same drain.
+    const step = escapeStep(actions.readState?.() ?? state);
+    if (step) actions.mutate((s) => escapeStep(s) ?? s);
     else actions.notify?.("nothing to unwind: ctrl-c quits");
     return;
   }
@@ -371,7 +396,9 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.requestRescan();
       return;
     }
-    const { disabledPatterns, extraPatterns } = rescanConfigFromState(state);
+    const { disabledPatterns, extraPatterns } = rescanConfigFromState(
+      actions.readState?.() ?? state,
+    );
     actions.finalize({ type: "rescan", disabledPatterns, extraPatterns });
     return;
   }
@@ -467,7 +494,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (key.name === "space" || key.name === "return") {
-      const pattern = patternAtCursor(state);
+      const pattern = patternAtCursor(actions.readState?.() ?? state);
       if (pattern) actions.mutate((s) => togglePattern(s, pattern));
       return;
     }
@@ -476,9 +503,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (key.name === "d" || key.name === "x") {
-      const pattern = patternAtCursor(state);
+      const fresh = actions.readState?.() ?? state;
+      const pattern = patternAtCursor(fresh);
       if (!pattern) return;
-      if (state.catalogPatterns.includes(pattern)) {
+      if (fresh.catalogPatterns.includes(pattern)) {
         // Catalog rows toggle off instead of deleting - say so rather than
         // letting d look like a no-op.
         actions.notify?.("catalog entries toggle with space - d removes customs only");
@@ -558,7 +586,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     if (key.name === "return") {
       // Mouse clicks can park the cursor on a group header - enter there means
       // "fold this group" (same as space/l), never the destructive dialog.
-      const row = buildDisplayRows(state)[state.rowIndex];
+      // Read post-commit rows: a same-burst cursor move must not misclassify
+      // the row enter lands on.
+      const fresh = actions.readState?.() ?? state;
+      const row = buildDisplayRows(fresh)[fresh.rowIndex];
       if (row?.kind === "header") {
         actions.mutate((s) => toggleGroup(s, row.groupKey));
       } else {
@@ -571,7 +602,8 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       // Only open inspect when there's a real subject: the overlay doesn't
       // render without a candidate, but inspectOpen still traps every key -
       // an invisible modal is the worst trap in the app.
-      const row = buildDisplayRows(state)[state.rowIndex];
+      const fresh = actions.readState?.() ?? state;
+      const row = buildDisplayRows(fresh)[fresh.rowIndex];
       if (row?.kind === "item") {
         actions.setInspect?.(true);
       } else {
@@ -599,9 +631,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   if (key.name === "space") {
     // Blocked rows can't be queued - say so instead of silently swallowing
     // the keypress (the ⊘ mark alone doesn't explain why nothing happened).
-    const row = buildDisplayRows(state)[state.rowIndex];
+    const fresh = actions.readState?.() ?? state;
+    const row = buildDisplayRows(fresh)[fresh.rowIndex];
     if (row?.kind === "item") {
-      const candidate = state.candidates.find((c) => c.id === row.candidateId);
+      const candidate = fresh.candidates.find((c) => c.id === row.candidateId);
       if (candidate?.riskTier === "blocked") {
         actions.notify?.("⊘ protected path: blocked items can't be queued");
         return;

@@ -78,10 +78,51 @@ export async function openUiSession(): Promise<UiSession> {
    * that path is dead and `sweep ui` hangs with no way to exit. Reading ETX
    * (0x03) straight off stdin keeps a route out that does not depend on
    * anything above the renderer still working.
+   *
+   * ETX inside a bracketed paste is payload, not a quit chord - the markers
+   * (ESC[200~ / ESC[201~) are tracked across chunk boundaries so pasting
+   * binary-ish text can't kill the session. A truncated marker carries its
+   * prefix into the next chunk's scan.
    */
+  const PASTE_START = Buffer.from("\x1b[200~");
+  const PASTE_END = Buffer.from("\x1b[201~");
+  let inPaste = false;
+  let scanCarry = Buffer.alloc(0);
   const onStdinData = (chunk: Buffer | string) => {
-    const bytes = typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk;
-    if (!bytes.includes(0x03)) return;
+    const bytes = Buffer.concat([
+      scanCarry,
+      typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk,
+    ]);
+    scanCarry = Buffer.alloc(0);
+    let etxSeen = false;
+    let i = 0;
+    while (i < bytes.length) {
+      const byte = bytes[i];
+      if (byte === 0x1b && i + 6 <= bytes.length) {
+        if (bytes.subarray(i, i + 6).equals(PASTE_START)) {
+          inPaste = true;
+          i += 6;
+          continue;
+        }
+        if (bytes.subarray(i, i + 6).equals(PASTE_END)) {
+          inPaste = false;
+          i += 6;
+          continue;
+        }
+      }
+      if (byte === 0x03 && !inPaste) etxSeen = true;
+      i += 1;
+    }
+    // The tail could be a truncated marker. Carry only real marker prefixes -
+    // they never contain ETX, so no quit byte is ever rescanned or hidden.
+    for (let k = Math.min(5, bytes.length); k > 0; k--) {
+      const slice = bytes.subarray(bytes.length - k);
+      if (PASTE_START.subarray(0, k).equals(slice) || PASTE_END.subarray(0, k).equals(slice)) {
+        scanCarry = Buffer.from(slice);
+        break;
+      }
+    }
+    if (!etxSeen) return;
     // Defer: the same byte also reaches the keymap, where ctrl+c during an
     // apply means "stop the delete and stay". An immediate finish() would
     // sever the apply mid-syscall with no report and no history entry.

@@ -150,6 +150,13 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       throw new GuardrailError("sweep ui requires an interactive TTY (stdin and stdout).");
     }
+    // TERM=dumb can't render the ANSI/mouse stream the UI emits - raw escape
+    // bytes would paint garbage and "keypresses" arrive without sequences.
+    if (process.env.TERM === "dumb") {
+      throw new GuardrailError(
+        "sweep ui can't run on a dumb terminal (TERM=dumb) - use `sweep scan`/`sweep plan` instead.",
+      );
+    }
 
     // Native FFI for the TUI requires Bun; re-exec under Bun when on Node.
     ensureBunRuntimeForUi();

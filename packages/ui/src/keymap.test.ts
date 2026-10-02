@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import { handleKeymap, type KeymapActions, type KeymapContext } from "./keymap.js";
-import { createUiState, type SweepUiState } from "./state.js";
+import { createUiState, patternAtCursor, type SweepUiState } from "./state.js";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 
 function mockPlan(): ScanPlan {
@@ -527,5 +527,154 @@ describe("single-row apply (x/d)", () => {
     const actions = makeActions();
     handleKeymap(makeContext({ key: { name: "c", ctrl: true } }), actions);
     expect(actions.finalize).toHaveBeenCalledWith({ type: "abort" });
+  });
+
+  describe("input-burst freshness", () => {
+    // OpenTUI's ConcurrentRoot only commits reducer work at the next render, so
+    // a multi-key stdin drain (bracketed-less paste, tmux send-keys, SSH packet
+    // coalescing) runs every key through one committed snapshot. These tests pin
+    // that decisions which pick a row/pattern go through readState and that a
+    // fresh confirm can't be confirmed by the burst that opened it.
+
+    test("a y while the confirm is unarmed does not delete", () => {
+      const actions = makeActions();
+      actions.applyPlan = mock(() => {});
+      actions.isConfirmArmed = mock(() => false);
+      handleKeymap(makeContext({ key: { name: "y" }, pendingApply: true }), actions);
+      expect(actions.applyPlan).not.toHaveBeenCalled();
+      expect(actions.setPendingApply).not.toHaveBeenCalled();
+    });
+
+    test("an armed confirm accepts y normally", () => {
+      const actions = makeActions();
+      actions.applyPlan = mock(() => {});
+      actions.isConfirmArmed = mock(() => true);
+      handleKeymap(makeContext({ key: { name: "y" }, pendingApply: true }), actions);
+      expect(actions.applyPlan).toHaveBeenCalledTimes(1);
+    });
+
+    test("a y with no arm check (test harnesses, legacy callers) still confirms", () => {
+      const actions = makeActions();
+      actions.applyPlan = mock(() => {});
+      handleKeymap(makeContext({ key: { name: "y" }, pendingApply: true }), actions);
+      expect(actions.applyPlan).toHaveBeenCalledTimes(1);
+    });
+
+    test("an unarmed confirm swallows t but never dismissal keys", () => {
+      const armed = makeActions();
+      armed.toggleTrash = mock(() => {});
+      armed.isConfirmArmed = mock(() => false);
+      handleKeymap(makeContext({ key: { name: "t" }, pendingApply: true }), armed);
+      expect(armed.toggleTrash).not.toHaveBeenCalled();
+
+      const dismiss = makeActions();
+      dismiss.isConfirmArmed = mock(() => false);
+      handleKeymap(makeContext({ key: { name: "n" }, pendingApply: true }), dismiss);
+      expect(dismiss.setPendingApply).toHaveBeenCalledWith(false);
+    });
+
+    /** Capture the last fn handed to mutate so tests can apply it directly. */
+    const lastMutateFn = (mutateMock: ReturnType<typeof mock>) =>
+      mutateMock.mock.calls.at(-1)![0] as (s: SweepUiState) => SweepUiState;
+
+    test("escape re-derives the unwind on committed state, not the snapshot", () => {
+      const stale = createUiState(mockPlan());
+      const committed = { ...stale, filter: "dist" };
+      const actions = makeActions();
+      const mutateMock = mock((fn: (s: SweepUiState) => SweepUiState) => fn);
+      actions.mutate = mutateMock;
+      actions.readState = () => committed;
+      handleKeymap(makeContext({ key: { name: "escape" }, state: stale }), actions);
+      expect(mutateMock).toHaveBeenCalled();
+      const fn = lastMutateFn(mutateMock);
+      // Applied to a state carrying ANOTHER layer, that layer must unwind -
+      // a snapshot-derived step would have wholesale-replaced fresh state.
+      const deeper = { ...committed, scopeFilter: "apps" };
+      expect(fn(deeper).scopeFilter).toBeNull();
+      // And a state with nothing to unwind passes through unchanged.
+      expect(fn(stale)).toBe(stale);
+    });
+
+    test("two escapes in one drain unwind one layer each", () => {
+      const committed = {
+        ...createUiState(mockPlan()),
+        filter: "a",
+        scopeFilter: "apps" as const,
+      };
+      const actions = makeActions();
+      const mutateMock = mock((fn: (s: SweepUiState) => SweepUiState) => fn);
+      actions.mutate = mutateMock;
+      actions.readState = () => committed;
+      handleKeymap(makeContext({ key: { name: "escape" }, state: committed }), actions);
+      const fn = lastMutateFn(mutateMock);
+      const afterOne = fn(committed);
+      expect(afterOne.scopeFilter).toBeNull();
+      expect(afterOne.filter).toBe("a");
+      // Second esc commits on the post-step state and peels the next layer.
+      const afterTwo = fn(afterOne);
+      expect(afterTwo.filter).toBe("");
+    });
+
+    test("enter acts on the post-move row, not the pre-burst cursor", () => {
+      const stale = { ...createUiState(mockPlan()), rowIndex: 0 }; // header row
+      const committed = { ...stale, rowIndex: 1 }; // cursor already moved to item
+      const actions = makeActions();
+      actions.requestApply = mock(() => {});
+      actions.readState = () => committed;
+      handleKeymap(makeContext({ key: { name: "return" }, state: stale }), actions);
+      expect(actions.requestApply).toHaveBeenCalledTimes(1);
+      expect(actions.mutate).not.toHaveBeenCalled();
+    });
+
+    test("enter on a post-move header folds instead of opening a confirm", () => {
+      const stale = { ...createUiState(mockPlan()), rowIndex: 1 }; // item row
+      const committed = { ...stale, rowIndex: 0 }; // moved up onto the header
+      const actions = makeActions();
+      const mutateMock = mock((fn: (s: SweepUiState) => SweepUiState) => fn);
+      actions.mutate = mutateMock;
+      actions.requestApply = mock(() => {});
+      actions.readState = () => committed;
+      handleKeymap(makeContext({ key: { name: "return" }, state: stale }), actions);
+      expect(actions.requestApply).not.toHaveBeenCalled();
+      const fn = lastMutateFn(mutateMock);
+      expect(fn(committed).collapsedGroups.size).toBe(1);
+    });
+
+    test("i refuses to open inspect when the post-move row has no subject", () => {
+      const stale = { ...createUiState(mockPlan()), rowIndex: 1 };
+      const committed = { ...stale, rowIndex: 0 };
+      const actions = makeActions();
+      actions.setInspect = mock(() => {});
+      actions.notify = mock(() => {});
+      actions.readState = () => committed;
+      handleKeymap(makeContext({ key: { name: "i" }, state: stale }), actions);
+      expect(actions.setInspect).not.toHaveBeenCalled();
+      expect(actions.notify).toHaveBeenCalled();
+    });
+
+    test("patterns space toggles the row the cursor committed to", () => {
+      const stale = {
+        ...createUiState(mockPlan()),
+        focus: "patterns" as const,
+        patternIndex: 0,
+      };
+      const committed = { ...stale, patternIndex: 1 };
+      const actions = makeActions();
+      const mutateMock = mock((fn: (s: SweepUiState) => SweepUiState) => fn);
+      actions.mutate = mutateMock;
+      actions.readState = () => committed;
+      handleKeymap(makeContext({ key: { name: "space" }, state: stale }), actions);
+      expect(mutateMock).toHaveBeenCalled();
+      const fn = lastMutateFn(mutateMock);
+      // The toggle must hit the pattern at the committed index - deriving the
+      // name from the stale snapshot would flip the wrong row.
+      const expected = patternAtCursor(committed);
+      expect(expected).not.toBeNull();
+      const out = fn(committed);
+      expect(
+        out.disabledPatterns.has(expected!) !== committed.disabledPatterns.has(expected!) ||
+          out.extraPatterns.includes(expected!) !== committed.extraPatterns.includes(expected!),
+      ).toBe(true);
+    });
   });
 });

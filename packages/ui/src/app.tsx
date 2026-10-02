@@ -1,5 +1,11 @@
 import { bold, fg, StyledText, t } from "@opentui/core";
-import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
+import {
+  flushSync,
+  useKeyboard,
+  usePaste,
+  useRenderer,
+  useTerminalDimensions,
+} from "@opentui/react";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { basename, join } from "node:path";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
@@ -123,7 +129,10 @@ function styledContentFallback(message: string): ReactNode {
       <text content="" />
       <text content={sanitizeTerminalText(message)} fg={darkTheme.text} />
       <text content="" />
-      <text content="Press q or Ctrl+C to exit, then re-run with --no-ui." fg={darkTheme.textDim} />
+      <text
+        content="Press Ctrl+C to exit (the keymap died with this view)."
+        fg={darkTheme.textDim}
+      />
     </box>
   );
 }
@@ -491,21 +500,50 @@ export function SweepApp({
   initiallyScanning,
 }: SweepAppProps) {
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) => createUiState(p, init));
-  const [showHelp, setShowHelp] = useState(false);
+  const [showHelp, setShowHelpState] = useState(false);
   const [pendingApply, setPendingApplyState] = useState(false);
   // Non-null while the confirm dialog is scoped to one row (x/d): the same
   // dialog renders, but `y` applies only that candidate.
   const [pendingSingleId, setPendingSingleId] = useState<string | null>(null);
   // An in-session apply is running: keys trap (except ctrl-c = stop), and the
   // report merges back into the list instead of ending the session.
-  const [applying, setApplying] = useState<string | null>(null);
+  const [applying, setApplyingState] = useState<string | null>(null);
   const applyAbortRef = useRef<AbortController | null>(null);
-  const [showInspect, setShowInspect] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
+  const [showInspect, setShowInspectState] = useState(false);
+  const [scanError, setScanErrorState] = useState<string | null>(null);
   // One-line feedback for keys that deliberately do nothing (esc with nothing
   // left to unwind, enter on an empty queue, space on a blocked row). Cleared
   // by the next real state change so it never lingers past its context.
   const [notice, setNotice] = useState<string | null>(null);
+
+  /**
+   * Which overlay is live, tracked synchronously in a ref. useState/useReducer
+   * values only commit at render, so two keypresses inside one stdin drain
+   * (a paste burst, tmux send-keys, SSH packet coalescing) both see the
+   * pre-burst flags - `i`+`enter` would open inspect AND arm the confirm
+   * underneath it, letting an unseen `y` delete. The mask is written in the
+   * setter call itself, so a second open in the same drain sees the first.
+   */
+  type ModalKind = "help" | "confirm" | "inspect" | "scanError" | "applying";
+  const openModalsRef = useRef(new Set<ModalKind>());
+  const openModal = (kind: ModalKind): boolean => {
+    if (openModalsRef.current.size > 0) return false;
+    openModalsRef.current.add(kind);
+    if (kind === "confirm") confirmArmedAtRef.current = performance.now();
+    return true;
+  };
+  const closeModal = (kind: ModalKind): void => {
+    openModalsRef.current.delete(kind);
+  };
+  // A consequential confirm key must outlive the burst that opened the
+  // dialog. Arming happens on first paint (the effect below): a pasted or
+  // scripted `y` landing in the same stdin drain as the opener finds the
+  // dialog never rendered and is dropped, while a y after any paint - or
+  // 100ms with none, so a wedged frame can't deadlock the dialog - works.
+  // Read live by the keymap (isConfirmArmed) because ctx values bake at
+  // render and would carry the pre-paint timestamp past the effect.
+  const CONFIRM_ARM_MS = 100;
+  const confirmArmedAtRef = useRef(0);
 
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -531,6 +569,70 @@ export function SweepApp({
   // Pageup/pagedown step real pages once known; the estimate below seeds it.
   const viewportRowsRef = useRef<number | null>(null);
   stateRef.current = state;
+
+  // Modal setters keep the ref mask in sync. Key-opened overlays
+  // (help/inspect/confirm) refuse when another overlay is live so a burst
+  // can't arm an unseen confirm; push overlays (scanError/applying) preempt
+  // unconditionally - the keymap precedence already traps input under them.
+  const setShowHelp = (open: boolean) => {
+    if (open) {
+      if (!openModal("help")) {
+        setNotice("finish this dialog first");
+        return;
+      }
+      setShowHelpState(true);
+    } else {
+      closeModal("help");
+      setShowHelpState(false);
+    }
+  };
+  const setInspect = (open: boolean) => {
+    if (open) {
+      if (!openModal("inspect")) {
+        setNotice("finish this dialog first");
+        return;
+      }
+      setShowInspectState(true);
+    } else {
+      closeModal("inspect");
+      setShowInspectState(false);
+    }
+  };
+  const setPendingApply = (pending: boolean): boolean => {
+    if (pending) {
+      if (!openModal("confirm")) {
+        setNotice("finish this dialog first");
+        return false;
+      }
+      setPendingApplyState(true);
+    } else {
+      closeModal("confirm");
+      setPendingApplyState(false);
+      setPendingSingleId(null);
+    }
+    return true;
+  };
+  const setScanError = (message: string | null) => {
+    if (message === null) closeModal("scanError");
+    else openModalsRef.current.add("scanError"); // preemptor - must trap input
+    setScanErrorState(message);
+  };
+  const setApplying = (verb: string | null) => {
+    if (verb === null) closeModal("applying");
+    else openModalsRef.current.add("applying"); // preemptor
+    setApplyingState(verb);
+  };
+
+  /**
+   * Commit queued reducer mutations, then read post-commit state. Under
+   * ConcurrentRoot a dispatch only applies at the next render, so handlers
+   * that branch on state (which row is focused, is a scan running) must
+   * flush first or a same-drain burst decides on stale rows.
+   */
+  const readFreshState = (): SweepUiState => {
+    flushSync();
+    return stateRef.current;
+  };
 
   // Live-scan lifecycle: boot into the first generation, restart on rescan.
   const startScan = useCallback(() => {
@@ -626,7 +728,10 @@ export function SweepApp({
 
   const requestRescan = useCallback(() => {
     if (!scan) return;
-    const { disabledPatterns, extraPatterns } = rescanConfigFromState(stateRef.current);
+    // Flush queued mutations (pattern toggles in the same input burst) so the
+    // rescan actually scans what the user just toggled - otherwise r applies
+    // the pre-burst pattern set while the UI already shows the new one.
+    const { disabledPatterns, extraPatterns } = rescanConfigFromState(readFreshState());
     scan.syncPatterns(disabledPatterns, extraPatterns);
     dispatch({ type: "mutate", fn: resetForRescan });
     startScan();
@@ -649,7 +754,7 @@ export function SweepApp({
     // scheduling only.
     activeEngineRef.current = next;
     setActiveEngine(next);
-    const { disabledPatterns, extraPatterns } = rescanConfigFromState(stateRef.current);
+    const { disabledPatterns, extraPatterns } = rescanConfigFromState(readFreshState());
     scan.syncPatterns(disabledPatterns, extraPatterns);
     dispatch({ type: "mutate", fn: resetForRescan });
     startScan();
@@ -662,6 +767,13 @@ export function SweepApp({
   const showSidebar = dimensions.width >= 72;
 
   const mutate = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
+    // Every user-input mutation funnels here: keymap actions AND mouse paths
+    // (row clicks, wheel, scrollbar drag via onSeek). While an overlay is
+    // live, input belongs to it - a captured scrollbar drag surviving a
+    // modal open would otherwise keep moving a cursor nobody can see, and
+    // the next destructive key would land on the wrong row. Async dispatches
+    // (scan batches, apply merges) use `dispatch` directly and stay ungated.
+    if (openModalsRef.current.size > 0) return;
     setNotice(null);
     dispatch({ type: "mutate", fn });
   }, []);
@@ -683,17 +795,21 @@ export function SweepApp({
   );
 
   const requestApply = useCallback(() => {
-    if (state.scanning) {
+    // Branch on post-commit state: a same-burst toggle/selection key can be
+    // queued-but-unapplied, and gating on the stale snapshot either wrongly
+    // refuses ("nothing queued") or opens a confirm showing older counts.
+    const s = readFreshState();
+    if (s.scanning) {
       // The queue is a moving target while discovery streams: a confirm
       // dialog whose count grows under the user's eyes is a trap.
       setNotice("scan still running - wait or esc out");
       return;
     }
-    if (state.scanIncomplete) {
+    if (s.scanIncomplete) {
       setNotice("scan incomplete: press r to retry before applying or saving");
       return;
     }
-    if (summary.selectedCount === 0) {
+    if (getUiSummary(s).selectedCount === 0) {
       setNotice("nothing queued: space on a row queues it");
       return;
     }
@@ -701,7 +817,7 @@ export function SweepApp({
     // dangerous tiers. The dialog tones down (no red banner) when nothing
     // dangerous is queued, but it is always there.
     setPendingApply(true);
-  }, [summary, state.scanning, state.scanIncomplete]);
+  }, []);
 
   const focusPanel = useCallback(
     (focus: SweepUiState["focus"]) => {
@@ -716,20 +832,14 @@ export function SweepApp({
   const toggleTrash = useCallback(() => setTrashMode((current) => !current), []);
 
   const applyPlan = useCallback(() => {
+    // The plan payload carries the committed queue - applying the stale
+    // snapshot could delete rows queued/unqueued in the same burst as y.
     finalize({
       type: "apply",
-      plan: applyUiSelection(plan, state),
+      plan: applyUiSelection(plan, readFreshState()),
       ...(trashMode ? { trash: true } : {}),
     });
-  }, [finalize, plan, state, trashMode]);
-
-  // The keymap's dismiss path calls this for both dialog scopes - clearing
-  // the dialog always drops a single-row scope too, or a later y would apply
-  // a candidate the user stopped looking at.
-  const setPendingApply = useCallback((pending: boolean) => {
-    setPendingApplyState(pending);
-    if (!pending) setPendingSingleId(null);
-  }, []);
+  }, [finalize, plan, trashMode]);
 
   /**
    * `x`/`d` on a row: confirm an apply scoped to exactly that candidate.
@@ -737,7 +847,9 @@ export function SweepApp({
    * row under the cursor is not the row the engine would see.
    */
   const requestSingleApply = useCallback(() => {
-    const s = stateRef.current;
+    // Flush first: j+x in one stdin drain must scope the dialog to the row
+    // the cursor actually lands on, not the pre-move row.
+    const s = readFreshState();
     if (s.scanning) {
       setNotice("scan still running - wait or esc out");
       return;
@@ -757,13 +869,14 @@ export function SweepApp({
       return;
     }
     setPendingSingleId(candidate.id);
-    setPendingApplyState(true);
+    if (!setPendingApply(true)) setPendingSingleId(null);
   }, []);
 
   const confirmSingle = useCallback(() => {
     const id = pendingSingleId;
     setPendingSingleId(null);
     if (!id) return;
+    flushSync();
     const candidate = stateRef.current.candidates.find((c) => c.id === id);
     if (!candidate) {
       setNotice("row already left the list - nothing to delete");
@@ -844,25 +957,27 @@ export function SweepApp({
   const renderer = useRenderer();
 
   const exportPlan = useCallback(() => {
-    if (state.scanning || state.scanIncomplete) {
+    const s = readFreshState();
+    if (s.scanning || s.scanIncomplete) {
       setNotice("scan incomplete: wait or press r to retry before saving");
       return;
     }
-    if (summary.selectedCount === 0) {
+    if (getUiSummary(s).selectedCount === 0) {
       setNotice("nothing queued: space on a row queues it");
       return;
     }
     try {
-      const file = writePlanExport(applyUiSelection(plan, state), process.cwd());
+      const file = writePlanExport(applyUiSelection(plan, s), process.cwd());
       setNotice(`plan saved: ${sanitizeTerminalText(basename(file))} (sweep apply --plan)`);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       setNotice(`couldn't save plan: ${sanitizeTerminalText(reason)}`);
     }
-  }, [plan, state, summary.selectedCount]);
+  }, [plan]);
 
   const yankPath = useCallback(() => {
-    const candidate = getCurrentCandidate(state);
+    const s = readFreshState();
+    const candidate = getCurrentCandidate(s);
     if (!candidate) {
       setNotice("nothing under the cursor");
       return;
@@ -870,14 +985,27 @@ export function SweepApp({
     const copied = renderer.copyToClipboardOSC52(candidate.path);
     setNotice(
       copied
-        ? `copied ${sanitizeTerminalText(relativePath(state.targetDir, candidate.path))}`
+        ? `copied ${sanitizeTerminalText(relativePath(s.targetDir, candidate.path))}`
         : "this terminal does not accept clipboard writes (OSC 52)",
     );
-  }, [renderer, state]);
+  }, [renderer]);
 
   const applyVisual = useCallback(() => {
-    const result = applyVisualRange(stateRef.current);
-    dispatch({ type: "replace", state: result.state });
+    // The reducer fn computes the transition on committed state - a queued
+    // toggle in the same burst must be part of the range it applies. The
+    // result is side-channelled out so the notice matches what committed.
+    let result: ReturnType<typeof applyVisualRange> | undefined;
+    flushSync(() => {
+      dispatch({
+        type: "mutate",
+        fn: (s) => {
+          const r = applyVisualRange(s);
+          result = r;
+          return r.state;
+        },
+      });
+    });
+    if (!result) return;
     const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
     if (result.queued > 0) setNotice(`queued ${result.queued}${skipped}`);
     else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued}${skipped}`);
@@ -885,8 +1013,18 @@ export function SweepApp({
   }, []);
 
   const applyScopeToggle = useCallback(() => {
-    const result = toggleSidebarScopeSelection(stateRef.current);
-    dispatch({ type: "replace", state: result.state });
+    let result: ReturnType<typeof toggleSidebarScopeSelection> | undefined;
+    flushSync(() => {
+      dispatch({
+        type: "mutate",
+        fn: (s) => {
+          const r = toggleSidebarScopeSelection(s);
+          result = r;
+          return r.state;
+        },
+      });
+    });
+    if (!result) return;
     const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
     if (result.queued > 0) setNotice(`queued ${result.queued} in scope${skipped}`);
     else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued} in scope${skipped}`);
@@ -899,6 +1037,7 @@ export function SweepApp({
    * reject never enters state from the editor either.
    */
   const submitPatternDraft = useCallback(() => {
+    flushSync();
     const draft = stateRef.current.patternDraft.trim();
     if (!draft) {
       dispatch({ type: "mutate", fn: (s) => setPatternInput(s, null) });
@@ -930,7 +1069,7 @@ export function SweepApp({
    * it, shift-W overwrites deliberately.
    */
   const writeSweeprc = useCallback((overwrite: boolean) => {
-    const s = stateRef.current;
+    const s = readFreshState();
     const configPath = join(s.targetDir, ".sweeprc");
     try {
       const result = writeProjectSweeprc(configPath, sweeprcPayload(s), overwrite);
@@ -971,9 +1110,9 @@ export function SweepApp({
         applyPlan,
         requestRescan,
         toggleEngine,
-        toggleSort: () => dispatch({ type: "mutate", fn: toggleSortBy }),
+        toggleSort: () => mutate(toggleSortBy),
         dismissScanError: () => setScanError(null),
-        setInspect: setShowInspect,
+        setInspect,
         toggleTrash,
         exportPlan,
         yankPath,
@@ -985,9 +1124,15 @@ export function SweepApp({
         confirmSingle,
         abortApply,
         notify: setNotice,
+        readState: readFreshState,
+        isConfirmArmed: () => performance.now() - confirmArmedAtRef.current >= CONFIRM_ARM_MS,
       },
     );
   });
+
+  // Bracketed paste carrying an ETX byte is content, not ctrl+c - tell the
+  // runtime's deadman the chord was handled so a paste can't kill the session.
+  usePaste(() => noteCtrlCHandled());
 
   const inspectCandidate = useMemo(
     () => (showInspect ? getCurrentCandidate(state) : undefined),
@@ -997,8 +1142,15 @@ export function SweepApp({
   // The inspected candidate can disappear mid-overlay (rescan, filter change):
   // without this the overlay unmounts while inspectOpen keeps trapping keys.
   useEffect(() => {
-    if (showInspect && !inspectCandidate) setShowInspect(false);
+    if (showInspect && !inspectCandidate) setInspect(false);
   }, [showInspect, inspectCandidate]);
+
+  // Arm the confirm's destructive keys once the dialog has actually painted.
+  // The ref flips to -Inf so the keymap's age check passes immediately; the
+  // 100ms open-time window remains as the fallback if a frame never lands.
+  useEffect(() => {
+    if (pendingApply) confirmArmedAtRef.current = Number.NEGATIVE_INFINITY;
+  }, [pendingApply]);
 
   // The sidebar unmounts under a narrow terminal; focus must not survive
   // into a pane that no longer exists - the keymap does the same reconcile
@@ -1183,6 +1335,21 @@ export function SweepApp({
         ) : null}
       </box>
 
+      {/*
+        Overlay paint order mirrors keymap precedence so the overlay that owns
+        input is always the one on top: inspect < help < confirm < scanError
+        < applying. Stale flags can coexist for one drain (a modal opened in
+        the same burst as a scan error), and painting the higher-precedence
+        overlay last keeps "what you see" == "what owns the keys".
+      */}
+      {showInspect && inspectCandidate ? (
+        <InspectOverlay
+          tokens={tokens}
+          candidate={inspectCandidate}
+          queued={state.selectedIds.has(inspectCandidate.id)}
+          targetDir={state.targetDir}
+        />
+      ) : null}
       {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
       {pendingApply ? (
         pendingSingleCandidate ? (
@@ -1211,6 +1378,20 @@ export function SweepApp({
           />
         )
       ) : null}
+      {scanError ? (
+        <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
+          <text
+            // Engine errors arrive prefixed ("error: ...") - redundant inside a
+            // dialog already titled "scan error".
+            content={sanitizeTerminalText(scanError.replace(/^[Ee]rror:\s*/, ""))}
+            fg={tokens.text}
+          />
+          <text content="" />
+          <text
+            content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("esc"))} ${fg(tokens.textMuted)("dismiss")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
+          />
+        </Modal>
+      ) : null}
       {applying !== null ? (
         <Modal tokens={tokens} title=" applying " titleColor={tokens.info} width={52}>
           <text
@@ -1224,28 +1405,6 @@ export function SweepApp({
           />
           <text
             content={t`${bold(fg(tokens.text)("ctrl-c"))} ${fg(tokens.textMuted)("stop now - the report still lands")}`}
-          />
-        </Modal>
-      ) : null}
-      {showInspect && inspectCandidate ? (
-        <InspectOverlay
-          tokens={tokens}
-          candidate={inspectCandidate}
-          queued={state.selectedIds.has(inspectCandidate.id)}
-          targetDir={state.targetDir}
-        />
-      ) : null}
-      {scanError ? (
-        <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
-          <text
-            // Engine errors arrive prefixed ("error: ...") - redundant inside a
-            // dialog already titled "scan error".
-            content={sanitizeTerminalText(scanError.replace(/^[Ee]rror:\s*/, ""))}
-            fg={tokens.text}
-          />
-          <text content="" />
-          <text
-            content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("esc"))} ${fg(tokens.textMuted)("dismiss")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
           />
         </Modal>
       ) : null}
