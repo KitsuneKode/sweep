@@ -160,9 +160,11 @@ Sizes (`process_file`): `--apparent-size` uses `st_size` when
 allocated blocks "in 512-byte units" and notes it "may be smaller than
 `stx_size/512` when the file has holes." `du`'s `--apparent-size` text says
 apparent size is usually smaller but can be larger because of holes,
-fragmentation, and indirect blocks. A directory's own contribution is
-included; children are added on the way up (`duinfo_add` when depth
-decreases) unless `-S` / `--separate-dirs`. Post-order visit is `FTS_DP`.
+fragmentation, and indirect blocks. `system.h::usable_st_size` accepts regular files, symlinks and the POSIX
+shared-memory/typed-memory predicates; it excludes directories. Thus apparent
+mode contributes zero for directory metadata, whereas block mode may count it.
+Children are added on the way up (`duinfo_add` when depth decreases) unless
+`-S` / `--separate-dirs`. [Coreutils system.h](https://github.com/coreutils/coreutils/blob/master/src/system.h). Post-order visit is `FTS_DP`.
 `fts_read` is depth-first; `process_file`'s comment says it depends on that.
 
 `-x` cannot exclude a command-line argument. A later entry is excluded only
@@ -562,6 +564,29 @@ the function requires a directory. `unlink` / `unlinkat` without
   The JS engine cannot assume it matches Rust `remove_dir_all`.
 - The Rust docs quote is unversioned (`doc.rust-lang.org/std` on 2026-10-01)
   and says the `remove_dir_all` mechanism "may change."
-- `sweep` still has to choose apparent size vs allocated size, and whether
-  a hard-linked cache should show blocks once (honest disk use) or per name
-  (matches a naive sum, overstates what deletion frees).
+- Apparent byte accounting is now decided below. Allocated blocks and physical
+  reclaim remain separate product questions.
+
+## Remediation sizing contract
+
+Both engines now use per-artifact apparent byte accounting: regular file and
+symlink lengths, no directory metadata, and hard links deduplicated within one
+artifact. Totals across artifacts can count an inode more than once and are
+estimates rather than physical reclaim. JS batches use a bounded metadata walk;
+a single artifact may use GNU du 9.2 or newer. Other du implementations fall
+back to the metadata walk. GNU 9.2 introduced the directory/special-inode
+exclusion; this is documented in [the upstream NEWS](https://raw.githubusercontent.com/coreutils/coreutils/v9.12/NEWS)
+and present in [9.4 system.h](https://raw.githubusercontent.com/coreutils/coreutils/v9.4/src/system.h).
+
+## Foreground terminal cancellation
+
+A terminal interrupt can reach every process in its foreground group. The host
+therefore uses a separate Unix process group/session for controlled native apply,
+keeps its pipes and process reference, and sends cancellation over stdin. This
+follows the documented [Node detached-child behavior](https://nodejs.org/api/child_process.html#optionsdetached);
+the actual Bun behavior was verified with an owned process-group SIGINT test.
+On Windows, [SetConsoleCtrlHandler](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler)
+registers a static [HandlerRoutine](https://learn.microsoft.com/en-us/windows/console/handlerroutine).
+The small Windows-only unsafe call is required by the OS ABI; its callback
+sets a static atomic and retains no borrowed data or handles. Platform runtime
+qualification remains pending, including console close/logoff behavior.

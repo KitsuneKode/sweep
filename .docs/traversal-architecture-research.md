@@ -4,7 +4,9 @@ Execution lives in [.plans/traversal-engine.md](../.plans/traversal-engine.md).
 Section 6 of this note is not the schedule. Primary-source corrections are
 in [.reference/filesystem-traversal.md](../.reference/filesystem-traversal.md).
 
-- **Status:** Active Reference / Architectural Proposal
+- **Status:** Historical architectural proposal; current behavior and evidence
+  are in [.docs/architecture.md](architecture.md) and
+  [the benchmark report](../.plans/codebase-audit-2026-10-01/benchmarks.md).
 - **Author:** Antigravity Engineering
 - **Date:** 2026-10-01
 - **Target:** Rust Engine (`crates/sweep-*`) & JS Engine (`packages/core/src/scanner*`)
@@ -369,4 +371,7 @@ class GlobalAsyncQueue {
 
 The Rust backend is not fundamentally flawed; it was simply penalized by **a naive in-process recursive sizing walk that did 300,000 extra syscalls**, **Rayon task overhead on shallow directories**, **lock contention**, and **pipe serialization**.
 
-By adopting the architectural principles of `du` and `ripgrep`—trusting `d_type`, work-stealing concurrency, zero-allocation path handling, and selective hardlink tracking—the Rust backend will decisively outperform the JS engine across all tree sizes, while the JS engine itself will become significantly more resilient.
+The implemented bounded traversal and sizing changes improve large-tree results
+in local measurements. Rust does not outperform JS across every tree size or
+tail metric; subprocess overhead still matters on small workloads. Use the
+linked benchmark report for measured results and qualification limits.

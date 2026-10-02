@@ -43,7 +43,7 @@ CLI flags / config
 - `sweep apply --plan` - apply a saved plan with revalidation
 - `sweep ui` - OpenTUI interactive selection (TTY required)
 - `sweep inspect --plan` - read-only plan provenance and totals
-- `sweep stats` - cleanup history and lifetime reclaimed total
+- `sweep stats` - retained cleanup history and estimated removed/moved totals
 - `sweep completions` - static bash/zsh/fish completion scripts
 - `sweep init` / `sweep doctor` - scaffolding and environment checks
 
@@ -110,7 +110,15 @@ or truncated stream fails the scan instead of returning a partial executable
 plan. Cancellation and non-EPIPE request-write failures stop the child process.
 Engine emit is buffered: found/updated candidates batch into
 `candidates_found`/`candidates_updated` lines that flush on a 16 ms heartbeat,
-at 64 pending, immediately on the first batch, and once at completion.
+at 64 pending, immediately on the first batch, on cadence inside `push`,
+and once at completion. A scoped timer flushes sparse pending batches even
+when no later event arrives; it exits before the terminal completion event.
+
+`estimatedBytes` is honest about completeness: `bytesKnown === false` marks a
+partial lower bound when part of a subtree was unreadable (also the pre-size
+stub state during a stream). `summary.exact` is only true when exact sizing
+was requested and every candidate's size is known; the UI marks partial rows
+with `~`.
 
 The TUI reveals the first candidate immediately, then coalesces discoveries and
 size updates by ID over a 60 ms window, flushing at 200 pending candidates. Each
@@ -121,9 +129,35 @@ found artifacts. A failed generation stays incomplete after its error is
 dismissed; apply and plan export require successful finalization. A completed
 scan with skipped directories remains usable and is explicitly labeled partial.
 
+Rust discovery uses a fixed LIFO/steal worker pool (at most eight threads).
+Sizing uses one shared eight-thread Rayon pool across candidates and nested
+subdirectories. Its external dispatcher admits at most 32 candidate jobs,
+behind a 256-entry channel. Directory subdivision batches at 64 paths and
+three parallel levels; deeper sizing uses a local LIFO, and leaf metadata does
+not retain one allocated path per file. Hardlink dedupe is per artifact;
+visited-directory identities, admitted paths and candidates share explicit
+resource budgets with sizing. See [resource limits](resource-limits.md) for
+numbers, failure behavior and the difference between logical charges and RSS.
+Worker panic stops the walk and propagates failure; idle workers back off
+instead of spinning indefinitely. JS uses one global 16-worker traversal queue,
+incremental 32-entry enumeration, and 32-name metadata batches; abort listeners
+are removed on exit and sparse sizing batches flush on a 16 ms timer. Both
+engines use budgeted apparent metadata sizing, with no external `du` shortcut.
+Node uses native `opendir`; Bun's array-backed `fs.Dir` is bypassed with one
+bounded Node enumeration child per operation. Missing Node fails explicitly
+when selecting JS under Bun. Standalone builds embed a matching Rust engine,
+which is extracted lazily into an owned private temporary directory; help and
+version do not extract it. The npm distribution keeps Node-compatible bundles.
+Apparent mode counts file
+and symlink lengths once per inode inside each artifact; directory metadata is
+excluded. Cross-artifact totals remain estimates rather than physical reclaim. Both engines recheck queued directories and avoid intentionally
+following leaf symlinks; pathname-to-open races remain a documented limitation.
+
 Queue totals cache by candidate, selection and visible-list identity, so cursor
-moves and progress ticks reuse totals. Selection changes still rebuild grouping
-and sorting; row windowing alone does not bound the entire interaction cost.
+moves and progress ticks reuse totals. Selection changes reuse structural grouping and sorting and update selection
+counts. Scope indexing is iterative and separately bounded; exceeding its
+budget suppresses only the folder index with visible feedback, retaining every
+candidate in the main list. Rendering still needs real-terminal qualification.
 
 - Optimize for time-to-first-result.
 - Keep memory bounded.
@@ -162,14 +196,34 @@ Both engines re-validate before deleting:
 - **Realpath containment** - a lexical check alone misses an ancestor swapped
   to a symlink after scanning (`proj/sub` → `/etc` would make `rm` recurse
   outside the target). Both engines canonicalize the target root and each
-  non-symlink candidate and require real containment. Symlink candidates are
-  exempt: they are unlinked, never followed.
+  non-symlink candidate and require real containment. Every candidate also has
+  its canonical parent checked for containment and VCS metadata. A symlink
+  leaf is unlinked without canonicalizing or following its target.
 - **Size ceiling** - `sweep apply --plan` enforces `maxSizeGB` just like the
   interactive flows; a saved plan is not a trusted lane around the cap
-  (`--force-large --yes` to bypass, matching `clean`).
+  (`--force-large --yes` to bypass, matching `clean`). Before destructive apply,
+  both engines refresh selected, revalidated, deduplicated entries using the
+  plan's sizing mode and refuse unknown totals or observations above the cap.
+  This is a pre-apply observation ceiling, not an atomic physical-reclaim cap:
+  concurrent changes after sizing remain possible. Preview totals stay estimates. Confirmation labels selected size, and
+  progress/summary report estimated removed or moved bytes rather than promised
+  physical reclaim.
 - **Interrupted deletes** - SIGINT during apply stops scheduling new work,
   lets in-flight removals finish, and reports exactly what was deleted
-  (exit 1). The Rust subprocess is terminated the same way.
+  (exit 1). Native apply uses an explicit plan/start/cancel NDJSON channel,
+  not process termination. On Unix its child runs in a separate process group
+  so terminal SIGINT reaches the host without killing the report writer. On
+  Windows a console handler sets the same atomic cancellation flag. It sends
+  begin/deleted events and a final report with
+  one outcome per unique selected ID: deleted, failed, covered by a completed
+  ancestor/duplicate operation, or unattempted. The host drains that report
+  before exit. A 30-second cancellation watchdog reports unknown outcomes if
+  force-kill is necessary. A process failure or malformed report after apply
+  begins also reports unknown outcomes; destructive operations are never
+  automatically retried.
+  Engines without this capability are refused before native apply starts;
+  upgrade the native package or explicitly choose JS. Scan cancellation still
+  terminates its read-only child.
 - **Plan files are untrusted** - `loadPlan` requires a regular file under
   256 MB, then validates against the ScanPlan schema. Engine apply reports
   are validated against the ApplyReport schema for the same reason:
@@ -200,7 +254,14 @@ failed, interrupted, trashDir). Best-effort: a failed write never fails the
 apply. `sweepConfigDir()` resolves `$XDG_CONFIG_HOME/sweep` (or
 `%APPDATA%/sweep`, else `~/.config/sweep`) - `SWEEP_CONFIG_DIR` overrides
 it entirely, which is how tests and `bun run dev` keep user state clean.
-`readHistory` tail-slices past 8 MB and skips malformed lines.
+`readHistory` opens and fstats the same regular handle, reading at most 8 MiB
+across the active log and newest archives. Symlinks and malformed/oversized
+records are rejected; POSIX files are private (0600). Rotation renames whole
+logs after 16 MiB to unique archives, retaining four, instead of rewriting a
+concurrently appended inode. Windows privacy follows the config directory ACL.
+Stats describe this retained window and estimated removed or moved bytes,
+not lifetime totals or measured physical reclaim. Best-effort history is not
+a crash-durable recovery journal.
 
 ### Terminal-output safety
 
@@ -211,3 +272,14 @@ escaped `ls -b`-style (`\xNN`, `\uNNNN`) by `sanitizeTerminalText` in
 builders, and guardrail/error messages (`printError` sanitizes centrally,
 keeping `\n`/`\t` for composed messages). A hostile `node_modules`-matching
 directory cannot inject ANSI into scan output, the TUI, or error text.
+
+### Selection and matcher costs
+
+UI rows cache ordering/group membership independently of selection. Selection
+changes reuse item rows and refresh header counts; queued/unqueued filters still
+recompute membership. Sidebar topology/order is cached per candidate generation
+and selected statistics use one postorder pass. Content caches are bounded.
+Glob question marks consume Unicode scalars in both engines, with Unicode
+lowercasing on case-insensitive platforms; pattern limits count scalars too.
+Native iterator/file-type errors count the directory as partially skipped once.
+Async pools stop claiming jobs on failure and drain admitted work before rejecting.

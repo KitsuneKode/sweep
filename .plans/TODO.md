@@ -1,6 +1,6 @@
 # TODO
 
-## In Progress
+## Done (earlier program)
 
 - [x] Execute the repo context cleanup plan in
       `.plans/repo-context-cleanup.md`
@@ -13,10 +13,15 @@
 
 ## Next
 
-- [ ] Execute [traversal engine](traversal-engine.md) — linear globs, a Rust
+- [x] Implement [codebase audit follow-ups](codebase-audit-2026-10-01/README.md) locally — native interruption/outcomes, large UI selection caching and history bounds. Platform/release qualification remains open.
+
+- [x] Implement [traversal engine](traversal-engine.md) locally — linear globs, a Rust
       sizer that can beat JS+`du` on one fat artifact, one walk queue per
       engine, then a truthful interrupted apply. Measure first. Do not start
       FFI or a `rustix` walk unless the size gate fails.
+- [ ] Finish [resource bounds and release qualification](resource-bounds-and-release.md):
+      scan/UI limits, stress evidence, release policy, real platform installers,
+      consoles and destructive-operation boundary qualification.
 - [x] Execute [TUI + core audit fixes](tui-audit/README.md) — modal viewport
       clamp, patterns pane, streaming queue + always-confirm apply, density
       pass, engine/guardrail edge cases. All leftovers in
@@ -29,7 +34,7 @@
       detection + `\`→`/` ignore normalization, engine exit-code parity,
       published `exports` → `dist/sweep-lib.js`, Rust legs in the win/mac CI
       matrix.
-- [ ] Execute [daily-driver overhaul](daily-driver-overhaul/master.md) — **unified
+- [x] Execute [daily-driver overhaul](daily-driver-overhaul/master.md) — **unified
       program**: Phase 0 catalog/hygiene → trust → TUI → streaming → orchestration →
       CLI → Rust → polish ([scope index](daily-driver-overhaul/README.md))
 - [x] Add a first `sweep ui` flow on top of the shared scan/plan/apply engine

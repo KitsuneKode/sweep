@@ -1,0 +1,492 @@
+{
+  "platform": "Linux",
+  "binarySha256": "717a98b75b33dbf3b961fe11aa3de86a241eb1dd5471e00f04574f9ddf8a9643",
+  "files": 100000,
+  "repeats": 5,
+  "fdSoftLimit": 64,
+  "rssAbortMb": 512,
+  "notes": "Sampled RSS includes the Bun host and native child; host UI rendering excluded. No forced GC. Warm cache. No leak or OOM-proof claim.",
+  "rows": [
+    {
+      "name": "js-flat-rescans",
+      "exit": 0,
+      "elapsedMs": 2772.7182939997874,
+      "sampledProcessTreePeakRssBytes": 138559488,
+      "summaries": [
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 567.593189,
+          "memory": {
+            "rss": 66658304,
+            "heapTotal": 9371648,
+            "heapUsed": 4635332,
+            "external": 3931570,
+            "arrayBuffers": 2457238
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 566.289664,
+          "memory": {
+            "rss": 68915200,
+            "heapTotal": 9406464,
+            "heapUsed": 3426389,
+            "external": 2162915,
+            "arrayBuffers": 515425
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 542.8515520000001,
+          "memory": {
+            "rss": 68653056,
+            "heapTotal": 9423872,
+            "heapUsed": 6739789,
+            "external": 5978594,
+            "arrayBuffers": 4323479
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 534.56592,
+          "memory": {
+            "rss": 69013504,
+            "heapTotal": 9424896,
+            "heapUsed": 11724713,
+            "external": 10538708,
+            "arrayBuffers": 8876969
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 527.3210910000003,
+          "memory": {
+            "rss": 69042176,
+            "heapTotal": 9425920,
+            "heapUsed": 5114236,
+            "external": 4260845,
+            "arrayBuffers": 2589161
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "js-wide-rescans",
+      "exit": 0,
+      "elapsedMs": 371.2444099946879,
+      "sampledProcessTreePeakRssBytes": 132435968,
+      "summaries": [
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 86.881783,
+          "memory": {
+            "rss": 58044416,
+            "heapTotal": 8017920,
+            "heapUsed": 3872700,
+            "external": 2143691,
+            "arrayBuffers": 423297
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 60.105002999999996,
+          "memory": {
+            "rss": 64991232,
+            "heapTotal": 8528896,
+            "heapUsed": 3872700,
+            "external": 2566988,
+            "arrayBuffers": 846594
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 60.76257199999998,
+          "memory": {
+            "rss": 67686400,
+            "heapTotal": 10481664,
+            "heapUsed": 5135094,
+            "external": 3444100,
+            "arrayBuffers": 1269891
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 64.430489,
+          "memory": {
+            "rss": 68603904,
+            "heapTotal": 11157504,
+            "heapUsed": 6426644,
+            "external": 4003462,
+            "arrayBuffers": 1693188
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 60.65297099999998,
+          "memory": {
+            "rss": 68718592,
+            "heapTotal": 11340800,
+            "heapUsed": 6426644,
+            "external": 4426759,
+            "arrayBuffers": 2116485
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-flat-rescans",
+      "exit": 0,
+      "elapsedMs": 512.0174679905176,
+      "sampledProcessTreePeakRssBytes": 48181248,
+      "summaries": [
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 101.24798700000001,
+          "memory": {
+            "rss": 41820160,
+            "heapTotal": 3000320,
+            "heapUsed": 3000320,
+            "external": 65839,
+            "arrayBuffers": 65839
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 98.350132,
+          "memory": {
+            "rss": 42344448,
+            "heapTotal": 3034112,
+            "heapUsed": 3034112,
+            "external": 131678,
+            "arrayBuffers": 131678
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 95.31105499999998,
+          "memory": {
+            "rss": 43261952,
+            "heapTotal": 3083264,
+            "heapUsed": 3083264,
+            "external": 197517,
+            "arrayBuffers": 197517
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 92.51780500000001,
+          "memory": {
+            "rss": 43261952,
+            "heapTotal": 3165184,
+            "heapUsed": 3165184,
+            "external": 263356,
+            "arrayBuffers": 263356
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 100000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 90.99910499999999,
+          "memory": {
+            "rss": 43393024,
+            "heapTotal": 3279872,
+            "heapUsed": 3279872,
+            "external": 329195,
+            "arrayBuffers": 329195
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-wide-rescans",
+      "exit": 0,
+      "elapsedMs": 70.57296903803945,
+      "sampledProcessTreePeakRssBytes": 56471552,
+      "summaries": [
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 11.788848000000002,
+          "memory": {
+            "rss": 47620096,
+            "heapTotal": 3936256,
+            "heapUsed": 3936256,
+            "external": 302812,
+            "arrayBuffers": 302812
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 6.198540000000001,
+          "memory": {
+            "rss": 50110464,
+            "heapTotal": 4969472,
+            "heapUsed": 4969472,
+            "external": 558932,
+            "arrayBuffers": 558932
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 5.6575460000000035,
+          "memory": {
+            "rss": 52338688,
+            "heapTotal": 5938176,
+            "heapUsed": 5938176,
+            "external": 815012,
+            "arrayBuffers": 815012
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 6.801362999999995,
+          "memory": {
+            "rss": 54571008,
+            "heapTotal": 6033408,
+            "heapUsed": 4282495,
+            "external": 2709521,
+            "arrayBuffers": 1065814
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "elapsedMs": 5.342478,
+          "memory": {
+            "rss": 55226368,
+            "heapTotal": 6035456,
+            "heapUsed": 4282495,
+            "external": 2965458,
+            "arrayBuffers": 1321751
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-slow-consumer",
+      "exit": 0,
+      "elapsedMs": 478.8838860113174,
+      "sampledProcessTreePeakRssBytes": 4472832,
+      "summaries": [
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "skippedDirs": 0,
+          "exact": true,
+          "elapsedMs": 213
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-native-budget-failure",
+      "exit": 2,
+      "elapsedMs": 7.40266201319173,
+      "sampledProcessTreePeakRssBytes": 1294336,
+      "summaries": [],
+      "error": "error: Scan resource limit exceeded (maxCandidates); scan is incomplete. Scan a smaller subtree."
+    }
+  ]
+}

@@ -14,15 +14,15 @@ engine, sharp CLI UX, and a Rust subprocess that honors the same protocol contra
 
 ## Phase status
 
-| Phase | Scope            | Status | Notes                                                                                                              |
-| ----- | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------ |
-| P0    | Monorepo hygiene | Done   | `lint-staged`, turbo fixture paths, workspace dep cleanup; publish moved to `apps/cli` (see packaging-restructure) |
-| P1    | Trust & safety   | Done   | Apply containment (JS + Rust), Windows guardrails/junctions, `blocked` tier via protected VCS paths                |
-| P2    | Streaming engine | Done   | Async scanner + hooks, async cleaner pool, batched `du`, `large-stream` benchmark, abort during sizing             |
-| P3    | React TUI        | Done   | `app.tsx` on `@opentui/react`, tests, risk filter, help overlay, dangerous/blocked selection guards                |
-| P4    | CLI UX           | Done   | Shared handlers, `--json`/`--quiet`/`--verbose`, doctor `EXIT.WARN`, global error handlers, no double-print        |
-| P5    | Rust parity      | Done   | Guardrails, streaming NDJSON, exact sizing, batched `du`, `SweepConfig` forwarding, apply containment tests        |
-| P6    | Daily-driver     | Done   | `sweep init`, `sweep clean`, richer doctor/help, docs refresh, optional-peer install story                         |
+| Phase | Scope            | Status | Notes                                                                                                                     |
+| ----- | ---------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| P0    | Monorepo hygiene | Done   | `lint-staged`, turbo fixture paths, workspace dep cleanup; publish moved to `apps/cli` (see packaging-restructure)        |
+| P1    | Trust & safety   | Done   | Apply containment (JS + Rust), Windows guardrails/junctions, `blocked` tier via protected VCS paths                       |
+| P2    | Streaming engine | Done   | Async scanner + hooks, async cleaner pool, in-process apparent sizing, `large-stream` benchmark, abort during sizing      |
+| P3    | React TUI        | Done   | `app.tsx` on `@opentui/react`, tests, risk filter, help overlay, dangerous/blocked selection guards                       |
+| P4    | CLI UX           | Done   | Shared handlers, `--json`/`--quiet`/`--verbose`, doctor `EXIT.WARN`, global error handlers, no double-print               |
+| P5    | Rust parity      | Done   | Guardrails, streaming NDJSON, exact sizing, in-process apparent sizing, `SweepConfig` forwarding, apply containment tests |
+| P6    | Daily-driver     | Done   | `sweep init`, `sweep clean`, richer doctor/help, docs refresh, optional-peer install story                                |
 
 ## Post-roadmap enhancements (also landed)
 
@@ -31,13 +31,11 @@ engine, sharp CLI UX, and a Rust subprocess that honors the same protocol contra
 
 ## Deferred backlog (not blocking roadmap completion)
 
-| Item                                                                  | Why deferred                                                 |
-| --------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Default engine `auto` when published Rust binaries are verified in CI | Trust: JS remains default (`--engine js`)                    |
-| Schema codegen as single source of truth for Rust + TS                | Hand-maintained schemas still pass contract tests            |
-| Windows CI contract matrix                                            | Guardrails implemented; no dedicated Windows runner yet      |
-| Desktop-scale memory caps / spill-to-disk streaming                   | Benchmark exists; no hard memory ceiling product requirement |
-| Rust apply concurrent deletes                                         | Sequential apply is correct; JS uses bounded pool            |
+| Item                                                   | Why deferred                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------------ |
+| Schema codegen as single source of truth for Rust + TS | Hand-maintained schemas still pass contract tests            |
+| Desktop-scale memory caps / spill-to-disk streaming    | Benchmark exists; no hard memory ceiling product requirement |
+| Rust apply concurrent deletes                          | Sequential apply is correct; JS uses bounded pool            |
 
 ## Verification
 

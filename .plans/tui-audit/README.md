@@ -1,6 +1,6 @@
 # TUI + core audit (2026-09-29)
 
-Status: implemented
+Status: done
 Scope: ui, engine, cli
 Created: 2026-09-29
 Updated: 2026-09-29

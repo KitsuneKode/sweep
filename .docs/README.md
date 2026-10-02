@@ -14,18 +14,21 @@ This directory is for durable internal project truth.
 
 ## Index
 
-| Document                                               | Purpose                                       |
-| ------------------------------------------------------ | --------------------------------------------- |
-| [architecture.md](architecture.md)                     | Layering, data flow, long-term decisions      |
-| [workspace-layout.md](workspace-layout.md)             | Directory map, packages, build/publish path   |
-| [engineering-principles.md](engineering-principles.md) | Priorities and single-source-of-truth table   |
-| [product-direction.md](product-direction.md)           | Product intent and UX stance                  |
-| [config.md](config.md)                                 | Implemented config resolution                 |
-| [ux-principles.md](ux-principles.md)                   | TUI design contract (keys, safety, streaming) |
-| [release.md](release.md)                               | npm + standalone binary distribution          |
-| [tooling.md](tooling.md)                               | Commands, Turborepo, CI                       |
-| [getting-started.md](getting-started.md)               | Install, dev, `npm link`                      |
-| [decision-log.md](decision-log.md)                     | Locked decisions with dates                   |
+| Document                                                                 | Purpose                                             |
+| ------------------------------------------------------------------------ | --------------------------------------------------- |
+| [architecture.md](architecture.md)                                       | Layering, data flow, long-term decisions            |
+| [workspace-layout.md](workspace-layout.md)                               | Directory map, packages, build/publish path         |
+| [engineering-principles.md](engineering-principles.md)                   | Priorities and single-source-of-truth table         |
+| [product-direction.md](product-direction.md)                             | Product intent and UX stance                        |
+| [config.md](config.md)                                                   | Implemented config resolution                       |
+| [ux-principles.md](ux-principles.md)                                     | TUI design contract (keys, safety, streaming)       |
+| [release.md](release.md)                                                 | npm + standalone binary distribution                |
+| [tooling.md](tooling.md)                                                 | Commands, Turborepo, CI                             |
+| [getting-started.md](getting-started.md)                                 | Install, dev, `npm link`                            |
+| [testing.md](testing.md)                                                 | How to run tests, engines, fixtures, benches        |
+| [resource-limits.md](resource-limits.md)                                 | Scan budgets and partial-scan reporting             |
+| [decision-log.md](decision-log.md)                                       | Locked decisions with dates                         |
+| [traversal-architecture-research.md](traversal-architecture-research.md) | Engine traversal research behind the current design |
 
 ## Rules
 

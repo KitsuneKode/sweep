@@ -1,9 +1,9 @@
 # Sweep codebase audit
 
-- **Status:** `planned` — audited; focused fixes implemented; open findings remain
+- **Status:** done — actionable code fixes verified; release qualification remains
 - **Scope:** `repo`, `engine`, `ui`, `security`, `performance`, `product`
 - **Created:** 2026-10-01
-- **Updated:** 2026-10-01
+- **Updated:** 2026-10-02
 - **Commit:** `uncommitted`
 - **Baseline:** `12c52b164ecef681151fa2f3faf15121b11ec047`
 
@@ -23,28 +23,60 @@ security certification. All deletion experiments used disposable temporary trees
 The initial baseline was `a42314e` with existing CLI/UI/doc edits. Other work
 landed `ea8da98`, `c90dddc`, and `12c52b1` during the audit; findings were refreshed
 against that state before implementation. Those commits are not audit-authored.
-The report's source references describe the final working tree and may drift.
+The original finding references describe the reviewed baseline. The status
+refresh below records which have since changed.
 
-## Implemented and verified in this audit
+## Status refresh after traversal continuation
 
-| Change                                               | Evidence                                                                                | Result                                                                                                                                                                                                                                                                                                          |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Drain native `du` stdout during execution            | `crates/sweep-fs/src/lib.rs`, test `du_drains_long_path_output_before_waiting_for_exit` | 50 empty artifacts with long paths stalled for 30.01 s before; the regression now completes in about 10 ms. Output remains capped and the 30 s timeout remains.                                                                                                                                                 |
-| Remove fixed 10 ms polling floor                     | `crates/sweep-fs/src/lib.rs`                                                            | Poll starts at 1 ms and backs off to 10 ms for long jobs. Repeated release-engine measurements are in the benchmark report.                                                                                                                                                                                     |
-| Protect canonical VCS parents for symlink leaves     | `packages/core/src/planner.ts`, `cleaner.ts`, `crates/sweep-engine/src/apply.rs`        | Both engines check the parent during revalidation and again at the destructive boundary, while leaving the leaf symlink target untouched. JS and Rust regression tests pass.                                                                                                                                    |
-| Validate and bound native scan streams               | `packages/core/src/ndjson.ts`, `rust-stream.ts`, `plan.ts`, `rust-engine.ts`            | UTF-8 line cap applies before newline; schema, start/finish order, candidate identity, size resolution and completion totals are checked. Malformed or truncated output fails instead of making a partial plan. Handler errors reject the request and terminate the child. Non-EPIPE stdin errors are surfaced. |
-| Restore real UI batching after first reveal          | `packages/ui/src/stream-batcher.ts`, `streaming.tsx`                                    | The first result is immediate; later upserts coalesce by ID over 60 ms or 200 pending candidates. The former `buffer.size === 1` branch flushed every arrival. Completion/error/abort clean up timers.                                                                                                          |
-| Keep scan failure persistent and make sizing visible | `packages/ui/src/state/store.ts`, `app.tsx`, `ReviewPane.tsx`                           | `N sizing` distinguishes unresolved sizes; dismissed failures stay `INCOMPLETE`. Apply and executable plan export require finalization. Successful retry recovers; completed scans with skipped dirs are explicitly partial.                                                                                    |
-| Cache queue summaries on their real inputs           | `packages/ui/src/state/store.ts`                                                        | Cursor and progress/timing frames reuse totals; dangerous count reuses the summary. Selection/filter changes still invalidate correctly.                                                                                                                                                                        |
-| Add reproducible streaming engine benchmark          | `packages/core/benchmarks/engine-comparison.ts`                                         | Alternating runs, raw samples, first result/size, empirical p50/p95/p99, heartbeat lag, and candidate/exact-byte parity.                                                                                                                                                                                        |
+Root HEAD advanced to `37012df` through another session. The requested worktree
+`traversal-engine` source remains at `3e458e8` and was reviewed without integration;
+[review](traversal-review.md) identifies its remaining cancellation/queue limits.
+
+- A01, A03 and A05 are addressed in the shared traversal diff: bounded matching,
+  global JS worker scheduling and native selected-ID HashSet lookup.
+- A07 is addressed locally: unreadable/missing/non-directory native roots fail
+  explicitly instead of returning a successful empty plan.
+- A08 is addressed with bytesKnown/partial totals across both engines and UI.
+  Native sizing now also marks iterator errors and retains non-UTF8 internal paths.
+- A09 is addressed with genuine JS/native sparse timers, not a cadence check
+  that requires another event. Jobs/timers/listeners are cleaned up on exits.
+- The authorized remediation implements A02/A06, A04 and A10–A17 locally.
+  Native outcome partitions/control cancellation, UI structural caching, bounded
+  private history, bounded identity-keyed probes, native ARM64 release checks,
+  doc gates, refreshed size observations, discovery error accounting, hard-link
+  scope and Unicode glob parity are now covered.
+- A12 still needs a successful hosted platform run. Filesystem-race, dependency
+  advisory, physical-reclaim and real-terminal qualification limits remain.
+  [Remediation evidence](remediation.md) owns the current completion status;
+  the issue table below records the audited baseline.
+
+The legacy native du drain/poll changes were superseded by in-process sizing
+in `37012df`; the 30-second pipe stall remains useful historical diagnosis, but
+those subprocess functions/tests are no longer the current implementation.
+
+## Implemented in this audit and continuation
+
+| Change                                               | Evidence                                                                         | Result                                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared native sizing pool and subdivision            | `sweep-fs`, `sweep-engine`, [benchmarks](benchmarks.md)                          | Eight sizing threads shared by candidates and child directories; 32 admitted jobs and a 256-entry channel. Nested 100k apparent median: Rust 47.30 ms / JS 139.15 ms.                                                                                                                                           |
+| Native worker failure and idle handling              | Panic regression and progressive-channel regression                              | Reproduced pending-counter hang; walkers stop and panic propagates. Idle workers back off rather than spinning through a slow tail.                                                                                                                                                                             |
+| Sparse size delivery and exit cleanup                | JS timer/listener regressions; native timer flush test                           | Updates reach the UI without waiting for another event or scan end; timers/owned jobs/listeners drain on exit.                                                                                                                                                                                                  |
+| Protect canonical VCS parents for symlink leaves     | `packages/core/src/planner.ts`, `cleaner.ts`, `crates/sweep-engine/src/apply.rs` | Both engines check the parent during revalidation and again at the destructive boundary, while leaving the leaf symlink target untouched. JS and Rust regression tests pass.                                                                                                                                    |
+| Validate and bound native scan streams               | `packages/core/src/ndjson.ts`, `rust-stream.ts`, `plan.ts`, `rust-engine.ts`     | UTF-8 line cap applies before newline; schema, start/finish order, candidate identity, size resolution and completion totals are checked. Malformed or truncated output fails instead of making a partial plan. Handler errors reject the request and terminate the child. Non-EPIPE stdin errors are surfaced. |
+| Restore real UI batching after first reveal          | `packages/ui/src/stream-batcher.ts`, `streaming.tsx`                             | The first result is immediate; later upserts coalesce by ID over 60 ms or 200 pending candidates. The former `buffer.size === 1` branch flushed every arrival. Completion/error/abort clean up timers.                                                                                                          |
+| Keep scan failure persistent and make sizing visible | `packages/ui/src/state/store.ts`, `app.tsx`, `ReviewPane.tsx`                    | `N sizing` distinguishes unresolved sizes; dismissed failures stay `INCOMPLETE`. Apply and executable plan export require finalization. Successful retry recovers; completed scans with skipped dirs are explicitly partial.                                                                                    |
+| Cache queue summaries on their real inputs           | `packages/ui/src/state/store.ts`                                                 | Cursor and progress/timing frames reuse totals; dangerous count reuses the summary. Selection/filter changes still invalidate correctly.                                                                                                                                                                        |
+| Add reproducible streaming engine benchmark          | `packages/core/benchmarks/engine-comparison.ts`                                  | Alternating runs, raw samples, first result/size, empirical p50/p95/p99, heartbeat lag, and candidate/exact-byte parity.                                                                                                                                                                                        |
 
 Focused tests include partial streams, malformed fields, oversized newline-free
 UTF-8 output, duplicate/out-of-order events, mismatched summaries, failed scan
 recovery, premature plan export, timer cleanup, and protected symlink parents.
 
-## Remaining findings, in recommended priority order
+## Original finding register, in recommended priority order
 
-Effort includes tests: S = hours, M = roughly a day, L = multiple days. Risk is
+Resolved rows remain here for traceability; use the status refresh above for
+current open work. Source line numbers below are baseline evidence, not current
+line guarantees. Effort includes tests: S = hours, M = roughly a day, L = multiple days. Risk is
 risk of the fix, not severity of the defect. HIGH confidence means code or a
 controlled experiment supports the claim; MED means a further platform or
 threat-model investigation is required.
@@ -54,7 +86,7 @@ threat-model investigation is required.
 | A01 | P1 security / p99   | JS glob translation creates exponential regex backtracking. One accepted short ignore pattern took 1181 ms for a single short basename in a controlled test; a larger permitted case exceeded 8 s. A project's config can freeze scan and UI feedback.                                                 | `packages/core/src/config.ts:382`, `scanner.ts:51`                                                                   | M      | MED: glob semantics/parity         | HIGH                           |
 | A02 | P1 correctness      | Rust interruption kills the process rather than stopping scheduling and returning exact completed/failed/unattempted work. Partial disk changes can occur without an exact report/history entry.                                                                                                       | `packages/core/src/rust-engine.ts:152`, `crates/sweep-engine-cli/src/main.rs:59`, `crates/sweep-engine/src/apply.rs` | L      | HIGH: destructive lifecycle        | HIGH                           |
 | A03 | P1 performance      | JS traversal's pool of 16 is recreated per directory. Nested sibling branches can create far more than 16 concurrent walkers; this is not a global resource limit. Broad/deep or slow filesystems can amplify memory, I/O and latency.                                                                 | `packages/core/src/scanner.ts:532`, `packages/core/src/async-pool.ts`                                                | L      | MED: scheduling/order/abort        | HIGH                           |
-| A04 | P2 UI p99           | Selection changes still reconstruct grouping/sorting/sidebar stats. At 50k candidates, the post-fix state pipeline's selection p95 is about 154 ms, excluding React/native rendering. Windowed rows do not eliminate upstream whole-list work.                                                         | `packages/ui/src/rows.ts:124`, `scope-tree.ts:64`, `scope-tree.ts:119`                                               | M–L    | MED: ordering and queue counts     | HIGH                           |
+| A04 | P2 UI p99           | Selection changes still reconstruct grouping/sorting/sidebar stats. At 50k candidates, the latest state pipeline's selection p95 is about 189 ms, excluding React/native rendering. Windowed rows do not eliminate upstream whole-list work.                                                           | `packages/ui/src/rows.ts:124`, `scope-tree.ts:64`, `scope-tree.ts:119`                                               | M–L    | MED: ordering and queue counts     | HIGH                           |
 | A05 | P2 performance      | Rust selection uses `Vec.contains` for each candidate, O(N×selected). Large saved plans pay quadratic work before deletion begins.                                                                                                                                                                     | `crates/sweep-engine/src/apply.rs:27`                                                                                | S      | LOW: set membership semantics      | HIGH                           |
 | A06 | P2 correctness      | Native apply adapter reconstructs deleted entries as every selected path absent from failures. Nested/duplicate candidates removed by native dedupe are counted as individual deletions by the host, unlike `report.deletedCount`.                                                                     | `packages/core/src/engine.ts:183`, native `deduplicate_nested_entries`                                               | M      | MED: report compatibility          | HIGH                           |
 | A07 | P2 parity / failure | Rust turns an unreadable root into a successful empty/partial scan with a skipped count; JS throws for the root. A failed root should not look like an ordinary empty scan to scripts.                                                                                                                 | `crates/sweep-fs/src/lib.rs:321`, `:325`; `packages/core/src/scanner.ts:474`                                         | M      | MED: exit-code compatibility       | HIGH                           |
@@ -65,6 +97,20 @@ threat-model investigation is required.
 | A12 | P2 release evidence | Native Linux ARM64 package is inspected but not executed (`verify: false`). ARM64 standalone CLI has its own runner, but that is a separate artifact and does not qualify this native package.                                                                                                         | `.github/workflows/native-engine-release.yml:43`; `.github/workflows/cli-binaries.yml:33`                            | M      | LOW: CI matrix                     | HIGH                           |
 | A13 | P3 CI / docs        | CI's TypeScript job calls Turbo directly, omitting root `check:docs`. Older roadmap/release docs still say JS default/no Windows Rust CI/four standalone targets despite current code/workflows. The old benchmark also suggests nonexistent `rust:build`.                                             | `.github/workflows/ci.yml:54`, `.plans/overhaul-roadmap.md:36`, `.docs/release.md`, `scripts/bench-engines.ts:226`   | S      | LOW                                | HIGH                           |
 | A14 | P2 design limit     | The apply size guard uses selected plan estimates, not a refreshed observation. Growth between scan and apply or hand-edited totals can bypass the intended size warning; exact sizing semantics differ from physical disk blocks. Decide whether this is a warning or an enforced current-data limit. | `packages/core/src/plan.ts:130`, `apps/cli/src/handlers/apply.ts:68`, `apply-plan.ts:33`                             | M–L    | HIGH: extra apply latency/contract | HIGH property; MED remediation |
+
+### Additional traversal/parity findings from this continuation
+
+| ID  | Priority              | Finding                                                                                                                                                                                                                          | Evidence and next step                                                                                                                                                                                               |
+| --- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A15 | P2 failure accounting | Discovery still uses read_dir.flatten, silently dropping errors yielded after the directory opened; failed file_type reads also skip entries without partial feedback.                                                           | `sweep-fs::scan_dir`; use an injectable iterator regression and record an incomplete-directory observation once per directory. Native sizing already handles these errors.                                           |
+| A16 | P2 byte parity        | Cross-artifact hard links have inconsistent accounting scopes: JS du deduplicates across a batch, while Rust deduplicates within each artifact. Two artifacts sharing one 1,000-byte inode reported JS 1,000 / Rust 2,000 bytes. | Disposable local probe, [results](edge-parity-results.jsonl); specify per-artifact apparent totals versus scan-wide unique-inode totals before changing batching. Never equate either with physical reclaim.         |
+| A17 | P2 matching parity    | JS '?' consumes UTF-16 units while Rust consumes Unicode scalar values. A one-character fox emoji directory is omitted by JS and matched by Rust; Unicode case folding also differs.                                             | Same probe: JS matched a/b, Rust matched a/b/emoji; define Unicode units and platform folding, then add shared matcher fixtures. A01's exponential backtracking is fixed, but matcher parity is not fully qualified. |
+
+Reproduce the two observed parity gaps with:
+
+```bash
+bun run packages/core/benchmarks/edge-parity.ts
+```
 
 Fix sketches: A01 uses a bounded matcher and parity tests; A02/A06 introduce
 explicit native apply outcomes and cooperative cancellation; A03/A09 use global
@@ -88,9 +134,12 @@ doc gate to CI; A14 needs a written policy before changing apply behavior.
   identity. A directory's own `modifiedMs` is not recursive activity: editing a
   nested file need not change its root mtime. Treat age as an own-entry timestamp,
   not proof an artifact is unused.
-- Scan latency benchmarks do not qualify apply throughput, cancellation latency,
-  peak RSS, cold caches, network/FUSE filesystems, permission-failure tails,
-  huge single directories, hardlink byte accounting, or physical disk reclaim.
+- Scan benchmarks now cover 20k/100k nested and flat artifacts, Linux apparent
+  byte parity, cross-directory hardlink regression and fresh-process resource
+  probes. The new seven-sample guarded apply benchmark is exploratory, and owned
+  cancellation regressions cover the signal/channel/watchdog boundaries. These
+  do not qualify production cancellation latency, aggregate peak RSS, leak
+  absence, cold caches, network/FUSE or physical disk reclaim.
 - macOS/Windows/ARM64 runtime behavior and real terminal/SSH/multiplexer sessions
   were not exercised locally. Existing CI configuration is not a hosted run result.
 - npm advisories were not obtained: the sandbox attempt failed DNS, and automatic
@@ -136,9 +185,8 @@ opt-in sharing rather than treating stars or scan speed as sufficient proof.
 
 ## Verification
 
-`bun run check` passed: 502 Bun tests, format/lint/typecheck and doc links.
-`bun run rust:check` passed. Release Rust build passed. Functional package
-preflight checks passed outside the sandbox; the publish gate correctly fails
-because source changes are uncommitted. Nothing was committed or published.
-A final refresh of verification after the last source refinement is recorded
-in the benchmark report/index when complete.
+[The remediation report](remediation.md#verification) owns the fresh full-gate
+results. The initial audit passed 502 Bun tests; subsequent traversal work passed
+518 and the pre-signal remediation gate passed 537. Later cancellation regressions
+and final gates supersede those snapshots. Benchmarks assert candidate and byte
+parity. No changes were committed or published by this remediation.

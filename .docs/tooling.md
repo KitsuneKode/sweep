@@ -57,15 +57,15 @@ and `clippy` in `rust-toolchain.toml`.
 
 #### Crate layout (not an antipattern)
 
-The Cargo workspace is five small crates (~900 lines total today):
+The Cargo workspace is five crates (~5.5k lines total today):
 
-| Crate              | Role                                            |
-| ------------------ | ----------------------------------------------- |
-| `sweep-types`      | Protocol types aligned with `packages/protocol` |
-| `sweep-errors`     | Structured error codes                          |
-| `sweep-fs`         | Directory walk and sizing helpers               |
-| `sweep-engine`     | Scan/plan/apply library (no I/O framing)        |
-| `sweep-engine-cli` | Thin `sweep-engine` binary + parity tests       |
+| Crate              | Role                                                  |
+| ------------------ | ----------------------------------------------------- |
+| `sweep-types`      | Protocol types aligned with `packages/protocol`       |
+| `sweep-errors`     | Structured error codes                                |
+| `sweep-fs`         | Directory walk, glob matching, sizing, budgets        |
+| `sweep-engine`     | Scan/plan/apply library (no I/O framing)              |
+| `sweep-engine-cli` | `sweep-engine` NDJSON binary shipped via npm packages |
 
 This is a normal Rust split: library vs CLI, types/errors/fs at the edges. It is
 slightly more granular than a two-crate setup would require at current size, but

@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-02",
+  "state": "local uncommitted remediation; no merge, publication or deployment",
+  "rootHead": "37012dfa9daf31c16cf88a79e767eebf7a9f109b",
+  "worktreeHead": "3e458e8e7b2ecf8b93114cd6b775bfe4d2bf97f5",
+  "nativeReleaseSha256": "58b79434b9812a9a7b80c25c47fd20cb993870d5dbab67bada00d4577d5c4f52",
+  "checks": {
+    "bun run check": {
+      "status": "passed",
+      "bunTests": 542,
+      "packages": {
+        "protocol": 16,
+        "display": 4,
+        "core": 208,
+        "cli": 20,
+        "ui": 246,
+        "integration": 48
+      },
+      "tasks": 45
+    },
+    "bun run rust:check": {
+      "status": "passed",
+      "tests": 66,
+      "tasks": 8
+    },
+    "cargo clippy --workspace --all-targets --locked -- -D warnings": {
+      "status": "passed"
+    },
+    "bun run engine:build": {
+      "status": "passed"
+    },
+    "bun run build": {
+      "status": "passed"
+    },
+    "bun run engine:verify": {
+      "status": "passed"
+    },
+    "benchmark strict TypeScript and oxlint": {
+      "status": "passed"
+    },
+    "bun run preflight": {
+      "status": "rejected-uncommitted-source",
+      "exit": 1,
+      "functionalChecksPassed": 20,
+      "failedCheck": "no uncommitted changes to apps/ or packages/"
+    },
+    "owned Linux PTY": {
+      "status": "read-only smoke passed",
+      "actions": ["Rust scan", "selection toggle", "confirmation", "Esc cancel", "q exit"],
+      "exit": 1,
+      "artifactsPreserved": 4,
+      "limit": "small fixture before estimate wording correction; not platform qualification"
+    }
+  },
+  "qualificationPending": [
+    "hosted Windows/macOS/ARM64 runtime",
+    "Windows console events",
+    "cold caches/network filesystem/million-entry resource stress",
+    "pathname race and mount boundaries",
+    "dependency advisories",
+    "physical reclaim and leak proof",
+    "broader terminal/SSH/multiplexer UX"
+  ]
+}

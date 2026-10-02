@@ -1,9 +1,14 @@
 # Traversal engine
 
-- **Status:** `planned`
+- **Status:** `implemented locally` — phases 1–4 have local code and tests.
+  Native cooperative control, authoritative outcomes, bounded sizing/traversal,
+  sparse timers and failure accounting are implemented on main. Phase 5 is not
+  needed for the demonstrated traversal gate. Hosted OS/runtime and security
+  qualification remain; see [remediation](codebase-audit-2026-10-01/remediation.md).
+  The separate worktree at `3e458e8` was reviewed and was not merged.
 - **Scope:** `engine`, `performance`, `protocol`
 - **Created:** 2026-10-01
-- **Updated:** 2026-10-01
+- **Updated:** 2026-10-02
 - **Commit:** `uncommitted`
 
 Execution plan for both engines. Background research lives in
@@ -18,7 +23,7 @@ UI selection cost (A04) and history (A10) stay in
 One phase at a time in this worktree. Scanner, protocol, and `sweep-fs`
 overlap. Do not commit or publish without a separate instruction.
 
-## What is wrong
+## Original problems
 
 Rust loses on a large tree because sizing one fat artifact is a sequential
 walk that allocates a `Utf8PathBuf` and calls `lstat` per child
@@ -37,7 +42,10 @@ stop backtracking. Audit A01.
 Rust apply looks up each selected id with `Vec::contains` (`apply.rs`). JS
 already uses a `Set`.
 
-## Decisions
+## Original implementation decisions
+
+The current contract in [.docs/architecture.md](../.docs/architecture.md) includes
+subsequent per-artifact hardlink and portable sizing refinements.
 
 These are settled. Do not reopen them inside a phase.
 
@@ -83,7 +91,8 @@ These are settled. Do not reopen them inside a phase.
    Always `readdir`. `DT_UNKNOWN` means stat.
 8. **Globs stay `*` and `?`.** No globstar. Match results for existing tests
    stay the same, including `*` matching `/` inside path ignore patterns.
-   Implementation is an exact `Set` plus a linear DP, not a regex. Reject
+   Implementation is an exact `Set` plus bounded wildcard matching, without
+   backtracking regexes. Reject
    patterns longer than 128 characters at config load.
 9. **Plan candidate order is sorted by path** before ids are compared in
    snapshots. Do not change the id algorithm. Stream tests assert
@@ -224,20 +233,22 @@ commands pass.
 
 ## Phase 4 — Stop a Rust apply without losing the report
 
-Audit A02. No new delete parallelism.
+A02/A06 implemented locally. No new delete parallelism.
 
-- On SIGINT/SIGTERM, stop taking new candidates. Let in-flight
-  removals finish. Directory candidates use `remove_dir_all`. Symlink
-  candidates stay `unlink`. Write an `ApplyReport` whose deleted, failed,
-  and unattempted sets partition the selection.
-- The host must not SIGKILL first. The existing 250 ms kill in
-  `terminateEngine` has to wait long enough for that report, or the engine
-  has to flush the report on the signal before exit.
-- JS already stops scheduling and reports what finished. Tests cover the
-  same partition on the Rust path with a disposable tree.
+- An explicit portable plan/start/cancel control channel stops further scheduling
+  while the running removal finishes. Initial EOF/malformed start fails before
+  deletion. Begin/deleted feedback streams during work; the final report carries
+  deleted, failed, covered and unattempted outcomes for every unique selected ID.
+- The host drains the report. A 30-second cancellation watchdog reports unknown
+  outcomes after force-kill, without destructive retry. Old engines lacking this
+  capability are refused before apply; the user can explicitly choose JS.
+- Regression tests cover pre-abort, duplicates, nested coverage, conflicting
+  types, live cancellation and a closed initial channel. Size guards refresh
+  observations before removal. CLI counts/history use actual operation outcomes.
 
-**Done when:** an interrupted Rust apply has a schema-valid report and a
-history line that matches that report.
+**Local gate:** schema-valid interrupted reports and matching callbacks/history
+pass. Hosted Windows/macOS/ARM64 and stuck-filesystem qualification remain
+release requirements.
 
 ## Phase 5 — Unix `fstatat` only if phase 2 missed the gate
 
@@ -274,3 +285,24 @@ part of `check`.
 Quote a result with the machine, warm or cold cache, binary profile, and
 fixture shape. diskus's 10× cold-cache figure is that author's laptop, not
 a sweep target.
+
+## Terminal cancellation qualification
+
+The root bridge now starts controlled apply in a separate Unix process group.
+An owned foreground-process-group SIGINT test verifies that the host cancels
+through the channel and drains the native outcome report. Windows installs a
+console callback that only sets a static atomic; actual Windows console behavior
+still needs execution on that platform. Forced cancellation of a deliberately
+stuck child passes the 30-second unknown-outcomes watchdog regression. Crashes
+and invalid output after begin also produce an explicit unknown-outcomes error.
+
+## Resource-bounds follow-up (2026-10-02)
+
+The old exclusion on switching JS away from `du` is superseded for resource
+safety by [resource bounds and release qualification](resource-bounds-and-release.md).
+External sizing cannot enforce the shared inode budget. Current apparent scans
+use metadata batching; the new benchmark records the tradeoff. Phase 4 controlled
+apply and Phase 0 fat/wide evidence already exist locally; neither source nor
+evidence is committed. Phase 5 syscall sizing remains deferred because the
+performance gate passed. Deletion race/mount qualification is a separate safety
+question, not a reason to add speculative sizing FFI.

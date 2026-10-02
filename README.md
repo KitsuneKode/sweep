@@ -81,7 +81,7 @@ sweep doctor --json     # config + environment + dry-scan report
 | `sweep ui`                    | OpenTUI interactive picker (TTY required)        |
 | `sweep apply --plan <path>`   | Apply a saved JSON plan                          |
 | `sweep inspect --plan <path>` | Show a plan's provenance and totals - no apply   |
-| `sweep stats`                 | Cleanup history + total reclaimed space          |
+| `sweep stats`                 | Retained history + estimated cleanup bytes       |
 | `sweep init`                  | Create a starter `.sweeprc`                      |
 | `sweep doctor`                | Validate config, check tooling, dry-scan preview |
 | `sweep completions <shell>`   | Print completion script for bash, zsh, or fish   |
@@ -316,7 +316,9 @@ future scans automatically.
 
 **History:** every apply appends to `history.jsonl` in the sweep config dir
 (`~/.config/sweep`, `%APPDATA%\sweep` on Windows; `SWEEP_CONFIG_DIR` overrides).
-`sweep stats` shows the lifetime total.
+`sweep stats` shows totals from retained history, capped to the newest 8 MiB.
+Bytes are plan estimates for completed removals or trash moves, not a physical
+disk-reclaim measurement or a lifetime counter.
 
 ---
 

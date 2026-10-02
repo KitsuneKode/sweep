@@ -1,0 +1,842 @@
+{
+  "date": "2026-10-02T06:03:00.922Z",
+  "runtime": "1.4.2",
+  "os": "linux",
+  "arch": "x64",
+  "cpu": "13th Gen Intel(R) Core(TM) i5-13450HX",
+  "binary": "/home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine",
+  "binarySha256": "58b79434b9812a9a7b80c25c47fd20cb993870d5dbab67bada00d4577d5c4f52",
+  "fixtureParent": "/home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures",
+  "du": {
+    "fat": {
+      "bytes": 12800000,
+      "elapsedMs": 123.29120200000011
+    },
+    "flat": {
+      "bytes": 12800000,
+      "elapsedMs": 107.60911800000031
+    }
+  },
+  "resources": [
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "js",
+      "rssKiB": 41032,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts js /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/fat false /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.08\n\tSystem time (seconds): 0.10\n\tPercent of CPU this job got: 104%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.18\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 41032\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3784\n\tVoluntary context switches: 122\n\tInvoluntary context switches: 17\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "js",
+      "rssKiB": 40892,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts js /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/fat false /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.07\n\tSystem time (seconds): 0.12\n\tPercent of CPU this job got: 104%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.18\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 40892\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3749\n\tVoluntary context switches: 120\n\tInvoluntary context switches: 19\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "rust",
+      "rssKiB": 38724,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts rust /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/fat false /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.09\n\tSystem time (seconds): 0.13\n\tPercent of CPU this job got: 276%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.08\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 38724\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3583\n\tVoluntary context switches: 512\n\tInvoluntary context switches: 30\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "rust",
+      "rssKiB": 38076,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts rust /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/fat false /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.09\n\tSystem time (seconds): 0.13\n\tPercent of CPU this job got: 264%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.08\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 38076\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3521\n\tVoluntary context switches: 510\n\tInvoluntary context switches: 160\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "js",
+      "rssKiB": 55704,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts js /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/fat true /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.51\n\tSystem time (seconds): 0.78\n\tPercent of CPU this job got: 142%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.91\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 55704\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 7058\n\tVoluntary context switches: 406216\n\tInvoluntary context switches: 315\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "js",
+      "rssKiB": 56260,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts js /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/fat true /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.56\n\tSystem time (seconds): 0.78\n\tPercent of CPU this job got: 141%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.95\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 56260\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 7111\n\tVoluntary context switches: 406419\n\tInvoluntary context switches: 414\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "rust",
+      "rssKiB": 38552,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts rust /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/fat true /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.04\n\tSystem time (seconds): 0.10\n\tPercent of CPU this job got: 297%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 38552\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3553\n\tVoluntary context switches: 497\n\tInvoluntary context switches: 179\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "rust",
+      "rssKiB": 38648,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts rust /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/fat true /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.11\n\tPercent of CPU this job got: 304%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 38648\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3545\n\tVoluntary context switches: 462\n\tInvoluntary context switches: 150\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "flat",
+      "exact": false,
+      "engine": "js",
+      "rssKiB": 40908,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts js /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/flat false /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.09\n\tSystem time (seconds): 0.06\n\tPercent of CPU this job got: 104%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.14\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 40908\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11037\n\tVoluntary context switches: 122\n\tInvoluntary context switches: 8\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "flat",
+      "exact": false,
+      "engine": "js",
+      "rssKiB": 40840,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts js /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/flat false /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.06\n\tSystem time (seconds): 0.08\n\tPercent of CPU this job got: 104%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.14\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 40840\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11023\n\tVoluntary context switches: 129\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "flat",
+      "exact": false,
+      "engine": "rust",
+      "rssKiB": 38748,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts rust /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/flat false /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.04\n\tSystem time (seconds): 0.07\n\tPercent of CPU this job got: 107%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.11\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 38748\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3560\n\tVoluntary context switches: 134\n\tInvoluntary context switches: 2\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "flat",
+      "exact": false,
+      "engine": "rust",
+      "rssKiB": 38212,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts rust /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/flat false /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.07\n\tPercent of CPU this job got: 105%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.11\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 38212\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3541\n\tVoluntary context switches: 163\n\tInvoluntary context switches: 11\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "flat",
+      "exact": true,
+      "engine": "js",
+      "rssKiB": 84064,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts js /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/flat true /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.53\n\tSystem time (seconds): 0.71\n\tPercent of CPU this job got: 144%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.86\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 84064\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 15921\n\tVoluntary context switches: 399814\n\tInvoluntary context switches: 276\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "flat",
+      "exact": true,
+      "engine": "js",
+      "rssKiB": 82728,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts js /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/flat true /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.48\n\tSystem time (seconds): 0.76\n\tPercent of CPU this job got: 142%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.87\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 82728\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 15012\n\tVoluntary context switches: 399884\n\tInvoluntary context switches: 306\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "flat",
+      "exact": true,
+      "engine": "rust",
+      "rssKiB": 38900,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts rust /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/flat true /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.08\n\tPercent of CPU this job got: 106%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.11\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 38900\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3597\n\tVoluntary context switches: 163\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "flat",
+      "exact": true,
+      "engine": "rust",
+      "rssKiB": 38920,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun /home/kitsunekode/Projects/cli-tools/sweep/packages/core/benchmarks/engine-resource-sample.ts rust /home/kitsunekode/Projects/cli-tools/sweep/target/benchmark-fixtures/sweep-benchmark-ekTurn/flat true /home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.08\n\tPercent of CPU this job got: 105%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.11\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 38920\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3573\n\tVoluntary context switches: 137\n\tInvoluntary context switches: 29\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    }
+  ],
+  "resourceMethod": "Separate fresh Bun processes using the same streaming APIs, measured with GNU time -v. Max RSS is per-process high-water accounting, not the sum of simultaneous host, Rust and du RSS; includes startup. Does not prove absence of leaks.",
+  "samples": 7,
+  "warmups": 2,
+  "method": "Alternating engines; warm filesystem cache; API scan-to-plan including Rust spawn, NDJSON and JS planning; no CLI startup, rendering, apply, cold-cache or memory measurement. p99 is empirical nearest rank, not a production guarantee. maxLag uses a 5 ms heartbeat and misses stalls shorter than a scan.",
+  "scenarios": [
+    {
+      "name": "fat",
+      "candidates": 1,
+      "files": 100000
+    },
+    {
+      "name": "flat",
+      "candidates": 1,
+      "files": 100000
+    }
+  ],
+  "rows": [
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 12800000,
+      "total": {
+        "p50": 120.76,
+        "p95": 125.91,
+        "p99": 125.91
+      },
+      "first": {
+        "p50": 0.55,
+        "p95": 0.86,
+        "p99": 0.86
+      },
+      "sized": {
+        "p50": 120.55,
+        "p95": 125.73,
+        "p99": 125.73
+      },
+      "maxLag": {
+        "p50": 0.18,
+        "p95": 1.44,
+        "p99": 1.44
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 12800000,
+      "total": {
+        "p50": 25.98,
+        "p95": 27.02,
+        "p99": 27.02
+      },
+      "first": {
+        "p50": 2.23,
+        "p95": 2.57,
+        "p99": 2.57
+      },
+      "sized": {
+        "p50": 25.47,
+        "p95": 26.38,
+        "p99": 26.38
+      },
+      "maxLag": {
+        "p50": 0.12,
+        "p95": 0.59,
+        "p99": 0.59
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 12800000,
+      "total": {
+        "p50": 943.34,
+        "p95": 1781.95,
+        "p99": 1781.95
+      },
+      "first": {
+        "p50": 0.26,
+        "p95": 0.48,
+        "p99": 0.48
+      },
+      "sized": {
+        "p50": 943.18,
+        "p95": 1781.76,
+        "p99": 1781.76
+      },
+      "maxLag": {
+        "p50": 0.07,
+        "p95": 1.12,
+        "p99": 1.12
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 12800000,
+      "total": {
+        "p50": 17.06,
+        "p95": 30.61,
+        "p99": 30.61
+      },
+      "first": {
+        "p50": 1.56,
+        "p95": 2.43,
+        "p99": 2.43
+      },
+      "sized": {
+        "p50": 16.8,
+        "p95": 29.94,
+        "p99": 29.94
+      },
+      "maxLag": {
+        "p50": 0.07,
+        "p95": 0.72,
+        "p99": 0.72
+      }
+    },
+    {
+      "scenario": "flat",
+      "exact": false,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 12800000,
+      "total": {
+        "p50": 110.15,
+        "p95": 115.86,
+        "p99": 115.86
+      },
+      "first": {
+        "p50": 0.29,
+        "p95": 0.4,
+        "p99": 0.4
+      },
+      "sized": {
+        "p50": 110.02,
+        "p95": 115.71,
+        "p99": 115.71
+      },
+      "maxLag": {
+        "p50": 0.1,
+        "p95": 0.23,
+        "p99": 0.23
+      }
+    },
+    {
+      "scenario": "flat",
+      "exact": false,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 12800000,
+      "total": {
+        "p50": 78.55,
+        "p95": 82.92,
+        "p99": 82.92
+      },
+      "first": {
+        "p50": 1.35,
+        "p95": 1.67,
+        "p99": 1.67
+      },
+      "sized": {
+        "p50": 77.99,
+        "p95": 82.53,
+        "p99": 82.53
+      },
+      "maxLag": {
+        "p50": 0.14,
+        "p95": 1,
+        "p99": 1
+      }
+    },
+    {
+      "scenario": "flat",
+      "exact": true,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 12800000,
+      "total": {
+        "p50": 946.93,
+        "p95": 1693.06,
+        "p99": 1693.06
+      },
+      "first": {
+        "p50": 0.26,
+        "p95": 0.68,
+        "p99": 0.68
+      },
+      "sized": {
+        "p50": 946.75,
+        "p95": 1692.87,
+        "p99": 1692.87
+      },
+      "maxLag": {
+        "p50": 1.88,
+        "p95": 8.55,
+        "p99": 8.55
+      }
+    },
+    {
+      "scenario": "flat",
+      "exact": true,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 12800000,
+      "total": {
+        "p50": 82.91,
+        "p95": 121.27,
+        "p99": 121.27
+      },
+      "first": {
+        "p50": 1.77,
+        "p95": 2.43,
+        "p99": 2.43
+      },
+      "sized": {
+        "p50": 82.32,
+        "p95": 120.26,
+        "p99": 120.26
+      },
+      "maxLag": {
+        "p50": 0.18,
+        "p95": 0.87,
+        "p99": 0.87
+      }
+    }
+  ],
+  "raw": {
+    "fat-estimated": {
+      "js": [
+        {
+          "total": 124.24989000000005,
+          "first": 0.7273020000000088,
+          "sized": 124.0671339999999,
+          "maxLag": 0.19624199999998382,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 119.54080799999997,
+          "first": 0.5530859999998938,
+          "sized": 119.3233929999999,
+          "maxLag": 0.1847339999999349,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 121.65008799999987,
+          "first": 0.7458400000000438,
+          "sized": 121.47137799999996,
+          "maxLag": 1.1551359999998567,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 125.90885599999979,
+          "first": 0.48611000000005333,
+          "sized": 125.72841399999993,
+          "maxLag": 0.1409880000001067,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 116.908367,
+          "first": 0.4468939999997019,
+          "sized": 116.62253199999986,
+          "maxLag": 1.4406679999997323,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 116.99452299999984,
+          "first": 0.49379899999985355,
+          "sized": 116.78832199999988,
+          "maxLag": 0.1718660000001364,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 120.76111300000002,
+          "first": 0.8637389999998959,
+          "sized": 120.55471799999987,
+          "maxLag": 0.0816290000002482,
+          "count": 1,
+          "bytes": 12800000
+        }
+      ],
+      "rust": [
+        {
+          "total": 26.523928999999953,
+          "first": 2.23355400000014,
+          "sized": 26.019299000000046,
+          "maxLag": 0.4336789999999837,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 25.97733500000004,
+          "first": 2.256648999999925,
+          "sized": 25.471817999999985,
+          "maxLag": 0.3604239999999663,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 27.020570000000134,
+          "first": 2.0781070000000454,
+          "sized": 26.382790999999997,
+          "maxLag": 0.11955800000009731,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 25.551766000000043,
+          "first": 2.4309500000001663,
+          "sized": 24.763232000000016,
+          "maxLag": 0.0812869999999748,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 26.197987000000012,
+          "first": 2.5725149999998393,
+          "sized": 25.70159599999988,
+          "maxLag": 0.5934650000003785,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 24.57188700000006,
+          "first": 1.79175400000031,
+          "sized": 24.02495799999997,
+          "maxLag": 0.118453000000045,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 25.283608999999615,
+          "first": 1.7864309999999932,
+          "sized": 24.61776699999973,
+          "maxLag": 0.07841899999993984,
+          "count": 1,
+          "bytes": 12800000
+        }
+      ]
+    },
+    "fat-exact": {
+      "js": [
+        {
+          "total": 902.6861640000006,
+          "first": 0.1976490000006379,
+          "sized": 902.5379990000001,
+          "maxLag": 0.030208000000129687,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 918.992201,
+          "first": 0.2977570000002743,
+          "sized": 918.8524829999997,
+          "maxLag": 0.042747000000417756,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 901.6966869999997,
+          "first": 0.19899600000007922,
+          "sized": 901.5488420000001,
+          "maxLag": 0.06753399999979592,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 1504.172681,
+          "first": 0.20906699999977718,
+          "sized": 1503.9820840000011,
+          "maxLag": 0.5833910000001197,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 1781.9464019999996,
+          "first": 0.27329199999985576,
+          "sized": 1781.7594740000004,
+          "maxLag": 0.6312120000002324,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 1591.1419640000004,
+          "first": 0.4769290000003821,
+          "sized": 1590.9432810000017,
+          "maxLag": 1.1220219999995606,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 943.3351709999988,
+          "first": 0.2567399999988993,
+          "sized": 943.1752980000001,
+          "maxLag": 0.03035199999976612,
+          "count": 1,
+          "bytes": 12800000
+        }
+      ],
+      "rust": [
+        {
+          "total": 17.05821299999934,
+          "first": 1.6327030000002196,
+          "sized": 16.79562199999964,
+          "maxLag": 0.06661600000006729,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 16.425948000000062,
+          "first": 0.9772910000001502,
+          "sized": 16.0978640000003,
+          "maxLag": 0.07447400000000926,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 16.33674399999836,
+          "first": 1.3401349999985541,
+          "sized": 16.020368999999846,
+          "maxLag": 0.10618199999953504,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 17.132266000000527,
+          "first": 1.4084970000003523,
+          "sized": 16.888592000001154,
+          "maxLag": 0.07096300000011979,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 30.211871999999858,
+          "first": 2.4323199999998906,
+          "sized": 29.421818999999232,
+          "maxLag": 0.41418999999950756,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 30.614778999999544,
+          "first": 2.3074720000004163,
+          "sized": 29.943161000001055,
+          "maxLag": 0.7225410000010015,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 15.374778999999762,
+          "first": 1.5558710000004794,
+          "sized": 14.993465999999898,
+          "maxLag": 0.06995899999856192,
+          "count": 1,
+          "bytes": 12800000
+        }
+      ]
+    },
+    "flat-estimated": {
+      "js": [
+        {
+          "total": 109.42422700000316,
+          "first": 0.3865010000008624,
+          "sized": 109.29883600000176,
+          "maxLag": 0.15892400000302587,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 115.85757599999852,
+          "first": 0.28532199999972363,
+          "sized": 115.71291399999973,
+          "maxLag": 0.16911899999831803,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 105.62073600000076,
+          "first": 0.40369899999859626,
+          "sized": 105.49559399999998,
+          "maxLag": 0.0872849999977916,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 106.18054199999824,
+          "first": 0.2823819999975967,
+          "sized": 106.05881999999838,
+          "maxLag": 0.09839800000190735,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 110.71720099999948,
+          "first": 0.35978899999827263,
+          "sized": 110.57628999999724,
+          "maxLag": 0.06829800000195974,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 110.4465139999993,
+          "first": 0.24293399999805843,
+          "sized": 110.33390599999984,
+          "maxLag": 0.2255650000006426,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 110.1484500000006,
+          "first": 0.24817199999961304,
+          "sized": 110.02372599999944,
+          "maxLag": 0.09011199999804376,
+          "count": 1,
+          "bytes": 12800000
+        }
+      ],
+      "rust": [
+        {
+          "total": 77.34009200000219,
+          "first": 1.4308110000019951,
+          "sized": 76.58213500000056,
+          "maxLag": 0.08675600000060513,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 80.3109970000005,
+          "first": 1.2781180000019958,
+          "sized": 79.7696410000026,
+          "maxLag": 0.13450599999850965,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 81.52309000000241,
+          "first": 1.3695600000028207,
+          "sized": 81.24465200000122,
+          "maxLag": 0.26312899999902584,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 78.33749900000112,
+          "first": 1.0849830000006477,
+          "sized": 77.73995500000092,
+          "maxLag": 1.0005730000011681,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 78.55237800000032,
+          "first": 1.3494360000004235,
+          "sized": 77.99377299999833,
+          "maxLag": 0.14434699999765144,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 77.60146700000041,
+          "first": 1.6749300000010408,
+          "sized": 76.85084500000085,
+          "maxLag": 0.18246500000168453,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 82.92215800000122,
+          "first": 1.2916729999997187,
+          "sized": 82.52942299999995,
+          "maxLag": 0.08317400000305497,
+          "count": 1,
+          "bytes": 12800000
+        }
+      ]
+    },
+    "flat-exact": {
+      "js": [
+        {
+          "total": 1693.0616709999995,
+          "first": 0.4303990000007616,
+          "sized": 1692.8724040000016,
+          "maxLag": 2.220314000001963,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 1589.5260339999986,
+          "first": 0.6820279999992636,
+          "sized": 1589.3768930000006,
+          "maxLag": 8.551543999998103,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 911.0967270000001,
+          "first": 0.260893999999098,
+          "sized": 910.9756879999986,
+          "maxLag": 1.1877150000000256,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 991.8632820000021,
+          "first": 0.2026140000016312,
+          "sized": 991.7167760000011,
+          "maxLag": 4.9635809999999765,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 946.930515,
+          "first": 0.294925999998668,
+          "sized": 946.7515519999979,
+          "maxLag": 1.881787999998778,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 909.2726480000019,
+          "first": 0.22119799999927636,
+          "sized": 909.0520949999991,
+          "maxLag": 1.6328280000016093,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 917.8823740000007,
+          "first": 0.259343000001536,
+          "sized": 917.7416230000017,
+          "maxLag": 1.1590890000006766,
+          "count": 1,
+          "bytes": 12800000
+        }
+      ],
+      "rust": [
+        {
+          "total": 121.27174499999819,
+          "first": 2.4269380000005185,
+          "sized": 120.26497499999823,
+          "maxLag": 0.17825099999754457,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 119.5171960000007,
+          "first": 2.351213000001735,
+          "sized": 118.783835000002,
+          "maxLag": 0.14314100000046892,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 83.82182799999646,
+          "first": 1.7671699999991688,
+          "sized": 83.33895999999731,
+          "maxLag": 0.14530899999954272,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 81.82300100000066,
+          "first": 1.4466730000021926,
+          "sized": 81.41298100000131,
+          "maxLag": 0.7235599999985425,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 81.30661400000099,
+          "first": 1.2963630000012927,
+          "sized": 80.82704999999987,
+          "maxLag": 0.8665949999995064,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 82.90949199999886,
+          "first": 2.0849569999991218,
+          "sized": 82.31995199999801,
+          "maxLag": 0.1267230000012205,
+          "count": 1,
+          "bytes": 12800000
+        },
+        {
+          "total": 77.7522379999973,
+          "first": 1.6042509999970207,
+          "sized": 77.10138000000006,
+          "maxLag": 0.6825669999998354,
+          "count": 1,
+          "bytes": 12800000
+        }
+      ]
+    }
+  }
+}

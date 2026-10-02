@@ -8,18 +8,18 @@ review, and catalog/`@types/bun` hygiene.
 
 ## Instruction plans (child files)
 
-| Plan                                                     | Phase | Status      | Scope         |
-| -------------------------------------------------------- | ----- | ----------- | ------------- |
-| [master.md](./master.md)                                 | —     | in_progress | cross-cutting |
-| [architecture-deepening.md](./architecture-deepening.md) | ref   | planned     | design        |
-| [repo-catalog-hygiene.md](./repo-catalog-hygiene.md)     | 0     | done        | repo          |
-| [trust-guardrails.md](./trust-guardrails.md)             | A     | done        | engine        |
-| [ui-review-pane.md](./ui-review-pane.md)                 | B     | done        | ui            |
-| [orchestration-seam.md](./orchestration-seam.md)         | C     | done        | cli           |
-| [streaming-engine.md](./streaming-engine.md)             | D     | done        | engine        |
-| [cli-output.md](./cli-output.md)                         | E     | done        | cli           |
-| [rust-engine-parity.md](./rust-engine-parity.md)         | G     | done        | engine        |
-| [daily-driver-polish.md](./daily-driver-polish.md)       | H     | done        | product       |
+| Plan                                                     | Phase | Status  | Scope         |
+| -------------------------------------------------------- | ----- | ------- | ------------- |
+| [master.md](./master.md)                                 | —     | done    | cross-cutting |
+| [architecture-deepening.md](./architecture-deepening.md) | ref   | planned | design        |
+| [repo-catalog-hygiene.md](./repo-catalog-hygiene.md)     | 0     | done    | repo          |
+| [trust-guardrails.md](./trust-guardrails.md)             | A     | done    | engine        |
+| [ui-review-pane.md](./ui-review-pane.md)                 | B     | done    | ui            |
+| [orchestration-seam.md](./orchestration-seam.md)         | C     | done    | cli           |
+| [streaming-engine.md](./streaming-engine.md)             | D     | done    | engine        |
+| [cli-output.md](./cli-output.md)                         | E     | done    | cli           |
+| [rust-engine-parity.md](./rust-engine-parity.md)         | G     | done    | engine        |
+| [daily-driver-polish.md](./daily-driver-polish.md)       | H     | done    | product       |
 
 ## Dependency graph
 

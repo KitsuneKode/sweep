@@ -1,9 +1,9 @@
 # Rust engine parity
 
-Status: planned
+Status: done
 Scope: engine
 Created: 2026-06-24
-Updated: 2026-06-24
+Updated: 2026-10-02
 Commit: uncommitted
 Parent: [master.md](./master.md)
 

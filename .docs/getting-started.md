@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [Bun](https://bun.sh) 1.4.2+ (matches `devEngines` in root `package.json`)
-- Node.js ≥ 18 (for preflight smoke tests and `npm link` consumers)
+- Node.js ≥ 18 (preflight, `npm link`, and bounded JS enumeration under Bun)
 - Rust toolchain (via rustup - `rust-toolchain.toml` pins stable + rustfmt +
   clippy). Required, not optional: Turborepo runs `cargo metadata` while
   discovering the Cargo workspace, so **every** `turbo run …` command - even
@@ -16,6 +16,22 @@ git clone https://github.com/KitsuneKode/sweep.git
 cd sweep
 bun install --frozen-lockfile   # required - links apps/cli and package workspaces
 ```
+
+For repeated local installs, Bun documents an optional shared virtual store:
+
+```toml
+# bunfig.toml (local opt-in)
+[install]
+linker = "isolated"
+globalStore = true
+```
+
+See [Bun's global store](https://bun.com/docs/pm/global-store). This changes
+dependency installation/storage, not traversal or UI latency. Workspace,
+patched and lifecycle-script dependencies can remain local. The repo does not
+enable it globally: qualify the install layout and shared cache on your machine
+before changing CI or deleting existing node_modules. No HTTP or SQLite runtime
+has been added for install or startup optimization.
 
 ## Daily development
 
@@ -72,9 +88,9 @@ cargo build -p sweep-engine-cli
 bun run dev -- scan . --engine rust --json
 ```
 
-The CLI defaults to `--engine js` for deterministic behavior. Use `--engine auto`
-only when you want Rust when a local debug binary exists (or `SWEEP_ENGINE_PATH`
-is set).
+The CLI defaults to `--engine auto`: an available Rust binary is preferred,
+otherwise it uses JS. Use `--engine js` to explicitly choose the reference
+engine, or `--engine rust` to require the native engine.
 
 ## Before opening a PR
 

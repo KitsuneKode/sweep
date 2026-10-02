@@ -204,10 +204,10 @@ empty.
 
 ## CI split
 
-| Workflow                        | When it runs                      | What it does                                                                                    |
-| ------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `.github/workflows/ci.yml`      | Every push/PR to `main`           | `fixtures:sync`, `turbo check`, `build`, `preflight`, and Rust                                  |
-| `.github/workflows/release.yml` | Push to `main` or manual dispatch | Changesets version PR or npm publish; native engine matrix only on version-bump publish commits |
+| Workflow                        | When it runs                      | What it does                                                                                                      |
+| ------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`      | Every push/PR to `main`           | `fixtures:sync`, `turbo check`, `build`, `preflight`, and Rust                                                    |
+| `.github/workflows/release.yml` | Push to `main` or manual dispatch | Changesets version PR or npm publish; native matrix required for an untagged version with no unapplied changesets |
 
 To smoke-test the native engine matrix without publishing, run the **Native engine release**
 workflow manually from GitHub Actions (`workflow_dispatch` on `native-engine-release.yml`).
@@ -220,7 +220,7 @@ regenerate with `bun run scripts/generate-parity-fixture.ts -- tests/fixtures/<n
 ## Engine latency benchmark
 
 Build the release binary, then compare the streaming APIs on generated small,
-wide and dense fixtures:
+wide, dense and nested single-artifact fixtures:
 
 ```bash
 bun run engine:build
@@ -228,13 +228,33 @@ bun run packages/core/benchmarks/engine-comparison.ts --samples 100 --warmups 3 
 ```
 
 `SWEEP_ENGINE_PATH` can pin a different binary. Runs alternate engine order,
-assert candidate and exact-byte parity, and record raw samples plus p50/p95/p99
+assert candidate and byte parity in both sizing modes, and record raw samples plus p50/p95/p99
 for completion, first discovery, first sized result, and a 5 ms event-loop
 heartbeat. Results use a warm filesystem cache and include Rust process startup
 and the native stream bridge. They exclude CLI startup, TUI rendering, apply,
 cold-cache behavior and memory measurement; an empirical p99 from 100 local
 samples is not a production latency guarantee. Use a quiet machine and report
 the runtime, CPU, platform, binary and fixture shape with any published result.
+
+Use `--scenarios fat,flat,wide --fat-files 100000` for scale qualification.
+`fat` distributes files into groups of 64 inside one artifact; `flat` puts every
+file directly in that artifact, where directory-level parallelism cannot help.
+To measure the project filesystem rather than `/tmp` (which may be tmpfs):
+
+```bash
+mkdir -p target/benchmark-fixtures
+bun run packages/core/benchmarks/engine-comparison.ts --scenarios fat,flat,wide --fat-files 20000 --fixture-parent target/benchmark-fixtures --samples 100 --warmups 3 --resource-samples 2 --output /tmp/sweep-large-bench.json
+```
+
+Linux records a separate `du -sb` reference for single-artifact scenarios and
+asserts apparent-byte parity. `--resource-samples` defaults to zero and requires
+Linux GNU `/usr/bin/time`; it runs separate fresh-process probes. Their maximum
+RSS includes startup and is per-process high-water accounting, not aggregate
+concurrent process memory or proof of no leaks. Temporary fixture creation and
+removal are excluded from scan timing. A binary SHA-256 identifies the measured
+release build. Runs with fewer than 100 samples are smoke/gate measurements;
+the reported nearest-rank p99 can equal the maximum and is not a p99 estimate
+with useful tail confidence.
 
 ## Seeded scenarios
 
@@ -246,3 +266,62 @@ bun run scripts/seed-fixture.ts -- --scenario monorepo
 
 [packages/test-fixtures/src/fixtures.ts](../packages/test-fixtures/src/fixtures.ts) wraps this for Bun tests; integration
 `seed-script.test.ts` verifies the script end-to-end.
+
+### Apply and remediation checks
+
+`packages/core/src/engine.test.ts` exercises duplicate/nested IDs, pre-abort,
+live native cancellation, closed initial control channels and changed-size
+ceilings on disposable trees. Packaged-engine release CI runs these tests on
+every native runner, including ARM64 and Windows. A configured workflow is not
+a successful hosted result. The probe timeout, bounded history tail, private
+rotation, Unicode globs and hard-link scopes have focused regressions too.
+
+```bash
+bun run packages/core/benchmarks/edge-parity.ts
+bun run packages/core/benchmarks/apply-comparison.ts --samples 7 --output /tmp/sweep-apply.json
+bun run packages/ui/benchmarks/state-pipeline.ts
+```
+
+Apply measurements include refreshed size guards, validation, native control
+startup and deletion; fixture creation/removal is excluded. Seven samples
+report exploratory medians/maxima, not qualified p99. UI state measurements
+exclude terminal rendering. See [remediation evidence](../.plans/codebase-audit-2026-10-01/remediation.md).
+
+## Resource and standalone qualification
+
+On Linux, use an owned fixture parent with enough space/inodes. `/tmp` quotas
+can be smaller than statvfs reports. The harness cleans up only its own tree:
+
+```bash
+bun run engine:build
+python3 scripts/resource-stress.py --files 100000 --repeats 5 --fixture-parent .plans --output /tmp/sweep-resources.json
+# Opt-in: approximately 4 GiB of filesystem blocks and a million inodes
+python3 scripts/resource-stress.py --files 1000000 --repeats 2 --fixture-parent .plans --output /tmp/sweep-million.json
+bun run packages/core/benchmarks/engine-comparison.ts --scenarios small,wide,fat,flat --fat-files 20000 --fixture-parent .plans --samples 100 --warmups 3 --output /tmp/sweep-latency.json
+```
+
+The harness limits descriptors to 64, samples combined host/child RSS with a
+512 MiB kill watchdog, repeats scans without forced GC, reads native streams
+slowly, and verifies explicit quota failure. The watchdog is test tooling, not
+a shipped memory cap. Tiny injected budget, cancellation, raw filename, deep
+scope and large ID group regressions also run in `bun run check` / `rust:check`.
+
+Dated evidence: [100k resource runs](../.plans/codebase-audit-2026-10-01/resource-stress-100k.json),
+[million-entry runs](../.plans/codebase-audit-2026-10-01/resource-stress-million.json),
+[latency samples](../.plans/codebase-audit-2026-10-01/engine-results-resource-bounds.json).
+The Bun JS measurement includes its Node enumeration worker startup/IPC.
+
+Standalone builds require a release Rust engine built on the same platform:
+
+```bash
+bun run scripts/build-standalone.ts "" target/sweep-bytecode
+bun run scripts/smoke-standalone.ts target/sweep-bytecode
+bun run scripts/build-standalone.ts "" target/sweep-plain --no-bytecode
+python3 scripts/bench-standalone.py --bytecode target/sweep-bytecode --plain target/sweep-plain --output /tmp/sweep-startup.json
+```
+
+The smoke scan empties PATH and checks candidate/byte parity. The startup
+comparison alternates 30 process launches after three warmups, measuring
+`--version` with the static UI import. It excludes native extraction and TTY
+rendering. [Local bytecode evidence](../.plans/codebase-audit-2026-10-01/standalone-bytecode.json)
+is an exploratory median/max comparison, not a portable speedup claim.

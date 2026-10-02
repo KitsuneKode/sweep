@@ -17,8 +17,8 @@ sweep/
 │   ├── ui/                # OpenTUI interactive mode (source only; bundled by CLI build)
 │   └── typescript-config/ # Shared tsconfig
 ├── native-packages/       # Platform npm package templates (not a workspace)
-├── crates/sweep-*/        # Rust engine experiment (Cargo workspace)
-├── tests/                 # Bun test suite
+├── crates/sweep-*/        # Rust native engine (Cargo workspace)
+├── tests/                 # Bun test suite (run via packages/integration-tests)
 ├── scripts/               # bundle, release, fixtures
 ├── turbo.json             # Task graph
 └── package.json           # Private root orchestrator
@@ -45,19 +45,21 @@ sweep/
 | `@kitsunekode/sweep-display`           | Bytes formatting, spinners, progressive scan output      |
 | `@kitsunekode/sweep-ui`                | OpenTUI app and selection state (bundled into CLI dist)  |
 | `@kitsunekode/sweep-typescript-config` | Base `tsconfig` for workspaces                           |
+| `@kitsunekode/sweep-integration-tests` | Thin workspace that runs `tests/` from the repo root     |
+| `@kitsunekode/sweep-test-fixtures`     | Fixture-seeding helpers used by tests and benchmarks     |
 
 ## Rust workspace
 
-| Crate              | Role                                         |
-| ------------------ | -------------------------------------------- |
-| `sweep-types`      | Shared Rust types aligned with protocol      |
-| `sweep-errors`     | Structured error codes                       |
-| `sweep-fs`         | Filesystem helpers                           |
-| `sweep-engine`     | Engine library                               |
-| `sweep-engine-cli` | `sweep-engine` binary for parity experiments |
+| Crate              | Role                                               |
+| ------------------ | -------------------------------------------------- |
+| `sweep-types`      | Shared Rust types aligned with protocol            |
+| `sweep-errors`     | Structured error codes                             |
+| `sweep-fs`         | Traversal, glob matching, sizing, resource budgets |
+| `sweep-engine`     | Scan, plan, and apply engine library               |
+| `sweep-engine-cli` | `sweep-engine` NDJSON binary shipped to npm        |
 
-CI runs Rust checks only when `crates/` or related paths change (see
-`.github/workflows/rust.yml`).
+CI runs Rust checks in `.github/workflows/ci.yml`; release binaries are built
+by `native-engine-release.yml` and `cli-binaries.yml`.
 
 ## Build and publish path
 

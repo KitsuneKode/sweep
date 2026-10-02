@@ -1,0 +1,2 @@
+{"case":"cross-artifact-hardlink","jsBytes":1000,"rustBytes":2000}
+{"case":"unicode-question","jsNames":["a","b"],"rustNames":["a","b","🦊"]}

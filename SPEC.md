@@ -43,7 +43,8 @@ is unsafe (no depth guard, follows into the wrong tree) and `npx rimraf` /
 6. Scan targetDir recursively
    - lstat entries, never follow symlinks
    - dedupe inode aliases (dev,ino), count unreadable dirs as skipped
-   - compute size estimates (du where available)
+   - compute size estimates (in-process metadata walk; unreadable subtrees
+     are flagged `bytesKnown: false` and `bytes` is a floor)
 7. Compile selection policy into explicit candidate ids
 8. If --dry-run / scan-only: print and exit 0
 9. If selected set empty: exit 0 with guidance
@@ -72,6 +73,17 @@ parity on the wire — same candidates, same order, same summary shape
 (`skippedDirs` is omitted at zero on both). Streaming `ScanEvent`s are emitted
 on `scan --json-stream` and consumed by the TUI.
 
+`ScanEntry.bytesKnown` (`bool`, optional) reports size completeness: `false`
+means part of the subtree was unreadable so `estimatedBytes` is a lower bound
+(shown as `~` in the UI); omitted/`true` means the size is complete. When any
+candidate is partial, `summary.exact` demotes to `false` even under `--exact`.
+
+`ApplyReport.outcomes` partitions every selected candidate into
+`deleted` / `failed` / `covered` (removed because it lived inside another
+deleted candidate — `coveredBy` names it) / `unattempted`. `interrupted: true`
+marks a report written after cancellation, when `unattempted` holds the
+entries that were never scheduled.
+
 ## Guardrails
 
 ### Hard-blocked `targetDir` (exit 2, not configurable)
@@ -97,7 +109,7 @@ on `scan --json-stream` and consumed by the TUI.
 
 ### Pattern safety (`assertSafePattern`)
 
-- No `/` at start, no `..`, no NUL, no whitespace; ≤256 chars per pattern.
+- No `/` at start, no `..`, no NUL, no whitespace; ≤128 chars per pattern.
 - Merged pattern lists cap at 512 entries.
 - Only names covered by a shipping-default pattern land the `safe` tier.
   Opt-in catalog names (`dist`, `build`, `out`, `coverage`, …) and custom

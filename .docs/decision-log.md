@@ -36,3 +36,27 @@
 - `.plans/` owns active planning and backlog.
 - `.docs/` owns stable internal truth.
 - `.reference/` owns supporting references.
+
+## Resource and release decisions (2026-10-02, locally implemented)
+
+- Use cumulative logical resource bounds and incremental metadata enumeration
+  in both engines. Stop oversized scans as incomplete. Remove the JS scan's
+  external `du` shortcut because its inode memory cannot share these bounds;
+  record the apparent-sizing tradeoff in benchmarks. See
+  [resource limits](resource-limits.md).
+- Bun 1.4.2's `fs.Dir` buffers full directory listings. Use a credit-driven Node
+  directory reader for the Bun JS path; never accept a Bun runtime pretending
+  to be Node. Direct Node scans retain native incremental `opendir`.
+- Standalone executables embed the matching host Rust engine as well as OpenTUI.
+  Enable ESM bytecode, disable runtime dotenv/bunfig autoloading, extract the
+  native engine lazily into a private owned directory, and smoke-test with an
+  empty PATH. Keep npm bundles compatible with Node. Cross-compilation of this
+  native asset requires a target runner, rather than embedding a host binary.
+- Keep Changesets' scoped npm package tag. The release workflow creates a
+  matching, immutable `vVERSION` alias for standalone downloads and dispatches
+  the binary workflow explicitly. Only the binary workflow creates the GitHub
+  release, avoiding duplicate package-tag and version-tag releases. Previews
+  are marked prerelease and never update the stable Homebrew formula.
+- Serialize publication without cancelling a running release. Require the full
+  matching native matrix in CI and explicit preview dist-tags. These workflow
+  changes require hosted qualification; no publication was performed locally.

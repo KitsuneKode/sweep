@@ -1,9 +1,9 @@
 # Sweep unified improvement plan (master)
 
-Status: in_progress
+Status: done
 Scope: product · ui · cli · engine · repo
 Created: 2026-06-24
-Updated: 2026-06-24
+Updated: 2026-10-02
 Commit: uncommitted (baseline `721dbdb`)
 
 **Canonical location:** `.plans/daily-driver-overhaul/` — this file is the single

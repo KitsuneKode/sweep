@@ -1,9 +1,9 @@
 # UI review pane — ghui / hunk parity
 
-Status: in_progress
+Status: done
 Scope: ui
 Created: 2026-06-24
-Updated: 2026-06-24
+Updated: 2026-10-02
 Commit: uncommitted
 Parent: [master.md](./master.md)
 
