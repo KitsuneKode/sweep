@@ -133,9 +133,29 @@ start can honestly do in-process: the engine probe memo is bypassed (a fresh
 `--version` spawn per resolution) and the page cache is dropped via
 `/proc/sys/vm/drop_caches` when the process is root. When the drop is not
 permitted the output says so - `drops:0/N` in the bench table, a `note:` on
-stderr for the CLI - so warm numbers never pose as cold. What it cannot do
-is un-warm JIT or module state; for process-cold numbers, spawn a fresh
-CLI per iteration.
+stderr for the CLI (and before the TUI mounts for `ui`, plus a `· cold`
+marker on the scan-complete notice) - so warm numbers never pose as cold.
+
+For real cold numbers - the ones a first-run user gets - run the
+drop-per-iteration harness as root:
+
+```bash
+sudo bun run scripts/bench-cold.ts ~/Projects                 # 5 cold runs
+sudo bun run scripts/bench-cold.ts ~/Projects --both          # cold vs warm
+sudo bun run scripts/bench-cold.ts ~/Projects --bin ./sweep   # standalone binary
+```
+
+Each run reports wall time (spawn + module load + scan + print - what the
+user waits for) and the engine's own `elapsedMs` from `scan_completed`.
+Trust the median. The manual equivalent for a single run:
+
+```bash
+sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches' && sweep scan ~/Projects --json-stream
+```
+
+What neither covers: JIT/module warmth beyond the spawned process (already
+cold per invocation), and macOS/Windows have no unprivileged drop
+(`purge`/admin tools needed).
 
 Runs are interleaved after one warmup each so page-cache bias lands evenly;
 the verdict line compares medians and the parity column hashes the sorted

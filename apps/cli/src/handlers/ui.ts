@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { ApplyReport, CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { CATALOG_PATTERNS, DEFAULT_PATTERN_SET } from "@kitsunekode/sweep-core/catalog";
+import { isColdRequested, tryDropPageCache } from "@kitsunekode/sweep-core/cold";
 import { GuardrailError, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
 import {
@@ -158,6 +159,19 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
 
     const selectionPolicy = resolveSelectionPolicy(opts);
     const engine = resolveEngineBackend(opts);
+
+    // Cold mode announces itself BEFORE the TUI takes the screen - the
+    // drop attempt inside a scan is silent by design, so without this a
+    // `sweep ui --cold` run gives no sign the mode is even armed. Rescans
+    // (`r`) still drop silently per-scan.
+    if (isColdRequested()) {
+      const drop = tryDropPageCache();
+      console.error(
+        drop.dropped
+          ? `cold: ${drop.detail}`
+          : `note: cold run - ${drop.detail}; scans may still hit warm cache`,
+      );
+    }
 
     const scanConfig = resolveScanConfig(targetDir, opts);
 

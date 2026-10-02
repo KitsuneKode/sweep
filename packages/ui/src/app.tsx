@@ -4,6 +4,7 @@ import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { basename, join } from "node:path";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
+import { isColdRequested } from "@kitsunekode/sweep-core/cold";
 import { writeProjectSweeprc } from "@kitsunekode/sweep-core/config";
 import { assertSafePattern } from "@kitsunekode/sweep-core/guardrails";
 import {
@@ -578,7 +579,7 @@ export function SweepApp({
               ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
               : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
           setNotice(
-            `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}`,
+            `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}${isColdRequested() ? " · cold" : ""}`,
           );
           dispatch({
             type: "mutate",
