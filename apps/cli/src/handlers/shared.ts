@@ -25,7 +25,7 @@ import {
   assertTargetDirectory,
   isSameResolvedPath,
 } from "@kitsunekode/sweep-core/guardrails";
-import { toCandidate } from "@kitsunekode/sweep-core/planner";
+import { resolveSelectedCandidates, toCandidate } from "@kitsunekode/sweep-core/planner";
 import { appendHistory } from "@kitsunekode/sweep-core/history";
 import {
   scanToPlanViaRust,
@@ -393,7 +393,7 @@ function freshTrashDir(targetDir: string): string {
 export async function executePlanDeletion(
   plan: ScanPlan,
   engine: EngineBackend,
-  options: { quiet?: boolean; trash?: boolean } = {},
+  options: { quiet?: boolean; trash?: boolean; maxSizeGB?: number; forceLarge?: boolean } = {},
 ): Promise<{
   report: ApplyReport;
   cleanResult: import("@kitsunekode/sweep-protocol").CleanResult;
@@ -404,20 +404,14 @@ export async function executePlanDeletion(
   // Re-assert the target guardrail here - not just in callers - so the trash
   // mkdir below can never run against a root a forged plan would fail on.
   assertSafeCwd(plan.targetDir);
-  const selectedIds = new Set(plan.selectedCandidateIds);
-  const selected = plan.candidates.filter((candidate) => selectedIds.has(candidate.id));
-  // Schema-valid doesn't mean semantically sound - a hand-edited or stale
-  // plan can list ids that match no candidate. Surface it instead of
-  // silently dropping them.
-  const droppedIds = plan.selectedCandidateIds.length - selected.length;
-  if (droppedIds > 0 && !options.quiet) {
-    console.error(
-      `warning: plan lists ${droppedIds} selected id(s) that match no candidate; skipping them`,
-    );
-  }
+  // Validate identity before creating trash directories or painting progress.
+  const selected = resolveSelectedCandidates(plan);
   const total = selected.length;
   let current = 0;
   let freedBytes = 0;
+  let activePath: string | undefined;
+  let activeBytes = 0;
+  const startedAt = Date.now();
 
   const { clearDeletionProgress, printDeletionProgress } =
     await import("@kitsunekode/sweep-display");
@@ -454,22 +448,45 @@ export async function executePlanDeletion(
   const onSigint = () => controller.abort();
   process.once("SIGINT", onSigint);
 
+  const verb = trashDir ? "moving" : "deleting";
+  const paintDeletion = () => {
+    printDeletionProgress(current, total, activePath, activeBytes, freedBytes, {
+      verb,
+      elapsedMs: Date.now() - startedAt,
+    });
+  };
+  // A long directory removal used to sit on a frozen line until it finished.
+  // Repaint on a short interval so the elapsed time moves while that one
+  // path is in flight. Non-TTY logs stay one line per finished item.
+  const progressTimer =
+    options.quiet || !process.stdout.isTTY ? undefined : setInterval(paintDeletion, 400);
+  progressTimer?.unref();
+
   const applyOptions = {
+    ...(options.maxSizeGB === undefined ? {} : { maxSizeGB: options.maxSizeGB }),
+    ...(options.forceLarge === undefined ? {} : { forceLarge: options.forceLarge }),
     isCancelled: () => controller.signal.aborted,
     signal: controller.signal,
     ...(trashDir ? { trashDir, trashRoot: plan.targetDir } : {}),
     ...(options.quiet
       ? {}
       : {
+          onBegin: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
+            activePath = entry.path;
+            activeBytes = entry.estimatedBytes;
+            if (process.stdout.isTTY) paintDeletion();
+          },
           onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
             current++;
             freedBytes += entry.estimatedBytes;
-            printDeletionProgress(current, total, entry.path, entry.estimatedBytes, freedBytes, {
-              verb: trashDir ? "moving" : "deleting",
-            });
+            activePath = entry.path;
+            activeBytes = entry.estimatedBytes;
+            paintDeletion();
           },
         }),
   };
+
+  if (!options.quiet && total > 0 && process.stdout.isTTY) paintDeletion();
 
   try {
     const { report, cleanResult, interrupted } = await applyPlanWithBackend(
@@ -495,6 +512,7 @@ export async function executePlanDeletion(
       ...(trashDir ? { trashDir } : {}),
     };
   } finally {
+    if (progressTimer) clearInterval(progressTimer);
     process.removeListener("SIGINT", onSigint);
     clearDeletionProgress();
     if (trashDir) {

@@ -110,7 +110,10 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
           ...cleanResult,
           failedPaths: report.failedPaths,
         },
-        trashDir ? { trashDir } : {},
+        {
+          ...(report.outcomes ? { outcomes: report.outcomes } : {}),
+          ...(trashDir ? { trashDir } : {}),
+        },
       );
       if (interrupted) {
         printInterrupted(report.deletedCount, plan.selectedCandidateIds.length, {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
-import { compileFilter } from "./filter-query.js";
+import { compileFilter, filterAdvice } from "./filter-query.js";
 
 const NOW = Date.UTC(2026, 8, 30);
 const DAY = 24 * 60 * 60 * 1000;
@@ -75,12 +75,26 @@ describe("compileFilter", () => {
     expect(matches("newer:30d", unknown)).toBe(false);
   });
 
-  test("is: flags cover queue state, symlinks and workspace stubs", () => {
+  test("is: flags cover queue state, symlinks, stubs, files and directories", () => {
     expect(matches("is:queued", candidate({ id: "a" }), ["a"])).toBe(true);
     expect(matches("is:queued", candidate({ id: "a" }), [])).toBe(false);
     expect(matches("is:unqueued", candidate({ id: "a" }), [])).toBe(true);
     expect(matches("is:symlink", candidate({ isSymlink: true }))).toBe(true);
     expect(matches("is:stub", candidate({ reasons: ["workspace-stub"] }))).toBe(true);
+    expect(matches("is:dir", candidate({ entryType: "directory" }))).toBe(true);
+    expect(matches("is:dir", candidate({ entryType: "file" }))).toBe(false);
+    expect(matches("is:file", candidate({ entryType: "file" }))).toBe(true);
+    expect(matches("is:file", candidate({ entryType: "directory" }))).toBe(false);
+  });
+
+  test("a finished term that is not a filter explains itself", () => {
+    expect(filterAdvice("")).toBeNull();
+    expect(filterAdvice("kind:")).toBeNull();
+    expect(filterAdvice(">100MB is:dir")).toBeNull();
+    expect(filterAdvice("is:nope")).toContain("isn't a filter");
+    expect(filterAdvice("older:x")).toContain("duration");
+    expect(filterAdvice("risk:spicy")).toContain("isn't a tier");
+    expect(filterAdvice("ecosystem:node")).toContain("isn't a filter");
   });
 
   test("a leading ! negates a term", () => {

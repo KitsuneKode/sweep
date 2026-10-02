@@ -201,11 +201,14 @@ describe("layout across terminal sizes", () => {
     await send(setup, (mock) => mock.pressEnter());
     let frame = setup.captureCharFrame();
     expect(frame).toContain("Permanently delete");
+    expect(frame).toContain("estimated size");
+    expect(frame).not.toContain("will be freed");
     expect(frame).toContain("move to trash instead");
 
     await press(setup, "t");
     frame = setup.captureCharFrame();
     expect(frame).toContain("Move to trash");
+    expect(frame).toContain("estimated size");
     expect(frame).toContain("delete permanently instead");
   });
 
@@ -252,6 +255,17 @@ describe("triage keys", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("node_modules");
     expect(frame).not.toContain("vendor");
+  });
+
+  test("an unknown filter term stays visible and says it is matching as text", async () => {
+    const setup = await mount(120, 34);
+    await press(setup, "/");
+    for (const character of "is:nope") await press(setup, character);
+
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("isn't a filter");
+    expect(frame).toContain('No artifacts match "is:nope"');
+    expect(frame).toContain("all scopes");
   });
 });
 

@@ -39,7 +39,8 @@ function visibleInputsOf(state: SweepUiState): VisibleInputs {
 function sameVisibleInputs(a: VisibleInputs, b: VisibleInputs): boolean {
   return (
     a.candidates === b.candidates &&
-    a.selectedIds === b.selectedIds &&
+    (!/(?:^|\s)!?is:(?:queued|unqueued)(?:\s|$)/i.test(a.filter) ||
+      a.selectedIds === b.selectedIds) &&
     a.filter === b.filter &&
     a.scopeFilter === b.scopeFilter &&
     a.riskFilter === b.riskFilter &&

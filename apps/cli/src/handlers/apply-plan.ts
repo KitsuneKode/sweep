@@ -44,6 +44,8 @@ export async function applyReviewedPlan(
     plan,
     options.engine,
     {
+      maxSizeGB: options.maxSizeGB,
+      ...(options.forceLarge === undefined ? {} : { forceLarge: options.forceLarge }),
       ...(options.quiet ? { quiet: true } : {}),
       ...(options.trash ? { trash: true } : {}),
     },

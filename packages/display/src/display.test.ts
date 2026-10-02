@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import {
   formatDeletionProgress,
+  formatDeletionStatus,
   formatRiskBadge,
   groupCandidatesByKind,
   riskBadgeLabel,
@@ -49,5 +50,24 @@ describe("display formatters", () => {
   test("formatDeletionProgress renders current progress", () => {
     expect(formatDeletionProgress(2, 5, "/tmp/x")).toContain("2/5");
     expect(formatDeletionProgress(2, 5, "/tmp/x")).toContain("/tmp/x");
+  });
+
+  test("formatDeletionStatus keeps the tally and shrinks a long path", () => {
+    const line = formatDeletionStatus({
+      current: 1,
+      total: 4,
+      path: "/home/dev/monorepo/apps/web/node_modules",
+      verb: "deleting",
+      itemBytes: 1024,
+      runningBytes: 4096,
+      elapsedMs: 2400,
+      columns: 48,
+    });
+    expect(line.startsWith("deleting [1/4] ")).toBe(true);
+    expect(line).toContain("~4.0 KB removed");
+    expect(line).not.toContain("freed");
+    expect(line).toContain("2.4s");
+    expect(line.length).toBeLessThanOrEqual(48);
+    expect(line).toContain("…");
   });
 });

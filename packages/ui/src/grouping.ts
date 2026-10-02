@@ -104,7 +104,7 @@ export function collapseDeepestScopes(
       if (collapsedKey !== key) shortened = true;
       const existing = next.get(collapsedKey);
       if (existing) {
-        existing.ids.push(...bucket.ids);
+        for (const id of bucket.ids) existing.ids.push(id);
       } else {
         next.set(collapsedKey, {
           label: labelForKey(collapsedKey),

@@ -202,7 +202,7 @@ const HELP_SINGLE: ReadonlyArray<HelpRow> = [
   ...HELP_APP,
 ];
 
-const HELP_FILTER_SYNTAX = "kind:x  risk:y  path:z  >100MB  older:30d  is:queued  !term";
+const HELP_FILTER_SYNTAX = "kind:x  risk:y  path:z  >100MB  older:30d  is:dir  is:file  !term";
 
 /** Compact duration for scan timing chips/notices: 96ms, 1.2s, 2m 4s. */
 function formatScanMs(ms: number): string {
@@ -353,7 +353,7 @@ function ConfirmOverlay({
         content={t`${bold(fg(accent)(`${action} ${selectedCount} item${selectedCount === 1 ? "" : "s"}`))}`}
       />
       <text
-        content={t`${fg(tokens.positive)(formatBytes(selectedBytes))} ${fg(tokens.textMuted)("will be freed")}`}
+        content={t`${fg(tokens.positive)(formatBytes(selectedBytes))} ${fg(tokens.textMuted)("estimated size")}`}
       />
       <text content="" />
       {shown.map((path) => (
@@ -439,7 +439,10 @@ function InspectOverlay({
         />
         <text content="" />
         {field("path", sanitizeTerminalText(rel.length > 0 ? rel : candidate.name))}
-        {field("size", formatBytes(candidate.estimatedBytes))}
+        {field(
+          "size",
+          `${formatBytes(candidate.estimatedBytes)}${candidate.bytesKnown === false ? " (partial - unreadable subtree)" : ""}`,
+        )}
         {field(
           "risk",
           t`${fg(riskGlyphColor)(candidate.riskTier)}${queued ? fg(tokens.accent)("  · queued") : ""}`,

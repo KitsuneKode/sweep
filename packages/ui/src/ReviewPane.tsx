@@ -18,7 +18,7 @@ import {
   type SweepUiState,
   type UiFocus,
 } from "./state.js";
-import { FILTER_HINT } from "./filter-query.js";
+import { FILTER_HINT, filterAdvice } from "./filter-query.js";
 import type { ThemeTokens } from "./theme.js";
 
 export interface ReviewPaneProps {
@@ -70,6 +70,7 @@ export function ReviewPane({
   const nothingFound = visibleItems.length === 0 && !scopeEmpty && !state.scanning;
   const searchFocused = state.focus === "search";
   const patternsPane = state.focus === "patterns" || state.focus === "patternInput";
+  const advice = patternsPane ? null : filterAdvice(state.filter);
   const listFocused = state.focus === "list" || patternsPane;
   const emptyScan = state.scanning && state.candidates.length === 0;
 
@@ -133,18 +134,23 @@ export function ReviewPane({
         paddingBottom={0}
       >
         {patternsPane ? null : (
-          <box width="100%" height={1} flexShrink={0}>
-            <input
-              focused={searchFocused}
-              value={state.filter}
-              placeholder={`Filter… ${FILTER_HINT}`}
-              backgroundColor={tokens.surfaceInset}
-              focusedBackgroundColor={tokens.surfaceInset}
-              textColor={tokens.text}
-              cursorColor={tokens.accent}
-              onInput={(value: string) => onMutate((s) => setFilter(s, value))}
-              onSubmit={() => onFocusPanel("list")}
-            />
+          <box width="100%" flexShrink={0} flexDirection="column">
+            <box width="100%" height={1} flexShrink={0}>
+              <input
+                focused={searchFocused}
+                value={state.filter}
+                placeholder={`Filter… ${FILTER_HINT}`}
+                backgroundColor={tokens.surfaceInset}
+                focusedBackgroundColor={tokens.surfaceInset}
+                textColor={tokens.text}
+                cursorColor={tokens.accent}
+                onInput={(value: string) => onMutate((s) => setFilter(s, value))}
+                onSubmit={() => onFocusPanel("list")}
+              />
+            </box>
+            {advice ? (
+              <text content={sanitizeTerminalText(advice)} fg={tokens.warning} wrapMode="none" />
+            ) : null}
           </box>
         )}
         {state.scanning && state.candidates.length > 0 ? (

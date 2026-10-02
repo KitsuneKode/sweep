@@ -100,6 +100,8 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
     const engine = resolveEngineBackend({ engine: opts.engine ?? "auto" });
 
     const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(plan, engine, {
+      maxSizeGB: config.maxSizeGB,
+      forceLarge: opts.forceLarge,
       ...(opts.json ? { quiet: true } : {}),
       ...(opts.trash ? { trash: true } : {}),
     });
@@ -112,7 +114,10 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
           ...cleanResult,
           failedPaths: report.failedPaths,
         },
-        trashDir ? { trashDir } : {},
+        {
+          ...(report.outcomes ? { outcomes: report.outcomes } : {}),
+          ...(trashDir ? { trashDir } : {}),
+        },
       );
       if (interrupted) {
         printInterrupted(report.deletedCount, selectedCount, {

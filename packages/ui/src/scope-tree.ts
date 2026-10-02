@@ -26,10 +26,17 @@ function emptyNode(segment: string, key: string): TrieNode {
   return { segment, key, ids: [], children: new Map() };
 }
 
-function insertGroup(root: TrieNode, group: ArtifactScopeGroup): void {
+const MAX_SCOPE_NODES = 100_000;
+const MAX_SCOPE_KEY_BYTES = 16 * 1024 * 1024;
+interface ScopeBudget {
+  nodes: number;
+  keyBytes: number;
+}
+
+function insertGroup(root: TrieNode, group: ArtifactScopeGroup, budget: ScopeBudget): boolean {
   if (group.key.length === 0) {
-    root.ids.push(...group.candidateIds);
-    return;
+    for (const id of group.candidateIds) root.ids.push(id);
+    return true;
   }
 
   const parts = group.key.split("/").filter((part) => part.length > 0);
@@ -39,96 +46,94 @@ function insertGroup(root: TrieNode, group: ArtifactScopeGroup): void {
     acc = acc.length === 0 ? part : `${acc}/${part}`;
     let child = node.children.get(part);
     if (!child) {
+      budget.nodes++;
+      budget.keyBytes += Buffer.byteLength(acc);
+      if (budget.nodes > MAX_SCOPE_NODES || budget.keyBytes > MAX_SCOPE_KEY_BYTES) return false;
       child = emptyNode(part, acc);
       node.children.set(part, child);
     }
     node = child;
   }
-  node.ids.push(...group.candidateIds);
+  for (const id of group.candidateIds) node.ids.push(id);
+  return true;
+}
+
+/** Iterative postorder avoids call-stack overflow on deep folder chains. */
+function* postorder(root: TrieNode): Generator<TrieNode> {
+  const pending: Array<[TrieNode, boolean]> = [[root, false]];
+  while (pending.length) {
+    const [node, ready] = pending.pop()!;
+    if (ready) {
+      yield node;
+      continue;
+    }
+    pending.push([node, true]);
+    for (const child of node.children.values()) pending.push([child, false]);
+  }
 }
 
 /** Collapse single-child folder chains the way trees.software flattens empty dirs. */
-export function flattenTrieNode(node: TrieNode): void {
-  for (const child of node.children.values()) flattenTrieNode(child);
-
-  while (node.key.length > 0 && node.ids.length === 0 && node.children.size === 1) {
-    const child = node.children.values().next().value;
-    if (!child) break;
-    node.segment = `${node.segment}/${child.segment}`;
-    node.key = child.key;
-    node.ids = child.ids;
-    node.children = child.children;
+export function flattenTrieNode(root: TrieNode): void {
+  for (const node of postorder(root)) {
+    while (node.key.length > 0 && node.ids.length === 0 && node.children.size === 1) {
+      const child = node.children.values().next().value;
+      if (!child) break;
+      node.segment = `${node.segment}/${child.segment}`;
+      node.key = child.key;
+      node.ids = child.ids;
+      node.children = child.children;
+    }
   }
 }
 
-function subtreeStats(
+interface Stats {
+  count: number;
+  bytes: number;
+  selectedCount: number;
+  selectedBytes: number;
+}
+
+// One postorder pass per selection, rather than repeatedly walking subtrees
+// for every comparator and visible row. Structural order is cached separately.
+function aggregate(
   node: TrieNode,
   byId: Map<string, ScanCandidate>,
-  selectedIds: Set<string>,
-): { count: number; bytes: number; selectedCount: number; selectedBytes: number } {
-  let count = 0;
-  let bytes = 0;
-  let selectedCount = 0;
-  let selectedBytes = 0;
-
-  const visit = (current: TrieNode) => {
+  selected: Set<string>,
+  stats: Map<TrieNode, Stats>,
+): Stats {
+  for (const current of postorder(node)) {
+    const result: Stats = { count: 0, bytes: 0, selectedCount: 0, selectedBytes: 0 };
     for (const id of current.ids) {
-      const candidate = byId.get(id);
-      if (!candidate) continue;
-      count += 1;
-      bytes += candidate.estimatedBytes;
-      if (selectedIds.has(id)) {
-        selectedCount += 1;
-        selectedBytes += candidate.estimatedBytes;
+      const c = byId.get(id);
+      if (!c) continue;
+      result.count++;
+      result.bytes += c.estimatedBytes;
+      if (selected.has(id)) {
+        result.selectedCount++;
+        result.selectedBytes += c.estimatedBytes;
       }
     }
-    for (const child of current.children.values()) visit(child);
-  };
-
-  visit(node);
-  return { count, bytes, selectedCount, selectedBytes };
-}
-
-function emitVisible(
-  node: TrieNode,
-  depth: number,
-  expanded: Set<string>,
-  byId: Map<string, ScanCandidate>,
-  selectedIds: Set<string>,
-  rows: ScopeSidebarRow[],
-): void {
-  const stats = subtreeStats(node, byId, selectedIds);
-  const hasChildren = node.children.size > 0;
-  rows.push({
-    key: node.key,
-    label: node.key.length === 0 ? "project root" : `${node.segment}/`,
-    depth,
-    hasChildren,
-    count: stats.count,
-    selectedCount: stats.selectedCount,
-    bytes: stats.bytes,
-    selectedBytes: stats.selectedBytes,
-  });
-
-  if (!hasChildren || !expanded.has(node.key)) return;
-  for (const child of sortedChildren(node, byId)) {
-    emitVisible(child, depth + 1, expanded, byId, selectedIds, rows);
+    for (const child of current.children.values()) {
+      const value = stats.get(child)!;
+      result.count += value.count;
+      result.bytes += value.bytes;
+      result.selectedCount += value.selectedCount;
+      result.selectedBytes += value.selectedBytes;
+    }
+    stats.set(current, result);
   }
+  return stats.get(node)!;
 }
 
-function nodeBytes(node: TrieNode, byId: Map<string, ScanCandidate>): number {
-  let total = 0;
-  for (const id of node.ids) total += byId.get(id)?.estimatedBytes ?? 0;
-  for (const child of node.children.values()) total += nodeBytes(child, byId);
-  return total;
-}
-
-function sortedChildren(node: TrieNode, byId: Map<string, ScanCandidate>): TrieNode[] {
-  return [...node.children.values()].sort((left, right) => {
-    const delta = nodeBytes(right, byId) - nodeBytes(left, byId);
-    return delta !== 0 ? delta : left.segment.localeCompare(right.segment);
-  });
-}
+let topology: {
+  targetDir: string;
+  candidates: ScanCandidate[];
+  root: TrieNode;
+  tops: TrieNode[];
+  byId: Map<string, ScanCandidate>;
+  children: Map<TrieNode, TrieNode[]>;
+  limited: boolean;
+} | null = null;
 
 // Rebuilt per render otherwise - tuple-keyed single-slot cache, same pattern
 // as the display-rows cache in rows.ts.
@@ -167,42 +172,76 @@ function computeScopeTreeRows(
   selectedIds: Set<string>,
   expandedKeys: ReadonlySet<string>,
 ): ScopeSidebarRow[] {
-  const groups = groupCandidatesByScope(targetDir, candidates, undefined, {
-    maxGroups: Number.POSITIVE_INFINITY,
-  });
-  const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
-  const root = emptyNode("", "");
-  for (const group of groups) insertGroup(root, group);
-  flattenTrieNode(root);
-
+  if (!topology || topology.targetDir !== targetDir || topology.candidates !== candidates) {
+    const groups = groupCandidatesByScope(targetDir, candidates, undefined, {
+      maxGroups: Number.POSITIVE_INFINITY,
+    });
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    const root = emptyNode("", "");
+    const budget: ScopeBudget = { nodes: 0, keyBytes: 0 };
+    let limited = false;
+    for (const group of groups) {
+      if (!insertGroup(root, group, budget)) {
+        limited = true;
+        break;
+      }
+    }
+    if (limited) {
+      // Keep every candidate available in the main list. Only the optional
+      // folder index is suppressed, with explicit feedback on its sole row.
+      root.children.clear();
+      root.ids = candidates.map((candidate) => candidate.id);
+    }
+    flattenTrieNode(root);
+    const stats = new Map<TrieNode, Stats>();
+    aggregate(root, byId, new Set(), stats);
+    const children = new Map<TrieNode, TrieNode[]>();
+    const compare = (a: TrieNode, b: TrieNode) =>
+      stats.get(b)!.bytes - stats.get(a)!.bytes || a.segment.localeCompare(b.segment);
+    for (const node of stats.keys()) children.set(node, [...node.children.values()].sort(compare));
+    const tops = [...children.get(root)!];
+    if (root.ids.length && !limited) {
+      const synthetic = emptyNode("project root", "");
+      synthetic.ids = root.ids;
+      aggregate(synthetic, byId, new Set(), stats);
+      children.set(synthetic, []);
+      tops.push(synthetic);
+      tops.sort(compare);
+    }
+    topology = { targetDir, candidates, root, tops, byId, children, limited };
+  }
+  const { root, tops, byId, children } = topology;
+  const stats = new Map<TrieNode, Stats>();
+  const all = aggregate(root, byId, selectedIds, stats);
   const rows: ScopeSidebarRow[] = [
     {
       key: null,
-      label: "all scopes",
+      label: topology.limited ? "all scopes (folder index limit)" : "all scopes",
       depth: 0,
       hasChildren: false,
-      count: candidates.length,
-      selectedCount: candidates.filter((candidate) => selectedIds.has(candidate.id)).length,
-      bytes: candidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
-      selectedBytes: candidates
-        .filter((candidate) => selectedIds.has(candidate.id))
-        .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
+      ...all,
     },
   ];
-
-  const tops: TrieNode[] = sortedChildren(root, byId);
-  if (root.ids.length > 0) {
-    const synthetic = emptyNode("project root", "");
-    synthetic.ids = root.ids;
-    tops.push(synthetic);
-    tops.sort((left, right) => {
-      const delta = nodeBytes(right, byId) - nodeBytes(left, byId);
-      return delta !== 0 ? delta : left.segment.localeCompare(right.segment);
+  const pending = tops
+    .slice()
+    .reverse()
+    .map((node) => ({ node, depth: 0 }));
+  while (pending.length) {
+    const { node, depth } = pending.pop()!;
+    const values = stats.get(node) ?? aggregate(node, byId, selectedIds, stats);
+    const hasChildren = node.children.size > 0;
+    rows.push({
+      key: node.key,
+      label: node.key === "" ? "project root" : `${node.segment}/`,
+      depth,
+      hasChildren,
+      ...values,
     });
-  }
-
-  for (const child of tops) {
-    emitVisible(child, 0, new Set(expandedKeys), byId, selectedIds, rows);
+    if (hasChildren && expandedKeys.has(node.key)) {
+      const nested = children.get(node) ?? [];
+      for (let i = nested.length - 1; i >= 0; i--)
+        pending.push({ node: nested[i]!, depth: depth + 1 });
+    }
   }
 
   return rows;
@@ -227,6 +266,8 @@ export function artifactScopeKey(targetDir: string, path: string): string {
   const rel = relativePath(targetDir, path).replaceAll("\\", "/");
   const slash = rel.lastIndexOf("/");
   const key = slash <= 0 ? "" : rel.slice(0, slash);
+  // Keep content cache bounded across rescans of the same root.
+  if (scopeKeyCache.size >= 100_000) scopeKeyCache.clear();
   scopeKeyCache.set(path, key);
   return key;
 }

@@ -8,19 +8,25 @@ export type StatsHandlerOptions = CliOptions & { json?: boolean };
 
 const RECENT_SESSIONS = 5;
 
-/** `sweep stats` - lifetime reclaimed space plus recent cleanup sessions. */
+/** `sweep stats` - retained estimated cleanup bytes plus recent cleanup sessions. */
 export async function handleStats(opts: StatsHandlerOptions): Promise<void> {
   applyNoColor(opts.color);
   warnIgnoredOptions(opts, "stats", { except: ["--json"] });
 
   try {
-    // Stats need every session for correct totals, not the default page.
+    // Total only the retained byte window, rather than the default recent page.
     const entries = readHistory(Number.MAX_SAFE_INTEGER);
     const summary = summarizeHistory(entries);
     const recent = entries.slice(-RECENT_SESSIONS);
 
     if (opts.json) {
-      writeJson({ summary, historyFile: historyFilePath(), recent });
+      writeJson({
+        scope: "retained-history",
+        byteBasis: "plan-estimate",
+        summary,
+        historyFile: historyFilePath(),
+        recent,
+      });
     } else {
       printStatsSummary(summary, recent, historyFilePath(), entries.length);
     }

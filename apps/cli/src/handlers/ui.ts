@@ -200,7 +200,11 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(
       selectedPlan,
       engine,
-      useTrash ? { trash: true } : {},
+      {
+        maxSizeGB: scanConfig.maxSizeGB,
+        forceLarge: opts.forceLarge,
+        ...(useTrash ? { trash: true } : {}),
+      },
     );
 
     printCleanResult(
@@ -208,7 +212,10 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
         ...cleanResult,
         failedPaths: report.failedPaths,
       },
-      trashDir ? { trashDir } : {},
+      {
+        ...(report.outcomes ? { outcomes: report.outcomes } : {}),
+        ...(trashDir ? { trashDir } : {}),
+      },
     );
     if (interrupted) {
       printInterrupted(report.deletedCount, selectedPlan.selectedCandidateIds.length, {

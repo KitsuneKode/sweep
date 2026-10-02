@@ -59,7 +59,9 @@ interface RowsInputs {
   nowMinute: number;
 }
 
-let rowsLast: { inputs: RowsInputs; result: UiDisplayRow[] } | null = null;
+let rowsLast: { inputs: RowsInputs; visible: ScanCandidate[]; result: UiDisplayRow[] } | null =
+  null;
+let groupMembers = new Map<string, string[]>();
 
 export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
   const inputs: RowsInputs = {
@@ -74,11 +76,12 @@ export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
     targetDir: state.targetDir,
     nowMinute: Math.floor(Date.now() / 60_000),
   };
+  const visible = getVisibleCandidates(state);
   const last = rowsLast;
   if (
     last &&
     last.inputs.candidates === inputs.candidates &&
-    last.inputs.selectedIds === inputs.selectedIds &&
+    last.visible === visible &&
     last.inputs.collapsedGroups === inputs.collapsedGroups &&
     last.inputs.filter === inputs.filter &&
     last.inputs.scopeFilter === inputs.scopeFilter &&
@@ -88,10 +91,23 @@ export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
     last.inputs.targetDir === inputs.targetDir &&
     last.inputs.nowMinute === inputs.nowMinute
   ) {
-    return last.result;
+    if (last.inputs.selectedIds === inputs.selectedIds) return last.result;
+    const result = last.result.map((row) =>
+      row.kind === "item"
+        ? row
+        : {
+            ...row,
+            selectedCount: (groupMembers.get(row.groupKey) ?? []).reduce(
+              (n, id) => n + Number(state.selectedIds.has(id)),
+              0,
+            ),
+          },
+    );
+    rowsLast = { inputs, visible, result };
+    return result;
   }
   const result = computeDisplayRows(state);
-  rowsLast = { inputs, result };
+  rowsLast = { inputs, visible, result };
   return result;
 }
 
@@ -136,17 +152,28 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
     maxGroups: Number.POSITIVE_INFINITY,
   });
   const rows: UiDisplayRow[] = [];
+  groupMembers = new Map(groups.map((group) => [group.key, group.candidateIds]));
+  const metrics = new Map(
+    groups.map((group) => [
+      group.key,
+      {
+        bytes: groupBytes(group, byId),
+        oldest: oldestModified(group, byId),
+        first: order ? firstDiscovery(group, order) : 0,
+      },
+    ]),
+  );
 
   if (order) {
     // A newly discovered scope lands at the bottom rather than pushing the
     // list around; existing scopes keep their place for the whole scan.
-    groups.sort((left, right) => firstDiscovery(left, order) - firstDiscovery(right, order));
+    groups.sort((left, right) => metrics.get(left.key)!.first - metrics.get(right.key)!.first);
   } else if (state.sortBy === "size") {
     // Heaviest scope first so the top of the list is the biggest win.
-    groups.sort((left, right) => groupBytes(right, byId) - groupBytes(left, byId));
+    groups.sort((left, right) => metrics.get(right.key)!.bytes - metrics.get(left.key)!.bytes);
   } else if (state.sortBy === "age") {
     // The scope holding the stalest artifact leads.
-    groups.sort((left, right) => oldestModified(left, byId) - oldestModified(right, byId));
+    groups.sort((left, right) => metrics.get(left.key)!.oldest - metrics.get(right.key)!.oldest);
   }
 
   for (const group of groups) {

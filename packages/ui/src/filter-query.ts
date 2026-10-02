@@ -37,7 +37,12 @@ const DURATION_TERM = /^(\d+(?:\.\d+)?)(m|h|d|w|mo|y)$/i;
 
 /** Every accepted `key:value` prefix, for hints and tests. */
 export const FILTER_KEYS = ["kind", "risk", "path", "is", "older", "newer"] as const;
-export const FILTER_HINT = "kind:target risk:caution >100MB older:30d is:queued";
+export const FILTER_HINT = "kind:target risk:caution >100MB older:30d is:dir";
+
+const FILTER_KEY_SET = new Set<string>(FILTER_KEYS);
+const RISK_TIERS = new Set(["safe", "caution", "dangerous", "blocked"]);
+const IS_VALUES = ["queued", "unqueued", "symlink", "stub", "file", "dir"] as const;
+const IS_VALUE_SET = new Set<string>(IS_VALUES);
 
 function sizePredicate(term: string): Predicate | null {
   const match = SIZE_TERM.exec(term);
@@ -82,6 +87,10 @@ function isPredicate(value: string): Predicate | null {
       return (candidate) => candidate.isSymlink;
     case "stub":
       return (candidate) => candidate.reasons.includes("workspace-stub");
+    case "file":
+      return (candidate) => candidate.entryType === "file";
+    case "dir":
+      return (candidate) => candidate.entryType === "directory";
     default:
       return null;
   }
@@ -126,6 +135,37 @@ function termPredicate(rawTerm: string): Predicate {
   // hiding everything mid-keystroke.
   const base = predicate ?? plainPredicate(term);
   return negated ? (candidate, context) => !base(candidate, context) : base;
+}
+
+/**
+ * One-line note when a finished term looks like a filter but isn't one.
+ * Half-typed terms (`kind:`, `>1`) stay quiet so the box doesn't nag mid-keystroke.
+ * The list still falls back to a text match; this only explains that fallback.
+ */
+export function filterAdvice(input: string): string | null {
+  const terms = input.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  for (const raw of terms) {
+    const term = raw.startsWith("!") && raw.length > 1 ? raw.slice(1) : raw;
+    if (sizePredicate(term)) continue;
+    const colon = term.indexOf(":");
+    if (colon <= 0) continue;
+    const key = term.slice(0, colon);
+    const value = term.slice(colon + 1);
+    if (value.length === 0) continue;
+    if (key === "is" && !IS_VALUE_SET.has(value)) {
+      return `is:${value} isn't a filter — ${IS_VALUES.join(", ")}`;
+    }
+    if ((key === "older" || key === "newer") && !DURATION_TERM.test(value)) {
+      return `${key}:${value} needs a duration like 30d, 12h, or 2w`;
+    }
+    if (key === "risk" && !RISK_TIERS.has(value)) {
+      return `risk:${value} isn't a tier — safe, caution, dangerous, blocked`;
+    }
+    if (!FILTER_KEY_SET.has(key)) {
+      return `${key}: isn't a filter — matching that text instead`;
+    }
+  }
+  return null;
 }
 
 /**

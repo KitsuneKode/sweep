@@ -23,6 +23,41 @@ function candidate(path: string, name: string, bytes = 1): ScanCandidate {
 }
 
 describe("scope tree", () => {
+  test("a large single scope avoids argument-count overflow", () => {
+    const candidates = Array.from({ length: 75_000 }, (_, i) =>
+      candidate(`/repo/file-${i}`, `${i}`),
+    );
+    const rows = buildScopeTreeRows("/repo", candidates, new Set(), new Set());
+    expect(rows[0]?.count).toBe(75_000);
+    expect(rows[1]?.count).toBe(75_000);
+  });
+  test("deep scope chains are processed without recursive stack growth", () => {
+    const path = `/repo/${Array.from({ length: 3000 }, () => "x").join("/")}/node_modules`;
+    const rows = buildScopeTreeRows(
+      "/repo",
+      [candidate(path, "deep", 10)],
+      new Set(["cand_deep"]),
+      new Set(),
+    );
+    expect(rows[0]?.selectedBytes).toBe(10);
+    expect(rows[1]?.count).toBe(1);
+    expect(rows[1]?.hasChildren).toBe(false);
+  });
+
+  test("an oversized optional folder index reports its limit and keeps all candidates", () => {
+    const chain = Array.from({ length: 3000 }, () => "x").join("/");
+    const candidates = [
+      candidate(`/repo/a/${chain}/node_modules`, "a", 10),
+      candidate(`/repo/b/${chain}/node_modules`, "b", 20),
+    ];
+    const rows = buildScopeTreeRows("/repo", candidates, new Set(["cand_b"]), new Set());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.label).toContain("folder index limit");
+    expect(rows[0]?.count).toBe(2);
+    expect(rows[0]?.bytes).toBe(30);
+    expect(rows[0]?.selectedBytes).toBe(20);
+  });
+
   test("flattens empty directory chains and keeps siblings nested", () => {
     const rows = buildScopeTreeRows(
       "/repo",

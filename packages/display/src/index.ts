@@ -29,6 +29,7 @@ export {
 export {
   clearDeletionProgress,
   formatDeletionProgress,
+  formatDeletionStatus,
   printDeletionProgress,
 } from "./deletion.js";
 export {
@@ -154,7 +155,7 @@ function printScanTotals(
 ): void {
   const exact = plan.summary.exact;
   const sizePrefix = exact ? "" : "~";
-  const totalLabel = exact ? "total" : "estimated";
+  const totalLabel = exact ? "measured" : "estimated";
   const selectedBytes = sumBytes(plan.candidates, selectedIds);
 
   if (isTTY()) {
@@ -164,7 +165,7 @@ function printScanTotals(
         pc.dim("  /  ") +
         `${pc.bold(plan.candidates.length.toString())} found` +
         pc.dim("  /  ") +
-        `${pc.yellow(`${sizePrefix}${formatBytes(selectedBytes)}`)} ${totalLabel} to free`,
+        `${pc.yellow(`${sizePrefix}${formatBytes(selectedBytes)}`)} ${totalLabel} selected size`,
     );
 
     if (hiddenStubCount > 0 && !verbose) {
@@ -180,7 +181,7 @@ function printScanTotals(
   }
 
   console.log(
-    `sweep: ${plan.selectedCandidateIds.length} selected, ${plan.candidates.length} found (${sizePrefix}${formatBytes(selectedBytes)} ${totalLabel} to free)`,
+    `sweep: ${plan.selectedCandidateIds.length} selected, ${plan.candidates.length} found (${sizePrefix}${formatBytes(selectedBytes)} ${totalLabel} selected size)`,
   );
   if (hiddenStubCount > 0 && !verbose) {
     console.log(`sweep: ${hiddenStubCount} workspace node_modules stubs hidden`);
@@ -214,7 +215,9 @@ function printGroupedCandidates(
     }
 
     for (const entry of group.entries) {
-      const size = formatBytes(entry.estimatedBytes);
+      // A partially-sized subtree undercounts - mark the row so a missing
+      // unreadable chunk never reads as the real freed-bytes figure.
+      const size = `${entry.bytesKnown === false ? "~" : ""}${formatBytes(entry.estimatedBytes)}`;
       const selected = selectedIds.has(entry.id);
       const badge = ` ${formatRiskBadge(entry.riskTier)}`;
       const note = insightBadge(entry);
@@ -248,7 +251,10 @@ export function printDryRunNotice(): void {
 
 export function printCleanResult(
   result: import("@kitsunekode/sweep-protocol").CleanResult,
-  options: { trashDir?: string } = {},
+  options: {
+    trashDir?: string;
+    outcomes?: import("@kitsunekode/sweep-protocol").ApplyOutcome[];
+  } = {},
 ): void {
   const duration =
     result.durationMs < 1000
@@ -259,12 +265,23 @@ export function printCleanResult(
   if (process.stdout.isTTY) {
     console.log(
       `${pc.green("✓")} ${verb} ${pc.bold(result.deleted.length.toString())} items, ` +
-        `${pc.bold(pc.green(formatBytes(result.totalBytesFreed)))} freed ` +
+        `~${pc.bold(pc.green(formatBytes(result.totalBytesFreed)))} estimated bytes ${options.trashDir ? "moved" : "removed"} ` +
         pc.dim(`(${duration})`),
     );
   } else {
-    console.log(`sweep: done, ${formatBytes(result.totalBytesFreed)} freed in ${duration}`);
+    console.log(
+      `sweep: done, ~${formatBytes(result.totalBytesFreed)} estimated bytes ${options.trashDir ? "moved" : "removed"} in ${duration}`,
+    );
   }
+
+  const covered = options.outcomes?.filter((outcome) => outcome.status === "covered").length ?? 0;
+  const unattempted =
+    options.outcomes?.filter((outcome) => outcome.status === "unattempted").length ?? 0;
+  if (covered)
+    console.log(
+      pc.dim(`  ${covered} nested or duplicate selection(s) covered by completed operations.`),
+    );
+  if (unattempted) console.log(pc.yellow(`  ${unattempted} selection(s) not attempted.`));
 
   if (options.trashDir) {
     console.log(
@@ -373,7 +390,7 @@ export interface StatsTotals {
   totalFailed: number;
 }
 
-/** `sweep stats` - lifetime reclaimed space plus recent sessions. */
+/** `sweep stats` - retained estimated cleanup bytes plus recent sessions. */
 export function printStatsSummary(
   totals: StatsTotals,
   recent: StatsSession[],
@@ -386,11 +403,11 @@ export function printStatsSummary(
   }
 
   console.log(
-    `  ${pc.bold(pc.green(formatBytes(totals.totalBytesFreed)))} reclaimed ` +
+    `  ${pc.bold(pc.green(formatBytes(totals.totalBytesFreed)))} estimated bytes removed or moved ` +
       pc.dim(`across ${totals.sessions} cleanup${totals.sessions === 1 ? "" : "s"}`),
   );
   if (totals.totalFailed > 0) {
-    console.log(pc.dim(`  ${totals.totalFailed} item(s) failed to delete over all sessions`));
+    console.log(pc.dim(`  ${totals.totalFailed} item(s) failed to delete in retained history`));
   }
   console.log();
 

@@ -265,3 +265,27 @@ describe("pinned ordering during a live scan", () => {
     expect(rows[1]).toEqual({ kind: "item", candidateId: "c", groupLabel: "apps/web/" });
   });
 });
+
+test("selection refreshes headers while reusing ordered item rows", () => {
+  const candidate: ScanCandidate = {
+    id: "a",
+    path: "/repo/app/node_modules",
+    name: "node_modules",
+    kind: "node_modules",
+    estimatedBytes: 42,
+    entryType: "directory",
+    isSymlink: false,
+    riskTier: "safe",
+    reasons: [],
+    selectedByDefault: false,
+  };
+  const state = createUiState(planWith([candidate]));
+  const before = buildDisplayRows(state);
+  const after = buildDisplayRows({ ...state, selectedIds: new Set(["a"]) });
+  expect(after[1]).toBe(before[1]);
+  expect(after[0]).toMatchObject({ selectedCount: 1, bytes: 42 });
+  const filtered = buildDisplayRows({ ...state, filter: "is:queued" });
+  expect(filtered).toHaveLength(0);
+  const queued = buildDisplayRows({ ...state, filter: "is:queued", selectedIds: new Set(["a"]) });
+  expect(queued).toHaveLength(2);
+});

@@ -186,7 +186,11 @@ export function buildArtifactRowContent(
         ? tokens.danger
         : tokens.text;
   const parentColor = isCurrent ? tokens.selectionText : tokens.textDim;
-  const size = formatSizeCell(candidate.estimatedBytes, widths.sizeWidth);
+  const size = formatSizeCell(
+    candidate.estimatedBytes,
+    widths.sizeWidth,
+    candidate.bytesKnown === false,
+  );
   const sizeColor = isCurrent
     ? tokens.selectionText
     : selected
@@ -252,8 +256,10 @@ export function splitNameCell(
   return { nameText: namePadded, parentText: ` ${parentShown}` };
 }
 
-function formatSizeCell(bytes: number, width: number): string {
-  const label = bytes > 0 ? formatBytes(bytes) : "-";
+function formatSizeCell(bytes: number, width: number, partial: boolean): string {
+  // `~` marks a partial lower bound (unreadable inodes inside the subtree) -
+  // pending stubs carry bytes=0 and still render "-" until their size lands.
+  const label = bytes > 0 ? `${partial ? "~" : ""}${formatBytes(bytes)}` : partial ? "~0" : "-";
   return label.padStart(width);
 }
 
@@ -467,7 +473,9 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
   const colors = riskColor(tokens);
   const glyph = fg(colors[candidate.riskTier])(riskGlyph[candidate.riskTier]);
   const kind = fg(tokens.textMuted)(candidate.kind);
-  const size = fg(tokens.textSecondary)(formatBytes(candidate.estimatedBytes));
+  const size = fg(tokens.textSecondary)(
+    `${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidate.estimatedBytes)}`,
+  );
   const now = Date.now();
   const ageText = describeAge(candidate.modifiedMs, now);
   const age = ageText
