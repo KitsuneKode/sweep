@@ -16,6 +16,7 @@ import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 import { releasePolicy, type PreState } from "../apps/cli/scripts/release-policy.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const CLI_DIST_DIR = join(REPO_ROOT, "apps/cli/dist");
 
 function run(command: string, args: string[], options: { cwd?: string } = {}): void {
   const result = spawnSync(command, args, {
