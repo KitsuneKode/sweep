@@ -106,6 +106,10 @@ export function ScopeSidebar({
         selectedBytes={selectedBytes}
         totalBytes={totalBytes}
         width={meterWidth}
+        scanning={state.scanning}
+        incomplete={state.scanIncomplete}
+        foundCount={state.candidates.length}
+        sizedCount={state.scanSizedCount}
       />
       <scrollbox
         ref={scrollRef}
@@ -227,12 +231,72 @@ function ReclaimPanel({
   selectedBytes,
   totalBytes,
   width,
+  scanning,
+  incomplete,
+  foundCount,
+  sizedCount,
 }: {
   tokens: ThemeTokens;
   selectedBytes: number;
   totalBytes: number;
   width: number;
+  scanning: boolean;
+  incomplete: boolean;
+  foundCount: number;
+  sizedCount: number;
 }) {
+  // While a scan runs the meter reports sizing progress, not queue coverage -
+  // default selection keeps coverage pinned near 100%, which reads as "done"
+  // even on a scan that later fails.
+  if (scanning) {
+    const percent = foundCount > 0 ? Math.min(99, Math.round((sizedCount / foundCount) * 100)) : 0;
+    const percentLabel = `${String(percent).padStart(3, " ")}%`;
+    const barWidth = Math.max(8, width - percentLabel.length - 1);
+    return (
+      <box
+        width="100%"
+        height={2}
+        flexDirection="column"
+        paddingLeft={1}
+        backgroundColor={tokens.bg}
+        flexShrink={0}
+      >
+        <text
+          content={concatStyled(
+            buildMeter(sizedCount, Math.max(1, foundCount), barWidth, tokens),
+            t` ${fg(tokens.info)(percentLabel)}`,
+          )}
+          wrapMode="none"
+        />
+        <text
+          content={t`${fg(tokens.info)(`${sizedCount.toLocaleString()} sized`)} ${fg(tokens.textMuted)("of")} ${fg(tokens.textMuted)(`${foundCount.toLocaleString()} found`)}`}
+          wrapMode="none"
+        />
+      </box>
+    );
+  }
+  // A failed or partial scan holds whatever it last measured - showing a full
+  // bar next to the INCOMPLETE chip would be a lie, so the meter steps down
+  // to text until a rescan restores trust.
+  if (incomplete) {
+    return (
+      <box
+        width="100%"
+        height={2}
+        flexDirection="column"
+        paddingLeft={1}
+        backgroundColor={tokens.bg}
+        flexShrink={0}
+      >
+        <text content={t`${fg(tokens.warning)("scan incomplete")}`} wrapMode="none" />
+        <text
+          content={t`${fg(tokens.textMuted)("sizes are lower bounds - press")} ${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("to rescan")}`}
+          wrapMode="none"
+        />
+      </box>
+    );
+  }
+
   const hasSelection = selectedBytes > 0 && totalBytes > 0;
   const percent = totalBytes > 0 ? Math.round((selectedBytes / totalBytes) * 100) : 0;
   const scanned = t`${fg(tokens.textDim)(`${compactBytesLabel(totalBytes)} found`)}`;

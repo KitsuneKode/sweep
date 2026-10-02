@@ -253,11 +253,20 @@ describe("sweep TUI render", () => {
       await setup.flush();
     });
     await act(async () => {
+      hooks?.onBatch(createPlan().candidates);
       hooks?.onProgress?.({ scannedDirs: 4, skippedDirs: 0, sizedCount: 1 });
       await setup.flush();
     });
     await settle();
     expect(setup.captureCharFrame()).toContain("1 sizing");
+    // The sidebar meter reports sizing progress while the scan runs -
+    // queue coverage would sit near 100% under default selection and read
+    // as "done" on a scan that can still fail.
+    const midScan = setup.captureCharFrame();
+    expect(midScan).toContain("1 sized");
+    expect(midScan).toContain("of");
+    expect(midScan).toContain("2 found");
+    expect(midScan).not.toContain("100%");
     await act(async () => {
       setup.mockInput.pressKey("S");
       await setup.flush();
@@ -270,6 +279,15 @@ describe("sweep TUI render", () => {
     });
     await settle();
     expect(setup.captureCharFrame()).not.toContain("1 sizing");
+    // Even at sized == found the scanning meter clamps under 100% - only a
+    // completed scan earns a full bar.
+    expect(setup.captureCharFrame()).not.toContain("100%");
+    await act(async () => {
+      hooks?.onDone({ scannedDirs: 5, skippedDirs: 0, plan: createPlan() });
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("found");
   });
 
   test("select-all then enter still asks for confirmation before applying", async () => {

@@ -158,6 +158,9 @@ export function validateScanEvent(value: unknown): ScanEvent {
       if (event.skippedDirs !== undefined && !uint(event.skippedDirs)) {
         fail("scan_progress.skippedDirs");
       }
+      if (event.sizedCount !== undefined && !uint(event.sizedCount)) {
+        fail("scan_progress.sizedCount");
+      }
       if (event.currentDir !== undefined && typeof event.currentDir !== "string") {
         fail("scan_progress.currentDir");
       }

@@ -4,7 +4,7 @@ use camino::Utf8Path;
 use serde::Deserialize;
 use serde::Serialize;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use sweep_engine::{
     apply_plan, apply_plan_controlled_with_limit, scan_to_plan_with_sweep_config, ScanHooks,
@@ -128,6 +128,10 @@ enum ScanStreamEvent {
         found: u32,
         #[serde(rename = "skippedDirs")]
         skipped_dirs: u32,
+        /// Candidates whose size resolved so far - powers a real progress
+        /// meter on the host instead of a queue-coverage bar.
+        #[serde(rename = "sizedCount")]
+        sized_count: u32,
         #[serde(rename = "currentDir", skip_serializing_if = "Option::is_none")]
         current_dir: Option<String>,
     },
@@ -200,8 +204,21 @@ fn run_scan() -> Result<(), CliFailure> {
         .map_err(CliFailure::failure)?;
 
         let emitter = StreamEmitter::default();
+        let sized = AtomicUsize::new(0);
+        // Last walk snapshot. Sizing outlives the walk, so sized completions
+        // re-emit it with a fresh count; otherwise the meter would freeze at
+        // the last walk value until the terminal flush.
+        let last_walk = std::sync::Mutex::new(None::<(u32, u32, u32, Option<String>)>);
         let on_entry = |candidate: ScanCandidate| emitter.emit_found(candidate);
-        let on_entry_sized = |candidate: ScanCandidate| emitter.emit_updated(candidate);
+        let on_entry_sized = |candidate: ScanCandidate| {
+            let count = sized.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some((dirs, found, skipped, dir)) =
+                last_walk.lock().unwrap_or_else(|p| p.into_inner()).clone()
+            {
+                emitter.emit_progress(dirs, found, skipped, dir, count as u32);
+            }
+            emitter.emit_updated(candidate);
+        };
         let on_progress = |scanned_dirs: u32, found: u32, skipped_dirs: u32, dir: &Utf8Path| {
             // Report the dir relative to the scan root ("." for the root
             // itself) so consumers show "scanning x/" not an absolute path.
@@ -216,7 +233,15 @@ fn run_scan() -> Result<(), CliFailure> {
                     }
                 })
                 .map(str::to_owned);
-            emitter.emit_progress(scanned_dirs, found, skipped_dirs, current_dir);
+            *last_walk.lock().unwrap_or_else(|p| p.into_inner()) =
+                Some((scanned_dirs, found, skipped_dirs, current_dir.clone()));
+            emitter.emit_progress(
+                scanned_dirs,
+                found,
+                skipped_dirs,
+                current_dir,
+                sized.load(Ordering::Relaxed) as u32,
+            );
         };
 
         let hooks = ScanHooks {
@@ -303,7 +328,7 @@ struct EmitterState<W: Write> {
     out: io::BufWriter<W>,
     found: Vec<ScanCandidate>,
     updated: Vec<ScanCandidate>,
-    progress: Option<(u32, u32, u32, Option<String>)>,
+    progress: Option<(u32, u32, u32, Option<String>, u32)>,
     last_flush: std::time::Instant,
     flushed_once: bool,
 }
@@ -365,6 +390,7 @@ impl<W: Write> StreamEmitter<W> {
         found: u32,
         skipped_dirs: u32,
         current_dir: Option<String>,
+        sized_count: u32,
     ) {
         if self.has_error() {
             return;
@@ -373,7 +399,7 @@ impl<W: Write> StreamEmitter<W> {
             Ok(state) => state,
             Err(poisoned) => poisoned.into_inner(),
         };
-        state.progress = Some((scanned_dirs, found, skipped_dirs, current_dir));
+        state.progress = Some((scanned_dirs, found, skipped_dirs, current_dir, sized_count));
         if state.last_flush.elapsed() >= EMIT_FLUSH_INTERVAL {
             self.flush_locked(&mut state);
         }
@@ -432,12 +458,15 @@ impl<W: Write> StreamEmitter<W> {
                 };
                 write_json_line_to(&event, &mut state.out)?;
             }
-            if let Some((scanned_dirs, found, skipped_dirs, current_dir)) = state.progress.take() {
+            if let Some((scanned_dirs, found, skipped_dirs, current_dir, sized_count)) =
+                state.progress.take()
+            {
                 write_json_line_to(
                     &ScanStreamEvent::ScanProgress {
                         scanned_dirs,
                         found,
                         skipped_dirs,
+                        sized_count,
                         current_dir,
                     },
                     &mut state.out,
@@ -753,5 +782,25 @@ mod tests {
         assert!(lines[1].contains("candidates_updated"));
         emitter.flush_if_due();
         assert_eq!(emitter_lines(&emitter).len(), 2);
+    }
+
+    /// The progress event carries `sizedCount` so hosts can draw an honest
+    /// sizing meter; without it the only number available was queue coverage,
+    /// which reads 100% while work is still in flight.
+    #[test]
+    fn progress_event_includes_sized_count() {
+        let emitter = StreamEmitter::new(io::BufWriter::new(Vec::new()));
+        emitter.emit_progress(10, 3, 0, Some("a/b".to_owned()), 1);
+        {
+            let mut state = emitter.state.lock().unwrap_or_else(|p| p.into_inner());
+            state.last_flush -= EMIT_FLUSH_INTERVAL;
+        }
+        emitter.flush_if_due();
+        let lines = emitter_lines(&emitter);
+        assert_eq!(lines.len(), 1);
+        let event: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(event["type"], "scan_progress");
+        assert_eq!(event["sizedCount"], 1);
+        assert_eq!(event["scannedDirs"], 10);
     }
 }

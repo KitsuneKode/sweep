@@ -71,6 +71,7 @@ export class RustScanStream {
         scannedDirs: event.scannedDirs,
         found: event.found,
         skippedDirs: event.skippedDirs ?? 0,
+        ...(event.sizedCount === undefined ? {} : { sizedCount: event.sizedCount }),
         ...(event.currentDir === undefined ? {} : { currentDir: event.currentDir }),
       });
     } else if (event.type === "scan_completed") {

@@ -19,6 +19,8 @@ export interface ScanHooks {
     scannedDirs: number;
     found: number;
     skippedDirs: number;
+    /** Candidates whose size has resolved so far. */
+    sizedCount?: number;
     /** Directory being walked, relative to the scan target ("." for the root). */
     currentDir?: string;
   }) => void;
@@ -414,17 +416,33 @@ export async function scan(
   const entries: ScanEntry[] = [];
   let scannedDirs = 0;
   let skippedDirs = 0;
+  let sizedCount = 0;
   let progressAt = 0;
+  let sizedProgressAt = 0;
   const emitProgress = (currentDir?: string, force = false) => {
     if (!hooks.onProgress) return;
     if (!force && scannedDirs !== 1 && scannedDirs - progressAt < 8) return;
     progressAt = scannedDirs;
+    sizedProgressAt = sizedCount;
     hooks.onProgress({
       scannedDirs,
       found: entries.length,
       skippedDirs,
+      sizedCount,
       ...(currentDir === undefined ? {} : { currentDir }),
     });
+  };
+  // Count completions once so progress events carry a real sized/found pair -
+  // a queue-coverage meter cannot express "still working" honestly. Sized
+  // events also force a heartbeat past the walk-end tail, when scannedDirs
+  // stops advancing and cadence alone would go quiet (mirrors A09).
+  const countingHooks: ScanHooks = {
+    ...hooks,
+    onEntrySized: (entry) => {
+      sizedCount++;
+      hooks.onEntrySized?.(entry);
+      if (sizedCount - sizedProgressAt >= 16) emitProgress(undefined, true);
+    },
   };
   const skipDir = () => {
     skippedDirs++;
@@ -443,7 +461,7 @@ export async function scan(
   const needsReparseCheck = platform === "win32";
   // Apparent metadata sizing streams during discovery. Exact mode sizes
   // after discovery using the same resource budget.
-  const sizer = !exact ? new ProgressiveSizer(hooks, signal, budget) : null;
+  const sizer = !exact ? new ProgressiveSizer(countingHooks, signal, budget) : null;
 
   type Frame = { dir: string; depth: number };
 
@@ -627,8 +645,11 @@ export async function scan(
     if (sizer) {
       await sizer.finish();
     } else {
-      await applySizeEstimatesPostWalk(entries, exact, { ...hooks, signal }, budget);
+      await applySizeEstimatesPostWalk(entries, exact, { ...countingHooks, signal }, budget);
     }
+    // Terminal emit lands sizedCount == found so a meter drawn from progress
+    // events only reaches 100% when sizing actually finished.
+    emitProgress(".", true);
 
     return {
       entries,

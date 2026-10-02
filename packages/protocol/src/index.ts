@@ -218,6 +218,11 @@ export interface ScanProgressEvent {
   /** Unreadable / deduped directories - absent on older producers. */
   skippedDirs?: number;
   /**
+   * Candidates whose size has resolved - powers honest sizing progress while
+   * discovery is still running. Absent on older producers.
+   */
+  sizedCount?: number;
+  /**
    * Directory being walked, relative to the target - powers "scanning x/"
    * lines in progress surfaces. Absent on older producers.
    */

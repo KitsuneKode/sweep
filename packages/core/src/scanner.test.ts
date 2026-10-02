@@ -437,6 +437,21 @@ describe("scan: streaming hooks", () => {
     expect(reports.length).toBeGreaterThan(0);
     expect(reports[reports.length - 1]?.scannedDirs).toBe(result.scannedDirs);
   });
+
+  test("onProgress carries sizedCount so hosts can meter real progress", async () => {
+    mkdirSync(dir("node_modules"));
+    writeFileSync(dir("node_modules/f.bin"), Buffer.alloc(64));
+    mkdirSync(dir("dist"));
+    const reports: Array<{ sizedCount?: number; found: number }> = [];
+    await scan(tmpDir, { ...DEFAULT_CONFIG, patterns: ["node_modules", "dist"] }, false, {
+      onProgress: (info) => reports.push(info),
+    });
+    const last = reports[reports.length - 1];
+    // Every report carries the field and the final one has counted all
+    // discovered candidates - a meter reading it reaches 100% only on truth.
+    expect(last?.sizedCount).toBe(last?.found);
+    expect(last?.sizedCount).toBe(2);
+  });
 });
 
 describe("scan: result metadata", () => {
