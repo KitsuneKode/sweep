@@ -36,6 +36,7 @@
     "fmt": "turbo run fmt --filter \"@kitsunekode/*\"",
     "test": "turbo run test --filter \"@kitsunekode/*\"",
     "check": "turbo run check --filter \"@kitsunekode/*\" && bun run check:docs",
+    "verify": "bun run scripts/verify.ts",
     "check:affected": "turbo run check --affected --filter \"@kitsunekode/*\" && bun run check:docs",
     "check:docs": "bun run scripts/check-doc-links.ts",
     "fixtures:sync": "bun run scripts/sync-fixture-trees.ts",

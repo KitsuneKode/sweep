@@ -24,7 +24,19 @@ for integration and engine parity.
 ## Commands
 
 ```bash
-# Full gate (all workspace packages + integration)
+# The whole ladder: fixture sync, goldens, check, rust, engine probe - one
+# report, skips carry reasons, nonzero exit on any failure
+bun run verify
+
+# Release shape too: preflight, pack preview, standalone binary smoke
+bun run verify -- --all
+
+# Iterate on one step
+bun run verify -- --step rust
+bun run verify -- --fail-fast   # stop at first failure
+bun run verify -- --json        # machine-readable step report
+
+# Full gate (all workspace packages + integration + doc links)
 bun run check
 
 # Everything that has a test script

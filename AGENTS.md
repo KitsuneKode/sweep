@@ -7,6 +7,9 @@ docs only when they are relevant to the task.
 
 - Run `bun run check` before treating work as complete.
   This runs format, lint, typecheck, and tests via Turborepo.
+- `bun run verify` runs the full local ladder (fixtures, goldens, check,
+  rust:check, engine probe) with one report; `--all` adds release-shape
+  checks (preflight, pack preview, standalone smoke).
 - For Rust changes under `crates/`, also run `bun run rust:check` (fmt, clippy,
   test). Individual steps: `rust:fmt`, `rust:lint`, `rust:test`.
 - Never use stale command names from older docs. The repo is on `oxfmt`,
