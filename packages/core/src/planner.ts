@@ -23,6 +23,7 @@ import {
 import { catalogMatchFor } from "./catalog.js";
 import {
   GuardrailError,
+  hasCanonicalPathSpelling,
   isPathWithinRoot,
   isSameResolvedPath,
   pathHasProtectedVcsSegment,
@@ -133,6 +134,7 @@ export function resolveSelectedCandidates(plan: ScanPlan): ScanCandidate[] {
 export function revalidateCandidates(
   candidates: ScanCandidate[],
   targetDir?: string,
+  isCancelled?: () => boolean,
 ): {
   ready: ScanEntry[];
   failedPaths: PathFailure[];
@@ -154,6 +156,9 @@ export function revalidateCandidates(
   }
 
   for (const candidate of candidates) {
+    // Rust parity: a cancel during revalidation stops the walk - candidates
+    // never reached stay unattempted instead of reporting phantom failures.
+    if (isCancelled?.()) break;
     if (targetDir && !isPathWithinRoot(candidate.path, targetDir)) {
       failedPaths.push({
         path: candidate.path,
@@ -174,6 +179,19 @@ export function revalidateCandidates(
         path: candidate.path,
         code: "protected_path",
         error: "candidate path is the plan target directory itself",
+      });
+      continue;
+    }
+    // A path spelling normalize() would rewrite (or a trailing separator,
+    // which makes lstat follow a leaf symlink) can never be a scanner
+    // product - treat it as a failed entry, never as something to delete.
+    // Runs after the semantic root checks so "is the target" still reports
+    // protected_path; must run before the first leaf-resolving syscall.
+    if (!hasCanonicalPathSpelling(candidate.path)) {
+      failedPaths.push({
+        path: candidate.path,
+        code: "filesystem_error",
+        error: "candidate path is not in canonical form",
       });
       continue;
     }

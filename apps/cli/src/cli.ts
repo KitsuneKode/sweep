@@ -162,6 +162,7 @@ export function makeProgram(): Command {
       "Apply engine: auto (default - rust when its binary is available), rust, or js",
       "auto",
     )
+    .option("-n, --dry-run", "Preview the plan's deletions without making changes", false)
     .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
     .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
     .option("--json", "Emit JSON apply results", false)

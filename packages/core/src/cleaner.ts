@@ -16,7 +16,13 @@ const CASE_FOLD_PATHS = process.platform === "darwin" || process.platform === "w
 export interface CleanOptions {
   /** Fires immediately before the remove or trash rename, while that path is in flight. */
   onBegin?: ((entry: ScanEntry, index: number, total: number) => void) | undefined;
-  onProgress?: ((entry: ScanEntry, index: number, total: number) => void) | undefined;
+  /**
+   * Fires once per processed entry with `succeeded` = whether it actually
+   * deleted/moved - a failed entry must not paint as freed bytes.
+   */
+  onProgress?:
+    | ((entry: ScanEntry, index: number, total: number, succeeded: boolean) => void)
+    | undefined;
   /**
    * JS engine: checked before each delete; true stops scheduling new work.
    * Unprocessed entries appear in neither `deleted` nor `failedPaths`.
@@ -118,8 +124,18 @@ function pathExists(path: string): boolean {
  * `trashRoot`. `rename` on a symlink moves the link itself, never the target.
  * A path outside `trashRoot` or an absolute relative result is refused -
  * the trash layout must stay inside `trashDir`.
+ *
+ * `realTrashDir` is the trash root's identity pinned once in `clean()`:
+ * re-resolving it per move would follow a post-validation swap and the
+ * "destination under wherever trashDir currently resolves" check becomes
+ * tautological. The pin is compared per move so a swapped trash root fails.
  */
-async function moveToTrash(entry: ScanEntry, trashDir: string, trashRoot: string): Promise<void> {
+async function moveToTrash(
+  entry: ScanEntry,
+  trashDir: string,
+  trashRoot: string,
+  realTrashDir: string | undefined,
+): Promise<void> {
   const rel = relative(trashRoot, entry.path);
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`trash destination escapes root for ${entry.path}`);
@@ -133,10 +149,14 @@ async function moveToTrash(entry: ScanEntry, trashDir: string, trashRoot: string
   }
   mkdirSync(dirname(destination), { recursive: true });
   // A symlink planted inside the trash layout would redirect the rename -
-  // verify the real parent still lands under the real trash dir.
+  // verify the real parent still lands under the PINNED real trash dir, and
+  // that trashDir itself still resolves to the same place it did at pin time.
   const realParent = realpathSync(dirname(destination));
-  const realTrash = realpathSync(trashDir);
-  if (!isPathWithinRoot(realParent, realTrash) && realParent !== realTrash) {
+  if (
+    realTrashDir === undefined ||
+    realpathSync(trashDir) !== realTrashDir ||
+    (!isPathWithinRoot(realParent, realTrashDir) && realParent !== realTrashDir)
+  ) {
     throw new Error(`trash destination escapes ${trashDir} for ${entry.path}`);
   }
   await rename(entry.path, destination);
@@ -169,13 +189,29 @@ export async function clean(
   }
 
   // Resolve the containment root once - every worker re-canonicalizes the
-  // entry's *parent* against it right before the delete.
+  // entry's *parent* against it right before the delete. A supplied root
+  // that cannot resolve is NOT "no check": it fails every entry closed.
+  const containmentRequired = options.containmentRoot !== undefined;
   let realContainmentRoot: string | undefined;
-  if (options.containmentRoot) {
+  if (containmentRequired) {
     try {
-      realContainmentRoot = realpathSync(options.containmentRoot);
+      realContainmentRoot = realpathSync(options.containmentRoot!);
     } catch {
       realContainmentRoot = undefined;
+    }
+  }
+
+  // Pin the trash root's identity once: moveToTrash compares every move
+  // against this value, so a trashDir swapped for a symlink mid-apply fails
+  // instead of re-resolving to wherever the attacker pointed it. The dir is
+  // created first - a not-yet-existing trash root cannot be canonicalized.
+  let realTrashDir: string | undefined;
+  if (options.trashDir) {
+    try {
+      mkdirSync(options.trashDir, { recursive: true });
+      realTrashDir = realpathSync(options.trashDir);
+    } catch {
+      realTrashDir = undefined;
     }
   }
 
@@ -185,6 +221,7 @@ export async function clean(
     deduplicated,
     DELETE_CONCURRENCY,
     async (entry, index) => {
+      let succeeded = false;
       try {
         // Re-lstat before touching anything: an entry that vanished since
         // validation must report "missing" (rm force:true never complains),
@@ -202,7 +239,14 @@ export async function clean(
             code: "ECHANGED",
           });
         }
-        if (realContainmentRoot) {
+        if (containmentRequired) {
+          // Fail closed: a supplied root that no longer resolves means the
+          // canonical checks cannot run at all - refuse rather than follow.
+          if (realContainmentRoot === undefined) {
+            throw Object.assign(new Error(`containment root could not be resolved`), {
+              code: "EOUTSIDE",
+            });
+          }
           // Shrink the validate-then-delete race: if an ancestor directory was
           // swapped for a symlink after revalidation, the canonical parent no
           // longer lands under the root - refuse rather than follow.
@@ -224,19 +268,27 @@ export async function clean(
           // A throwing progress sink must not abort the delete loop.
         }
         if (options.trashDir && options.trashRoot) {
-          await moveToTrash(entry, options.trashDir, options.trashRoot);
+          await moveToTrash(entry, options.trashDir, options.trashRoot, realTrashDir);
         } else if (
           entry.isSymlink ||
           (process.platform === "win32" && isReparsePointOrSymlink(entry.path))
         ) {
           try {
             await unlink(entry.path);
-          } catch {
+          } catch (err) {
+            // Windows refuses unlink on dir symlinks/junctions; rmdir removes
+            // the link itself. Re-verify the leaf is still a reparse point
+            // first - a swap to a real dir must not be removed by the
+            // fallback. On POSIX unlink errors propagate with their real code.
+            if (process.platform !== "win32" || !isReparsePointOrSymlink(entry.path)) {
+              throw err;
+            }
             await rmdir(entry.path);
           }
         } else {
           await rm(entry.path, { recursive: true, force: true });
         }
+        succeeded = true;
         deleted.push(entry);
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
@@ -249,7 +301,7 @@ export async function clean(
       }
 
       try {
-        options.onProgress?.(entry, index, deduplicated.length);
+        options.onProgress?.(entry, index, deduplicated.length, succeeded);
       } catch {
         // A throwing progress sink must not abort the delete loop.
       }

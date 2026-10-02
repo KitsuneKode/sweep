@@ -1,4 +1,9 @@
-import { DEFAULT_SCAN_LIMITS, type ScanLimits, type ScanPlan } from "@kitsunekode/sweep-protocol";
+import {
+  DEFAULT_SCAN_LIMITS,
+  type ScanCandidate,
+  type ScanLimits,
+  type ScanPlan,
+} from "@kitsunekode/sweep-protocol";
 import { GuardrailError } from "./guardrails.js";
 
 export class ResourceLimitError extends GuardrailError {
@@ -70,9 +75,12 @@ export class ResourceBudget {
     this.charge("maxRetainedBytes", bytes * 4 + overhead);
   }
 
-  candidate(path: string): void {
+  candidate(path: string, extraChars = 0): void {
     this.charge("maxCandidates", 1);
-    this.path(path, 1024);
+    // extraChars covers the OTHER retained string fields (id, name, kind,
+    // reasons) at worst-case UTF-32 width - the path alone undercounts what
+    // actually stays in memory per candidate.
+    this.path(path, 1024 + extraChars * 4);
   }
 
   directory(path: string | Buffer): void {
@@ -91,6 +99,16 @@ export class ResourceBudget {
   }
 }
 
+/** Characters retained per candidate beyond the path: id, name, kind, reasons. */
+export function candidateFieldChars(candidate: ScanCandidate): number {
+  return (
+    candidate.id.length +
+    candidate.name.length +
+    candidate.kind.length +
+    candidate.reasons.reduce((sum, reason) => sum + reason.length, 0)
+  );
+}
+
 /** Validate logical bounds and byte totals before any destructive operation. */
 export function assertPlanResources(plan: ScanPlan): void {
   const budget = new ResourceBudget();
@@ -99,7 +117,7 @@ export function assertPlanResources(plan: ScanPlan): void {
     throw new ResourceLimitError("maxCandidates");
   checkedBytes(0, plan.summary.estimatedTotalBytes);
   for (const candidate of plan.candidates) {
-    budget.candidate(candidate.path);
+    budget.candidate(candidate.path, candidateFieldChars(candidate));
     total = checkedBytes(total, candidate.estimatedBytes);
   }
 }

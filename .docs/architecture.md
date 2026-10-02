@@ -225,7 +225,7 @@ Both engines re-validate before deleting:
   upgrade the native package or explicitly choose JS. Scan cancellation still
   terminates its read-only child.
 - **Plan files are untrusted** - `loadPlan` requires a regular file under
-  256 MB, then validates against the ScanPlan schema. Engine apply reports
+  64 MB, then validates against the ScanPlan schema. Engine apply reports
   are validated against the ApplyReport schema for the same reason:
   `SWEEP_ENGINE_PATH` can point the subprocess at any binary.
 - **Nested + duplicate candidates** - `deduplicateNestedEntries` drops any

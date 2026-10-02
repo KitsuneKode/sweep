@@ -242,6 +242,15 @@ async function runEngineAsync(
         stderr += chunk;
       }
     });
+    // A stream-level error on a flowing pipe would otherwise escape as an
+    // uncaughtException, bypassing the exit-code taxonomy entirely.
+    proc.stdout.on("error", (error: Error) => {
+      terminateEngine(proc);
+      settle(() => rejectPromise(new Error(`rust engine stdout failed: ${error.message}`)));
+    });
+    proc.stderr.on("error", () => {
+      // stderr is diagnostic-only - the close handler still reports exit.
+    });
 
     proc.on("error", (error) => {
       settle(() =>
@@ -363,7 +372,15 @@ export async function scanToPlanViaRust(
     warmPlanValidator();
     const stdout = await scan;
     if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
-    return validatePlan(JSON.parse(stdout));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch (error) {
+      throw new PlanValidationError(
+        `Invalid plan JSON from engine: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return validatePlan(parsed);
   }
 
   const stream = new RustScanStream(absoluteTarget, options, options.exact ?? false);
@@ -425,7 +442,12 @@ export async function applyPlanViaRust(
       ["apply", "--json-control"],
       `${JSON.stringify({ plan, maxSizeBytes })}\n{"type":"start"}\n`,
       (line) => {
-        const event = JSON.parse(line) as { type?: string; candidateId?: string; report?: unknown };
+        let event: { type?: string; candidateId?: string; report?: unknown };
+        try {
+          event = JSON.parse(line) as typeof event;
+        } catch {
+          throw new PlanValidationError("Invalid apply event JSON from engine");
+        }
         if (report) throw new PlanValidationError("Apply event after completion");
         if (event.type === "apply_begin") {
           if (

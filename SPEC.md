@@ -129,7 +129,10 @@ entries that were never scheduled.
   `clean`); structured failures carry stable codes.
 - `scan --json-stream` emits newline-delimited `ScanEvent`s:
   `scan_started`, `candidate_found`, `candidate_updated` (sized enrichments),
-  `scan_progress`, `warning`, and `scan_completed` (always last).
+  `scan_progress`, and `scan_completed` (always last). The raw engine stream
+  batches candidates as `candidates_found`/`candidates_updated`; the CLI
+  re-emits them per candidate. A `warning` event is reserved in the schema -
+  no producer emits it yet.
 - `ApplyReport.failedPaths[].code` is one of: `missing` (vanished before
   delete), `changed_symlink_state`, `changed_entry_type`, `outside_target`,
   `protected_path` (VCS metadata or protected segment), `permission_denied`,

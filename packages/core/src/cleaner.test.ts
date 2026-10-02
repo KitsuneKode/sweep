@@ -263,3 +263,125 @@ describe("clean with trashDir", () => {
     }
   });
 });
+
+describe("clean delete-time hardening", () => {
+  test("an unresolvable containment root fails every entry closed", async () => {
+    // A dangling-then-repointed target must not turn "couldn't canonicalize"
+    // into "no canonical checks at all" - every entry fails outside_target.
+    const root = mkdtempSync(join(tmpdir(), "sweep-rootgone-"));
+    try {
+      const targetDir = join(root, "project");
+      mkdirSync(join(targetDir, "node_modules"), { recursive: true });
+      writeFileSync(join(targetDir, "node_modules", "index.js"), "x");
+
+      const result = await clean(
+        [
+          {
+            path: join(targetDir, "node_modules"),
+            name: "node_modules",
+            estimatedBytes: 1,
+            isSymlink: false,
+            entryType: "directory",
+          },
+        ],
+        { containmentRoot: join(root, "does-not-exist") },
+      );
+
+      expect(result.deleted.length).toBe(0);
+      expect(result.failedPaths[0]?.code).toBe("outside_target");
+      expect(existsSync(join(targetDir, "node_modules", "index.js"))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a trashDir swapped for a symlink mid-apply cannot redirect moves", async () => {
+    // The pin is taken once in clean(); re-resolving the trash root per move
+    // would follow the swap and tautologically "pass" containment.
+    const root = mkdtempSync(join(tmpdir(), "sweep-trashpin-"));
+    try {
+      const targetDir = join(root, "project");
+      const outside = join(root, "outside");
+      mkdirSync(join(targetDir, "node_modules"), { recursive: true });
+      mkdirSync(outside, { recursive: true });
+      writeFileSync(join(targetDir, "node_modules", "index.js"), "x");
+
+      const trashDir = join(targetDir, ".sweep-trash-2025-01-01");
+      mkdirSync(trashDir, { recursive: true });
+      const { symlinkSync } = await import("node:fs");
+      let swapped = false;
+
+      const result = await clean(
+        [
+          {
+            path: join(targetDir, "node_modules"),
+            name: "node_modules",
+            estimatedBytes: 1,
+            isSymlink: false,
+            entryType: "directory",
+          },
+        ],
+        {
+          trashDir,
+          trashRoot: targetDir,
+          onBegin: () => {
+            // Swap lands after clean() pinned the real trash dir.
+            rmSync(trashDir, { recursive: true, force: true });
+            symlinkSync(outside, trashDir);
+            swapped = true;
+          },
+        },
+      );
+
+      expect(swapped).toBe(true);
+      expect(result.deleted.length).toBe(0);
+      expect(result.failedPaths.length).toBe(1);
+      // Nothing left the target: source intact, nothing relocated outside.
+      expect(existsSync(join(targetDir, "node_modules", "index.js"))).toBe(true);
+      expect(existsSync(join(outside, "node_modules"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("onProgress reports succeeded=false for failed entries", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-progress-"));
+    try {
+      const targetDir = join(root, "project");
+      mkdirSync(join(targetDir, "node_modules"), { recursive: true });
+      writeFileSync(join(targetDir, "node_modules", "index.js"), "x");
+      const gone = join(targetDir, "dist");
+
+      const outcomes = new Map<string, boolean>();
+      await clean(
+        [
+          {
+            path: join(targetDir, "node_modules"),
+            name: "node_modules",
+            estimatedBytes: 1,
+            isSymlink: false,
+            entryType: "directory",
+          },
+          {
+            path: gone,
+            name: "dist",
+            estimatedBytes: 5,
+            isSymlink: false,
+            entryType: "directory",
+          },
+        ],
+        {
+          onProgress: (entry, _i, _total, succeeded) => {
+            outcomes.set(entry.path, succeeded);
+          },
+        },
+      );
+
+      expect(outcomes.get(join(targetDir, "node_modules"))).toBe(true);
+      // Failed entries must not paint as freed bytes downstream.
+      expect(outcomes.get(gone)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

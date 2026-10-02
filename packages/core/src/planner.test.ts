@@ -301,3 +301,72 @@ describe("planner", () => {
     ).toEqual([safeCandidate.id, cautionCandidate.id, dangerousCandidate.id]);
   });
 });
+
+describe("revalidateCandidates canonical spelling", () => {
+  test("rejects a trailing-separator path spelling before any syscall", () => {
+    // lstat("/t/sub/") follows a leaf symlink to a directory - the delete-time
+    // symlink check would never see the link. A trailing-separator path can
+    // only come from a forged/corrupt plan: refuse it as a failed entry.
+    mkdirSync(dir("sub", "node_modules"), { recursive: true });
+    const candidate = toCandidate({
+      path: `${dir("sub", "node_modules")}/`,
+      name: "node_modules",
+      estimatedBytes: 0,
+      isSymlink: false,
+      entryType: "directory",
+    });
+
+    const { ready, failedPaths } = revalidateCandidates([candidate], tmpDir);
+
+    expect(ready).toHaveLength(0);
+    expect(failedPaths[0]?.code).toBe("filesystem_error");
+    expect(failedPaths[0]?.error).toContain("canonical");
+    expect(existsSync(dir("sub", "node_modules"))).toBe(true);
+  });
+
+  test("rejects dot-segment and duplicate-separator spellings", () => {
+    mkdirSync(dir("node_modules"), { recursive: true });
+    for (const spelling of [
+      `${dir("node_modules")}/.`,
+      `${tmpDir}//node_modules`,
+      `${tmpDir}/x/../node_modules`,
+    ]) {
+      const candidate = toCandidate({
+        path: spelling,
+        name: "node_modules",
+        estimatedBytes: 0,
+        isSymlink: false,
+        entryType: "directory",
+      });
+      const { ready, failedPaths } = revalidateCandidates([candidate], tmpDir);
+      // Inside-root spellings land on canonical; outside-root variants land
+      // on outside_target - either way nothing reaches ready as written.
+      expect(ready).toHaveLength(0);
+      expect(failedPaths).toHaveLength(1);
+    }
+  });
+
+  test("a cancelled revalidation leaves later candidates unattempted", () => {
+    // Rust parity: a stop during revalidation must not manufacture failures
+    // for candidates it never reached - they read as unattempted upstream.
+    mkdirSync(dir("node_modules"), { recursive: true });
+    mkdirSync(dir(".vite"), { recursive: true });
+    const mk = (name: string) =>
+      toCandidate({
+        path: dir(name),
+        name,
+        estimatedBytes: 0,
+        isSymlink: false,
+        entryType: "directory",
+      });
+    let calls = 0;
+    const { ready, failedPaths } = revalidateCandidates(
+      [mk("node_modules"), mk(".vite")],
+      tmpDir,
+      () => calls++ > 0, // first call false, every later call true
+    );
+
+    expect(ready).toHaveLength(1);
+    expect(failedPaths).toHaveLength(0);
+  });
+});

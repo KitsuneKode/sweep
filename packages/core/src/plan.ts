@@ -2,6 +2,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { assertPlanResources } from "./resource-budget.js";
+import { hasCanonicalPathSpelling } from "./guardrails.js";
 import type { ApplyReport, ScanCandidate, ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   APPLY_REPORT_SCHEMA,
@@ -68,8 +69,20 @@ function formatValidationErrors(errors: ErrorObject[] | null | undefined): strin
 export function validatePlan(value: unknown): ScanPlan {
   const validator = getValidator();
   if (validator(value)) {
-    assertPlanResources(value as ScanPlan);
-    return value as ScanPlan;
+    const plan = value as ScanPlan;
+    assertPlanResources(plan);
+    // Canonical path spellings only: a trailing separator makes lstat follow
+    // a leaf symlink, and `./`-style spellings pass lexical checks while
+    // reaching a different entry. sweep never writes one - a plan carrying
+    // it is malformed input, rejected wholesale.
+    for (const candidate of plan.candidates) {
+      if (!hasCanonicalPathSpelling(candidate.path)) {
+        throw new PlanValidationError(
+          `Invalid scan plan: candidate path is not in canonical form: ${sanitizeTerminalText(candidate.path)}`,
+        );
+      }
+    }
+    return plan;
   }
 
   throw new PlanValidationError(`Invalid scan plan: ${formatValidationErrors(validator.errors)}`);
@@ -107,13 +120,41 @@ export function validateScanEvent(value: unknown): ScanEvent {
   const event = value as Record<string, unknown>;
   if (typeof event.type !== "string") fail("missing type");
 
+  // Retained-string caps: the candidate budget meters path bytes, but name,
+  // id and reasons land in live state unmetered - an engine could pin host
+  // memory with a few huge strings inside the per-line byte cap.
+  const MAX_ID_CHARS = 1024;
+  const MAX_NAME_CHARS = 4096;
+  const MAX_REASON_CHARS = 1024;
+  const MAX_REASONS = 64;
+  const MAX_MESSAGE_CHARS = 64 * 1024;
+  const KINDS = new Set([
+    "node_modules",
+    "dist",
+    "build",
+    "out",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    ".vite",
+    ".parcel-cache",
+    "target",
+    "coverage",
+    ".nyc_output",
+    "tsbuildinfo",
+    "custom",
+  ]);
+
   const candidateOk = (candidate: unknown): candidate is ScanCandidate => {
     if (typeof candidate !== "object" || candidate === null) return false;
     const c = candidate as Record<string, unknown>;
     return (
       typeof c.id === "string" &&
+      c.id.length <= MAX_ID_CHARS &&
       typeof c.path === "string" &&
       typeof c.name === "string" &&
+      c.name.length <= MAX_NAME_CHARS &&
       typeof c.estimatedBytes === "number" &&
       Number.isSafeInteger(c.estimatedBytes) &&
       c.estimatedBytes >= 0 &&
@@ -125,12 +166,16 @@ export function validateScanEvent(value: unknown): ScanEvent {
       typeof c.isSymlink === "boolean" &&
       (c.entryType === "file" || c.entryType === "directory" || c.entryType === "symlink") &&
       typeof c.kind === "string" &&
+      KINDS.has(c.kind) &&
       (c.riskTier === "safe" ||
         c.riskTier === "caution" ||
         c.riskTier === "dangerous" ||
         c.riskTier === "blocked") &&
       Array.isArray(c.reasons) &&
-      c.reasons.every((reason) => typeof reason === "string") &&
+      c.reasons.length <= MAX_REASONS &&
+      c.reasons.every(
+        (reason) => typeof reason === "string" && reason.length <= MAX_REASON_CHARS,
+      ) &&
       typeof c.selectedByDefault === "boolean"
     );
   };
@@ -166,7 +211,12 @@ export function validateScanEvent(value: unknown): ScanEvent {
       }
       break;
     case "warning":
-      if (typeof event.message !== "string") fail("warning.message");
+      if (typeof event.message !== "string" || event.message.length > MAX_MESSAGE_CHARS) {
+        fail("warning.message");
+      }
+      if (event.candidateId !== undefined && typeof event.candidateId !== "string") {
+        fail("warning.candidateId");
+      }
       break;
     case "scan_completed": {
       const summary = event.summary;
@@ -174,6 +224,15 @@ export function validateScanEvent(value: unknown): ScanEvent {
       const s = summary as Record<string, unknown>;
       if (!uint(s.candidateCount) || !uint(s.estimatedTotalBytes) || !uint(s.scannedDirs)) {
         fail("scan_completed.summary counters");
+      }
+      if (s.skippedDirs !== undefined && !uint(s.skippedDirs)) {
+        fail("scan_completed.summary.skippedDirs");
+      }
+      if (s.exact !== undefined && typeof s.exact !== "boolean") {
+        fail("scan_completed.summary.exact");
+      }
+      if (s.elapsedMs !== undefined && !uint(s.elapsedMs)) {
+        fail("scan_completed.summary.elapsedMs");
       }
       break;
     }

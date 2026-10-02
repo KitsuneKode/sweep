@@ -468,6 +468,10 @@ export async function executePlanDeletion(
   const onSigint = () => controller.abort();
   process.once("SIGINT", onSigint);
   options.signal?.addEventListener("abort", onSigint, { once: true });
+  // addEventListener on an already-aborted signal never fires - a ctrl-c
+  // that landed during the import/trash setup above would be silently
+  // dropped without this check.
+  if (options.signal?.aborted) onSigint();
 
   const verb = trashDir ? "moving" : "deleting";
   const paintDeletion = () => {

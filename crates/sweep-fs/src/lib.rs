@@ -619,7 +619,7 @@ fn scan_dir_entries(
         }
 
         if matched {
-            if !ctx.budget.candidate(full_path.as_str().len()) {
+            if !ctx.budget.candidate(full_path.as_str().len(), 0) {
                 break;
             }
             let entry_type = if is_symlink {

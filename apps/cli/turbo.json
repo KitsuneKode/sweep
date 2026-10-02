@@ -6,6 +6,7 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/ui/src/**",
+        "$TURBO_ROOT$/packages/display/src/**",
         "$TURBO_ROOT$/scripts/bundle.ts"
       ],
       "outputs": ["dist/**"]

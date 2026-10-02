@@ -146,3 +146,12 @@ describe("apply report validation", () => {
     expect(() => validateApplyReport("null")).toThrow(PlanValidationError);
   });
 });
+
+test("rejects a plan whose candidate path is not in canonical form", () => {
+  // A trailing separator makes lstat follow a leaf symlink - the delete-time
+  // symlink check would never see it. sweep never writes this; a plan that
+  // carries it is malformed input.
+  const forged = validPlan();
+  forged.candidates[0]!.path += "/";
+  expect(() => validatePlan(forged)).toThrow("canonical");
+});

@@ -329,6 +329,8 @@ struct EmitterState<W: Write> {
     found: Vec<ScanCandidate>,
     updated: Vec<ScanCandidate>,
     progress: Option<(u32, u32, u32, Option<String>, u32)>,
+    /// Estimated serialized bytes of the pending found+updated batches.
+    pending_bytes: usize,
     last_flush: std::time::Instant,
     flushed_once: bool,
 }
@@ -336,6 +338,20 @@ struct EmitterState<W: Write> {
 /// Flush once this many candidates are pending - bounds latency when the
 /// walk outpaces the progress heartbeat.
 const EMIT_BATCH_AT: usize = 64;
+/// The host caps one event line at 4 MB (`MAX_EVENT_LINE`). 64 candidates
+/// with near-maximal paths could exceed that and get the engine killed
+/// mid-scan, so batches also flush on a byte budget well under the cap.
+const EMIT_BATCH_BYTES: usize = 1024 * 1024;
+
+/// Serialized-size estimate good enough to bound the line under the host cap.
+fn candidate_wire_bytes(candidate: &ScanCandidate) -> usize {
+    candidate.id.len()
+        + candidate.entry.path.len()
+        + candidate.entry.name.len()
+        + candidate.kind.len()
+        + candidate.reasons.iter().map(|r| r.len()).sum::<usize>()
+        + 256
+}
 /// Flush at most this often on progress heartbeats. The TUI coalesces into
 /// 60ms windows, so a faster cadence only buys syscalls, not freshness.
 const EMIT_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
@@ -355,6 +371,7 @@ impl<W: Write> StreamEmitter<W> {
                 found: Vec::new(),
                 updated: Vec::new(),
                 progress: None,
+                pending_bytes: 0,
                 last_flush: std::time::Instant::now(),
                 flushed_once: false,
             }),
@@ -362,11 +379,19 @@ impl<W: Write> StreamEmitter<W> {
     }
 
     fn emit_found(&self, candidate: ScanCandidate) {
-        self.push(|state| state.found.push(candidate));
+        let bytes = candidate_wire_bytes(&candidate);
+        self.push(|state| {
+            state.pending_bytes += bytes;
+            state.found.push(candidate);
+        });
     }
 
     fn emit_updated(&self, candidate: ScanCandidate) {
-        self.push(|state| state.updated.push(candidate));
+        let bytes = candidate_wire_bytes(&candidate);
+        self.push(|state| {
+            state.pending_bytes += bytes;
+            state.updated.push(candidate);
+        });
     }
 
     fn flush_if_due(&self) {
@@ -422,6 +447,7 @@ impl<W: Write> StreamEmitter<W> {
         // scan end (plan A09).
         if !state.flushed_once
             || state.found.len() + state.updated.len() >= EMIT_BATCH_AT
+            || state.pending_bytes >= EMIT_BATCH_BYTES
             || state.last_flush.elapsed() >= EMIT_FLUSH_INTERVAL
         {
             self.flush_locked(&mut state);
@@ -446,6 +472,7 @@ impl<W: Write> StreamEmitter<W> {
     /// stream order preserves the found-then-updated invariant.
     fn flush_locked(&self, state: &mut EmitterState<W>) {
         let result = (|| -> Result<(), String> {
+            state.pending_bytes = 0;
             if !state.found.is_empty() {
                 let event = ScanStreamEvent::CandidatesFound {
                     candidates: std::mem::take(&mut state.found),

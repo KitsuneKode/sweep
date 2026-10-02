@@ -1049,6 +1049,26 @@ describe("mergeApplyReport", () => {
     expect(merged.state.candidates.map((c) => c.id)).toContain("cand_dangerous");
   });
 
+  test("an interrupted legacy report without outcomes removes nothing", () => {
+    // With no per-candidate outcomes there is no way to tell unattempted
+    // ids from deleted ones - inferring removals would clear rows for files
+    // that still exist.
+    const state = createUiState(createPlan());
+    const legacyReport: Parameters<typeof mergeApplyReport>[1] = {
+      ...baseReport,
+      selectedCandidateIds: ["cand_safe", "cand_dangerous"],
+      deletedCount: 0,
+      interrupted: true,
+    };
+    // Legacy producers omit the field entirely - undefined isn't assignable
+    // under exactOptionalPropertyTypes, so drop the key outright.
+    delete (legacyReport as { outcomes?: unknown }).outcomes;
+    const merged = mergeApplyReport(state, legacyReport);
+    expect(merged.removedIds).toEqual([]);
+    expect(merged.unattempted).toBe(2);
+    expect(merged.state.candidates.length).toBe(3);
+  });
+
   test("legacy reports without outcomes infer removals minus failures", () => {
     const state = createUiState(createPlan());
     const merged = mergeApplyReport(state, { ...baseReport });

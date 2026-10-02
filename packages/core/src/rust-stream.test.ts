@@ -173,3 +173,73 @@ describe("Rust scan stream contract", () => {
     expect(() => send(stream, found)).toThrow("completed");
   });
 });
+
+describe("stream candidate spelling and dedupe hardening", () => {
+  test("rejects non-canonical candidate spellings", () => {
+    for (const spelling of [`${target}/node_modules/`, `${target}/./node_modules`]) {
+      const stream = new RustScanStream(target);
+      send(stream, start);
+      expect(() =>
+        send(stream, {
+          type: "candidate_found",
+          candidate: { ...candidate, path: spelling },
+        }),
+      ).toThrow("canonical");
+    }
+  });
+
+  test("rejects the target root under resolve-equal spellings", () => {
+    // "/t/." and "/t/" hit the canonical-spelling gate first; the bare
+    // exact spelling lands on resolved-path equality.
+    for (const spelling of [`${target}/.`, `${target}/`]) {
+      const stream = new RustScanStream(target);
+      send(stream, start);
+      expect(() =>
+        send(stream, {
+          type: "candidate_found",
+          candidate: { ...candidate, path: spelling, name: "." },
+        }),
+      ).toThrow("canonical");
+    }
+    const stream = new RustScanStream(target);
+    send(stream, start);
+    expect(() =>
+      send(stream, {
+        type: "candidate_found",
+        candidate: { ...candidate, path: target, name: target },
+      }),
+    ).toThrow("outside target");
+  });
+
+  test("rejects a second sizing update for the same candidate", () => {
+    const stream = new RustScanStream(target);
+    send(stream, start);
+    send(stream, found);
+    send(stream, updated);
+    expect(() => send(stream, updated)).toThrow("duplicate scan candidate update");
+  });
+
+  test("rejects mistyped completion summary fields", () => {
+    const stream = new RustScanStream(target);
+    send(stream, start);
+    send(stream, found);
+    send(stream, updated);
+    expect(() =>
+      send(stream, {
+        type: "scan_completed",
+        summary: { ...complete.summary, skippedDirs: "1" },
+      }),
+    ).toThrow("skippedDirs");
+  });
+
+  test("rejects a kind outside the candidate-kind enum", () => {
+    const stream = new RustScanStream(target);
+    send(stream, start);
+    expect(() =>
+      send(stream, {
+        type: "candidate_found",
+        candidate: { ...candidate, kind: "definitely-not-a-kind" },
+      }),
+    ).toThrow("Invalid scan event");
+  });
+});

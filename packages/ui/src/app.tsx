@@ -789,10 +789,16 @@ export function SweepApp({
         const merged = mergeApplyReport(stateRef.current, result.report);
         dispatch({ type: "replace", state: merged.state });
         const verb = result.trashDir ? "moved to trash" : "deleted";
-        if (merged.failed > 0 && merged.removedIds.length === 0) {
-          setNotice(
-            `couldn't ${trashMode ? "move" : "delete"} ${name}: ${sanitizeTerminalText(merged.firstFailure ?? "revalidation failed")}`,
-          );
+        if (merged.removedIds.length === 0) {
+          // Zero rows left the list: claiming "deleted" would be a lie -
+          // say what actually happened (failure, or an early stop).
+          const why =
+            merged.failed > 0
+              ? `: ${sanitizeTerminalText(merged.firstFailure ?? "revalidation failed")}`
+              : merged.interrupted || merged.unattempted > 0
+                ? " - stopped before it was attempted"
+                : "";
+          setNotice(`couldn't ${trashMode ? "move" : "delete"} ${name}${why}`);
         } else {
           const extra =
             merged.removedIds.length > 1 ? ` (+${merged.removedIds.length - 1} nested)` : "";

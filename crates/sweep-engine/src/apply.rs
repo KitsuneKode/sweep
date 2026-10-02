@@ -52,7 +52,13 @@ pub fn apply_plan_controlled_with_limit(
     }
     let mut observed_bytes = 0u64;
     for candidate in &plan.candidates {
-        if !budget.candidate(candidate.entry.path.len()) {
+        if !budget.candidate(
+            candidate.entry.path.len(),
+            candidate.id.len()
+                + candidate.entry.name.len()
+                + candidate.kind.len()
+                + candidate.reasons.iter().map(|r| r.len()).sum::<usize>(),
+        ) {
             break;
         }
         observed_bytes = observed_bytes
@@ -102,8 +108,9 @@ pub fn apply_plan_controlled_with_limit(
     // Resolve the target once: lexical containment alone is not enough - a
     // directory inside the tree can be swapped for a symlink between scan and
     // apply, and rm would then recurse through it outside the target.
-    // If the root itself cannot be canonicalized, every candidate fails
-    // symlink_metadata anyway, so skipping the check loses nothing.
+    // An unresolvable root is NOT "no check": a dangling-then-repointed
+    // target would otherwise proceed with zero canonical verification, so
+    // every delete fails closed instead (JS parity: EOUTSIDE per entry).
     let real_root = fs::canonicalize(&plan.target_dir).ok();
 
     let mut ready: Vec<ScanEntry> = Vec::new();
@@ -147,6 +154,21 @@ pub fn apply_plan_controlled_with_limit(
                 &candidate.entry.path,
                 FailureReasonCode::ProtectedPath,
                 "candidate path is the plan target directory itself".to_owned(),
+            ));
+            continue;
+        }
+        // A path spelling that is not canonical - a trailing separator or a
+        // spelling normalize() would rewrite - can never be a scanner
+        // product. `symlink_metadata` on a trailing separator follows a leaf
+        // symlink to a directory, silently disabling the delete-time
+        // symlink recheck. Runs after the semantic root checks so "is the
+        // target" still reports protected_path; must run before the first
+        // leaf-resolving syscall. JS parity: revalidateCandidates.
+        if !has_canonical_spelling(&candidate.entry.path) {
+            failed_paths.push(path_failure(
+                &candidate.entry.path,
+                FailureReasonCode::FilesystemError,
+                "candidate path is not in canonical form".to_owned(),
             ));
             continue;
         }
@@ -235,11 +257,22 @@ pub fn apply_plan_controlled_with_limit(
         }
         let key = dedupe_key(&entry.path);
         let id = retained_ids[key.as_str()];
-        on_begin(id);
         if cancelled.load(Ordering::Acquire) {
             break;
         }
-        match delete_entry(&entry, real_root.as_deref()) {
+        // apply_begin must only fire for an entry that will actually be
+        // attempted - a cancel landing between the checks above used to
+        // paint a phantom "deleting" line for work that never ran.
+        on_begin(id);
+        let result = match real_root.as_deref() {
+            Some(root) => delete_entry(&entry, root),
+            None => Err(path_failure(
+                &entry.path,
+                FailureReasonCode::OutsideTarget,
+                "containment root could not be resolved".to_owned(),
+            )),
+        };
+        match result {
             Ok(()) => {
                 deleted_count += 1;
                 total_bytes_freed += entry.estimated_bytes; // preflight checked all candidate bytes before any removal
@@ -491,58 +524,63 @@ fn deduplicate_nested_entries(entries: Vec<ScanEntry>) -> Vec<ScanEntry> {
     retained
 }
 
-fn delete_entry(entry: &ScanEntry, real_root: Option<&Path>) -> Result<(), PathFailure> {
+fn delete_entry(entry: &ScanEntry, real_root: &Path) -> Result<(), PathFailure> {
     let path = Path::new(entry.path.as_str());
 
-    if let Some(root) = real_root {
-        // Shrink the validate-then-delete race: an ancestor swapped for a
-        // symlink after revalidation redirects remove_dir_all outside the
-        // target. Re-canonicalize the parent right before the delete - the
-        // escape window shrinks to the syscall itself. JS parity.
-        validate_real_parent(path, root)?;
-        // Type-flip check: a real dir swapped for a symlink since validation
-        // must not be deleted through or unlinked as the wrong kind.
-        match fs::symlink_metadata(path) {
-            Ok(meta) => {
-                let now_symlink = meta.file_type().is_symlink();
-                let now_type = if now_symlink {
-                    EntryType::Symlink
-                } else if meta.is_dir() {
-                    EntryType::Directory
-                } else {
-                    EntryType::File
-                };
-                if now_symlink != entry.is_symlink {
-                    return Err(path_failure(
-                        &entry.path,
-                        FailureReasonCode::ChangedSymlinkState,
-                        "entry symlink state changed since validation".to_owned(),
-                    ));
-                }
-                if now_type != entry.entry_type {
-                    return Err(path_failure(
-                        &entry.path,
-                        FailureReasonCode::ChangedEntryType,
-                        "entry type changed since validation".to_owned(),
-                    ));
-                }
-            }
-            Err(err) => {
+    // Shrink the validate-then-delete race: an ancestor swapped for a
+    // symlink after revalidation redirects remove_dir_all outside the
+    // target. Re-canonicalize the parent right before the delete - the
+    // escape window shrinks to the syscall itself. JS parity.
+    validate_real_parent(path, real_root)?;
+    // Type-flip check: a real dir swapped for a symlink since validation
+    // must not be deleted through or unlinked as the wrong kind.
+    match fs::symlink_metadata(path) {
+        Ok(meta) => {
+            let now_symlink = meta.file_type().is_symlink();
+            let now_type = if now_symlink {
+                EntryType::Symlink
+            } else if meta.is_dir() {
+                EntryType::Directory
+            } else {
+                EntryType::File
+            };
+            if now_symlink != entry.is_symlink {
                 return Err(path_failure(
                     &entry.path,
-                    classify_io_error(&err),
-                    err.to_string(),
+                    FailureReasonCode::ChangedSymlinkState,
+                    "entry symlink state changed since validation".to_owned(),
                 ));
             }
+            if now_type != entry.entry_type {
+                return Err(path_failure(
+                    &entry.path,
+                    FailureReasonCode::ChangedEntryType,
+                    "entry type changed since validation".to_owned(),
+                ));
+            }
+        }
+        Err(err) => {
+            return Err(path_failure(
+                &entry.path,
+                classify_io_error(&err),
+                err.to_string(),
+            ));
         }
     }
 
     let result = if entry.is_symlink {
-        // Directory junctions and dir symlinks on Windows are dir reparse
-        // points - remove_file refuses them, so fall back to remove_dir
-        // (deletes the link itself, never the target). Matches the JS
-        // unlink -> rmdir fallback.
-        fs::remove_file(path).or_else(|_| fs::remove_dir(path))
+        fs::remove_file(path).or_else(|err| {
+            // Windows refuses remove_file on dir symlinks/junctions; remove_dir
+            // deletes the link itself. Re-verify the leaf is still a reparse
+            // point first - a swap to a real dir must not be removed by the
+            // fallback. On POSIX remove_file never needs it, so the real
+            // error propagates with its true code. JS parity.
+            if cfg!(windows) && is_reparse_or_symlink(path) {
+                fs::remove_dir(path)
+            } else {
+                Err(err)
+            }
+        })
     } else {
         fs::remove_dir_all(path).or_else(|err| {
             if entry.entry_type == EntryType::File {
@@ -554,6 +592,37 @@ fn delete_entry(entry: &ScanEntry, real_root: Option<&Path>) -> Result<(), PathF
     };
 
     result.map_err(|err| path_failure(&entry.path, classify_io_error(&err), err.to_string()))
+}
+
+/// Windows dir-symlinks and junctions are reparse points - distinguishable
+/// from a real directory via the file attribute bit.
+#[cfg(windows)]
+fn is_reparse_or_symlink(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    fs::symlink_metadata(path)
+        .map(|meta| meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn is_reparse_or_symlink(_path: &Path) -> bool {
+    false
+}
+
+/// A candidate path must reach the leaf it names: no `.`/`..`/duplicate
+/// separators and no trailing separator - `symlink_metadata` on a trailing
+/// separator follows a leaf symlink to a directory, disabling the
+/// delete-time symlink recheck. JS parity: hasCanonicalPathSpelling.
+fn has_canonical_spelling(path: &str) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    let ends_sep = path.ends_with('/') || (cfg!(windows) && path.ends_with('\\'));
+    if path.len() > 1 && ends_sep {
+        return false;
+    }
+    lexical_abs(Path::new(path)).as_os_str() == std::ffi::OsStr::new(path)
 }
 
 /// Unlink never follows a leaf symlink, but it does resolve its ancestors.
@@ -599,18 +668,9 @@ fn classify_io_error(err: &std::io::Error) -> FailureReasonCode {
         ErrorKind::NotFound => FailureReasonCode::Missing,
         ErrorKind::PermissionDenied => FailureReasonCode::PermissionDenied,
         ErrorKind::WouldBlock | ErrorKind::AddrInUse => FailureReasonCode::Busy,
-        _ => {
-            let message = err.to_string();
-            if message.contains("ENOENT") {
-                FailureReasonCode::Missing
-            } else if message.contains("EACCES") || message.contains("EPERM") {
-                FailureReasonCode::PermissionDenied
-            } else if message.contains("EBUSY") {
-                FailureReasonCode::Busy
-            } else {
-                FailureReasonCode::FilesystemError
-            }
-        }
+        // err.kind() is authoritative - a filename literally containing
+        // "ENOENT" must not shadow the real failure class. JS parity.
+        _ => FailureReasonCode::FilesystemError,
     }
 }
 
@@ -640,7 +700,7 @@ mod tests {
         let validation = revalidate_candidate(&selected, Some(&root));
         assert!(validation.is_err(), "VCS symlink passed revalidation");
         assert!(
-            delete_entry(&selected.entry, Some(&root)).is_err(),
+            delete_entry(&selected.entry, &root).is_err(),
             "VCS symlink passed delete-time checks"
         );
         assert!(fs::symlink_metadata(git.join("node_modules")).is_ok());
@@ -687,6 +747,82 @@ mod tests {
             vec!["deleted", "covered", "unattempted"]
         );
         assert_eq!(outcomes[1].covered_by.as_deref(), Some("cand_a"));
+    }
+
+    #[test]
+    fn forged_trailing_separator_path_fails_instead_of_following_a_leaf_symlink() {
+        // lstat-style metadata on "x/" follows a leaf symlink to a dir, so the
+        // symlink recheck would never see the link. The spelling itself is
+        // rejected before any leaf syscall - JS parity: hasCanonicalPathSpelling.
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let artifact = dir.path().join("node_modules");
+        fs::create_dir_all(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        let mut spelled = artifact.to_string_lossy().into_owned();
+        spelled.push('/');
+
+        let mut plan = ScanPlan::empty(dir.path().to_string_lossy().into_owned(), "test");
+        plan.candidates = vec![candidate(
+            &spelled,
+            "node_modules",
+            EntryType::Directory,
+            false,
+        )];
+        plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
+
+        let report = apply_plan(&plan).unwrap_or_else(|e| panic!("apply: {e}"));
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(report.failed_count, 1);
+        assert_eq!(report.failed_paths[0].code, "filesystem_error");
+        assert!(artifact.exists(), "forged spelling deleted the dir");
+    }
+
+    #[test]
+    fn a_vanished_target_root_fails_every_entry_closed() {
+        // canonicalize(target) fails when the root is gone; every selected
+        // entry must then fail - nothing may proceed with no verified root.
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let ghost = dir.path().join("gone");
+        let candidate_path = ghost.join("node_modules");
+        fs::create_dir_all(&candidate_path).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        let mut plan = ScanPlan::empty(ghost.to_string_lossy().into_owned(), "test");
+        plan.candidates = vec![candidate(
+            &candidate_path.to_string_lossy(),
+            "node_modules",
+            EntryType::Directory,
+            false,
+        )];
+        plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
+        fs::remove_dir_all(&ghost).unwrap_or_else(|e| panic!("rmdir: {e}"));
+
+        let report = apply_plan(&plan).unwrap_or_else(|e| panic!("apply: {e}"));
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(report.failed_count, 1);
+    }
+
+    #[test]
+    fn cancelled_before_any_entry_never_fires_apply_begin() {
+        // apply_begin paints "deleting X" - it must only fire for an entry
+        // that will actually be attempted, not for entries already cancelled.
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let artifact = dir.path().join("node_modules");
+        fs::create_dir_all(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        let mut plan = ScanPlan::empty(dir.path().to_string_lossy().into_owned(), "test");
+        plan.candidates = vec![candidate(
+            &artifact.to_string_lossy(),
+            "node_modules",
+            EntryType::Directory,
+            false,
+        )];
+        plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
+
+        let cancel = AtomicBool::new(true);
+        let mut begins = 0u32;
+        let report = apply_plan_controlled(&plan, &cancel, &mut |_| begins += 1)
+            .unwrap_or_else(|e| panic!("apply: {e}"));
+        assert_eq!(begins, 0, "apply_begin fired for a cancelled entry");
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(report.interrupted, Some(true));
+        assert!(artifact.exists());
     }
 
     fn candidate(path: &str, name: &str, entry_type: EntryType, is_symlink: bool) -> ScanCandidate {

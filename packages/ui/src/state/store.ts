@@ -1181,14 +1181,25 @@ export function mergeApplyReport(
         unattempted += 1;
       }
     }
-  } else {
+  } else if (report.interrupted !== true) {
     // Legacy engines carry no per-candidate outcomes: infer removals as the
-    // request minus reported failures, matched by path.
+    // request minus reported failures, matched by path. An interrupted
+    // report can't infer - unattempted ids are not removals, so no rows
+    // leave the list when the apply stopped early.
     const failedPaths = new Set(report.failedPaths.map((failure) => failure.path));
     const byId = candidateIndex(state.candidates);
     for (const id of report.selectedCandidateIds) {
       const candidate = byId.get(id);
       if (candidate && !failedPaths.has(candidate.path)) removedIds.add(id);
+    }
+  } else {
+    // Interrupted + no outcomes: nothing can be inferred as removed. Count
+    // selected ids that didn't report a failure path as unattempted.
+    const failedPaths = new Set(report.failedPaths.map((failure) => failure.path));
+    const byId = candidateIndex(state.candidates);
+    for (const id of report.selectedCandidateIds) {
+      const candidate = byId.get(id);
+      if (!candidate || !failedPaths.has(candidate.path)) unattempted += 1;
     }
   }
 

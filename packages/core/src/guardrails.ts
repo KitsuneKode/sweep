@@ -307,6 +307,26 @@ export function isSameResolvedPath(a: string, b: string): boolean {
   return false;
 }
 
+/**
+ * A candidate path must reach the leaf it names. Reject spellings that
+ * `normalize()` would rewrite (`.`, `..`, duplicate separators) and any
+ * trailing separator: `lstat`/`symlink_metadata` on a path ending in a
+ * separator follows a leaf symlink to a directory, so the delete-time
+ * symlink check would never see the link itself. sweep-produced plans
+ * always emit canonical spellings - a non-canonical path is forged or
+ * corrupt input, never a real candidate.
+ */
+export function hasCanonicalPathSpelling(path: string): boolean {
+  // Candidates are always absolute - a relative spelling resolves against
+  // the caller's cwd, not the plan target. Rust parity: lexical_abs folds
+  // the cwd in, so anything non-absolute fails there too.
+  if (path.length === 0 || !isAbsolute(path) || normalize(path) !== path) return false;
+  // normalize() preserves a trailing separator - reject it separately.
+  const separators = process.platform === "win32" ? "/\\" : sep;
+  const last = path[path.length - 1];
+  return path.length === 1 || last === undefined || !separators.includes(last);
+}
+
 /** True when any path segment is a protected VCS metadata directory. */
 export function pathHasProtectedVcsSegment(entryPath: string): boolean {
   const insensitive = process.platform === "darwin" || process.platform === "win32";

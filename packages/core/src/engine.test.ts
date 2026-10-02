@@ -513,3 +513,16 @@ console.log(JSON.stringify({report: result.report, deleted}));
     );
   },
 );
+
+describe("applyPlan input guards", () => {
+  test("a non-finite maxSizeGB is rejected instead of silently disabling the ceiling", async () => {
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+
+    // JSON.stringify(NaN/Infinity) -> null -> the native ceiling check would
+    // see "no limit" and skip the preflight entirely. Fail loudly instead.
+    await expect(applyPlan(plan, { maxSizeGB: NaN })).rejects.toThrow("maxSizeGB");
+    await expect(applyPlan(plan, { maxSizeGB: Infinity })).rejects.toThrow("maxSizeGB");
+    expect(existsSync(dir("node_modules"))).toBe(true);
+  });
+});

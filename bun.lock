@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "sweep-clean",
+      "name": "sweep-monorepo",
       "devDependencies": {
         "@changesets/cli": "catalog:",
         "@commitlint/cli": "catalog:",

@@ -83,6 +83,11 @@ export async function applyPlan(
   }
   assertSafeCwd(plan.targetDir);
   assertPlanResources(plan);
+  // A NaN/Infinity ceiling would silently disable the size preflight
+  // entirely (JSON.stringify turns it into null) - reject it loudly.
+  if (options.maxSizeGB !== undefined && !Number.isFinite(options.maxSizeGB)) {
+    throw new GuardrailError(`invalid maxSizeGB: ${options.maxSizeGB}`);
+  }
   const selected = resolveSelectedCandidates(plan);
 
   if (selected.length === 0) {
@@ -96,6 +101,7 @@ export async function applyPlan(
   const { ready, failedPaths: revalidationFailures } = revalidateCandidates(
     selected,
     plan.targetDir,
+    () => options.signal?.aborted ?? false,
   );
   // Dedupe up front so `interrupted` compares against the real work set -
   // entries deduped away are never attempted and must not read as skipped.
@@ -124,8 +130,10 @@ export async function applyPlan(
     onBegin: (entry) => {
       options.onBegin?.(entry);
     },
-    onProgress: (entry) => {
-      options.onDeleted?.(entry);
+    onProgress: (entry, _index, _total, succeeded) => {
+      // Progress fires for failed entries too - only real removals count
+      // toward the freed-bytes line.
+      if (succeeded) options.onDeleted?.(entry);
     },
     isCancelled: () => (options.signal?.aborted ?? false) || (options.isCancelled?.() ?? false),
     trashDir: options.trashDir,
@@ -133,8 +141,13 @@ export async function applyPlan(
     containmentRoot: plan.targetDir,
   });
   const allFailures = [...revalidationFailures, ...cleanResult.failedPaths];
-  // Skipped (unattempted) entries land in neither list - that's the interrupt signal.
-  const interrupted = cleanResult.deleted.length + cleanResult.failedPaths.length < workSet.length;
+  // Rust parity: `interrupted` is whether the cancel flag was observed at
+  // all - including a signal already aborted before revalidation, where
+  // workSet is empty and the residual comparison alone reads false.
+  const interrupted =
+    (options.signal?.aborted ?? false) ||
+    (options.isCancelled?.() ?? false) ||
+    cleanResult.deleted.length + cleanResult.failedPaths.length < workSet.length;
 
   const firstByPath = new Map(
     workSet.map((entry) => [dedupeKey(entry.path), entry as ScanCandidate]),
@@ -234,6 +247,9 @@ export async function applyPlanWithBackend(
 
   assertSafeCwd(plan.targetDir);
   assertPlanResources(plan);
+  if (options.maxSizeGB !== undefined && !Number.isFinite(options.maxSizeGB)) {
+    throw new GuardrailError(`invalid maxSizeGB: ${options.maxSizeGB}`);
+  }
   const selected = resolveSelectedCandidates(plan);
   if (selected.length === 0) {
     return emptyApplyPlanResult(plan);

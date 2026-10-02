@@ -94,13 +94,19 @@ impl ResourceBudget {
         )
     }
 
-    pub fn candidate(&self, path_bytes: usize) -> bool {
+    /// `extra_bytes` covers the other retained string fields (id, name, kind,
+    /// reasons) so a plan/stream of huge-field candidates is metered by what
+    /// actually stays in memory, not just the path.
+    pub fn candidate(&self, path_bytes: usize, extra_bytes: usize) -> bool {
         self.charge(
             &self.candidates,
             1,
             self.limits.max_candidates,
             "maxCandidates",
-        ) && self.path(path_bytes, 1024)
+        ) && self.path(
+            path_bytes,
+            extra_bytes.saturating_mul(4).saturating_add(1024),
+        )
     }
 
     pub fn directory(&self, path_bytes: usize) -> bool {
@@ -165,7 +171,7 @@ mod tests {
         budget.dequeue_directory();
         assert!(budget.directory(1));
         assert!(!budget.directory(1));
-        assert!(!budget.candidate(1));
+        assert!(!budget.candidate(1, 0));
         assert!(budget.error().is_some_and(|s| s.contains("maxQueuedDirs")));
     }
     #[test]
@@ -180,7 +186,7 @@ mod tests {
             max_retained_bytes: 1024,
             ..ScanLimits::default()
         });
-        assert!(!budget.candidate(1));
+        assert!(!budget.candidate(1, 0));
         assert!(ResourceBudget::new(ScanLimits {
             max_candidates: 0,
             ..ScanLimits::default()

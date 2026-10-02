@@ -4,10 +4,16 @@ import type {
   ScanEntry,
   ScanResult,
 } from "@kitsunekode/sweep-protocol";
-import { isPathWithinRoot } from "./guardrails.js";
+import { hasCanonicalPathSpelling, isPathWithinRoot, isSameResolvedPath } from "./guardrails.js";
 import { PlanValidationError, validateScanEvent } from "./plan.js";
 import type { ScanHooks } from "./scanner.js";
-import { ResourceBudget, checkedBytes } from "./resource-budget.js";
+import { ResourceBudget, candidateFieldChars, checkedBytes } from "./resource-budget.js";
+
+// Progress/warning events carry no candidates, so the per-line byte cap is
+// the only bound on their count - a hostile engine could emit millions and
+// pin the host in JSON.parse. 16ms-cadence heartbeats over ~4.5 hours of
+// continuous scanning would reach this cap; no real scan gets close.
+const MAX_AUXILIARY_EVENTS = 1_000_000;
 
 function entryFrom(candidate: ScanCandidate): ScanEntry {
   return {
@@ -29,6 +35,7 @@ export class RustScanStream {
   private readonly ids = new Set<string>();
   private readonly sized = new Set<string>();
   private readonly budget: ResourceBudget;
+  private auxiliaryEvents = 0;
 
   constructor(
     private readonly target: string,
@@ -66,14 +73,19 @@ export class RustScanStream {
           ? event.candidates
           : [event.candidate];
       for (const candidate of candidates) this.pushCandidate(candidate, found);
-    } else if (event.type === "scan_progress") {
-      this.hooks.onProgress?.({
-        scannedDirs: event.scannedDirs,
-        found: event.found,
-        skippedDirs: event.skippedDirs ?? 0,
-        ...(event.sizedCount === undefined ? {} : { sizedCount: event.sizedCount }),
-        ...(event.currentDir === undefined ? {} : { currentDir: event.currentDir }),
-      });
+    } else if (event.type === "scan_progress" || event.type === "warning") {
+      if (++this.auxiliaryEvents > MAX_AUXILIARY_EVENTS) {
+        throw new PlanValidationError("engine emitted too many progress events");
+      }
+      if (event.type === "scan_progress") {
+        this.hooks.onProgress?.({
+          scannedDirs: event.scannedDirs,
+          found: event.found,
+          skippedDirs: event.skippedDirs ?? 0,
+          ...(event.sizedCount === undefined ? {} : { sizedCount: event.sizedCount }),
+          ...(event.currentDir === undefined ? {} : { currentDir: event.currentDir }),
+        });
+      }
     } else if (event.type === "scan_completed") {
       if (this.sized.size !== this.candidates.size) {
         throw new PlanValidationError("scan incomplete: candidate sizes missing");
@@ -93,7 +105,17 @@ export class RustScanStream {
   }
 
   private pushCandidate(candidate: ScanCandidate, found: boolean): void {
-    if (!isPathWithinRoot(candidate.path, this.target) || candidate.path === this.target) {
+    // A path spelling normalize() would rewrite (or a trailing separator,
+    // which makes lstat follow a leaf symlink) is never a scanner product.
+    if (!hasCanonicalPathSpelling(candidate.path)) {
+      throw new PlanValidationError("scan candidate path is not canonical");
+    }
+    // Resolved-path equality, not raw `===`: "/t/." and "/t/" spellings of
+    // the target itself must not be admitted as deletable candidates.
+    if (
+      !isPathWithinRoot(candidate.path, this.target) ||
+      isSameResolvedPath(candidate.path, this.target)
+    ) {
       throw new PlanValidationError("scan candidate outside target");
     }
     const prior = this.candidates.get(candidate.path);
@@ -101,7 +123,7 @@ export class RustScanStream {
       if (prior || this.ids.has(candidate.id)) {
         throw new PlanValidationError("duplicate scan candidate");
       }
-      this.budget.candidate(candidate.path);
+      this.budget.candidate(candidate.path, candidateFieldChars(candidate));
       this.ids.add(candidate.id);
       this.candidates.set(candidate.path, candidate);
       this.hooks.onEntry?.(entryFrom(candidate));
@@ -115,6 +137,11 @@ export class RustScanStream {
       prior.isSymlink !== candidate.isSymlink
     ) {
       throw new PlanValidationError("scan candidate update does not match discovery");
+    }
+    // The contract is exactly one sizing update per found candidate - a
+    // second update for the same id is a protocol violation, not a merge.
+    if (this.sized.has(candidate.id)) {
+      throw new PlanValidationError("duplicate scan candidate update");
     }
     this.candidates.set(candidate.path, candidate);
     this.sized.add(candidate.id);

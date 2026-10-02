@@ -1,7 +1,5 @@
 node_modules/
 dist/
-apps/cli/README.md
-apps/cli/LICENSE
 *.tsbuildinfo
 .DS_Store
 coverage/

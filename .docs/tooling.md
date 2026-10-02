@@ -91,9 +91,11 @@ Root `optionalDependencies` on the CLI package are synced via `bun run sync-engi
 **Runtime resolution** (`packages/core/src/rust-engine.ts`):
 
 1. `SWEEP_ENGINE_PATH`
-2. Installed optional `@kitsunekode/sweep-engine-{platform}-{arch}`
-3. `target/debug` or `target/release` under repo root (dev)
-4. `sweep-engine` on `PATH`
+2. Embedded engine (standalone binary builds)
+3. `target/debug` or `target/release` under a Cargo.toml-gated repo root
+   walk (dev builds must shadow the installed optional package)
+4. Installed optional `@kitsunekode/sweep-engine-{platform}-{arch}`
+5. `sweep-engine` on `PATH`
 
 **Release CI:** `.github/workflows/release.yml` builds all five platforms, packs
 artifacts, then `scripts/publish-release.ts` publishes native packages before
