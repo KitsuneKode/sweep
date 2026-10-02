@@ -8,14 +8,14 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 
+import { releasePolicy, type PreState } from "../apps/cli/scripts/release-policy.js";
+
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CLI_PKG_PATH = join(REPO_ROOT, "apps/cli/package.json");
-const CLI_DIST_DIR = join(REPO_ROOT, "apps/cli/dist");
 
 function run(command: string, args: string[], options: { cwd?: string } = {}): void {
   const result = spawnSync(command, args, {
@@ -51,8 +51,18 @@ function cliVersion(): string {
 }
 
 const skipNative = process.argv.includes("--skip-native");
-const requiresNative = process.env.SWEEP_RELEASE_REQUIRES_NATIVE === "true";
+const requiresNative =
+  process.env.CI === "true" || process.env.SWEEP_RELEASE_REQUIRES_NATIVE === "true";
 const version = cliVersion();
+const preFile = join(REPO_ROOT, ".changeset/pre.json");
+const preState = existsSync(preFile)
+  ? (JSON.parse(readFileSync(preFile, "utf8")) as PreState)
+  : undefined;
+const policy = releasePolicy(version, preState);
+if (skipNative && requiresNative)
+  throw new Error(
+    "CI publication requires the complete native matrix; --skip-native is not allowed",
+  );
 
 // Gate before any publish: a failing check must not strand engine packages on
 // the registry with no matching CLI release.
@@ -67,6 +77,14 @@ if (!skipNative) {
     const dir = join(REPO_ROOT, "native-packages", platform.id);
     const binPath = join(dir, "bin", platform.binaryName);
     if (existsSync(binPath)) {
+      const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+        name?: string;
+        version?: string;
+      };
+      if (manifest.name !== platform.npmName || manifest.version !== version)
+        throw new Error(
+          `Native package ${platform.id} does not match ${platform.npmName}@${version}`,
+        );
       packed.push(platform.id);
     } else {
       missing.push(platform.id);
@@ -74,7 +92,7 @@ if (!skipNative) {
   }
 
   if (packed.length === 0) {
-    if (process.env.CI === "true" && requiresNative) {
+    if (requiresNative) {
       console.error(
         "error: no packed native engine binaries found; CI release expects native-packages/*/bin",
       );
@@ -84,7 +102,7 @@ if (!skipNative) {
   } else {
     if (missing.length > 0) {
       console.warn(`warn: missing packed binaries for: ${missing.join(", ")}`);
-      if (process.env.CI === "true" && requiresNative) {
+      if (requiresNative) {
         console.error("error: incomplete native engine matrix in CI");
         process.exit(1);
       }
@@ -103,7 +121,15 @@ if (!skipNative) {
       console.log(`\npublishing ${platform.npmName}@${version}...`);
       // No --provenance: trusted publishing attests automatically, and the
       // flag is only needed for token-authenticated publishes.
-      run("npm", ["publish", dir, "--access", "public", "--ignore-scripts"]);
+      run("npm", [
+        "publish",
+        dir,
+        "--access",
+        "public",
+        "--ignore-scripts",
+        "--tag",
+        policy.distTag,
+      ]);
     }
   }
 } else {
@@ -111,7 +137,7 @@ if (!skipNative) {
 }
 
 console.log("\npublishing @kitsunekode/sweep...");
-run("bunx", ["changeset", "publish"]);
+run("bunx", policy.changesetArgs);
 
 const distFiles = existsSync(CLI_DIST_DIR) ? readdirSync(CLI_DIST_DIR) : [];
 console.log(`\nrelease complete (apps/cli/dist: ${distFiles.join(", ") || "empty"})`);

@@ -45,7 +45,7 @@
     "pack": "npm pack -w @kitsunekode/sweep",
     "changeset": "changeset",
     "commitlint": "commitlint",
-    "version": "changeset version && bun run sync-engine-versions",
+    "version": "changeset version && bun run sync-engine-versions && bun install --lockfile-only",
     "sync-engine-versions": "bun run scripts/sync-engine-versions.ts",
     "bootstrap:npm-trust": "bun run scripts/bootstrap-npm-trusted-publishing.ts",
     "engine:build:debug": "turbo run \"sweep-engine-cli#build\"",

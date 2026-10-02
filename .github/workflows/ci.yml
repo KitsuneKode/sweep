@@ -50,6 +50,19 @@ jobs:
       - name: Validate parity golden candidate ids
         run: bun run fixtures:validate-goldens
 
+      - name: Validate documentation links
+        run: bun run check:docs
+
+      # turbo's experimentalCargoWorkspaces runs `cargo metadata` on every
+      # invocation, and the integration-tests package depends on the
+      # sweep-engine-cli build - provision Rust explicitly instead of relying
+      # on whatever the runner image happens to ship.
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
       - name: Check, build, and preflight
         run: bunx turbo run check build preflight --filter "@kitsunekode/*" --continue
 
@@ -110,9 +123,9 @@ jobs:
       - name: Typecheck all workspaces
         run: bunx turbo run typecheck
 
-      - name: Unit tests (core + protocol + ui)
+      - name: Unit tests (core + protocol + ui + cli)
         run: |
-          bun test packages/core packages/protocol packages/ui
+          bun test packages/core packages/protocol packages/ui apps/cli
 
       # The Rust engine's bugs live in platform code (reparse points, verbatim
       # paths, ignore separators) - Linux-only Rust CI left every one of them

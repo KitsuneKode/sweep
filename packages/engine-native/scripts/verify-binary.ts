@@ -30,7 +30,12 @@ function parseBinaryArg(argv: string[]): string {
 }
 
 const binary = resolve(parseBinaryArg(process.argv.slice(2)));
-const proc = spawnSync(binary, [], { encoding: "utf8" });
+const proc = spawnSync(binary, [], {
+  encoding: "utf8",
+  timeout: 5000,
+  killSignal: "SIGKILL",
+  maxBuffer: 64 * 1024,
+});
 
 if (proc.error) {
   console.error(`failed to run ${binary}: ${proc.error.message}`);
@@ -43,4 +48,13 @@ if (!proc.stderr?.includes("usage:")) {
   process.exit(1);
 }
 
-console.log(`ok: ${binary}`);
+const version = spawnSync(binary, ["--version"], {
+  encoding: "utf8",
+  timeout: 5000,
+  killSignal: "SIGKILL",
+  maxBuffer: 4096,
+});
+if (version.status !== 0 || !/^\d+\.\d+\.\d+/.test(version.stdout)) {
+  throw new Error(`native version probe failed: ${binary}`);
+}
+console.log(`ok: ${binary} (${version.stdout.trim()})`);

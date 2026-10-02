@@ -223,7 +223,7 @@ async function main(): Promise<void> {
   const rustOk = isRustEngineAvailable();
   if (!rustOk && !jsonOut) {
     console.error(
-      "note: sweep-engine binary not found - benchmarking js only (run `bun run rust:build` first)",
+      "note: sweep-engine binary not found - benchmarking js only (run `bun run engine:build` first)",
     );
   }
 
