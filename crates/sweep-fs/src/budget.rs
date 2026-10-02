@@ -134,6 +134,16 @@ impl ResourceBudget {
             "maxRetainedBytes",
         )
     }
+
+    /// Per-job caps for transient sizing structures. Sizing re-walks subtrees
+    /// the scan already admitted, so it must not charge the scan-wide counters
+    /// again - it is bounded by these local caps instead.
+    pub fn sizing_caps(&self) -> (usize, usize) {
+        (
+            self.limits.max_identities as usize,
+            self.limits.max_queued_dirs as usize,
+        )
+    }
 }
 
 impl Default for ResourceBudget {

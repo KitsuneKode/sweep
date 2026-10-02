@@ -1216,12 +1216,15 @@ export function SweepApp({
       ) : null}
       {scanError ? (
         <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
-          <text content={t`${fg(tokens.danger)("The scan engine reported an error:")}`} />
-          <text content="" />
-          <text content={sanitizeTerminalText(scanError)} fg={tokens.text} />
+          <text
+            // Engine errors arrive prefixed ("error: ...") - redundant inside a
+            // dialog already titled "scan error".
+            content={sanitizeTerminalText(scanError.replace(/^[Ee]rror:\s*/, ""))}
+            fg={tokens.text}
+          />
           <text content="" />
           <text
-            content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
+            content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("esc"))} ${fg(tokens.textMuted)("dismiss")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
           />
         </Modal>
       ) : null}

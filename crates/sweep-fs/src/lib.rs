@@ -918,32 +918,58 @@ struct SizeContext<'a> {
     budget: &'a ResourceBudget,
     exact: bool,
     parallel: bool,
+    /// Per-job caps on the transient dedup sets and pending queue. These sets
+    /// die with the job, so they bound peak memory - not a cumulative total.
+    dedup_cap: usize,
+    pending_cap: usize,
+    pending: AtomicUsize,
     links: Mutex<HashSet<(u64, u64)>>,
     dirs: Mutex<HashSet<(u64, u64)>>,
 }
 
-fn price_sizing_inode(meta: &fs::Metadata, ctx: &SizeContext<'_>) -> u64 {
+/// Admits a directory to the job-local queue. The walk already bounded these
+/// paths globally; this caps the in-flight stack per sizing job only.
+fn queue_sizing_dir(
+    ctx: &SizeContext<'_>,
+    children: &mut Vec<std::path::PathBuf>,
+    path: std::path::PathBuf,
+) -> bool {
+    if ctx.pending.fetch_add(1, Ordering::Relaxed) >= ctx.pending_cap {
+        ctx.pending.fetch_sub(1, Ordering::Relaxed);
+        return false;
+    }
+    children.push(path);
+    true
+}
+
+fn price_sizing_inode(meta: &fs::Metadata, ctx: &SizeContext<'_>) -> SubtreeSize {
     let exact = ctx.exact;
     let links = &ctx.links;
+    let mut complete = true;
     if exact {
-        return if meta.is_file() { meta.len() } else { 0 };
+        return SubtreeSize {
+            bytes: if meta.is_file() { meta.len() } else { 0 },
+            complete,
+        };
     }
     // GNU du's usable_st_size excludes directories and special inodes.
-    if !meta.is_file() && !meta.is_symlink() {
-        return 0;
-    }
-    if !meta.is_dir() && hardlink_candidate(meta) {
+    let mut bytes = meta.len();
+    if meta.is_dir() || (!meta.is_file() && !meta.is_symlink()) {
+        bytes = 0;
+    } else if hardlink_candidate(meta) {
         let mut seen = links.lock().unwrap_or_else(|p| p.into_inner());
         let key = inode_id(meta);
         if seen.contains(&key) {
-            return 0;
+            bytes = 0;
+        } else if seen.len() >= ctx.dedup_cap {
+            // Set at cap: count the link anyway (overcount, flagged partial)
+            // rather than undercounting zero or killing the scan.
+            complete = false;
+        } else {
+            seen.insert(key);
         }
-        if !ctx.budget.identity() {
-            return 0;
-        }
-        seen.insert(key);
     }
-    meta.len()
+    SubtreeSize { bytes, complete }
 }
 
 const SIZE_DIR_BATCH: usize = 64;
@@ -991,7 +1017,7 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
         complete: true,
     };
     while let Some(dir) = pending.pop() {
-        ctx.budget.dequeue_directory();
+        ctx.pending.fetch_sub(1, Ordering::Relaxed);
         if ctx.budget.failed() {
             total.complete = false;
             break;
@@ -1007,28 +1033,20 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
         // is priced as the link and never deliberately followed. Pathname
         // operations still have a residual swap window before read_dir.
         if !meta.is_dir() || meta.is_symlink() || meta_is_reparse_point(&meta) {
-            total.merge(SubtreeSize {
-                bytes: price_sizing_inode(&meta, ctx),
-                complete: true,
-            });
+            total.merge(price_sizing_inode(&meta, ctx));
             continue;
         }
         if let Some(key) = directory_id(&meta) {
             let mut dirs = ctx.dirs.lock().unwrap_or_else(|p| p.into_inner());
-            if dirs.contains(&key) {
+            // Skip repeats and capped-set inserts alike - without the dedup
+            // entry a hardlinked-dir cycle could recurse forever.
+            if dirs.contains(&key) || dirs.len() >= ctx.dedup_cap {
                 total.complete = false;
                 continue;
             }
-            if !ctx.budget.identity() {
-                total.complete = false;
-                break;
-            }
             dirs.insert(key);
         }
-        total.merge(SubtreeSize {
-            bytes: price_sizing_inode(&meta, ctx),
-            complete: true,
-        });
+        total.merge(price_sizing_inode(&meta, ctx));
         let items = match fs::read_dir(&dir) {
             Ok(items) => items,
             Err(_) => {
@@ -1061,28 +1079,23 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
             #[cfg(not(windows))]
             if ft.is_dir() {
                 let path = item.path();
-                if !ctx.budget.directory(path.as_os_str().len()) {
+                if !queue_sizing_dir(ctx, &mut children, path) {
                     total.complete = false;
                     break;
                 }
-                children.push(path);
             }
             #[cfg(windows)]
             if ft.is_dir() {
                 match item.metadata() {
                     Ok(meta) if !meta_is_reparse_point(&meta) => {
                         let path = item.path();
-                        if !ctx.budget.directory(path.as_os_str().len()) {
+                        if !queue_sizing_dir(ctx, &mut children, path) {
                             total.complete = false;
                             break;
                         }
-                        children.push(path);
                     }
                     Ok(meta) => {
-                        total.merge(SubtreeSize {
-                            bytes: price_sizing_inode(&meta, ctx),
-                            complete: true,
-                        });
+                        total.merge(price_sizing_inode(&meta, ctx));
                     }
                     Err(_) => total.complete = false,
                 }
@@ -1093,17 +1106,13 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
                         if meta.is_dir() && !meta.is_symlink() && !meta_is_reparse_point(&meta) =>
                     {
                         let path = item.path();
-                        if !ctx.budget.directory(path.as_os_str().len()) {
+                        if !queue_sizing_dir(ctx, &mut children, path) {
                             total.complete = false;
                             break;
                         }
-                        children.push(path);
                     }
                     Ok(meta) => {
-                        total.merge(SubtreeSize {
-                            bytes: price_sizing_inode(&meta, ctx),
-                            complete: true,
-                        });
+                        total.merge(price_sizing_inode(&meta, ctx));
                     }
                     Err(_) => total.complete = false,
                 }
@@ -1212,16 +1221,23 @@ pub fn measure_size_with_budget(
             complete: true,
         };
     }
-    if !budget.directory(path.as_str().len()) {
+    // No admission charge: the walk already bounded this path globally. Sizing
+    // bounds its own transient state via per-job caps; a scan-level failure
+    // still propagates through `budget.failed()` polls inside the job.
+    if budget.failed() {
         return SubtreeSize {
             bytes: 0,
             complete: false,
         };
     }
+    let (dedup_cap, pending_cap) = budget.sizing_caps();
     let ctx = SizeContext {
         budget,
         exact,
         parallel: sizing_pool().is_some(),
+        dedup_cap,
+        pending_cap,
+        pending: AtomicUsize::new(1),
         links: Mutex::new(HashSet::new()),
         dirs: Mutex::new(HashSet::new()),
     };
@@ -1377,6 +1393,7 @@ fn is_reparse_point_or_symlink(entry_path: &Utf8Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sweep_types::ScanLimits;
     use tempfile::tempdir;
 
     #[test]
@@ -1402,16 +1419,52 @@ mod tests {
         let dir = tempdir().unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
         let meta = fs::symlink_metadata(dir.path())
             .unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
+        let budget = ResourceBudget::default();
+        let (dedup_cap, pending_cap) = budget.sizing_caps();
         let mut ctx = SizeContext {
             exact: false,
             parallel: false,
-            budget: &ResourceBudget::default(),
+            budget: &budget,
+            dedup_cap,
+            pending_cap,
+            pending: AtomicUsize::new(0),
             links: Mutex::new(HashSet::new()),
             dirs: Mutex::new(HashSet::new()),
         };
-        assert_eq!(price_sizing_inode(&meta, &ctx), 0);
+        assert_eq!(price_sizing_inode(&meta, &ctx).bytes, 0);
         ctx.exact = true;
-        assert_eq!(price_sizing_inode(&meta, &ctx), 0);
+        assert_eq!(price_sizing_inode(&meta, &ctx).bytes, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sizing_dedup_cap_overcounts_but_stays_incomplete() {
+        // Past the per-job dedup cap a hardlinked file counts again - the
+        // estimate becomes an honest upper bound instead of a dead scan.
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let source = dir.path().join("source");
+        fs::write(&source, vec![0u8; 64]).unwrap_or_else(|err| panic!("write failed: {err}"));
+        fs::hard_link(&source, dir.path().join("copy"))
+            .unwrap_or_else(|err| panic!("link failed: {err}"));
+        // A second inode pair - the dedup set is already at cap=1, so both
+        // links count and the result is a flagged upper bound, not a dead scan.
+        let other = dir.path().join("other");
+        fs::write(&other, vec![0u8; 64]).unwrap_or_else(|err| panic!("write failed: {err}"));
+        fs::hard_link(&other, dir.path().join("other2"))
+            .unwrap_or_else(|err| panic!("link failed: {err}"));
+        let budget = ResourceBudget::new(ScanLimits {
+            max_identities: 1,
+            ..ScanLimits::default()
+        });
+        let size = measure_size_with_budget(
+            Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("path not UTF-8")),
+            false,
+            &budget,
+        );
+        assert_eq!(size.bytes, 192); // source once; other+other2 overcounted
+        assert!(!size.complete);
+        // And critically: the shared budget was never tripped by sizing.
+        assert!(!budget.failed());
     }
 
     #[cfg(unix)]

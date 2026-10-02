@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync 
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "./config.js";
+import { ResourceBudget } from "./resource-budget.js";
 import {
   exactSizeAsync,
   exactSizeDetailed,
@@ -53,15 +54,17 @@ test("resource exhaustion rejects without presenting a partial scan as complete"
   expect(discovered).toBe(1);
 });
 
-test("sizing and discovery share the directory admission budget", async () => {
+test("sizing bounds itself per-job, not against the walk admission budget", async () => {
   mkdirSync(dir("node_modules", "nested"), { recursive: true });
   writeFileSync(dir("node_modules", "nested", "file"), "hello");
   for (const exact of [false, true]) {
-    await expect(
-      scan(tmpDir, DEFAULT_CONFIG, exact, {
-        limits: { maxDirectories: 2 },
-      }),
-    ).rejects.toThrow("maxDirectories");
+    // A tight walk-level cap must not bleed into sizing: a candidate's own
+    // subtree was already admitted when it matched, and sizing re-walks it
+    // under transient per-job caps, not cumulative scan counters.
+    const result = await scan(tmpDir, DEFAULT_CONFIG, exact, {
+      limits: { maxDirectories: 2 },
+    });
+    expect(result.entries.length).toBe(1);
   }
 });
 
@@ -508,4 +511,39 @@ test("apparent bytes are complete and deduplicate hard links per artifact", asyn
   expect(result.estimatedTotalBytes).toBe(2000);
   expect(result.entries.map((entry) => entry.estimatedBytes)).toEqual([1000, 1000]);
   expect(result.entries.every((entry) => entry.bytesKnown === true)).toBe(true);
+});
+
+test("a full dedup set overcounts hardlinks but keeps the scan alive", async () => {
+  if (process.platform === "win32") return;
+  const { linkSync } = await import("node:fs");
+  const target = dir("node_modules");
+  mkdirSync(target);
+  // Two distinct inode pairs. With maxIdentities=1 the set holds the first
+  // pair; the second pair counts twice - an upper bound flagged partial.
+  writeFileSync(join(target, "a"), Buffer.alloc(64));
+  linkSync(join(target, "a"), join(target, "a2"));
+  writeFileSync(join(target, "b"), Buffer.alloc(64));
+  linkSync(join(target, "b"), join(target, "b2"));
+  const budget = new ResourceBudget({ maxIdentities: 1 });
+  const size = await apparentSizeDetailed(target, undefined, budget);
+  expect(size).toEqual({ bytes: 192, complete: false });
+});
+
+test("sizing does not charge the scan-wide budget for transient dedup work", async () => {
+  if (process.platform === "win32") return;
+  const { linkSync } = await import("node:fs");
+  const target = dir("node_modules");
+  mkdirSync(target);
+  // maxDirectories=1 would fail instantly if sizing charged it; maxIdentities=2
+  // caps the dedup set so deeper subtrees flag partial instead of dying.
+  const budget = new ResourceBudget({ maxIdentities: 2, maxDirectories: 1 });
+  for (const sub of ["one", "two", "three"]) {
+    mkdirSync(join(target, sub));
+    writeFileSync(join(target, sub, "f"), Buffer.alloc(32));
+    linkSync(join(target, sub, "f"), join(target, sub, "f2"));
+  }
+  const size = await apparentSizeDetailed(target, undefined, budget);
+  expect(size.complete).toBe(false); // dedup capped - partial, not fatal
+  expect(size.bytes).toBeGreaterThan(0);
+  expect(() => budget.check()).not.toThrow();
 });

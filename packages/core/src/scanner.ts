@@ -146,6 +146,12 @@ async function metadataSize(
 ): Promise<SubtreeSize> {
   let bytes = 0;
   let complete = true;
+  // The dedup sets and stack die with this job, so they bound peak memory -
+  // not a cumulative total. The walk already charged these paths against the
+  // scan-wide budget; sizing bounds itself with per-job caps derived from the
+  // same limits. A scan-level failure still propagates via budget.check().
+  const dedupCap = budget.limits.maxIdentities;
+  const pendingCap = budget.limits.maxQueuedDirs;
   const links = new Set<string>();
   const dirs = new Set<string>();
   const stack: (string | Buffer)[] = [];
@@ -154,18 +160,21 @@ async function metadataSize(
     if (!exact && stat.nlink > 1n && stat.ino !== 0n) {
       const id = `${stat.dev}:${stat.ino}`;
       if (links.has(id)) return;
-      budget.identity();
-      links.add(id);
+      if (links.size >= dedupCap) {
+        // Set at cap: count the link anyway (overcount, flagged partial)
+        // rather than undercounting zero or killing the scan.
+        complete = false;
+      } else {
+        links.add(id);
+      }
     }
     bytes = checkedBytes(bytes, Number(stat.size));
   };
-  budget.directory(entryPath);
   stack.push(entryPath);
   while (stack.length) {
     budget.check();
     if (signal?.aborted) return { bytes, complete: false };
     const path = stack.pop()!;
-    budget.dequeueDirectory();
     try {
       const stat = await lstat(path, { bigint: true });
       if (
@@ -178,11 +187,12 @@ async function metadataSize(
       }
       if (stat.ino !== 0n) {
         const id = `${stat.dev}:${stat.ino}`;
-        if (dirs.has(id)) {
+        // Skip repeats and capped-set inserts alike - without the dedup
+        // entry a hardlinked-dir cycle could recurse forever.
+        if (dirs.has(id) || dirs.size >= dedupCap) {
           complete = false;
           continue;
         }
-        budget.identity();
         dirs.add(id);
       }
       const parent = Buffer.concat([Buffer.from(path), Buffer.from(sep)]);
@@ -200,7 +210,12 @@ async function metadataSize(
             let childStat: import("node:fs").Stats | import("node:fs").BigIntStats =
               await lstat(child);
             if (childStat.isDirectory() && !childStat.isSymbolicLink()) {
-              budget.directory(child);
+              if (stack.length >= pendingCap) {
+                // Job-local queue at cap - leave the rest of this subtree
+                // unsized rather than letting transient state grow unbounded.
+                complete = false;
+                return;
+              }
               stack.push(child);
             } else {
               if (!exact && childStat.nlink > 1) childStat = await lstat(child, { bigint: true });

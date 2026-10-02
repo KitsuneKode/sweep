@@ -806,12 +806,14 @@ mod tests {
     }
 
     #[test]
-    fn discovery_and_sizing_share_directory_budget() {
+    fn sizing_does_not_charge_the_walk_admission_budget() {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("fixture: {e}"));
         std::fs::create_dir_all(dir.path().join("node_modules/nested"))
             .unwrap_or_else(|e| panic!("fixture: {e}"));
         let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("encoding"));
         for exact in [false, true] {
+            // A candidate's subtree was already admitted when it matched -
+            // sizing re-walks it under per-job caps, not cumulative counters.
             let result = scan_to_plan_with_config(
                 root,
                 &WalkConfig::default(),
@@ -825,7 +827,7 @@ mod tests {
                     ..ScanOptions::default()
                 },
             );
-            assert!(result.is_err_and(|e| e.to_string().contains("maxDirectories")));
+            assert!(result.is_ok());
         }
     }
 

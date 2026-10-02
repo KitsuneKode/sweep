@@ -56,7 +56,9 @@ export function Modal({
         flexDirection="column"
       >
         <scrollbox
-          flexGrow={1}
+          // No flexGrow: the card hugs content height. flexShrink still lets
+          // the scrollbox compress and scroll once the card hits maxHeight.
+          flexShrink={1}
           minHeight={0}
           width="100%"
           scrollX={false}

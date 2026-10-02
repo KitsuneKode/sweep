@@ -1,16 +1,16 @@
 # Scan resource limits
 
-Discovery and in-process metadata sizing share one operation budget. Defaults
-are identical in the JS protocol package and Rust `ScanLimits`:
+Discovery runs under one cumulative operation budget. Defaults are identical
+in the JS protocol package and Rust `ScanLimits`:
 
-| Resource                                 | Default |
-| ---------------------------------------- | ------- |
-| Candidates                               | 100,000 |
-| Directory admissions, including sizing   | 250,000 |
-| Queued directory paths, including sizing | 32,768  |
-| Retained inode identities                | 500,000 |
-| Cumulative admitted path bytes           | 64 MiB  |
-| Estimated retained byte charges          | 128 MiB |
+| Resource                         | Default |
+| -------------------------------- | ------- |
+| Candidates                       | 100,000 |
+| Directory admissions (walk)      | 250,000 |
+| Queued directory paths (walk)    | 32,768  |
+| Retained inode identities (walk) | 500,000 |
+| Cumulative admitted path bytes   | 64 MiB  |
+| Estimated retained byte charges  | 128 MiB |
 
 Admission is checked before insertion. Directory queue slots are returned when
 work starts. Other charges are cumulative: candidates cost 1,024 bytes plus
@@ -18,6 +18,18 @@ four times their UTF-8 path length; directories cost 128 plus four times their
 path length; inode identities cost 128. Freed objects do not refund these
 charges. This conservative policy can stop a long scan whose current retained
 data is smaller than its cumulative charges.
+
+**Sizing is post-admission work and does not share these counters.** A
+candidate's own subtree was already bounded when it matched during discovery;
+re-charging it would double-count and could starve the walk. Each sizing job
+instead bounds its transient state locally: the inode-dedup sets are capped at
+`maxIdentities` entries per job (~16 MB transient), and the job's pending
+directory queue is capped at `maxQueuedDirs`. Reaching a cap never kills the
+scan: an over-cap hardlink is counted again (the estimate becomes an upper
+bound) and an over-cap directory is skipped (an under bound) - both mark the
+entry `bytesKnown: false` and render with `~`. The walk-level directory dedup
+is structural cycle protection, so it stays on the fatal budget; it is bounded
+by `maxDirectories` and cannot be starved by sizing.
 
 **The 128 MiB value is logical accounting, not an RSS ceiling.** Runtime heaps,
 thread stacks, temporary buffers, JSON parsing, the UI, native libraries and
@@ -50,7 +62,8 @@ eight metadata calls (64 calls total). Raw names preserve invalid UTF-8
 filenames. Ordinary file metadata avoids BigInt allocation; hardlink and visited
 directory identities use BigInt to preserve inode precision. Native sizing uses
 the shared eight-thread Rayon pool and bounded directory subdivision. Neither
-engine retains one path per ordinary file in a flat artifact.
+engine retains one path per ordinary file in a flat artifact, and no sizing job
+holds more than its per-job dedup/queue caps at once.
 
 The external GNU `du` scan shortcut was removed because its retained inode data
 cannot share this budget. Apparent sizing now uses the same bounded metadata
