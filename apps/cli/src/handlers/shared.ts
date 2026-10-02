@@ -25,7 +25,9 @@ import {
   assertSafePattern,
   assertTargetDirectory,
   isSameResolvedPath,
+  pathUsesProcessRelativeRoot,
 } from "@kitsunekode/sweep-core/guardrails";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { resolveSelectedCandidates, toCandidate } from "@kitsunekode/sweep-core/planner";
 import { appendHistory } from "@kitsunekode/sweep-core/history";
 import {
@@ -35,6 +37,7 @@ import {
   defaultRustSelectionPolicy,
   type EngineBackend,
 } from "@kitsunekode/sweep-core/rust-engine";
+import { setActiveApply } from "../apply-lifecycle.js";
 
 export type OutputOptions = Pick<CliOptions, "quiet" | "verbose">;
 
@@ -70,6 +73,11 @@ export function resolveScanTarget(pathArg: string): string {
   return targetDir;
 }
 
+/** Config-layer warnings go to stderr - stdout stays machine-readable. */
+const warnConfig = (message: string): void => {
+  console.error(`warning: ${message}`);
+};
+
 export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepConfig {
   const patterns = opts.pattern ?? [];
   const disabledPatterns = opts.disabledPattern ?? [];
@@ -88,12 +96,12 @@ export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepCon
     ...(ignore.length > 0 ? { ignore } : {}),
   };
 
-  return loadConfig(targetDir, opts.config, cliOverrides);
+  return loadConfig(targetDir, opts.config, cliOverrides, warnConfig);
 }
 
 /** Config from project files only (no CLI pattern/ignore/depth overrides). */
 export function resolveProjectScanConfig(targetDir: string, opts: CliOptions): SweepConfig {
-  return loadConfig(targetDir, opts.config, {});
+  return loadConfig(targetDir, opts.config, {}, warnConfig);
 }
 
 export function resolveEngineBackend(opts: Pick<CliOptions, "engine">): EngineBackend {
@@ -241,12 +249,55 @@ export function assertOpenTuiAvailable(): void {
   );
 }
 
+/**
+ * Tracks a pending drain after a write() returned false. write() still
+ * buffers in userspace when the pipe is full - remembering that state lets
+ * drainStdout await the real flush instead of guessing.
+ */
+let pendingStdoutDrain: Promise<void> | undefined;
+
+function writeStdout(chunk: string): void {
+  if (process.stdout.write(chunk)) return;
+  pendingStdoutDrain ??= new Promise<void>((resolvePromise) => {
+    const done = () => {
+      pendingStdoutDrain = undefined;
+      resolvePromise();
+    };
+    process.stdout.once("drain", done);
+    process.stdout.once("error", done);
+    process.stdout.once("close", done);
+  });
+}
+
 export function writeJson(value: unknown): void {
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+  writeStdout(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function writeJsonLine(value: unknown): void {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
+  writeStdout(`${JSON.stringify(value)}\n`);
+}
+
+/**
+ * Wait (bounded) for buffered stdout bytes to flush before exit. A large
+ * `--json` payload to a pipe can sit in the write buffer when a handler
+ * reaches `process.exit` - exiting then truncates the payload. The 500ms
+ * cap keeps a wedged consumer from hanging the CLI; callers still exit on
+ * the normal path when the buffer is empty.
+ */
+export async function drainStdout(): Promise<void> {
+  await pendingStdoutDrain;
+  const out = process.stdout;
+  if (out.destroyed || out.writableLength === 0) return;
+  return new Promise((resolvePromise) => {
+    const bail = setTimeout(() => resolvePromise(), 500);
+    bail.unref();
+    const done = () => {
+      clearTimeout(bail);
+      resolvePromise();
+    };
+    out.once("error", done);
+    out.write("", done);
+  });
 }
 
 /**
@@ -389,7 +440,23 @@ export async function confirmPlanDeletion(
   const action = options.trash
     ? `Move ${plan.selectedCandidateIds.length} selected items to .sweep-trash`
     : `Delete ${plan.selectedCandidateIds.length} selected items`;
-  return promptConfirm(`${action} (~${formatBytes(selectedBytes)})${dangerNote}?`);
+  // Show where the deletion actually lands: a symlinked-ancestor spelling is
+  // legal in a real plan, but the user deserves to see the resolved truth -
+  // and a forged spelling can't hide behind what it resolves to.
+  const resolvedTarget = (() => {
+    try {
+      return realpathSync(plan.targetDir);
+    } catch {
+      return plan.targetDir;
+    }
+  })();
+  const targetDisplay =
+    resolvedTarget === plan.targetDir
+      ? sanitizeTerminalText(plan.targetDir)
+      : `${sanitizeTerminalText(plan.targetDir)} → ${sanitizeTerminalText(resolvedTarget)}`;
+  return promptConfirm(
+    `${action} in ${targetDisplay} (~${formatBytes(selectedBytes)})${dangerNote}?`,
+  );
 }
 
 /**
@@ -426,6 +493,20 @@ export async function executePlanDeletion(
   // Re-assert the target guardrail here - not just in callers - so the trash
   // mkdir below can never run against a root a forged plan would fail on.
   assertSafeCwd(plan.targetDir);
+  // A plan's target leaf must be a REAL directory: both scanners refuse
+  // leaf-symlink roots, so a plan carrying one is forged input. This is the
+  // /proc/self/cwd class - canonicalized it resolves to wherever the victim
+  // ran sweep, and every downstream containment check then passes under the
+  // resolved path. lstat, not stat: stat follows the link.
+  if (pathUsesProcessRelativeRoot(plan.targetDir)) {
+    throw new GuardrailError("plan target resolves through a process-relative path");
+  }
+  const targetLeaf = lstatSync(plan.targetDir);
+  if (targetLeaf.isSymbolicLink() || !targetLeaf.isDirectory()) {
+    throw new GuardrailError(
+      `plan target is not a real directory: ${sanitizeTerminalText(plan.targetDir)}`,
+    );
+  }
   // Validate identity before creating trash directories or painting progress.
   const selected = resolveSelectedCandidates(plan);
   const total = selected.length;
@@ -446,7 +527,10 @@ export async function executePlanDeletion(
       effectiveEngine = "js";
     }
     trashDir = freshTrashDir(plan.targetDir);
-    mkdirSync(trashDir, { recursive: true });
+    // Non-recursive on purpose: the parent IS the targetDir we just
+    // revalidated. `recursive: true` would silently resurrect a targetDir
+    // that vanished between plan validation and here.
+    mkdirSync(trashDir);
     // Pin the trash root's identity before any move touches it: a watcher
     // could have swapped the fresh directory for a symlink between existsSync
     // and mkdir - every rename would then land outside the target.
@@ -465,23 +549,34 @@ export async function executePlanDeletion(
 
   // Ctrl+C during apply must not vanish the report: stop scheduling new
   // deletions, let in-flight rm calls finish, then report the partial state.
-  // A second SIGINT (no listener left) force-kills as usual. An external
-  // signal (the TUI's in-session apply) stops scheduling the same way.
+  // SIGTERM/SIGHUP/SIGQUIT route through the same abort - a terminal closing
+  // or `kill` must not orphan a mid-flight delete with no history written.
+  // Once any terminating signal fires, ALL listeners come off: a second one
+  // force-kills with its default disposition, preserving the escape hatch.
+  const TERMINATING = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"] as const;
   const controller = new AbortController();
-  const onSigint = () => controller.abort();
-  process.once("SIGINT", onSigint);
-  options.signal?.addEventListener("abort", onSigint, { once: true });
+  const onTerminating = () => {
+    for (const signal of TERMINATING) process.removeListener(signal, onTerminating);
+    controller.abort();
+  };
+  for (const signal of TERMINATING) process.once(signal, onTerminating);
+  options.signal?.addEventListener("abort", onTerminating, { once: true });
   // addEventListener on an already-aborted signal never fires - a ctrl-c
   // that landed during the import/trash setup above would be silently
   // dropped without this check.
-  if (options.signal?.aborted) onSigint();
+  if (options.signal?.aborted) onTerminating();
 
   const verb = trashDir ? "moving" : "deleting";
   const paintDeletion = () => {
-    printDeletionProgress(current, total, activePath, activeBytes, freedBytes, {
-      verb,
-      elapsedMs: Date.now() - startedAt,
-    });
+    try {
+      printDeletionProgress(current, total, activePath, activeBytes, freedBytes, {
+        verb,
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch {
+      // A broken display sink (dead pty, EPIPE mid-write) must never abort
+      // the delete loop - the operation's outcome is what matters.
+    }
   };
   // A long directory removal used to sit on a frozen line until it finished.
   // Repaint on a short interval so the elapsed time moves while that one
@@ -516,6 +611,9 @@ export async function executePlanDeletion(
 
   if (!options.quiet && total > 0 && process.stdout.isTTY) paintDeletion();
 
+  // Register the in-flight apply so bin.ts's EPIPE handler aborts it instead
+  // of exiting 0 on a dead stdout.
+  setActiveApply(controller);
   try {
     const { report, cleanResult, interrupted } = await applyPlanWithBackend(
       plan,
@@ -540,9 +638,10 @@ export async function executePlanDeletion(
       ...(trashDir ? { trashDir } : {}),
     };
   } finally {
+    setActiveApply(undefined);
     if (progressTimer) clearInterval(progressTimer);
-    process.removeListener("SIGINT", onSigint);
-    options.signal?.removeEventListener("abort", onSigint);
+    for (const signal of TERMINATING) process.removeListener(signal, onTerminating);
+    options.signal?.removeEventListener("abort", onTerminating);
     clearDeletionProgress();
     if (trashDir) {
       // rmdir only removes an empty dir - when every move failed the trash

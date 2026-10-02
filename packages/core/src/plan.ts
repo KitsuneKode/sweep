@@ -2,7 +2,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { assertPlanResources } from "./resource-budget.js";
-import { hasCanonicalPathSpelling } from "./guardrails.js";
+import { hasCanonicalPathSpelling, pathUsesProcessRelativeRoot } from "./guardrails.js";
 import type { ApplyReport, ScanCandidate, ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   APPLY_REPORT_SCHEMA,
@@ -71,6 +71,30 @@ export function validatePlan(value: unknown): ScanPlan {
   if (validator(value)) {
     const plan = value as ScanPlan;
     assertPlanResources(plan);
+    // The target is untrusted input too: "" or a relative spelling resolves
+    // against the applying process's cwd, and a process-relative magic root
+    // (/proc/self/cwd, /dev/fd/...) makes "inside the target" mean "inside
+    // wherever sweep runs". Scanners never emit either shape.
+    if (!hasCanonicalPathSpelling(plan.targetDir)) {
+      throw new PlanValidationError(
+        "Invalid scan plan: targetDir is not a canonical absolute path",
+      );
+    }
+    if (pathUsesProcessRelativeRoot(plan.targetDir)) {
+      throw new PlanValidationError(
+        "Invalid scan plan: targetDir resolves through a process-relative path",
+      );
+    }
+    // createdAt is printed verbatim by `sweep inspect` - the schema's
+    // date-time format is decorative (validateFormats is off), so refuse a
+    // garbage or escape-carrying timestamp here instead.
+    if (
+      typeof plan.createdAt !== "string" ||
+      plan.createdAt.length > 64 ||
+      Number.isNaN(Date.parse(plan.createdAt))
+    ) {
+      throw new PlanValidationError("Invalid scan plan: createdAt is not a valid timestamp");
+    }
     // Canonical path spellings only: a trailing separator makes lstat follow
     // a leaf symlink, and `./`-style spellings pass lexical checks while
     // reaching a different entry. sweep never writes one - a plan carrying

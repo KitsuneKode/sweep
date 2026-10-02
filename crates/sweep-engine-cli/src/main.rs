@@ -605,7 +605,9 @@ fn read_stdin_if_present() -> Result<Option<String>, CliFailure> {
 }
 
 fn run_apply() -> Result<(), CliFailure> {
-    if std::env::args().nth(2).as_deref() == Some("--json-control") {
+    // arg(), not env::args(): args() panics on non-UTF-8 argv - a mangled
+    // argument must produce an invalid_input error, not an abort.
+    if arg(2)?.as_deref() == Some("--json-control") {
         return run_apply_controlled();
     }
 

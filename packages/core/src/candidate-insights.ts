@@ -1,7 +1,6 @@
 import { realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
-import { isPathWithinRoot } from "./guardrails.js";
 
 /** Reason tag for hoisted workspace `node_modules` stubs (Bun/npm symlinks). */
 export const WORKSPACE_STUB_REASON = "workspace-stub";
@@ -33,33 +32,51 @@ function canonicalPath(path: string): string {
   } catch {
     // dangling or unreadable - compare the unresolved path
   }
-  const normalized = resolve(resolved)
+  return normalizeKey(resolved);
+}
+
+/** canonicalPath's normalization without the realpath - the lexical key. */
+function normalizeKey(path: string): string {
+  const normalized = resolve(path)
     .replace(/^\\\\\?\\/i, "")
     .replace(/\\/g, "/");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 function markSymlinkAliases(candidates: ScanCandidate[]): ScanCandidate[] {
-  const directoryCandidates = candidates
-    .filter((c) => !c.isSymlink && c.entryType === "directory")
-    .map((c) => ({ candidate: c, realPath: canonicalPath(c.path) }));
+  // Index directory candidates once under BOTH spellings - canonical and
+  // lexical (the lexical key covers a dir whose own canonicalize failed and
+  // fell back). The old shape was O(symlinks x dirs) with a fresh
+  // realpathSync inside the probe: a pnpm monorepo froze the event loop for
+  // seconds inside enrichCandidates - unquittable even for Ctrl+C, since
+  // signal delivery is event-loop-bound.
+  const dirByReal = new Map<string, ScanCandidate>();
+  const dirByLexical = new Map<string, ScanCandidate>();
+  for (const candidate of candidates) {
+    if (candidate.isSymlink || candidate.entryType !== "directory") continue;
+    dirByReal.set(canonicalPath(candidate.path), candidate);
+    dirByLexical.set(normalizeKey(candidate.path), candidate);
+  }
 
   return candidates.map((candidate) => {
     if (!candidate.isSymlink) {
       return candidate;
     }
 
+    // A link is an alias when its resolved target IS a directory candidate
+    // or lives inside one - walk the resolved path's ancestors instead of
+    // probing every dir: O(path depth) per symlink.
     const resolved = canonicalPath(candidate.path);
-
-    const hostMatch = directoryCandidates.find(({ candidate: other, realPath }) => {
-      if (other.id === candidate.id) return false;
-      return (
-        resolved === realPath ||
-        resolved === canonicalPath(other.path) ||
-        isPathWithinRoot(resolved, realPath) ||
-        isPathWithinRoot(resolved, other.path)
-      );
-    });
+    let hostMatch: ScanCandidate | undefined;
+    for (let cursor: string | undefined = resolved; cursor !== undefined; ) {
+      const hit = dirByReal.get(cursor) ?? dirByLexical.get(cursor);
+      if (hit !== undefined && hit.id !== candidate.id) {
+        hostMatch = hit;
+        break;
+      }
+      const parent = dirname(cursor);
+      cursor = parent === cursor ? undefined : parent;
+    }
 
     if (!hostMatch) {
       return candidate;

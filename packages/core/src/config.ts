@@ -346,6 +346,20 @@ function mergeStringArrays(...sources: Array<string[] | undefined>): string[] {
   return [...new Set(all)];
 }
 
+/**
+ * Config JSON is untyped - `{"patterns": {"x": 1}}` or `"patterns":
+ * "node_modules"` must not reach flatMap/assertSafePattern and crash as a
+ * TypeError (wrong exit taxonomy) or silently warp scan scope. Field type
+ * errors are config-parse errors.
+ */
+function checkedStringArray(value: unknown, field: string, source: string): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new ConfigParseError(`"${field}" in ${source} must be an array of strings`);
+  }
+  return value;
+}
+
 function subtractPatterns(patterns: string[], disabled: string[]): string[] {
   if (disabled.length === 0) return patterns;
   const disabledSet = new Set(disabled);
@@ -440,6 +454,7 @@ export function loadConfig(
   cwd: string,
   explicitConfigPath?: string,
   cliOverrides: Partial<SweepConfig> = {},
+  onWarning?: (message: string) => void,
 ): SweepConfig {
   const global = getGlobalConfig() ?? {};
 
@@ -459,26 +474,26 @@ export function loadConfig(
   }
 
   const disabledPatterns = mergeStringArrays(
-    global.disabledPatterns,
-    project.disabledPatterns,
-    cliOverrides.disabledPatterns,
+    checkedStringArray(global.disabledPatterns, "disabledPatterns", "global config"),
+    checkedStringArray(project.disabledPatterns, "disabledPatterns", "project config"),
+    checkedStringArray(cliOverrides.disabledPatterns, "disabledPatterns", "CLI flags"),
   );
 
   const patterns = subtractPatterns(
     mergeStringArrays(
       DEFAULT_CONFIG.patterns,
-      global.patterns,
-      project.patterns,
-      cliOverrides.patterns,
+      checkedStringArray(global.patterns, "patterns", "global config"),
+      checkedStringArray(project.patterns, "patterns", "project config"),
+      checkedStringArray(cliOverrides.patterns, "patterns", "CLI flags"),
     ),
     disabledPatterns,
   );
 
   const ignore = mergeStringArrays(
     DEFAULT_CONFIG.ignore,
-    global.ignore,
-    project.ignore,
-    cliOverrides.ignore,
+    checkedStringArray(global.ignore, "ignore", "global config"),
+    checkedStringArray(project.ignore, "ignore", "project config"),
+    checkedStringArray(cliOverrides.ignore, "ignore", "CLI flags"),
   );
 
   // A hostile or hand-mangled config could carry thousands of patterns; each
@@ -502,6 +517,18 @@ export function loadConfig(
   const maxSizeGB =
     cliOverrides.maxSizeGB ?? project.maxSizeGB ?? global.maxSizeGB ?? DEFAULT_CONFIG.maxSizeGB;
   const depth = cliOverrides.depth ?? project.depth ?? global.depth ?? DEFAULT_CONFIG.depth;
+
+  // maxSizeGB is the delete-size guardrail. A CLI flag raising it is explicit
+  // intent; a buried config-file raise widens the destructive envelope with
+  // no user signal - surface it once.
+  const fileRaised =
+    cliOverrides.maxSizeGB === undefined &&
+    (project.maxSizeGB ?? global.maxSizeGB ?? 0) > DEFAULT_CONFIG.maxSizeGB;
+  if (fileRaised) {
+    onWarning?.(
+      `config raises "maxSizeGB" to ${maxSizeGB} (default ${DEFAULT_CONFIG.maxSizeGB}) - the delete-size guardrail is wider than stock`,
+    );
+  }
 
   // Scalars come from hand-edited config files - validate rather than letting
   // NaN-adjacent or negative values silently warp scan/delete behavior.

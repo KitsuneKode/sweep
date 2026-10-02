@@ -105,6 +105,35 @@ pub fn apply_plan_controlled_with_limit(
         return Ok(ApplyReport::empty(plan));
     }
 
+    // The target is untrusted input too: a relative/`..`-carrying spelling
+    // resolves against the applying process's cwd, and a leaf symlink like
+    // /proc/self/cwd resolves to wherever the victim ran sweep - every
+    // downstream canonical check then passes under the resolved path. Both
+    // scanners refuse leaf-symlink roots, so a plan carrying one is forged.
+    // JS parity: validatePlan + executePlanDeletion.
+    if !has_canonical_spelling(&plan.target_dir) {
+        return Err(EngineError::InvalidPlan {
+            message: "plan targetDir is not a canonical absolute path".to_owned(),
+        });
+    }
+    if path_uses_process_relative_root(&plan.target_dir) {
+        return Err(EngineError::InvalidPlan {
+            message: "plan targetDir resolves through a process-relative path".to_owned(),
+        });
+    }
+    match fs::symlink_metadata(&plan.target_dir) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => {
+            return Err(EngineError::InvalidPlan {
+                message: "plan target is not a real directory".to_owned(),
+            });
+        }
+        Ok(_) => {}
+        Err(err) => {
+            return Err(EngineError::InvalidPlan {
+                message: format!("plan target cannot be inspected: {err}"),
+            });
+        }
+    }
     // Resolve the target once: lexical containment alone is not enough - a
     // directory inside the tree can be swapped for a symlink between scan and
     // apply, and rm would then recurse through it outside the target.
@@ -112,6 +141,17 @@ pub fn apply_plan_controlled_with_limit(
     // target would otherwise proceed with zero canonical verification, so
     // every delete fails closed instead (JS parity: EOUTSIDE per entry).
     let real_root = fs::canonicalize(&plan.target_dir).ok();
+    // Identity pin, not just a path: a root renamed away and recreated under
+    // the same spelling resolves identically but is a different directory.
+    // dev:ino is unix-only; on other platforms the canonical spelling is
+    // all we have (documented residual). JS parity: containmentRootId.
+    #[cfg(unix)]
+    let real_root_id: Option<(u64, u64)> = real_root.as_deref().and_then(|root| {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(root).ok().map(|meta| (meta.dev(), meta.ino()))
+    });
+    #[cfg(not(unix))]
+    let real_root_id: Option<(u64, u64)> = None;
 
     let mut ready: Vec<ScanEntry> = Vec::new();
     let mut failed_paths: Vec<PathFailure> = Vec::new();
@@ -265,7 +305,7 @@ pub fn apply_plan_controlled_with_limit(
         // paint a phantom "deleting" line for work that never ran.
         on_begin(id);
         let result = match real_root.as_deref() {
-            Some(root) => delete_entry(&entry, root),
+            Some(root) => delete_entry(&entry, root, real_root_id),
             None => Err(path_failure(
                 &entry.path,
                 FailureReasonCode::OutsideTarget,
@@ -418,6 +458,51 @@ fn revalidate_candidate(
     Ok(candidate.entry.clone())
 }
 
+/// True when a path resolves through a process-relative magic root
+/// (`/proc/self`, `/proc/<pid>/cwd|root|fd`, `/dev/fd`, `/dev/std*`): such a
+/// spelling means "wherever the applying process runs". A forged plan can
+/// carry `targetDir: /proc/self/cwd` + candidates inside it and delete under
+/// the victim's cwd while every canonical check passes. JS parity:
+/// pathUsesProcessRelativeRoot.
+fn path_uses_process_relative_root(path: &str) -> bool {
+    if cfg!(windows) {
+        return false;
+    }
+    let segments: Vec<String> = lexical_abs(Path::new(path))
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(segment) => Some(segment.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    let (first, second, third) = (
+        segments.first().map(String::as_str),
+        segments.get(1).map(String::as_str),
+        segments.get(2).map(String::as_str),
+    );
+    if first == Some("dev")
+        && matches!(
+            second,
+            Some("fd") | Some("stdin") | Some("stdout") | Some("stderr")
+        )
+    {
+        return true;
+    }
+    if first == Some("proc") && matches!(second, Some("self") | Some("thread-self")) {
+        return true;
+    }
+    if first == Some("proc")
+        && second.is_some_and(|pid| pid.bytes().all(|b| b.is_ascii_digit()))
+        && matches!(
+            third,
+            Some("cwd") | Some("root") | Some("fd") | Some("fdinfo")
+        )
+    {
+        return true;
+    }
+    false
+}
+
 fn is_path_within_root(candidate_path: &str, root_path: &str) -> bool {
     let candidate = lexical_abs(Path::new(candidate_path));
     let root = lexical_abs(Path::new(root_path));
@@ -425,9 +510,13 @@ fn is_path_within_root(candidate_path: &str, root_path: &str) -> bool {
         return true;
     }
     match candidate.strip_prefix(&root) {
+        // Only an actual `..` first segment means escape - `..foo` is a legal
+        // directory name that lives INSIDE the root and must not be refused.
+        // A prefix check on the string would get this wrong; components do
+        // not conflate the two.
         Ok(relative) => {
-            let rel = relative.to_string_lossy();
-            !rel.is_empty() && !rel.starts_with("..")
+            !relative.as_os_str().is_empty()
+                && relative.components().next() != Some(std::path::Component::ParentDir)
         }
         Err(_) => false,
     }
@@ -471,15 +560,27 @@ fn lexical_abs(path: &Path) -> std::path::PathBuf {
     out
 }
 
-/// Comparison key for dedupe: lexical-abs path, case-folded where the
-/// filesystem folds. A forged plan can smuggle duplicates through spelling
-/// variants (`a/../b`, case) that byte-order compare differently. JS parity.
+/// Comparison key for dedupe and outcome mapping: the *canonical* parent
+/// joined to the leaf name, case-folded where the filesystem folds. Lexical
+/// keys let a forged plan list the same inode twice through a symlinked
+/// ancestor (`sub/x` and `alias/x` where `alias` -> `sub`) - the pair
+/// survives dedupe and two delete jobs race onto one target. The leaf
+/// itself is never resolved: two symlink candidates pointing at one target
+/// are distinct unlinks. JS parity: dedupeKey.
 fn dedupe_key(path: &str) -> String {
-    let normalized = lexical_abs(Path::new(path)).to_string_lossy().into_owned();
+    let normalized = lexical_abs(Path::new(path));
+    let key = match normalized
+        .parent()
+        .and_then(|parent| fs::canonicalize(parent).ok())
+    {
+        Some(real_parent) => real_parent.join(normalized.file_name().unwrap_or_default()),
+        None => normalized,
+    };
+    let spelling = key.to_string_lossy().into_owned();
     if cfg!(windows) || cfg!(target_os = "macos") {
-        normalized.to_lowercase()
+        spelling.to_lowercase()
     } else {
-        normalized
+        spelling
     }
 }
 
@@ -524,8 +625,34 @@ fn deduplicate_nested_entries(entries: Vec<ScanEntry>) -> Vec<ScanEntry> {
     retained
 }
 
-fn delete_entry(entry: &ScanEntry, real_root: &Path) -> Result<(), PathFailure> {
+fn delete_entry(
+    entry: &ScanEntry,
+    real_root: &Path,
+    real_root_id: Option<(u64, u64)>,
+) -> Result<(), PathFailure> {
     let path = Path::new(entry.path.as_str());
+
+    // Identity pin, not just a path: a renamed-away-and-recreated root
+    // resolves to the same spelling but is a different directory. Re-stat
+    // right before the delete so that swap fails closed. JS parity.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let root_ok = real_root_id
+            .and_then(|(dev, ino)| {
+                fs::metadata(real_root)
+                    .ok()
+                    .map(|meta| meta.dev() == dev && meta.ino() == ino)
+            })
+            .unwrap_or(false);
+        if !root_ok {
+            return Err(path_failure(
+                &entry.path,
+                FailureReasonCode::OutsideTarget,
+                "containment root was replaced mid-apply".to_owned(),
+            ));
+        }
+    }
 
     // Shrink the validate-then-delete race: an ancestor swapped for a
     // symlink after revalidation redirects remove_dir_all outside the
@@ -558,6 +685,23 @@ fn delete_entry(entry: &ScanEntry, real_root: &Path) -> Result<(), PathFailure> 
                     "entry type changed since validation".to_owned(),
                 ));
             }
+            // A mount point inside the root is invisible to canonical paths
+            // - they still spell "inside" - but st_dev exposes it. Removing
+            // across that boundary would delete a filesystem the scan never
+            // covered. JS parity: current.dev !== rootNow.dev.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if let Some((root_dev, _)) = real_root_id {
+                    if meta.dev() != root_dev {
+                        return Err(path_failure(
+                            &entry.path,
+                            FailureReasonCode::OutsideTarget,
+                            "candidate sits on a different filesystem than the target".to_owned(),
+                        ));
+                    }
+                }
+            }
         }
         Err(err) => {
             return Err(path_failure(
@@ -581,15 +725,30 @@ fn delete_entry(entry: &ScanEntry, real_root: &Path) -> Result<(), PathFailure> 
                 Err(err)
             }
         })
+    } else if entry.entry_type == EntryType::File {
+        // remove_file only: a file swapped for a populated dir in the
+        // check->act gap must fail (ENOTDIR on unix), never recurse into
+        // content the scan never saw. JS parity: unlink dispatch.
+        fs::remove_file(path)
     } else {
-        fs::remove_dir_all(path).or_else(|err| {
-            if entry.entry_type == EntryType::File {
-                fs::remove_file(path)
-            } else {
-                Err(err)
-            }
-        })
+        // remove_dir_all errors on a missing path (no force flag) - a
+        // renamed-away entry is an honest failure, never a phantom delete.
+        fs::remove_dir_all(path)
     };
+
+    let result = result.and_then(|()| {
+        // Post-delete verify: a path that still exists after a successful
+        // removal is an anomaly (recreated mid-delete or exotic fs
+        // semantics) - report it, don't claim it. JS parity.
+        if fs::symlink_metadata(path).is_ok() {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "path still exists after delete",
+            ))
+        } else {
+            Ok(())
+        }
+    });
 
     result.map_err(|err| path_failure(&entry.path, classify_io_error(&err), err.to_string()))
 }
@@ -697,10 +856,14 @@ mod tests {
         let selected = candidate(&path, "node_modules", EntryType::Symlink, true);
         let root =
             fs::canonicalize(dir.path()).unwrap_or_else(|err| panic!("canonicalize failed: {err}"));
+        let root_id = {
+            use std::os::unix::fs::MetadataExt;
+            fs::metadata(&root).ok().map(|m| (m.dev(), m.ino()))
+        };
         let validation = revalidate_candidate(&selected, Some(&root));
         assert!(validation.is_err(), "VCS symlink passed revalidation");
         assert!(
-            delete_entry(&selected.entry, &root).is_err(),
+            delete_entry(&selected.entry, &root, root_id).is_err(),
             "VCS symlink passed delete-time checks"
         );
         assert!(fs::symlink_metadata(git.join("node_modules")).is_ok());
@@ -778,8 +941,9 @@ mod tests {
 
     #[test]
     fn a_vanished_target_root_fails_every_entry_closed() {
-        // canonicalize(target) fails when the root is gone; every selected
-        // entry must then fail - nothing may proceed with no verified root.
+        // A root that cannot even be inspected is not a report of per-entry
+        // failures - the whole plan is untrusted, so apply_plan refuses up
+        // front and nothing is touched.
         let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
         let ghost = dir.path().join("gone");
         let candidate_path = ghost.join("node_modules");
@@ -794,9 +958,9 @@ mod tests {
         plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
         fs::remove_dir_all(&ghost).unwrap_or_else(|e| panic!("rmdir: {e}"));
 
-        let report = apply_plan(&plan).unwrap_or_else(|e| panic!("apply: {e}"));
-        assert_eq!(report.deleted_count, 0);
-        assert_eq!(report.failed_count, 1);
+        let err = apply_plan(&plan).expect_err("vanished target must refuse the plan");
+        assert!(err.to_string().contains("cannot be inspected"), "{err}");
+        assert!(!ghost.exists());
     }
 
     #[test]

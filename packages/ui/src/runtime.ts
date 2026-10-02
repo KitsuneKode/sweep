@@ -49,6 +49,7 @@ export async function openUiSession(): Promise<UiSession> {
     noteCtrlCHandled();
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
+    process.removeListener("SIGHUP", onSignal);
     process.stdin.off("data", onStdinData);
     try {
       root.unmount();
@@ -93,6 +94,9 @@ export async function openUiSession(): Promise<UiSession> {
 
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+  // SIGHUP = terminal closed: restore alternate-screen/raw mode/mouse
+  // capture before exit or the user's shell inherits a mangled terminal.
+  process.on("SIGHUP", onSignal);
   process.stdin.on("data", onStdinData);
 
   return { root, finish, done };

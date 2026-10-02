@@ -284,7 +284,9 @@ export function isPathWithinRoot(candidatePath: string, rootPath: string): boole
   if (rel === "") {
     return true;
   }
-  if (rel.startsWith("..") || isAbsolute(rel)) {
+  // Only an actual `..` first segment means escape - `..foo` is a legal
+  // directory name that lives INSIDE the root and must not be refused.
+  if (rel === ".." || rel.startsWith("../") || rel.startsWith("..\\") || isAbsolute(rel)) {
     return false;
   }
   return true;
@@ -325,6 +327,41 @@ export function hasCanonicalPathSpelling(path: string): boolean {
   const separators = process.platform === "win32" ? "/\\" : sep;
   const last = path[path.length - 1];
   return path.length === 1 || last === undefined || !separators.includes(last);
+}
+
+/**
+ * True when a path resolves through a process-relative magic root
+ * (`/proc/self`, `/proc/<pid>/cwd|root|fd`, `/dev/fd`, `/dev/std*`): such a
+ * spelling means "wherever the applying process runs", so a forged plan can
+ * carry `targetDir: /proc/self/cwd` + candidates `/proc/self/cwd/node_modules`
+ * and delete inside the victim's cwd while every canonical check passes.
+ * Legit plans never spell targets this way - scanners are invoked on real
+ * directories - so the class is refused outright.
+ */
+export function pathUsesProcessRelativeRoot(candidatePath: string): boolean {
+  if (process.platform === "win32") return false;
+  const segments = normalize(candidatePath)
+    .split(sep)
+    .filter((segment) => segment.length > 0);
+  const [first, second, third] = segments;
+  if (
+    first === "dev" &&
+    (second === "fd" || second === "stdin" || second === "stdout" || second === "stderr")
+  ) {
+    return true;
+  }
+  if (first === "proc" && (second === "self" || second === "thread-self")) {
+    return true;
+  }
+  if (
+    first === "proc" &&
+    second !== undefined &&
+    /^\d+$/.test(second) &&
+    (third === "cwd" || third === "root" || third === "fd" || third === "fdinfo")
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** True when any path segment is a protected VCS metadata directory. */

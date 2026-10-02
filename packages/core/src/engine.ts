@@ -98,10 +98,12 @@ export async function applyPlan(
   // (containment, target-root, VCS segments, symlink/type state), matching the
   // Rust engine's apply_plan. Forged entries become per-path failures in the
   // report instead of aborting the whole apply.
+  const isCancelled = () =>
+    (options.signal?.aborted ?? false) || (options.isCancelled?.() ?? false);
   const { ready, failedPaths: revalidationFailures } = revalidateCandidates(
     selected,
     plan.targetDir,
-    () => options.signal?.aborted ?? false,
+    isCancelled,
   );
   // Dedupe up front so `interrupted` compares against the real work set -
   // entries deduped away are never attempted and must not read as skipped.
@@ -152,9 +154,20 @@ export async function applyPlan(
   const firstByPath = new Map(
     workSet.map((entry) => [dedupeKey(entry.path), entry as ScanCandidate]),
   );
+  // Candidates revalidation never reached (cancelled mid-loop) must report
+  // "unattempted", not "failed": the tail has no failedPaths entry, and
+  // counting it would disagree with failedCount (Rust parity).
   const readySet = new Set(ready);
+  const revalidationFailureKeys = new Set(
+    revalidationFailures.map((failure) => dedupeKey(failure.path)),
+  );
   const failedIds = new Set(
-    selected.filter((candidate) => !readySet.has(candidate)).map((candidate) => candidate.id),
+    selected
+      .filter(
+        (candidate) =>
+          !readySet.has(candidate) && revalidationFailureKeys.has(dedupeKey(candidate.path)),
+      )
+      .map((candidate) => candidate.id),
   );
   for (const failure of cleanResult.failedPaths) {
     const candidate = firstByPath.get(dedupeKey(failure.path));

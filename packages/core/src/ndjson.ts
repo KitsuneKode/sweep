@@ -2,6 +2,7 @@
 export class NdjsonDecoder {
   private pending = "";
   private pendingBytes = 0;
+  private emptyLines = 0;
 
   constructor(
     private readonly onLine: (line: string) => void,
@@ -33,6 +34,15 @@ export class NdjsonDecoder {
     const line = this.pending.endsWith("\r") ? this.pending.slice(0, -1) : this.pending;
     this.pending = "";
     this.pendingBytes = 0;
-    if (line.length > 0) this.onLine(line);
+    if (line.length > 0) {
+      this.onLine(line);
+      return;
+    }
+    // Empty lines are free of the per-line byte cap, so a malformed peer
+    // could spin forever on "\n\n\n..." without tripping it. Real engines
+    // never emit them; treat a flood as a protocol failure.
+    if (++this.emptyLines > 1024) {
+      throw new Error("rust engine emitted an empty-line flood");
+    }
   }
 }

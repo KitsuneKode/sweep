@@ -628,3 +628,61 @@ test("a pre-aborted scan reports its unvisited queue as skipped, not complete", 
   // not read as "found nothing".
   expect(result.skippedDirs).toBeGreaterThanOrEqual(1);
 });
+
+test("an endless dirent stream is capped and the dir counts as skipped", async () => {
+  // A hostile FUSE/NFS dir can yield dirents forever - bounded memory is not
+  // enough when the walk itself never ends. The cap turns it into a skipped
+  // dir instead of a scan that spins until killed.
+  const junk = Buffer.from("junk-entry");
+  stubDirectoryEntriesForTest(async function* () {
+    // 4M+ iterations of a never-matching name; the scan must cut it off.
+    for (let i = 0; i <= 4_000_000; i++) yield { name: junk, type: "f" };
+  });
+  try {
+    const result = await scan(tmpDir, DEFAULT_CONFIG);
+    expect(result.entries).toHaveLength(0);
+    expect(result.skippedDirs).toBeGreaterThanOrEqual(1);
+  } finally {
+    stubDirectoryEntriesForTest();
+  }
+}, 60_000);
+
+test("a throwing onEntrySized hook does not sink the scan's sizing", async () => {
+  // The batch fails when a host hook throws; the per-entry fallback must
+  // still size the batch (the dead `unsized` arm used to leave this fatal).
+  mkdirSync(dir("node_modules"));
+  writeFileSync(dir("node_modules", "f"), "hello");
+  const sizer = new ProgressiveSizer({
+    onEntrySized: () => {
+      throw new Error("hook broke");
+    },
+  });
+  const entry = {
+    path: dir("node_modules"),
+    name: "node_modules",
+    entryType: "directory" as const,
+    isSymlink: false,
+    estimatedBytes: 0,
+    bytesKnown: false,
+  };
+  sizer.add(entry);
+  await sizer.finish();
+  expect(entry.estimatedBytes).toBeGreaterThan(0);
+  expect(entry.bytesKnown).toBe(true);
+});
+
+test("a resource-limit sizing failure still fails the scan", async () => {
+  // Only budget failures are fatal - the latch lives in the shared budget.
+  const budget = new ResourceBudget({ maxCandidates: 1 });
+  budget.candidate("/a");
+  expect(() => budget.candidate("/b")).toThrow("maxCandidates");
+  const sizer = new ProgressiveSizer({}, undefined, budget);
+  sizer.add({
+    path: dir("node_modules"),
+    name: "node_modules",
+    entryType: "directory",
+    isSymlink: false,
+    estimatedBytes: 0,
+  });
+  await expect(sizer.finish()).rejects.toThrow("maxCandidates");
+});

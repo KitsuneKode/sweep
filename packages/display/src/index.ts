@@ -331,6 +331,12 @@ export interface PlanInfoSummary {
   protocolVersion: string;
   createdAt: string;
   targetDir: string;
+  /**
+   * Canonical resolution of targetDir, when the path still resolves. Shown
+   * when it differs - a spelled path through symlinks must not hide where
+   * apply will actually operate.
+   */
+  resolvedTargetDir?: string;
   candidateCount: number;
   selectedCount: number;
   selectedBytes: number;
@@ -346,7 +352,9 @@ export interface PlanInfoSummary {
 export function printPlanInfo(planPath: string, summary: PlanInfoSummary): void {
   console.log(`  ${pc.bold("plan")}      ${sanitizeTerminalText(planPath)}`);
   console.log(`    target      ${sanitizeTerminalText(summary.targetDir)}`);
-  console.log(`    created     ${summary.createdAt}`);
+  if (summary.resolvedTargetDir !== undefined && summary.resolvedTargetDir !== summary.targetDir)
+    console.log(`    resolves to ${sanitizeTerminalText(summary.resolvedTargetDir)}`);
+  console.log(`    created     ${sanitizeTerminalText(summary.createdAt)}`);
   console.log(`    protocol    v${summary.protocolVersion}`);
   console.log(
     `    candidates  ${summary.candidateCount} ` +

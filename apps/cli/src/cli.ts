@@ -1,4 +1,4 @@
-import { Command, InvalidArgumentError } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { handleApply } from "./handlers/apply.js";
 import { handleClean } from "./handlers/clean.js";
@@ -39,48 +39,58 @@ function addOutputOptions<T extends Command>(command: T): T {
 }
 
 function addScanOptions<T extends Command>(command: T): T {
-  return command
-    .option(
-      "-p, --pattern <pattern>",
-      "Add extra pattern, repeatable: -p .output -p .cache",
-      (v: string, acc: string[]) => [...acc, v],
-      [] as string[],
-    )
-    .option(
-      "-i, --ignore <pattern>",
-      "Add ignore pattern, repeatable",
-      (v: string, acc: string[]) => [...acc, v],
-      [] as string[],
-    )
-    .option(
-      "--disabled-pattern <pattern>",
-      "Disable a default pattern for this run, repeatable",
-      (v: string, acc: string[]) => [...acc, v],
-      [] as string[],
-    )
-    .option("--depth <n>", "Max recursion depth (-1 = unlimited)", (v: string) => {
-      const parsed = Number.parseInt(v, 10);
-      // No default: an absent flag must leave project/global config depth
-      // reachable; InvalidArgumentError makes a bad value a usage error.
-      if (!Number.isInteger(parsed)) {
-        throw new InvalidArgumentError(`expected an integer, got "${v}"`);
-      }
-      return parsed;
-    })
-    .option("--select <mode>", "Default selection policy: default, safe, all, none", "default")
-    .option("--include-dangerous", "Include dangerous candidates in selection", false)
-    .option("--config <path>", "Explicit config file path")
-    .option(
-      "--engine <backend>",
-      "Scan engine: auto (default - rust when its binary is available), rust, or js",
-      "auto",
-    )
-    .option(
-      "--cold",
-      "Cold-start run: refresh the engine probe and drop OS page cache when permitted (dev)",
-      false,
-    )
-    .option("--no-color", "Disable color output");
+  return (
+    command
+      .option(
+        "-p, --pattern <pattern>",
+        "Add extra pattern, repeatable: -p .output -p .cache",
+        (v: string, acc: string[]) => [...acc, v],
+        [] as string[],
+      )
+      .option(
+        "-i, --ignore <pattern>",
+        "Add ignore pattern, repeatable",
+        (v: string, acc: string[]) => [...acc, v],
+        [] as string[],
+      )
+      .option(
+        "--disabled-pattern <pattern>",
+        "Disable a default pattern for this run, repeatable",
+        (v: string, acc: string[]) => [...acc, v],
+        [] as string[],
+      )
+      .option("--depth <n>", "Max recursion depth (-1 = unlimited)", (v: string) => {
+        // Strict digits only - parseInt("5x") -> 5 would silently mangle intent.
+        if (!/^-?\d+$/.test(v)) {
+          throw new InvalidArgumentError(`expected an integer, got "${v}"`);
+        }
+        return Number.parseInt(v, 10);
+      })
+      // .choices makes an unknown value a usage error - a typo like
+      // `--select safe` mistyped must not silently select MORE (or less) than
+      // asked.
+      .addOption(
+        new Option("--select <mode>", "Default selection policy")
+          .choices(["default", "safe", "all", "none"])
+          .default("default"),
+      )
+      .option("--include-dangerous", "Include dangerous candidates in selection", false)
+      .option("--config <path>", "Explicit config file path")
+      .addOption(
+        new Option(
+          "--engine <backend>",
+          "Scan engine: auto (default - rust when its binary is available), rust, or js",
+        )
+          .choices(["auto", "rust", "js"])
+          .default("auto"),
+      )
+      .option(
+        "--cold",
+        "Cold-start run: refresh the engine probe and drop OS page cache when permitted (dev)",
+        false,
+      )
+      .option("--no-color", "Disable color output")
+  );
 }
 
 function addCleanAction(command: Command): Command {
@@ -157,10 +167,13 @@ export function makeProgram(): Command {
     .command("apply")
     .description("Apply a saved scan plan")
     .requiredOption("--plan <path>", "Path to a saved scan plan")
-    .option(
-      "--engine <backend>",
-      "Apply engine: auto (default - rust when its binary is available), rust, or js",
-      "auto",
+    .addOption(
+      new Option(
+        "--engine <backend>",
+        "Apply engine: auto (default - rust when its binary is available), rust, or js",
+      )
+        .choices(["auto", "rust", "js"])
+        .default("auto"),
     )
     .option("-n, --dry-run", "Preview the plan's deletions without making changes", false)
     .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)

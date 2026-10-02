@@ -104,4 +104,78 @@ describe("enrichCandidates", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test("marks a symlink whose target lives INSIDE another candidate (ancestor match)", () => {
+    // The alias check is an ancestor walk, not just exact equality: a link
+    // pointing at a subdirectory of a candidate still shadows real content.
+    const root = mkdtempSync(join(tmpdir(), "sweep-insights-"));
+    try {
+      mkdirSync(join(root, "dist-target", "deep"), { recursive: true });
+      try {
+        symlinkSync(join(root, "dist-target", "deep"), join(root, "target"), "dir");
+      } catch {
+        symlinkSync(join(root, "dist-target", "deep"), join(root, "target"), "junction");
+      }
+
+      const host = candidate({
+        id: "host",
+        path: join(root, "dist-target"),
+        name: "dist-target",
+        estimatedBytes: 12,
+        kind: "custom",
+      });
+      const nestedAlias = candidate({
+        id: "nested-alias",
+        path: join(root, "target"),
+        name: "target",
+        isSymlink: true,
+        entryType: "symlink",
+        kind: "target",
+        riskTier: "caution",
+        reasons: ["symlink"],
+      });
+
+      const enriched = enrichCandidates([host, nestedAlias]);
+      const enrichedAlias = enriched.find((entry) => entry.id === "nested-alias");
+      expect(enrichedAlias?.reasons).toContain(SYMLINK_ALIAS_REASON);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("leaves symlinks to unrelated paths unmarked", () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-insights-"));
+    try {
+      mkdirSync(join(root, "dist-target"));
+      mkdirSync(join(root, "elsewhere"));
+      try {
+        symlinkSync(join(root, "elsewhere"), join(root, "target"), "dir");
+      } catch {
+        symlinkSync(join(root, "elsewhere"), join(root, "target"), "junction");
+      }
+
+      const host = candidate({
+        id: "host",
+        path: join(root, "dist-target"),
+        name: "dist-target",
+        kind: "custom",
+      });
+      const unrelated = candidate({
+        id: "unrelated",
+        path: join(root, "target"),
+        name: "target",
+        isSymlink: true,
+        entryType: "symlink",
+        kind: "target",
+        reasons: ["symlink"],
+      });
+
+      const enriched = enrichCandidates([host, unrelated]);
+      const enrichedAlias = enriched.find((entry) => entry.id === "unrelated");
+      expect(enrichedAlias?.reasons).not.toContain(SYMLINK_ALIAS_REASON);
+      expect(enrichedAlias?.selectedByDefault).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

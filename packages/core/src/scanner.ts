@@ -41,6 +41,12 @@ const skipDirName = (name: string): boolean =>
   );
 
 const TRAVERSAL_CONCURRENCY = 16;
+/**
+ * Dirents seen per directory before the listing is declared untrustworthy.
+ * No budget otherwise bounds enumeration: a hostile FUSE/NFS dir returning
+ * an endless stream would spin a scan forever with flat memory.
+ */
+const MAX_DIR_ENTRIES = 4_000_000;
 const SIZE_CONCURRENCY = 8;
 /** Max sizing batches in flight while the walk continues. */
 const SIZE_MAX_INFLIGHT = 4;
@@ -292,14 +298,14 @@ class Semaphore {
  *
  * Batches discovered paths into in-process metadata size jobs while the
  * directory walk is still running (bounded by SIZE_MAX_INFLIGHT), so sizes
- * stream in instead of waiting for traversal to finish. Entries a batch
- * could not size fall back to exact/stat walks after all batches settle.
+ * stream in instead of waiting for traversal to finish. A batch that fails
+ * for a non-budget reason re-sizes its entries with the stat fallback
+ * inline; only a resource-limit failure fails the scan.
  */
 /** @internal Exported for lifecycle regression tests; not a package API. */
 export class ProgressiveSizer {
   private readonly pending: ScanEntry[] = [];
   private readonly inflight = new Set<Promise<void>>();
-  private readonly unsized: ScanEntry[] = [];
   private readonly slots = new Semaphore(SIZE_MAX_INFLIGHT);
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly controller = new AbortController();
@@ -354,8 +360,31 @@ export class ProgressiveSizer {
       if (entries.length === 0) continue;
       const task = this.runBatch(entries);
       const tracked = task
-        .catch((error: unknown) => {
-          this.failure ??= error;
+        .catch(async (error: unknown) => {
+          if (error instanceof ResourceLimitError) {
+            this.failure ??= error;
+            return;
+          }
+          // A non-budget batch failure (a dying mount mid-job, a throwing
+          // hook) must not sink the whole scan: size this batch's entries
+          // with the per-entry stat fallback - the arm the dead `unsized`
+          // list never reached. Entries already sized get harmlessly
+          // re-answered; the fallback marks them bytesKnown as it resolves.
+          for (const entry of entries) {
+            if (this.signal.aborted) break;
+            try {
+              const size = await applyFallbackSizeAsync(entry, this.signal, this.budget);
+              entry.estimatedBytes = size.bytes;
+              entry.bytesKnown = size.complete;
+              this.hooks.onEntrySized?.(entry);
+            } catch (fallbackError) {
+              if (fallbackError instanceof ResourceLimitError) {
+                this.failure ??= fallbackError;
+              }
+              // A non-budget fallback failure leaves the entry unsized -
+              // bytesKnown stays false and summary.exact demotes honestly.
+            }
+          }
         })
         .then(() => {
           this.inflight.delete(tracked);
@@ -379,22 +408,11 @@ export class ProgressiveSizer {
     }
   }
 
-  /** Flush leftovers and apply fallbacks; resolves when every entry is sized. */
+  /** Flush leftovers and surface any fatal failure; resolves when settled. */
   async finish(): Promise<void> {
     this.flushPending();
     await Promise.all(this.inflight);
     if (this.failure !== undefined) throw this.failure;
-    if (this.signal?.aborted) return;
-
-    const remaining = [...this.unsized];
-    this.unsized.length = 0;
-    await mapPool(remaining, SIZE_CONCURRENCY, async (entry) => {
-      if (this.signal?.aborted) return;
-      const size = await applyFallbackSizeAsync(entry, this.signal, this.budget);
-      entry.estimatedBytes = size.bytes;
-      entry.bytesKnown = size.complete;
-      this.hooks.onEntrySized?.(entry);
-    });
   }
 }
 
@@ -446,7 +464,10 @@ export async function scan(
   };
   const skipDir = () => {
     skippedDirs++;
-    emitProgress(undefined, true);
+    // A forced emit per skip used to write one --json-stream line per
+    // unreadable dir - a skip flood buffered unboundedly at a slow consumer.
+    // The regular cadence (plus the forced tail emit) still carries the count.
+    emitProgress();
   };
   const matches = compileMatcher(config.patterns);
   // Compiled once per scan - the hot loop must not re-resolve paths per entry.
@@ -520,6 +541,7 @@ export async function scan(
     // NFS/FUSE mount) degrades this dir to skipped instead of failing the
     // whole scan - Rust parity: incomplete dir + skippedDirs increment.
     let midReadError = false;
+    let dirEntriesSeen = 0;
     async function* openedEntries() {
       try {
         if (!first.done) yield first.value;
@@ -550,21 +572,48 @@ export async function scan(
       if (signal?.aborted) {
         return;
       }
+      // A hostile or misbehaving directory (FUSE/NFS) can yield an unbounded
+      // stream of dirents - bounded memory is not enough if the walk can be
+      // spun forever. Cap entries seen per directory; past it the listing is
+      // incomplete and the dir counts as skipped, like a mid-read error.
+      if (++dirEntriesSeen > MAX_DIR_ENTRIES) {
+        midReadError = true;
+        break;
+      }
+      // A single giant directory emits no progress between dir boundaries -
+      // heartbeat per 64k entries so a 4M-entry listing isn't a frozen UI.
+      if (dirEntriesSeen % 65_536 === 0) {
+        emitProgress(relative(targetDir, dir) || ".", true);
+      }
+
+      // Cheap name+type rejects first (Rust parity: cheap_reject ordering):
+      // a non-matching leaf file/link can never be a candidate or a descent
+      // target, and a non-matching dir only matters while depth allows
+      // children. Skipping here avoids the path join, the ignore matcher
+      // (which lowercases a relative path per entry), and - for "?" dirents
+      // - the lstat, for the overwhelmingly common non-candidate.
+      const mightMatch = matches(item.name);
+      let isLink = item.isSymbolicLink();
+      let rawIsDir = item.isDirectory();
+      const typeKnown = isLink || rawIsDir || item.isFile();
+      if (!mightMatch) {
+        if (!childrenAllowed || skipDirName(item.name) || (typeKnown && !rawIsDir)) {
+          continue;
+        }
+      }
 
       const fullPath = join(dir, item.name);
 
       if (isIgnored?.(fullPath, item.name)) continue;
 
-      let isLink = item.isSymbolicLink();
       // DT_UNKNOWN filesystems (some NFSv3, CIFS/SMB, FUSE) report "?" for
       // every dirent - lstat is the only way to learn what it actually is.
       // Without this a real dir is silently never descended AND never
       // counted skipped - "found nothing" masquerading as "nothing there".
-      let rawIsDir = item.isDirectory();
       if (!isLink && rawIsDir && needsReparseCheck) {
         isLink = isReparsePointOrSymlink(fullPath);
       }
-      if (!isLink && !item.isFile() && !rawIsDir) {
+      if (!typeKnown) {
         try {
           const stat = await lstat(fullPath);
           isLink = stat.isSymbolicLink();
@@ -577,7 +626,7 @@ export async function scan(
         }
       }
 
-      if (matches(item.name)) {
+      if (mightMatch) {
         const modifiedMs = await modifiedTimeMs(fullPath);
         const entry: ScanEntry = {
           path: fullPath,

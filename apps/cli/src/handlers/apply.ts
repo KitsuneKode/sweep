@@ -17,6 +17,7 @@ import {
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
+  drainStdout,
   executePlanDeletion,
   promptConfirm,
   resolveEngineBackend,
@@ -66,7 +67,9 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
 
     // The plan path must enforce the same size ceiling as interactive flows -
     // a saved or shared plan is not a trusted lane around maxSizeGB.
-    const config = loadConfig(plan.targetDir);
+    const config = loadConfig(plan.targetDir, undefined, {}, (message) =>
+      console.error(`warning: ${message}`),
+    );
     assertSizeLimit(getSelectedBytes(plan), config.maxSizeGB, opts.forceLarge ?? false);
 
     if (opts.dryRun) {
@@ -126,6 +129,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       }
     }
 
+    await drainStdout();
     exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
     handleFatalError(err);

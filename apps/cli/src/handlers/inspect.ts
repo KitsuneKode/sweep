@@ -1,8 +1,9 @@
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { getSelectedBytes, loadPlan } from "@kitsunekode/sweep-core/plan";
 import { printPlanInfo } from "@kitsunekode/sweep-display";
+import { realpathSync } from "node:fs";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { applyNoColor, warnIgnoredOptions, writeJson } from "./shared.js";
+import { applyNoColor, drainStdout, warnIgnoredOptions, writeJson } from "./shared.js";
 
 export type InspectHandlerOptions = CliOptions & {
   plan: string;
@@ -25,10 +26,21 @@ export async function handleInspect(opts: InspectHandlerOptions): Promise<void> 
   try {
     const plan = loadPlan(opts.plan);
 
+    // Best-effort canonical view: a plan spelled through symlinked or magic
+    // roots (/proc/self/cwd) must not hide where apply actually operates. A
+    // vanished root just leaves the field absent.
+    let resolvedTargetDir: string | undefined;
+    try {
+      resolvedTargetDir = realpathSync(plan.targetDir);
+    } catch {
+      // leave absent
+    }
+
     const summary = {
       protocolVersion: plan.protocolVersion,
       createdAt: plan.createdAt,
       targetDir: plan.targetDir,
+      ...(resolvedTargetDir !== undefined ? { resolvedTargetDir } : {}),
       candidateCount: plan.candidates.length,
       selectedCount: plan.selectedCandidateIds.length,
       selectedBytes: getSelectedBytes(plan),
@@ -45,6 +57,7 @@ export async function handleInspect(opts: InspectHandlerOptions): Promise<void> 
     } else {
       printPlanInfo(opts.plan, summary);
     }
+    await drainStdout();
     exitWith(EXIT.OK);
   } catch (err) {
     handleFatalError(err);

@@ -276,7 +276,7 @@ describe("CLI scan/apply", () => {
     const result = runCli(["ui", tmpDir]);
 
     expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain("requires a TTY");
+    expect(result.stderr).toContain("requires an interactive TTY");
   });
 
   test("rust engine honors --pattern on scan --json", () => {

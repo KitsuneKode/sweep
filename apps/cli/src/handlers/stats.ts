@@ -2,7 +2,7 @@ import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { historyFilePath, readHistory, summarizeHistory } from "@kitsunekode/sweep-core/history";
 import { printStatsSummary } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { applyNoColor, warnIgnoredOptions, writeJson } from "./shared.js";
+import { applyNoColor, drainStdout, warnIgnoredOptions, writeJson } from "./shared.js";
 
 export type StatsHandlerOptions = CliOptions & { json?: boolean };
 
@@ -30,6 +30,7 @@ export async function handleStats(opts: StatsHandlerOptions): Promise<void> {
     } else {
       printStatsSummary(summary, recent, historyFilePath(), entries.length);
     }
+    await drainStdout();
     exitWith(EXIT.OK);
   } catch (err) {
     handleFatalError(err);

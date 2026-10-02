@@ -4,6 +4,7 @@ import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
+  drainStdout,
   resolveEngineBackend,
   resolveProjectScanConfig,
   resolveScanConfig,
@@ -75,6 +76,7 @@ export async function handleScan(
           elapsedMs: Math.round(performance.now() - scanStartedAt),
         },
       } satisfies ScanEvent);
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
@@ -85,6 +87,7 @@ export async function handleScan(
         projectConfig,
       });
       writeJson(plan);
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
@@ -97,6 +100,7 @@ export async function handleScan(
         ...(opts.verbose ? { verbose: true } : {}),
       },
     });
+    await drainStdout();
     exitWith(EXIT.OK);
   } catch (err) {
     handleFatalError(err);

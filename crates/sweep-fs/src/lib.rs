@@ -426,6 +426,11 @@ type DirJob = (Utf8PathBuf, i32);
 /// Cap on walk threads - directory listing is I/O bound, so extra threads buy
 /// contention, not throughput (matches `SIZE_MAX_INFLIGHT` reasoning).
 const WALK_MAX_THREADS: usize = 8;
+/// Dirents seen per directory before the listing is declared untrustworthy.
+/// No budget otherwise bounds enumeration: a hostile FUSE/NFS dir returning
+/// an endless stream would spin a scan forever with flat memory. JS parity:
+/// MAX_DIR_ENTRIES.
+const MAX_DIR_ENTRIES: u64 = 4_000_000;
 
 fn walk_worker(
     ctx: &WalkCtx<'_>,
@@ -550,9 +555,18 @@ fn scan_dir_entries(
         }
     }
     let mut subdirs: Vec<Utf8PathBuf> = Vec::new();
+    let mut seen: u64 = 0;
 
     for item in entries {
         if ctx.budget.failed() {
+            break;
+        }
+        // An unbounded dirent stream must not spin the walk forever - past
+        // the cap the listing is incomplete and the dir counts as skipped,
+        // like a mid-read error (JS parity).
+        seen += 1;
+        if seen > MAX_DIR_ENTRIES {
+            incomplete = true;
             break;
         }
         let item = match item {

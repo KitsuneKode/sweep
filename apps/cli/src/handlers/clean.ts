@@ -12,6 +12,7 @@ import { applyReviewedPlan } from "./apply-plan.js";
 import {
   applyNoColor,
   confirmPlanDeletion,
+  drainStdout,
   resolveEngineBackend,
   resolveProjectScanConfig,
   resolveScanConfig,
@@ -122,6 +123,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       }
     }
 
+    await drainStdout();
     exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
     handleFatalError(err);

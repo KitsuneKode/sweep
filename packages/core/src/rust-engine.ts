@@ -45,9 +45,13 @@ export function registerEmbeddedEngine(resolver: () => string): void {
 export function sweepPackageRoot(fromModuleDir: string = MODULE_DIR): string {
   const normalized = fromModuleDir.replace(/\\/g, "/");
 
-  if (normalized.includes("/dist")) {
-    const distIndex = normalized.lastIndexOf("/dist");
-    return resolve(normalized.slice(0, distIndex));
+  // `dist` must be the TRAILING component - substring matching mis-slices a
+  // path that merely contains it (`/work/dist-app/...` -> `/work`, or a repo
+  // nested under a literal `dist` dir), pointing engine resolution at a
+  // foreign tree. Deeper module dirs fall through to the package.json walk.
+  const parts = normalized.split("/");
+  if (parts[parts.length - 1] === "dist") {
+    return resolve(parts.slice(0, -1).join("/"));
   }
 
   let dir = fromModuleDir;
@@ -88,6 +92,25 @@ function resolveOptionalNativeBinary(packageRoot: string): string | null {
 }
 
 /**
+ * Is `dir` a checkout of this repository? The dev-engine shadow is only
+ * honored for our own workspace shape - crates/sweep-engine plus an
+ * apps/cli package.json named @kitsunekode/sweep.
+ */
+function isSweepWorkspaceRoot(dir: string): boolean {
+  if (!existsSync(join(dir, "Cargo.toml")) || !existsSync(join(dir, "crates", "sweep-engine"))) {
+    return false;
+  }
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, "apps", "cli", "package.json"), "utf8")) as {
+      name?: string;
+    };
+    return pkg.name === "@kitsunekode/sweep";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Resolve the `sweep-engine` binary used for Rust backend subprocess calls.
  *
  * Resolution order:
@@ -109,13 +132,17 @@ export function resolveRustEngineBinary(): string {
   const binaryName = process.platform === "win32" ? "sweep-engine.exe" : "sweep-engine";
 
   // Cargo workspace builds land in <repo>/target, not <repo>/apps/cli/target -
-  // walk up so a local build is found from either layout. The Cargo.toml gate
-  // keeps this scoped to real source checkouts: a published install or an
-  // unrelated ~/target/debug/sweep-engine must not shadow the package binary.
+  // walk up so a local build is found from either layout. The gate must prove
+  // this is a checkout of THIS repository: a foreign repo that commits a
+  // Cargo.toml plus an executable target/debug/sweep-engine would otherwise
+  // have sweep auto-execute its binary on any invocation (a planted binary
+  // is arbitrary code execution triggered by merely running `sweep` inside
+  // that project). Require the sweep workspace shape - crates/sweep-engine
+  // plus apps/cli/package.json naming @kitsunekode/sweep.
   // Newest build wins - a stale target/release artifact must not beat a fresh
   // cargo build --profile dev.
   for (let dir = packageRoot, depth = 0; depth < 4; depth++) {
-    if (existsSync(join(dir, "Cargo.toml"))) {
+    if (isSweepWorkspaceRoot(dir)) {
       let newest: { path: string; mtimeMs: number } | null = null;
       for (const profile of ["debug", "release"] as const) {
         const local = join(dir, "target", profile, binaryName);
@@ -204,9 +231,41 @@ async function runEngineAsync(
       : undefined;
     let settled = false;
 
+    // A detached cooperative-apply child runs in its own process group, so
+    // terminal job control (Ctrl+Z -> SIGTSTP) never reaches it. Without
+    // forwarding, the host freezes while the deletion keeps running - the
+    // worst possible lie. Forward stop to the child group, then SIGSTOP the
+    // host (uncatchable, so the suspend is reliable); on resume the shell
+    // SIGCONTs only the host, which then forwards SIGCONT to the child.
+    const detachedGroup =
+      options.cooperativeApply === true && process.platform !== "win32" && proc.pid !== undefined
+        ? -proc.pid
+        : 0;
+    const onSigtstp = () => {
+      try {
+        process.kill(detachedGroup, "SIGTSTP");
+      } catch {
+        // Child group already gone.
+      }
+      process.kill(process.pid, "SIGSTOP");
+    };
+    const onSigcont = () => {
+      try {
+        process.kill(detachedGroup, "SIGCONT");
+      } catch {
+        // Child group already gone.
+      }
+    };
+    if (detachedGroup !== 0) {
+      process.on("SIGTSTP", onSigtstp);
+      process.on("SIGCONT", onSigcont);
+    }
+
     const settle = (fn: () => void) => {
       if (settled) return;
       settled = true;
+      process.removeListener("SIGTSTP", onSigtstp);
+      process.removeListener("SIGCONT", onSigcont);
       fn();
     };
 
@@ -428,6 +487,14 @@ export async function applyPlanViaRust(
     killSignal: "SIGKILL",
     maxBuffer: 4096,
   });
+  // Distinguish "binary cannot run" (ENOENT/EPERM spawn error) from "ran but
+  // lacks applyControl" (old engine): same flag, different remedy.
+  if (capabilities.error) {
+    throw new GuardrailError(
+      `Could not run the Rust engine at ${binary}: ${capabilities.error.message}. ` +
+        `Reinstall the native package or use --engine js.`,
+    );
+  }
   let controlled = false;
   try {
     controlled = capabilities.status === 0 && JSON.parse(capabilities.stdout).applyControl === true;

@@ -2,6 +2,7 @@ import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
+  drainStdout,
   resolveEngineBackend,
   resolveProjectScanConfig,
   resolveScanConfig,
@@ -27,6 +28,7 @@ export async function handlePlan(pathArg: string, opts: CliOptions): Promise<voi
     });
 
     writeJson(plan);
+    await drainStdout();
     exitWith(EXIT.OK);
   } catch (err) {
     handleFatalError(err);

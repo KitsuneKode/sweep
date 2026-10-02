@@ -16,6 +16,7 @@ import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
   assertOpenTuiAvailable,
+  drainStdout,
   executePlanDeletion,
   resolveEngineBackend,
   resolveScanConfig,
@@ -144,8 +145,10 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
   try {
     const targetDir = resolveScanTarget(pathArg);
 
-    if (!process.stdout.isTTY) {
-      throw new GuardrailError("sweep ui requires a TTY terminal.");
+    // Both ends must be a TTY: stdout paints, stdin must be raw-mode capable
+    // (piped stdin would leave the UI with no keyboard).
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      throw new GuardrailError("sweep ui requires an interactive TTY (stdin and stdout).");
     }
 
     // Native FFI for the TUI requires Bun; re-exec under Bun when on Node.
@@ -228,6 +231,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
 
     if (selectedPlan.selectedCandidateIds.length === 0) {
       console.log("Nothing selected.");
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
@@ -235,6 +239,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
 
     if (opts.dryRun) {
       printDryRunNotice();
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
@@ -264,6 +269,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       });
     }
 
+    await drainStdout();
     exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
     handleFatalError(err);
