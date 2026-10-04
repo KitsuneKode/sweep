@@ -59,7 +59,7 @@ jobs:
       # on whatever the runner image happens to ship.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: stable
+          toolchain: 1.99.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -82,7 +82,7 @@ jobs:
         run: bun install --frozen-lockfile
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: stable
+          toolchain: 1.99.0
       - name: Check and prerender docs
         run: bun run docs:check
       - name: Validate prerendered content
@@ -110,7 +110,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: stable
+          toolchain: 1.99.0
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -124,15 +124,30 @@ jobs:
           bun run build
 
       - name: Install local tarballs and verify owned scan-save-apply
-        run: bun run scripts/smoke-package.ts
+        run: bun run scripts/smoke-package.ts --online
 
       - name: Qualify nested bind mounts in a private namespace
-        run: python3 scripts/qualify-linux-mounts.py
+        shell: bash
+        run: |
+          if unshare --user --map-root-user --mount true; then
+            python3 scripts/qualify-linux-mounts.py
+          else
+            # Ubuntu can restrict unprivileged user namespaces. Still run the
+            # real test in a private mount namespace on this disposable VM.
+            original_ns="$(readlink /proc/self/ns/mnt)"
+            sudo --preserve-env=PATH unshare --mount --propagation private \
+              python3 scripts/qualify-linux-mounts.py --inside "$original_ns"
+          fi
+
+      - name: Compile and verify self-contained standalone
+        run: bun run scripts/verify-standalone.ts
 
   platform:
     name: cross-platform (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
+    env:
+      SWEEP_ENGINE_PATH: ${{ github.workspace }}/target/debug/sweep-engine${{ matrix.os == 'windows-latest' && '.exe' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -152,7 +167,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: stable
+          toolchain: 1.99.0
           components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -162,6 +177,11 @@ jobs:
       # only; interactive verification stays manual/local by design.
       - name: Typecheck CLI workspaces
         run: bunx turbo run typecheck --filter "@kitsunekode/*"
+
+      # Native assertions must execute on every runner, not silently skip
+      # because the binary was only built after the Bun unit tests.
+      - name: Build native engine before contract tests
+        run: cargo build -p sweep-engine-cli --locked
 
       - name: Unit tests (core + protocol + ui + cli)
         run: |
@@ -183,7 +203,10 @@ jobs:
         run: cargo build --release -p sweep-engine-cli --locked
 
       - name: Install local tarballs and verify owned scan-save-apply
-        run: bun run scripts/smoke-package.ts
+        run: bun run scripts/smoke-package.ts --online
+
+      - name: Compile and verify self-contained standalone
+        run: bun run scripts/verify-standalone.ts
 
       - name: Smoke - scan a temp tree (no deletion, no TTY)
         shell: bash

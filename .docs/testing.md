@@ -458,6 +458,10 @@ an owned temporary directory, resolves the installed native package without an
 engine-path override, and runs both engines' scan/save/apply. It restores the
 source native manifest and deletes its own fixture. This is headless proof,
 not OpenTUI peer installation, hosted registry installation or real TTY proof.
+Fresh CI runners use `bun run scripts/smoke-package.ts --online` to fetch public
+dependencies; local runs keep the offline default. Rust qualification uses the
+exact version in `rust-toolchain.toml`, currently 1.99.0. The standalone smoke
+also loads the embedded UI module and checks its version with an empty PATH.
 The Linux mount harness launches its own private user/mount namespace and tests
 actual nested same-device bind mounts; refusal to create that namespace is a
 qualification failure, not a passing skip. Mounts and sentinels are all owned

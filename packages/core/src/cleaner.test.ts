@@ -336,8 +336,31 @@ describe("clean with trashDir", () => {
       expect(existsSync(join(targetDir, "node_modules"))).toBe(false);
       expect(existsSync(join(targetDir, "apps", "web", "dist"))).toBe(false);
       // Restorable layout mirrors the original tree.
-      expect(readFileSync(join(trashDir, "node_modules", "pkg", "index.js"), "utf-8")).toBe("x");
-      expect(readFileSync(join(trashDir, "apps", "web", "dist", "bundle.js"), "utf-8")).toBe("y");
+      expect(
+        readFileSync(
+          join(
+            trashDir,
+            "node_modules",
+            ...(process.platform === "win32" ? ["payload"] : []),
+            "pkg",
+            "index.js",
+          ),
+          "utf-8",
+        ),
+      ).toBe("x");
+      expect(
+        readFileSync(
+          join(
+            trashDir,
+            "apps",
+            "web",
+            "dist",
+            ...(process.platform === "win32" ? ["payload"] : []),
+            "bundle.js",
+          ),
+          "utf-8",
+        ),
+      ).toBe("y");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -449,7 +472,17 @@ describe("clean with trashDir", () => {
       expect(result.deleted.length).toBe(1);
       // Prior trash contents survive; the new move lands under a bumped name.
       expect(readFileSync(join(trashDir, "node_modules", "index.js"), "utf-8")).toBe("prior");
-      expect(readFileSync(join(trashDir, "node_modules-2", "index.js"), "utf-8")).toBe("new");
+      expect(
+        readFileSync(
+          join(
+            trashDir,
+            "node_modules-2",
+            ...(process.platform === "win32" ? ["payload"] : []),
+            "index.js",
+          ),
+          "utf-8",
+        ),
+      ).toBe("new");
       expect(existsSync(join(targetDir, "node_modules"))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });

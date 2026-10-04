@@ -65,17 +65,22 @@ impl ResourceBudget {
         if self.failed() {
             return false;
         }
-        if counter
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |old| {
-                old.checked_add(amount)
-                    .filter(|&next| next <= limit as usize)
-            })
-            .is_err()
-        {
-            self.fail(name);
-            return false;
+        // A CAS loop works on both the supported local compiler and newer
+        // compilers that deprecate fetch_update in favor of try_update.
+        let mut old = counter.load(Ordering::Acquire);
+        loop {
+            let Some(next) = old
+                .checked_add(amount)
+                .filter(|&next| next <= limit as usize)
+            else {
+                self.fail(name);
+                return false;
+            };
+            match counter.compare_exchange_weak(old, next, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return true,
+                Err(current) => old = current,
+            }
         }
-        true
     }
 
     fn path(&self, bytes: usize, overhead: usize) -> bool {

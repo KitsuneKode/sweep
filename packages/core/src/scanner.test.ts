@@ -43,7 +43,7 @@ afterEach(() => {
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
-test.skipIf(process.platform === "win32")(
+test.skipIf(process.platform !== "linux")(
   "discovery never aliases invalid UTF-8 bytes to a real replacement-character name",
   async () => {
     const invalid = Buffer.concat([
@@ -114,7 +114,7 @@ test("a budget failure drains workers and allows a later scan", async () => {
 });
 
 test("streaming sizing preserves filenames that are not valid UTF-8", async () => {
-  if (process.platform === "win32") return;
+  if (process.platform !== "linux") return;
   const artifact = dir("node_modules");
   mkdirSync(artifact);
   writeFileSync(Buffer.concat([Buffer.from(`${artifact}/`), Buffer.from([0xff])]), "hello");

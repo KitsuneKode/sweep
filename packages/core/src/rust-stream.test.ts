@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { RustScanStream } from "./rust-stream.js";
 
-const target = "/tmp/sweep-stream";
+const target = join(tmpdir(), "sweep-stream");
 const candidate: ScanCandidate = {
   id: "cand_stream",
-  path: `${target}/node_modules`,
+  path: join(target, "node_modules"),
   name: "node_modules",
   kind: "node_modules",
   estimatedBytes: 0,
@@ -55,7 +57,7 @@ describe("Rust scan stream contract", () => {
     expect(() =>
       send(stream, {
         type: "candidate_found",
-        candidate: { ...candidate, id: "other", path: `${target}/other` },
+        candidate: { ...candidate, id: "other", path: join(target, "other") },
       }),
     ).toThrow("maxCandidates");
     expect(revealed).toBe(1);
@@ -89,7 +91,7 @@ describe("Rust scan stream contract", () => {
     const other: ScanCandidate = {
       ...candidate,
       id: "cand_stream_2",
-      path: `${target}/dist`,
+      path: join(target, "dist"),
       name: "dist",
       kind: "custom",
     };

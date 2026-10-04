@@ -205,7 +205,7 @@ fn run_scan() -> Result<(), CliFailure> {
                 code: EXIT_GUARDRAIL,
                 message: format!(
                     "pattern exceeds {MAX_PATTERN_LENGTH} characters: {:?}…",
-                    &pattern.chars().take(64).collect::<String>()
+                    pattern.chars().take(64).collect::<String>()
                 ),
             });
         }

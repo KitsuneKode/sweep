@@ -1546,7 +1546,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn discovery_does_not_alias_invalid_utf8_to_a_real_replacement_name() {
         use std::os::unix::ffi::OsStrExt;
@@ -1711,7 +1711,7 @@ mod tests {
                 complete: true
             }
         );
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         {
             use std::os::unix::ffi::OsStrExt;
             fs::write(path.join(std::ffi::OsStr::from_bytes(b"\xff")), b"abcd")
@@ -1775,7 +1775,7 @@ mod tests {
 
     // Paths that cannot be represented by the UTF-8 wire contract make the
     // containing directory incomplete; they never become lossy path aliases.
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn non_utf8_directory_counts_as_skipped() {
         use std::os::unix::ffi::OsStrExt;

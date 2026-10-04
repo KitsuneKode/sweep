@@ -321,6 +321,8 @@ original relative path preserved. Trash dirs are excluded from future scans
 automatically. This is local holding storage, not a backup or automatic restore
 system: deleting the trash directory, external edits or storage failure can
 lose its contents. Review the outcome report before relying on a completed move.
+On Windows, each relative destination is an exclusive slot; its `payload`
+contains the moved file or directory. Restore that payload to the original path.
 
 **History:** every apply appends to `history.jsonl` in the sweep config dir
 (`~/.config/sweep`, `%APPDATA%\sweep` on Windows; `SWEEP_CONFIG_DIR` overrides).

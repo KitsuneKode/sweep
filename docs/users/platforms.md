@@ -18,6 +18,12 @@ target. Current measurements were collected on Linux x64. Alpine/musl and Window
 ARM64 are not currently shipped targets. Refer to the specific release assets
 rather than assuming an unsupported binary will work.
 
+Choose the npm CLI plus its optional precompiled engine when you already have
+Node/Bun. Choose `sweep-TARGET` for the self-contained application. The smaller
+`sweep-engine-TARGET` download is only the machine-protocol backend; it does not
+include interactive commands or the TUI. Both binary families get checksums and
+gzip assets through the release workflow.
+
 ## Runtime and engine selection
 
 Node.js 20.3+ supports the plain npm CLI. The full-screen UI needs Bun and

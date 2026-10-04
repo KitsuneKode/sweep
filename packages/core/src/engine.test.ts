@@ -612,6 +612,7 @@ console.log(JSON.stringify({report: result.report, deleted}));
     const child = spawn(process.execPath, [helper], {
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, SWEEP_ENGINE_PATH: resolveRustEngineBinary() },
     });
     let stdout = "",
       stderr = "";

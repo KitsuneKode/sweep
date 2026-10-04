@@ -121,7 +121,7 @@ jobs:
       # engine - provision the toolchain rather than trust the runner image.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          toolchain: stable
+          toolchain: 1.99.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -160,7 +160,8 @@ jobs:
       - name: Create release PR or publish
         id: release
         if: steps.changesets.outputs.run == 'true'
-        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v1
+        # Action v1 supports our CLI v2; action v2 requires CLI v3.
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
           version: bun run version
           publish: bun run scripts/publish-release.ts

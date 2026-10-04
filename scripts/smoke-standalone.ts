@@ -12,6 +12,24 @@ try {
   for (const key of Object.keys(env))
     if (key.toLowerCase() === "path") delete env[key as keyof typeof env];
   env.PATH = "";
+  for (const args of [["--ui-probe"], ["--version"]]) {
+    const probe = Bun.spawn([executable, ...args], {
+      cwd: owned,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, out, error] = await Promise.all([
+      probe.exited,
+      new Response(probe.stdout).text(),
+      new Response(probe.stderr).text(),
+    ]);
+    if (code !== 0 || !out.trim())
+      throw new Error(`Standalone ${args[0]} failed (${code}): ${error}`);
+    if (args[0] === "--ui-probe" && !out.includes("embedded sweep-ui module loaded")) {
+      throw new Error("Standalone UI probe did not load the embedded module");
+    }
+  }
   const proc = Bun.spawn([executable, "scan", owned, "--engine", "rust", "--json"], {
     cwd: owned,
     env,

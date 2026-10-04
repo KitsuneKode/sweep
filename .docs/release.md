@@ -111,6 +111,13 @@ reduce download size without changing the executable. All five binaries attach t
 are marked prerelease and cannot update the stable Homebrew formula. Linux
 local success does not substitute for passing those hosted platform jobs.
 
+The workflow also builds `sweep-engine-TARGET` assets (with `.exe` on Windows),
+their checksums and verified gzip archives. These small files expose the machine
+scan/apply protocol and contain neither the terminal UI nor the Bun runtime.
+They complement the full `sweep-TARGET` application and the optional native npm
+packages. Keep their download labels distinct. A manual dispatch on `main`
+builds and tests artifacts without attaching a public release.
+
 The npm package keeps the dynamic `sweep-ui.js` sibling loading - only standalone
 binaries use the static entrypoint.
 

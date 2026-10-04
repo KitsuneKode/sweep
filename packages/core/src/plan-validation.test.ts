@@ -13,7 +13,7 @@ import {
 function validPlan(): ScanPlan {
   return {
     protocolVersion: "1",
-    targetDir: "/tmp/sweep-plan-test/project",
+    targetDir: join(tmpdir(), "sweep-plan-test", "project"),
     selectionPolicy: {
       mode: "default",
       includeDangerous: false,
@@ -21,7 +21,7 @@ function validPlan(): ScanPlan {
     candidates: [
       {
         id: "cand_1",
-        path: "/tmp/sweep-plan-test/project/node_modules",
+        path: join(tmpdir(), "sweep-plan-test", "project", "node_modules"),
         name: "node_modules",
         kind: "node_modules",
         estimatedBytes: 1024,

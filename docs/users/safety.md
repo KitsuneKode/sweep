@@ -46,6 +46,8 @@ Permanent deletion removes contents. Trash moves selected artifacts into a
 not the desktop recycle bin, and it does not free the occupied storage yet.
 
 To recover, inspect the trash contents and move the desired artifact back manually.
+On Windows, each reserved trash slot contains a `payload` file or directory;
+restore that payload to the original artifact location.
 Check its original location first: do not overwrite a newly recreated directory.
 There is no documented automatic `undo` command. Remove trash only after you have
 verified the recovered project and no longer need those contents.

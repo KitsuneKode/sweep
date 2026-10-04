@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   binaries:
@@ -53,7 +53,7 @@ jobs:
       # build task.
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
         with:
-          toolchain: stable
+          toolchain: 1.99.0
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -67,11 +67,20 @@ jobs:
         shell: bash
         run: |
           case "${{ matrix.id }}" in
-            win-x64) out="sweep-${{ matrix.id }}.exe" ;;
-            *)       out="sweep-${{ matrix.id }}" ;;
+            win-x64)
+              out="sweep-${{ matrix.id }}.exe"
+              engine_out="sweep-engine-${{ matrix.id }}.exe"
+              cp target/release/sweep-engine.exe "$engine_out"
+              ;;
+            *)
+              out="sweep-${{ matrix.id }}"
+              engine_out="sweep-engine-${{ matrix.id }}"
+              cp target/release/sweep-engine "$engine_out"
+              ;;
           esac
           bun run scripts/build-standalone.ts "" "$out"
           echo "OUT=$out" >> "$GITHUB_ENV"
+          echo "ENGINE_OUT=$engine_out" >> "$GITHUB_ENV"
 
       - name: Smoke - embedded UI probe + version
         shell: bash
@@ -79,20 +88,25 @@ jobs:
           "./$OUT" --ui-probe
           "./$OUT" --version
           bun run scripts/smoke-standalone.ts "./$OUT"
+          bun run packages/engine-native/scripts/verify-binary.ts --binary "./$ENGINE_OUT"
 
       - name: Generate checksum
         shell: bash
         run: |
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "$OUT" > "$OUT.sha256"
-          else
-            shasum -a 256 "$OUT" > "$OUT.sha256"
-          fi
-          cat "$OUT.sha256"
+          for binary in "$OUT" "$ENGINE_OUT"; do
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$binary" > "$binary.sha256"
+            else
+              shasum -a 256 "$binary" > "$binary.sha256"
+            fi
+            cat "$binary.sha256"
+          done
 
       - name: Compress and verify standalone download
         shell: bash
-        run: bun run apps/cli/scripts/compress-standalone.ts "$OUT"
+        run: |
+          bun run apps/cli/scripts/compress-standalone.ts "$OUT"
+          bun run apps/cli/scripts/compress-standalone.ts "$ENGINE_OUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -103,12 +117,18 @@ jobs:
             ${{ env.OUT }}.sha256
             ${{ env.OUT }}.gz
             ${{ env.OUT }}.gz.sha256
+            ${{ env.ENGINE_OUT }}
+            ${{ env.ENGINE_OUT }}.sha256
+            ${{ env.ENGINE_OUT }}.gz
+            ${{ env.ENGINE_OUT }}.gz.sha256
 
   attach:
     name: attach binaries to release
     needs: binaries
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
     if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/@kitsunekode/sweep@')
     steps:
       - name: Download all binaries

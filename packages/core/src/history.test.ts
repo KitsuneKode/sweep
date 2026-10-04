@@ -150,7 +150,7 @@ describe("history", () => {
     };
     appendHistory(entry);
     const file = join(sandbox, "sweep", "history.jsonl");
-    const fd = openSync(file, "a");
+    const fd = openSync(file, "r+");
     ftruncateSync(fd, 17 * 1024 * 1024);
     closeSync(fd);
     expect(appendHistory(entry)).toBe(true);

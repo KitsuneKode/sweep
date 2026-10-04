@@ -20,6 +20,7 @@ import { identityFromStat, sameFilesystemIdentity } from "./filesystem-identity.
 import { assertNoMountsWithin, readLinuxMountPoints } from "./mount-boundary.js";
 import { mapPool } from "./async-pool.js";
 import { checkedBytes } from "./resource-budget.js";
+import { moveIntoTrashSlot } from "./trash-slot.js";
 import {
   isPathWithinRoot,
   isReparsePointOrSymlink,
@@ -193,6 +194,15 @@ async function moveToTrash(
     // otherwise redirect both the mkdir AND the rename outside the trash
     // root. Each existing segment must be a real directory.
     ensureTrashParent(trashDir, dirname(destination), trashPin);
+    if (process.platform === "win32") {
+      try {
+        await moveIntoTrashSlot(entry.path, destination);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+        throw error;
+      }
+    }
     try {
       if (wantDirSlot) {
         mkdirSync(destination);

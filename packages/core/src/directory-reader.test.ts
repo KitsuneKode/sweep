@@ -61,7 +61,7 @@ test("dirent types classify files, dirs, and symlinks", async () => {
   expect(types.get("1")).toBe("f");
 });
 
-test.skipIf(process.platform === "win32")(
+test.skipIf(process.platform !== "linux")(
   "invalid-UTF8 names survive with accurate dirent types",
   async () => {
     const raw = Buffer.from([0x62, 0x61, 0x64, 0xff, 0xfe]);

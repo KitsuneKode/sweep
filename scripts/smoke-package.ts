@@ -1,12 +1,14 @@
-/** Install the actual local CLI/native tarballs offline into an owned directory.
+/** Install actual local CLI/native tarballs into an owned directory.
+ * Offline by default; --online downloads public dependencies on fresh CI runners.
  * Headless package proof; excludes OpenTUI peer installation and real terminals.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const repo = resolve(import.meta.dir, "..");
 const owned = mkdtempSync(join(tmpdir(), "sweep-installed-smoke-"));
+const offline = !process.argv.includes("--online");
 let nativeManifest: string | undefined;
 let previousManifest: Buffer | undefined;
 async function run(args: string[], cwd = repo, env = process.env): Promise<string> {
@@ -20,7 +22,7 @@ async function run(args: string[], cwd = repo, env = process.env): Promise<strin
   return out;
 }
 function packedName(output: string): string {
-  const start = output.indexOf("[\n");
+  const start = output.search(/^\s*\[/m);
   const files = JSON.parse(start >= 0 ? output.slice(start) : output) as Array<{
     filename: string;
   }>;
@@ -54,7 +56,7 @@ try {
     [
       "npm",
       "install",
-      "--offline",
+      ...(offline ? ["--offline"] : []),
       "--ignore-scripts",
       "--omit=dev",
       "--omit=optional",
@@ -94,9 +96,9 @@ try {
       throw new Error("installed apply failed");
     let removed = false;
     try {
-      readFileSync(join(root, "node_modules/owned"));
-    } catch {
-      removed = true;
+      lstatSync(join(root, "node_modules"));
+    } catch (error) {
+      removed = (error as NodeJS.ErrnoException).code === "ENOENT";
     }
     if (!removed) throw new Error("installed apply reported a phantom removal");
     outcomes.push({ engine, deletedCount: report.deletedCount, snapshotsPreserved: true });
@@ -106,8 +108,7 @@ try {
       {
         platform: process.platform,
         arch: process.arch,
-        installation:
-          "Actual local npm CLI/native tarballs, offline, no scripts, native package resolved without SWEEP_ENGINE_PATH",
+        installation: `Actual local npm CLI/native tarballs, ${offline ? "offline cache" : "public dependency downloads"}, no scripts, native package resolved without SWEEP_ENGINE_PATH`,
         outcomes,
       },
       null,
