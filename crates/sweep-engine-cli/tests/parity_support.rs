@@ -9,6 +9,22 @@ use sweep_types::ScanPlan;
 
 const FIXTURE_ROOT_PLACEHOLDER: &str = "__FIXTURE_ROOT__";
 
+fn normalize_fixture_path(text: &str, root: &str, separator: char) -> String {
+    if text == root {
+        return FIXTURE_ROOT_PLACEHOLDER.to_owned();
+    }
+    match text
+        .strip_prefix(root)
+        .and_then(|suffix| suffix.strip_prefix(separator))
+    {
+        Some(suffix) => format!(
+            "{FIXTURE_ROOT_PLACEHOLDER}/{}",
+            suffix.replace(separator, "/")
+        ),
+        None => text.to_owned(),
+    }
+}
+
 fn stable_candidate_id(path: &str, name: &str) -> String {
     let digest = Sha256::digest(format!("{path}:{name}").as_bytes());
     let hex: String = digest[..8]
@@ -109,11 +125,7 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
         .unwrap_or_else(|err| panic!("failed to serialize ScanPlan: {err}"));
 
     let replace_root = |text: String| -> String {
-        if text.starts_with(&root) {
-            text.replacen(&root, FIXTURE_ROOT_PLACEHOLDER, 1)
-        } else {
-            text
-        }
+        normalize_fixture_path(&text, &root, std::path::MAIN_SEPARATOR)
     };
 
     value["targetDir"] = Value::String(FIXTURE_ROOT_PLACEHOLDER.to_owned());
@@ -235,4 +247,20 @@ fn sort_plan_value(value: &mut Value) {
     ) {
         *ids = ordered;
     }
+}
+
+#[test]
+fn fixture_normalization_uses_portable_separators_without_aliasing_other_paths() {
+    assert_eq!(
+        normalize_fixture_path(r"C:\fixture\apps\node_modules", r"C:\fixture", '\\'),
+        "__FIXTURE_ROOT__/apps/node_modules"
+    );
+    assert_eq!(
+        normalize_fixture_path(r"/fixture/literal\name", "/fixture", '/'),
+        r"__FIXTURE_ROOT__/literal\name"
+    );
+    assert_eq!(
+        normalize_fixture_path("/fixture-other/node_modules", "/fixture", '/'),
+        "/fixture-other/node_modules"
+    );
 }

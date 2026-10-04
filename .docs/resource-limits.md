@@ -61,12 +61,23 @@ not used for this path. Bun's JS backend needs Node on PATH; unavailability is
 an explicit error, not an unsafe fallback. Standalone binaries embed Rust and
 use it by default, with no external runtime required.
 
-Metadata sizing keeps 32 raw filename buffers per enumeration batch, with eight
-concurrent sizing walks across four progressive batches, each allowing up to
-eight metadata calls (64 calls total). Raw names preserve invalid UTF-8
+Concurrency follows the CPU allowance reported by the runtime, including
+affinity where supported. Rust discovery and sizing divide one allowance of
+at most 16 workers, with no more than eight per pool. On one or two CPUs they
+use one worker each to retain I/O overlap; larger allowances leave one CPU
+outside these pools. This is admission control, not an OS CPU-use guarantee:
+runtime threads, the host, multiple Sweep processes and filesystem work also
+consume resources. The long-lived sizing pool chooses its allowance at creation.
+
+Metadata sizing keeps 32 raw filename buffers per enumeration batch. JS admits
+at most eight concurrent sizing walks across four progressive batches, each
+allowing up to eight metadata calls (64 calls total). On one CPU this becomes
+one batch with two sizing walks and two metadata calls per walk, alongside two
+discovery workers. Larger allowances scale up within the existing caps.
+Raw names preserve invalid UTF-8
 filenames. Ordinary file metadata avoids BigInt allocation; hardlink and visited
 directory identities use BigInt to preserve inode precision. Native sizing uses
-the shared eight-thread Rayon pool and bounded directory subdivision. Neither
+the shared CPU-aware Rayon pool and bounded directory subdivision. Neither
 engine retains one path per ordinary file in a flat artifact, and no sizing job
 holds more than its per-job dedup/queue caps at once.
 

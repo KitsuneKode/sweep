@@ -1,6 +1,7 @@
 //! Filesystem traversal helpers for the sweep engine.
 
 mod budget;
+mod concurrency;
 mod identity;
 #[cfg(target_os = "linux")]
 mod removal;
@@ -346,12 +347,7 @@ pub fn walk_matched_entries_with_budget(
         budget,
     };
 
-    // Directory reads are I/O bound - past ~8 threads the kernel caches, not
-    // the CPU, are the wall (same bound the sizing pool uses).
-    let worker_count = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(1)
-        .clamp(1, WALK_MAX_THREADS);
+    let (worker_count, _) = concurrency::scan_workers();
 
     let injector = Injector::<DirJob>::new();
     if !budget.queue_dir(root.as_str().len()) {
@@ -417,9 +413,6 @@ pub fn walk_matched_entries_with_budget(
 /// `(directory, depth)` unit of work for the walk pool.
 type DirJob = (Utf8PathBuf, i32);
 
-/// Cap on walk threads - directory listing is I/O bound, so extra threads buy
-/// contention, not throughput (matches `SIZE_MAX_INFLIGHT` reasoning).
-const WALK_MAX_THREADS: usize = 8;
 /// Dirents seen per directory before the listing is declared untrustworthy.
 /// No budget otherwise bounds enumeration: a hostile FUSE/NFS dir returning
 /// an endless stream would spin a scan forever with flat memory. JS parity:
@@ -907,20 +900,14 @@ pub fn estimate_bytes(path: &Utf8Path) -> u64 {
     apparent_size(path).bytes
 }
 
-/// How many in-process sizing walks run at once. `lstat`+`readdir` is I/O
-/// bound - past a handful of threads the disk is the wall and extra
-/// parallelism only adds contention, same bound reasoning as the JS
-/// `DU_MAX_INFLIGHT`.
-const SIZE_MAX_INFLIGHT: usize = 8;
-
 /// One sizing pool is shared by candidate jobs and subdivision jobs. Nested
-/// Rayon work stays on these eight threads instead of creating a pool per
+/// Rayon work stays on the CPU-aware workers instead of creating a pool per
 /// candidate or using the unbounded CPU-sized global pool.
 fn sizing_pool() -> Option<&'static rayon::ThreadPool> {
     static POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
     POOL.get_or_init(|| {
         rayon::ThreadPoolBuilder::new()
-            .num_threads(SIZE_MAX_INFLIGHT)
+            .num_threads(concurrency::scan_workers().1)
             .build()
             .ok()
     })

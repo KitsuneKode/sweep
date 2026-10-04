@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { sep } from "node:path";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 
 export const FIXTURE_ROOT_PLACEHOLDER = "__FIXTURE_ROOT__";
@@ -41,7 +42,14 @@ function withStableCandidateIds(plan: ScanPlan): ScanPlan {
 export function normalizePlan(plan: ScanPlan, fixtureRoot: string): ScanPlan {
   const { targetIdentity: _targetIdentity, ...stablePlan } = plan;
   const replaceRoot = (value: string) =>
-    value.startsWith(fixtureRoot) ? value.replace(fixtureRoot, FIXTURE_ROOT_PLACEHOLDER) : value;
+    value.startsWith(`${fixtureRoot}${sep}`)
+      ? `${FIXTURE_ROOT_PLACEHOLDER}/${value
+          .slice(fixtureRoot.length + 1)
+          .split(sep)
+          .join("/")}`
+      : value === fixtureRoot
+        ? FIXTURE_ROOT_PLACEHOLDER
+        : value;
 
   return sortCandidates(
     withStableCandidateIds({

@@ -56,6 +56,12 @@ separate pools, not one combined memory cap. These are accounting limits, not an
 state, native libraries, buffers and thread stacks add memory. Sweep cannot
 promise immunity from OOM on an already constrained device.
 
+Worker admission follows the runtime's available CPU allowance. Rust shares at
+most 16 workers between discovery and sizing, with one worker per pool on one-
+or two-CPU allowances. JS also reduces directory and metadata concurrency on
+small allowances. Other runtime threads and filesystem caches still use resources;
+these limits do not reserve RAM or guarantee a maximum percentage of CPU use.
+
 If a resource error appears, scan a smaller project subtree. There are currently
 no public resource-limit CLI flags or `.sweeprc` fields. On a very large scope
 tree, the sidebar may fall back to `all scopes (folder index limit)` while the

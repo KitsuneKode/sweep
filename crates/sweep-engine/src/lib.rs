@@ -123,7 +123,7 @@ pub fn scan_to_plan_with_config(
         emit_sized: on_entry_sized,
     };
     let walk = std::thread::scope(|scope| {
-        // A single dispatcher feeds the shared eight-thread sizing pool.
+        // A single dispatcher feeds the shared CPU-aware sizing pool.
         // Both candidate jobs and nested directory jobs use that pool; no
         // size job parks a Rayon worker waiting for discovery or queue space.
         let sizer = if progressive {

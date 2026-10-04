@@ -27,6 +27,16 @@ benchmark fixtures were removed. Two repeats are not a p99 estimate or a leak pr
 
 ## Empirical latency tails
 
+The October 4 CPU-aware follow-up also passed ten rescans per engine/shape with
+one-CPU affinity, 32 descriptors and a sampled 192 MiB watchdog. For the flat
+20k-file artifact, sampled host-plus-child peaks were 47.1 MiB Rust and 123.7 MiB
+JS; the 256-artifact wide fixture peaked at 65.6 MiB Rust and 127.1 MiB JS.
+Both returned complete, equal totals. The sparse 200 GiB counter check,
+slow-consumer stream and explicit candidate-budget refusal also passed.
+These observations exclude UI rendering and do not simulate a physically
+low-memory device. Ten samples under variable host load do not establish p99
+or a speed improvement. The following latency table retains its earlier hash.
+
 The October 4 paced-stream build collected 100 warm-cache samples per scenario
 after three warmups.
 They exclude terminal rendering and CLI startup.

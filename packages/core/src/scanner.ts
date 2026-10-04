@@ -11,6 +11,7 @@ import type {
 import { ResourceBudget, ResourceLimitError, checkedBytes } from "./resource-budget.js";
 import { directoryEntries, disposeDirectoryReader } from "./directory-reader.js";
 import { mapPool } from "./async-pool.js";
+import { SCAN_CONCURRENCY } from "./scan-concurrency.js";
 import { compileIgnoreMatcher } from "./config.js";
 import { compileGlobMatchers } from "./glob-match.js";
 import { isReparsePointOrSymlink } from "./guardrails.js";
@@ -50,16 +51,16 @@ const skipDirName = (name: string): boolean =>
     process.platform === "darwin" || process.platform === "win32" ? name.toLowerCase() : name,
   );
 
-const TRAVERSAL_CONCURRENCY = 16;
+const TRAVERSAL_CONCURRENCY = SCAN_CONCURRENCY.traversal;
 /**
  * Dirents seen per directory before the listing is declared untrustworthy.
  * No budget otherwise bounds enumeration: a hostile FUSE/NFS dir returning
  * an endless stream would spin a scan forever with flat memory.
  */
 const MAX_DIR_ENTRIES = 4_000_000;
-const SIZE_CONCURRENCY = 8;
+const SIZE_CONCURRENCY = SCAN_CONCURRENCY.metadata;
 /** Max sizing batches in flight while the walk continues. */
-const SIZE_MAX_INFLIGHT = 4;
+const SIZE_MAX_INFLIGHT = SCAN_CONCURRENCY.sizingBatches;
 
 // ─── Pattern matching ─────────────────────────────────────────────────────────
 

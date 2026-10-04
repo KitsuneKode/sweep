@@ -451,6 +451,8 @@ bun run engine:build
 bun run scripts/smoke-package.ts
 python3 scripts/qualify-linux-mounts.py
 bun run packages/ui/benchmarks/long-session.ts
+# Linux lower-spec qualification; choose a CPU from /proc/self/status.
+taskset -c 0 python3 scripts/resource-stress.py --files 20000 --repeats 10 --fds 32 --rss-mb 192 --sparse-gib 200 --fixture-parent target/benchmark-fixtures --output target/low-spec.json
 ```
 
 The package smoke packs and installs the local CLI/native tarballs offline into
@@ -467,3 +469,6 @@ actual nested same-device bind mounts; refusal to create that namespace is a
 qualification failure, not a passing skip. Mounts and sentinels are all owned
 fixtures. The 30-cycle UI harness uses 10k synthetic candidates and no forced GC;
 it measures state/cache lifecycle, excluding terminal rendering and real scans.
+The resource harness records CPU affinity and samples descendants spawned by
+any runtime thread. Its RSS watchdog terminates only its owned process group;
+it is qualification tooling, not a production RAM limiter.

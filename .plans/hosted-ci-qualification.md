@@ -4,7 +4,7 @@
 - Scope: ci, release, safety
 - Created: 2026-10-04
 - Updated: 2026-10-04
-- Commit: uncommitted
+- Commit: CI repair checkpoint 529a7b2; follow-up qualification in progress
 - Source baseline: e2dd306
 - Execution: inline; user authorized push and checking hosted workflows
 
@@ -36,6 +36,29 @@ passed. The earlier cc7dab6 runs show the same original failure classes.
 10. Qualify embedded UI loading as well as the native scan in the standalone.
 11. Keep Linux mount qualification running when Ubuntu restricts unprivileged
     namespaces, using a private namespace on the disposable runner.
+12. Windows Rust golden normalization retained native separators before deriving
+    fixture IDs. Normalize only fixture-relative test paths to portable separators;
+    preserve Unix literal backslashes and unrelated root-prefix paths.
+
+The non-publishing CLI Binaries run 37217933535 passed all five targets and skipped
+release attachment. Release run 37217900642 passed with compatible Changesets.
+CI run 37217900461 passed every job except Windows Rust fixture parity; its
+normalizer fix is awaiting a new hosted run. These are checkpoint results,
+not qualification of the pending CPU-aware resource changes.
+
+## Lower-spec follow-up
+
+- Native discovery and sizing share a CPU-aware worker allowance rather than
+  allocating eight sizing workers regardless of a small CPU allowance.
+- JS metadata and directory concurrency scale down on small allowances while
+  preserving the existing maximum counts and directory-reader handle bounds.
+- Sample child processes from all runtime threads, and record affinity/thread
+  peaks in the Linux resource harness. Keep logical budgets distinct from RSS.
+- Qualify ten rescans on one CPU, 32 descriptors, a sampled 192 MiB watchdog,
+  and an allocation-checked 200 GiB sparse fixture. This excludes UI rendering
+  and does not establish a hard RAM cap or allocated-200-GB deletion throughput.
+
+Recorded lower-spec evidence: [resource qualification JSON](codebase-audit-2026-10-01/resource-low-spec-2026-10-04.json).
 
 Local checks: `bun run check` passed 676 Bun tests; `bun run rust:check`
 passed 95 Rust tests with Rust 1.99.0. Hosted results remain pending for these

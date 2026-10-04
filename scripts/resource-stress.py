@@ -52,7 +52,14 @@ def descendants(pid):
     while todo:
         current = todo.pop()
         try:
-            children = Path(f"/proc/{current}/task/{current}/children").read_text().split()
+            # A runtime may spawn its child from a background thread. Checking
+            # only the main thread's children can miss that child's RSS.
+            children = []
+            for task in Path(f"/proc/{current}/task").iterdir():
+                try:
+                    children.extend((task / "children").read_text().split())
+                except OSError:
+                    pass
         except OSError:
             continue
         for child in children:
@@ -63,16 +70,19 @@ def descendants(pid):
     return result
 
 
-def rss(pids):
+def process_resources(pids):
     total = 0
+    threads = 0
     for pid in pids:
         try:
             for line in Path(f"/proc/{pid}/status").read_text().splitlines():
                 if line.startswith("VmRSS:"):
                     total += int(line.split()[1]) * 1024
+                elif line.startswith("Threads:"):
+                    threads += int(line.split()[1])
         except OSError:
             pass
-    return total
+    return total, threads
 
 
 def limit_fds():
@@ -91,6 +101,7 @@ def run(name, command, request=None, expected=0, slow=False, allow_partial=False
             proc.stdin.close()
         output = bytearray()
         peak = 0
+        peak_threads = 0
         exceeded = False
 
         def consume():
@@ -108,7 +119,9 @@ def run(name, command, request=None, expected=0, slow=False, allow_partial=False
         reader = threading.Thread(target=consume, daemon=True)
         reader.start()
         while proc.poll() is None:
-            peak = max(peak, rss(descendants(proc.pid)))
+            current_rss, current_threads = process_resources(descendants(proc.pid))
+            peak = max(peak, current_rss)
+            peak_threads = max(peak_threads, current_threads)
             if peak > args.rss_mb * 1024 * 1024 or time.monotonic() - started > 120:
                 exceeded = True
                 os.killpg(proc.pid, 9)
@@ -131,7 +144,8 @@ def run(name, command, request=None, expected=0, slow=False, allow_partial=False
             if not summaries or (not allow_partial and any(s["exact"] is not True or s.get("skippedDirs", 0) != 0 for s in summaries)):
                 raise RuntimeError(f"{name}: unexpected incomplete result under descriptor limit")
         return {"name": name, "exit": code, "elapsedMs": (time.monotonic() - started) * 1000,
-                "sampledProcessTreePeakRssBytes": peak, "summaries": summaries, "error": error.strip()}
+                "sampledProcessTreePeakRssBytes": peak, "sampledProcessTreePeakThreads": peak_threads,
+                "summaries": summaries, "error": error.strip()}
 
 
 with tempfile.TemporaryDirectory(prefix="sweep-resource-stress-", dir=args.fixture_parent) as owned:
@@ -169,6 +183,7 @@ with tempfile.TemporaryDirectory(prefix="sweep-resource-stress-", dir=args.fixtu
     rows.append(run("rust-native-budget-failure", [str(BINARY), "scan", str(wide)], request, expected=2))
     result = {"platform": os.uname().sysname, "binarySha256": hashlib.sha256(BINARY.read_bytes()).hexdigest(),
               "files": args.files, "sparseGiB": args.sparse_gib, "existingTreeReadOnly": bool(args.existing_tree), "repeats": args.repeats, "fdSoftLimit": args.fds, "rssAbortMb": args.rss_mb,
+              "cpuAffinity": sorted(os.sched_getaffinity(0)),
               "notes": "Sampled RSS includes the Bun host and native child; host UI rendering excluded. No forced GC. Warm cache. No leak or OOM-proof claim.",
               "rows": rows}
 
