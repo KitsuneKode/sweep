@@ -18,7 +18,14 @@ Driven by changesets in `.github/workflows/release.yml`:
 Release jobs are serialized without cancelling an in-flight publication. Native
 build intent comes from the version, applied changesets and scoped tag state,
 not a commit-message substring. CI requires every native artifact and checks
-all package versions before the first publish. Stable publishes explicitly use
+all package versions before the first publish.
+
+`scripts/publish-release.ts` also waits for successful push CI on the exact
+`GITHUB_SHA` before any registry write. Failed, cancelled, skipped or missing
+qualification refuses publication; a different commit's pass is insufficient.
+This read-only gate requires GitHub CLI access and has a 30-minute deadline.
+
+Stable publishes explicitly use
 `latest`; preview versions use `next` or the active Changesets prerelease tag.
 The policy rejects prerelease/latest and conflicting pre-mode tags. Changesets
 pre mode controls its own tag and rejects an extra `--tag` argument.

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 
 import { releasePolicy, type PreState } from "../apps/cli/scripts/release-policy.js";
+import { requireQualifiedCi } from "../apps/cli/scripts/release-ci.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_DIST_DIR = join(REPO_ROOT, "apps/cli/dist");
@@ -64,6 +65,9 @@ if (skipNative && requiresNative)
   throw new Error(
     "CI publication requires the complete native matrix; --skip-native is not allowed",
   );
+
+if (process.env.CI === "true")
+  await requireQualifiedCi(process.env.GITHUB_REPOSITORY, process.env.GITHUB_SHA);
 
 // Gate before any publish: a failing check must not strand engine packages on
 // the registry with no matching CLI release.

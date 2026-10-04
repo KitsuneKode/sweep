@@ -60,9 +60,35 @@ not qualification of the pending CPU-aware resource changes.
 
 Recorded lower-spec evidence: [resource qualification JSON](codebase-audit-2026-10-01/resource-low-spec-2026-10-04.json).
 
-Local checks: `bun run check` passed 676 Bun tests; `bun run rust:check`
-passed 95 Rust tests with Rust 1.99.0. Hosted results remain pending for these
-fixes; the red source-baseline runs above are not passing qualification.
+Initial CI repair checks: `bun run check` passed 676 Bun tests;
+`bun run rust:check` passed 95 Rust tests with Rust 1.99.0. Resource follow-up
+checks passed 678 Bun and 98 Rust tests; the committed a943256 checkpoint
+passed all nine `bun run verify -- --all` steps.
+
+## Hosted resource checkpoint
+
+The exact a943256 head passed:
+
+- [Full CI matrix](https://github.com/KitsuneKode/sweep/actions/runs/37218603503):
+  workflow lint, TypeScript, docs, Linux Rust, and four platform jobs, including
+  installed CLI/native tarballs and standalone checks.
+- [Non-publishing binary qualification](https://github.com/KitsuneKode/sweep/actions/runs/37218647608):
+  all five standalone/native downloads with checksums and verified compression;
+  release attachment skipped on main.
+- [Native package qualification](https://github.com/KitsuneKode/sweep/actions/runs/37218649537):
+  all five native package builds with actual apply/cancellation contracts and
+  successful artifact merge. This workflow does not publish.
+- [Release automation](https://github.com/KitsuneKode/sweep/actions/runs/37218603647):
+  version-PR automation succeeded; no version PR was merged by this session.
+
+## Publication gate follow-up
+
+Publication previously proceeded independently of the full CI matrix. Add a
+read-only exact-commit CI gate before any registry side effect. Regression
+tests cover pending, wrong-head, wrong-event, failed, cancelled and skipped runs.
+The live gate accepted successful a943256 CI and refused failed 529a7b2 CI,
+without registry calls. Source changes are confined to release scripts/docs;
+the qualified scanner/native/standalone source is unchanged.
 
 ## Completion gates
 
