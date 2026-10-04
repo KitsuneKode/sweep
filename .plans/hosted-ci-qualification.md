@@ -43,8 +43,8 @@ passed. The earlier cc7dab6 runs show the same original failure classes.
 The non-publishing CLI Binaries run 37217933535 passed all five targets and skipped
 release attachment. Release run 37217900642 passed with compatible Changesets.
 CI run 37217900461 passed every job except Windows Rust fixture parity; its
-normalizer fix is awaiting a new hosted run. These are checkpoint results,
-not qualification of the pending CPU-aware resource changes.
+normalizer fix subsequently passed on a943256. These are initial checkpoint
+results; the resource checkpoint and final harness follow-up are recorded below.
 
 ## Lower-spec follow-up
 
@@ -89,6 +89,22 @@ tests cover pending, wrong-head, wrong-event, failed, cancelled and skipped runs
 The live gate accepted successful a943256 CI and refused failed 529a7b2 CI,
 without registry calls. Source changes are confined to release scripts/docs;
 the qualified scanner/native/standalone source is unchanged.
+
+Final gate-only head f79d2bb passed every CI job except Intel macOS, where the
+foreground SIGINT regression exhausted Bun's default five-second deadline
+during its 4,096-file fixture scan. An interrupted reader then failed outside
+the timed-out test. Give fixture/setup time its own 30-second test deadline and
+retain a separate 10-second child watchdog; do not skip the signal assertions.
+Ten one-CPU repetitions passed after that deadline correction, and the full
+local check passed 680 Bun tests. Final hosted verification follows the next
+pushed SHA, without changing the already-qualified binary build inputs.
+
+An additional one-CPU UI state-only run completed 30 synthetic 10k-item sessions
+without forced GC. Cursor movement remained responsive, but RSS peaked at
+295.8 MiB, with heap dropping from 146.1 to 44.5 MiB after collection. This is
+not a leak diagnosis or low-memory certification. Explicit public memory
+profiles and combined UI/host/native pressure qualification remain important
+follow-up work; current logical budgets cannot promise no OOM on every device.
 
 ## Completion gates
 

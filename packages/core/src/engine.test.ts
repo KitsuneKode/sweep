@@ -622,7 +622,7 @@ console.log(JSON.stringify({report: result.report, deleted}));
     child.stderr.setEncoding("utf8").on("data", (chunk) => {
       stderr += chunk;
     });
-    const watchdog = setTimeout(() => child.kill("SIGKILL"), 5000);
+    const watchdog = setTimeout(() => child.kill("SIGKILL"), 10_000);
     let code;
     try {
       code = await new Promise<number | null>((resolve, reject) => {
@@ -643,6 +643,9 @@ console.log(JSON.stringify({report: result.report, deleted}));
       result.report.deletedCount,
     );
   },
+  // APFS setup + bounded JS enumeration can exceed Bun's default five-second
+  // test deadline on a loaded runner. Keep the child watchdog independent.
+  30_000,
 );
 
 describe("applyPlan input guards", () => {

@@ -5,16 +5,21 @@ description: Choose an engine and understand runtime, memory and filesystem limi
 
 ## Distribution targets
 
-| Target              | Native engine / standalone release target |
-| ------------------- | ----------------------------------------- |
-| Linux glibc x64     | Configured                                |
-| Linux glibc ARM64   | Configured                                |
-| macOS Intel         | Configured                                |
-| macOS Apple Silicon | Configured                                |
-| Windows x64         | Configured                                |
+| Target              | Installed packages / standalone source qualification |
+| ------------------- | ---------------------------------------------------- |
+| Linux glibc x64     | Passed on hosted runner                              |
+| Linux glibc ARM64   | Passed on hosted runner                              |
+| macOS Intel         | Passed on hosted runner                              |
+| macOS Apple Silicon | Passed on hosted runner                              |
+| Windows x64         | Passed on hosted runner                              |
 
-Actual installed packages and interactive terminals need qualification on each
-target. Current measurements were collected on Linux x64. Alpine/musl and Windows
+The October 4 source checkpoint passed the
+[CI matrix](https://github.com/KitsuneKode/sweep/actions/runs/37218603503) and
+[binary workflow](https://github.com/KitsuneKode/sweep/actions/runs/37218647608).
+This verifies local tarball installation and headless standalone checks on
+those runners; it is not a published release or a physical-terminal guarantee.
+Interactive terminals still need qualification. Current performance
+measurements were collected on Linux x64. Alpine/musl and Windows
 ARM64 are not currently shipped targets. Refer to the specific release assets
 rather than assuming an unsupported binary will work.
 
