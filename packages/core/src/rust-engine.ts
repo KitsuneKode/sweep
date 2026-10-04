@@ -178,6 +178,7 @@ interface RunEngineOptions {
   cwd?: string | undefined;
   signal?: AbortSignal | undefined;
   cooperativeApply?: boolean;
+  waitForConsumer?: (() => Promise<void> | undefined) | undefined;
 }
 
 /** A plan with 100k candidates is ~20 MB; this bound leaves generous room. */
@@ -225,11 +226,13 @@ async function runEngineAsync(
 
   return await new Promise<string>((resolvePromise, rejectPromise) => {
     let stdout = "";
+    let stdoutBytes = 0;
     let stderr = "";
     const lines = onLine
       ? new NdjsonDecoder(onLine, options.cooperativeApply ? MAX_ENGINE_STDOUT : MAX_EVENT_LINE)
       : undefined;
     let settled = false;
+    let consumerWork: Promise<void> = Promise.resolve();
 
     // A detached cooperative-apply child runs in its own process group, so
     // terminal job control (Ctrl+Z -> SIGTSTP) never reaches it. Without
@@ -275,24 +278,38 @@ async function runEngineAsync(
     if (onLine) {
       proc.stdout.on("data", (chunk: string) => {
         if (settled) return;
-        try {
-          lines?.push(chunk);
-        } catch (error) {
-          terminateEngine(proc);
-          settle(() => rejectPromise(error));
-        }
+        // Node resumes child stdout on exit, even when we paused it. Chain
+        // work so that final pipe draining cannot overlap decoder slices.
+        proc.stdout.pause();
+        const work: Promise<void> = consumerWork
+          .then(async () => {
+            if (settled) return;
+            await lines?.pushAsync(chunk);
+            await options.waitForConsumer?.();
+            // Only the last queued task owns resuming input. An older task
+            // must not unpause the stream while its successor is waiting.
+            if (!settled && consumerWork === work) proc.stdout.resume();
+          })
+          .catch((error) => {
+            terminateEngine(proc);
+            settle(() => rejectPromise(error));
+          });
+        consumerWork = work;
       });
     } else {
       proc.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
+        if (settled) return;
+        stdoutBytes += Buffer.byteLength(chunk, "utf8");
         // A misbehaving engine binary must not pin the host process - the
         // largest legitimate payload is a plan JSON, far under this bound.
-        if (stdout.length > MAX_ENGINE_STDOUT) {
+        if (stdoutBytes > MAX_ENGINE_STDOUT) {
           terminateEngine(proc);
           settle(() =>
             rejectPromise(new Error(`rust engine output exceeded ${MAX_ENGINE_STDOUT} bytes`)),
           );
+          return;
         }
+        stdout += chunk;
       });
     }
 
@@ -318,34 +335,36 @@ async function runEngineAsync(
     });
 
     proc.on("close", (code) => {
-      if (settled) return;
-      if (options.signal?.aborted && !options.cooperativeApply) {
-        settle(() => resolvePromise(stdout));
-        return;
-      }
-      if (code === 0) {
-        try {
-          lines?.finish();
-        } catch (error) {
-          settle(() => rejectPromise(error));
+      void consumerWork.then(() => {
+        if (settled) return;
+        if (options.signal?.aborted && !options.cooperativeApply) {
+          settle(() => resolvePromise(stdout));
           return;
         }
-        settle(() => resolvePromise(stdout));
-      } else {
-        // The engine exits with the CLI's taxonomy (2 guardrail, 3 invalid
-        // input, 4 failure) so `sweep --engine rust` maps errors identically
-        // to the JS engine instead of collapsing every failure to exit 4.
-        const message = stderr.trim() || `rust engine exited with status ${code ?? "signal"}`;
-        settle(() =>
-          rejectPromise(
-            code === 2
-              ? new GuardrailError(message, 2)
-              : code === 3
-                ? new PlanValidationError(message)
-                : new Error(message),
-          ),
-        );
-      }
+        if (code === 0) {
+          try {
+            lines?.finish();
+          } catch (error) {
+            settle(() => rejectPromise(error));
+            return;
+          }
+          settle(() => resolvePromise(stdout));
+        } else {
+          // The engine exits with the CLI's taxonomy (2 guardrail, 3 invalid
+          // input, 4 failure) so `sweep --engine rust` maps errors identically
+          // to the JS engine instead of collapsing every failure to exit 4.
+          const message = stderr.trim() || `rust engine exited with status ${code ?? "signal"}`;
+          settle(() =>
+            rejectPromise(
+              code === 2
+                ? new GuardrailError(message, 2)
+                : code === 3
+                  ? new PlanValidationError(message)
+                  : new Error(message),
+            ),
+          );
+        }
+      });
     });
 
     if (stdin !== undefined) {
@@ -407,6 +426,7 @@ export async function scanToPlanViaRust(
 ): Promise<ScanPlan> {
   const absoluteTarget = resolve(targetDir);
   const wantsStream =
+    options.onStarted !== undefined ||
     options.onEntry !== undefined ||
     options.onEntrySized !== undefined ||
     options.onProgress !== undefined;
@@ -449,6 +469,7 @@ export async function scanToPlanViaRust(
   const stream = new RustScanStream(absoluteTarget, options, options.exact ?? false);
   await runEngineAsync(["scan", absoluteTarget], stdin, (line) => stream.push(line), {
     signal: options.signal,
+    waitForConsumer: options.waitForConsumer,
   });
   if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
   return buildPlan(
@@ -496,14 +517,21 @@ export async function applyPlanViaRust(
     );
   }
   let controlled = false;
+  let identityChecked = false;
   try {
-    controlled = capabilities.status === 0 && JSON.parse(capabilities.stdout).applyControl === true;
+    const supported = JSON.parse(capabilities.stdout);
+    controlled = capabilities.status === 0 && supported.applyControl === true;
+    identityChecked = capabilities.status === 0 && supported.planIdentity === true;
   } catch {
     /* older engine */
   }
   if (!controlled)
     throw new GuardrailError(
       "This Rust engine lacks safe apply cancellation. Update the native package or use --engine js.",
+    );
+  if (!identityChecked)
+    throw new GuardrailError(
+      "This Rust engine lacks saved-plan identity checks. Update the native package or use --engine js with a fresh scan.",
     );
   let report: ApplyReport | undefined;
   const progress = new Set<string>();

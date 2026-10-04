@@ -1,15 +1,23 @@
 import { lstatSync } from "node:fs";
 import { lstat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import type { ScanEntry, ScanResult, SweepConfig, ScanLimits } from "@kitsunekode/sweep-protocol";
+import type {
+  ScanEntry,
+  ScanResult,
+  SweepConfig,
+  ScanLimits,
+  FilesystemIdentity,
+} from "@kitsunekode/sweep-protocol";
 import { ResourceBudget, ResourceLimitError, checkedBytes } from "./resource-budget.js";
 import { directoryEntries, disposeDirectoryReader } from "./directory-reader.js";
 import { mapPool } from "./async-pool.js";
 import { compileIgnoreMatcher } from "./config.js";
 import { compileGlobMatchers } from "./glob-match.js";
 import { isReparsePointOrSymlink } from "./guardrails.js";
+import { identityFromStat, readFilesystemIdentity } from "./filesystem-identity.js";
 
 export interface ScanHooks {
+  onStarted?: (targetIdentity: FilesystemIdentity | undefined) => void;
   /** Fired as soon as a matching entry is discovered (bytes may be 0 until sized). */
   onEntry?: (entry: ScanEntry) => void;
   /** Fired after size estimation completes for an entry. */
@@ -24,6 +32,8 @@ export interface ScanHooks {
     /** Directory being walked, relative to the scan target ("." for the root). */
     currentDir?: string;
   }) => void;
+  /** Optional downstream backpressure. Only streaming CLI consumers need this. */
+  waitForConsumer?: () => Promise<void> | undefined;
   /** Optional cancellation signal for long-running scans. */
   signal?: AbortSignal;
   /** Optional resource bounds; defaults protect ordinary scans. */
@@ -68,12 +78,16 @@ const SIZE_BATCH_SIZE = 50;
 const SIZE_BATCH_PATH_BUDGET = 96 * 1024;
 
 /** mtime of the path itself (not its target), or undefined when it cannot be read. */
-async function modifiedTimeMs(path: string): Promise<number | undefined> {
+async function discoveryMetadata(path: string) {
   try {
-    const { mtimeMs } = await lstat(path);
-    return Number.isFinite(mtimeMs) && mtimeMs >= 0 ? Math.trunc(mtimeMs) : undefined;
+    const stat = await lstat(path, { bigint: true });
+    const mtimeMs = Number(stat.mtimeMs);
+    return {
+      identity: identityFromStat(stat),
+      modifiedMs: Number.isSafeInteger(mtimeMs) && mtimeMs >= 0 ? mtimeMs : undefined,
+    };
   } catch {
-    return undefined;
+    return { identity: undefined, modifiedMs: undefined };
   }
 }
 
@@ -168,7 +182,7 @@ async function metadataSize(
     if (!exact && stat.nlink > 1n && stat.ino !== 0n) {
       const id = `${stat.dev}:${stat.ino}`;
       if (links.has(id)) return;
-      if (links.size >= dedupCap) {
+      if (links.size >= dedupCap || !budget.sizingIdentity()) {
         // Set at cap: count the link anyway (overcount, flagged partial)
         // rather than undercounting zero or killing the scan.
         complete = false;
@@ -178,80 +192,87 @@ async function metadataSize(
     }
     bytes = checkedBytes(bytes, Number(stat.size));
   };
+  if (!budget.sizingDirectory(entryPath)) return { bytes: 0, complete: false };
   stack.push(entryPath);
-  while (stack.length) {
-    budget.check();
-    if (signal?.aborted) return { bytes, complete: false };
-    const path = stack.pop()!;
-    try {
-      const stat = await lstat(path, { bigint: true });
-      if (
-        !stat.isDirectory() ||
-        stat.isSymbolicLink() ||
-        (platform === "win32" && isReparsePointOrSymlink(path.toString()))
-      ) {
-        price(stat, path === entryPath);
-        continue;
-      }
-      if (stat.ino !== 0n) {
-        const id = `${stat.dev}:${stat.ino}`;
-        // Skip repeats and capped-set inserts alike - without the dedup
-        // entry a hardlinked-dir cycle could recurse forever.
-        if (dirs.has(id) || dirs.size >= dedupCap) {
-          complete = false;
+  try {
+    while (stack.length) {
+      budget.check();
+      if (signal?.aborted) return { bytes, complete: false };
+      const path = stack.pop()!;
+      budget.releaseSizingDirectory(path);
+      try {
+        const stat = await lstat(path, { bigint: true });
+        if (
+          !stat.isDirectory() ||
+          stat.isSymbolicLink() ||
+          (platform === "win32" && isReparsePointOrSymlink(path.toString()))
+        ) {
+          price(stat, path === entryPath);
           continue;
         }
-        dirs.add(id);
-      }
-      const parent = Buffer.concat([Buffer.from(path), Buffer.from(sep)]);
-      const processNames = async (names: Buffer[]) => {
-        await mapPool(names, SIZE_CONCURRENCY, async (name) => {
-          budget.check();
-          if (signal?.aborted) {
+        if (stat.ino !== 0n) {
+          const id = `${stat.dev}:${stat.ino}`;
+          // Skip repeats and capped-set inserts alike - without the dedup
+          // entry a hardlinked-dir cycle could recurse forever.
+          if (dirs.has(id) || dirs.size >= dedupCap || !budget.sizingIdentity()) {
             complete = false;
-            return;
+            continue;
           }
-          const child = Buffer.concat([parent, name]);
-          try {
-            // Ordinary leaves do not retain inode IDs. Avoid allocating a
-            // BigInt for every metadata field; only hardlink identity needs it.
-            let childStat: import("node:fs").Stats | import("node:fs").BigIntStats =
-              await lstat(child);
-            if (childStat.isDirectory() && !childStat.isSymbolicLink()) {
-              if (stack.length >= pendingCap) {
-                // Job-local queue at cap - leave the rest of this subtree
-                // unsized rather than letting transient state grow unbounded.
-                complete = false;
-                return;
-              }
-              stack.push(child);
-            } else {
-              if (!exact && childStat.nlink > 1) childStat = await lstat(child, { bigint: true });
-              price(childStat);
-            }
-          } catch (error) {
-            if (error instanceof ResourceLimitError) throw error;
-            complete = false;
-          }
-        });
-      };
-      let names: Buffer[] = [];
-      for await (const { name } of directoryEntries(path, budget, signal)) {
-        names.push(name);
-        if (names.length === 32) {
-          await processNames(names);
-          names = [];
+          dirs.add(id);
         }
-        if (signal?.aborted) break;
+        const parent = Buffer.concat([Buffer.from(path), Buffer.from(sep)]);
+        const processNames = async (names: Buffer[]) => {
+          await mapPool(names, SIZE_CONCURRENCY, async (name) => {
+            budget.check();
+            if (signal?.aborted) {
+              complete = false;
+              return;
+            }
+            const child = Buffer.concat([parent, name]);
+            try {
+              // Ordinary leaves do not retain inode IDs. Avoid allocating a
+              // BigInt for every metadata field; only hardlink identity needs it.
+              let childStat: import("node:fs").Stats | import("node:fs").BigIntStats =
+                await lstat(child);
+              if (childStat.isDirectory() && !childStat.isSymbolicLink()) {
+                if (stack.length >= pendingCap || !budget.sizingDirectory(child)) {
+                  // Job-local queue at cap - leave the rest of this subtree
+                  // unsized rather than letting transient state grow unbounded.
+                  complete = false;
+                  return;
+                }
+                stack.push(child);
+              } else {
+                if (!exact && childStat.nlink > 1) childStat = await lstat(child, { bigint: true });
+                price(childStat);
+              }
+            } catch (error) {
+              if (error instanceof ResourceLimitError) throw error;
+              complete = false;
+            }
+          });
+        };
+        let names: Buffer[] = [];
+        for await (const { name } of directoryEntries(path, budget, signal)) {
+          names.push(name);
+          if (names.length === 32) {
+            await processNames(names);
+            names = [];
+          }
+          if (signal?.aborted) break;
+        }
+        await processNames(names);
+      } catch (error) {
+        if (error instanceof ResourceLimitError) throw error;
+        complete = false;
       }
-      await processNames(names);
-    } catch (error) {
-      if (error instanceof ResourceLimitError) throw error;
-      complete = false;
     }
+    budget.check();
+    return { bytes, complete: complete && !signal?.aborted };
+  } finally {
+    budget.releaseSizingIdentities(links.size + dirs.size);
+    for (const path of stack) budget.releaseSizingDirectory(path);
   }
-  budget.check();
-  return { bytes, complete: complete && !signal?.aborted };
 }
 
 async function applyFallbackSizeAsync(
@@ -361,8 +382,9 @@ export class ProgressiveSizer {
       const task = this.runBatch(entries);
       const tracked = task
         .catch(async (error: unknown) => {
-          if (error instanceof ResourceLimitError) {
+          if (error instanceof ResourceLimitError || this.hooks.waitForConsumer) {
             this.failure ??= error;
+            this.controller.abort();
             return;
           }
           // A non-budget batch failure (a dying mount mid-job, a throwing
@@ -401,7 +423,11 @@ export class ProgressiveSizer {
         const size = await apparentSizeDetailed(entry.path, this.signal, this.budget);
         entry.estimatedBytes = size.bytes;
         entry.bytesKnown = size.complete;
-        if (!this.signal.aborted) this.hooks.onEntrySized?.(entry);
+        if (!this.signal.aborted) {
+          this.hooks.onEntrySized?.(entry);
+          const pendingOutput = this.hooks.waitForConsumer?.();
+          if (pendingOutput) await pendingOutput;
+        }
       });
     } finally {
       this.slots.release();
@@ -431,6 +457,8 @@ export async function scan(
   exact = false,
   hooks: ScanHooks = {},
 ): Promise<ScanResult> {
+  const targetIdentity = readFilesystemIdentity(targetDir);
+  hooks.onStarted?.(targetIdentity);
   const entries: ScanEntry[] = [];
   let scannedDirs = 0;
   let skippedDirs = 0;
@@ -562,6 +590,8 @@ export async function scan(
       }
     }
     for await (const raw of openedEntries()) {
+      const pendingOutput = hooks.waitForConsumer?.();
+      if (pendingOutput) await pendingOutput;
       const item = {
         name: raw.name.toString("utf8"),
         isDirectory: () => raw.type === "d",
@@ -579,6 +609,12 @@ export async function scan(
       if (++dirEntriesSeen > MAX_DIR_ENTRIES) {
         midReadError = true;
         break;
+      }
+      // Wire paths must round-trip to the exact dirent. A lossy UTF-8 name
+      // can collide with a different real entry containing U+FFFD.
+      if (item.name.includes("\ufffd") && !raw.name.equals(Buffer.from(item.name, "utf8"))) {
+        midReadError = true;
+        continue;
       }
       // A single giant directory emits no progress between dir boundaries -
       // heartbeat per 64k entries so a 4M-entry listing isn't a frozen UI.
@@ -627,8 +663,9 @@ export async function scan(
       }
 
       if (mightMatch) {
-        const modifiedMs = await modifiedTimeMs(fullPath);
+        const { modifiedMs, identity } = await discoveryMetadata(fullPath);
         const entry: ScanEntry = {
+          identity,
           path: fullPath,
           name: item.name,
           estimatedBytes: 0,
@@ -731,6 +768,7 @@ export async function scan(
     emitProgress(".", true);
 
     return {
+      targetIdentity,
       entries,
       estimatedTotalBytes: entries.reduce((sum, e) => checkedBytes(sum, e.estimatedBytes), 0),
       scannedDirs,
@@ -762,5 +800,7 @@ async function applySizeEstimatesPostWalk(
     entry.estimatedBytes = size.bytes;
     entry.bytesKnown = size.complete;
     hooks.onEntrySized?.(entry);
+    const pendingOutput = hooks.waitForConsumer?.();
+    if (pendingOutput) await pendingOutput;
   });
 }

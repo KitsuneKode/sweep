@@ -24,3 +24,19 @@ describe("bounded NDJSON transport", () => {
     expect(lines).toEqual(["a", "b", "c"]);
   });
 });
+
+test("cooperative decode yields between bounded ordered slices", async () => {
+  const lines: string[] = [];
+  const checkpoints: number[] = [];
+  const decoder = new NdjsonDecoder((line) => lines.push(line), 32);
+  await decoder.pushAsync(
+    "a\nb\nc\nd\ne",
+    async () => {
+      checkpoints.push(lines.length);
+    },
+    2,
+  );
+  decoder.finish();
+  expect(checkpoints).toEqual([2, 4]);
+  expect(lines).toEqual(["a", "b", "c", "d", "e"]);
+});

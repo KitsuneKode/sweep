@@ -10,7 +10,14 @@ import {
 } from "node:fs";
 import { rename, rm, rmdir, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
-import type { CleanResult, PathFailure, ScanEntry } from "@kitsunekode/sweep-protocol";
+import type {
+  CleanResult,
+  PathFailure,
+  ScanEntry,
+  FilesystemIdentity,
+} from "@kitsunekode/sweep-protocol";
+import { identityFromStat, sameFilesystemIdentity } from "./filesystem-identity.js";
+import { assertNoMountsWithin, readLinuxMountPoints } from "./mount-boundary.js";
 import { mapPool } from "./async-pool.js";
 import { checkedBytes } from "./resource-budget.js";
 import {
@@ -58,6 +65,7 @@ export interface CleanOptions {
    * needs fd-relative operations, which Node's fs API doesn't expose).
    */
   containmentRoot?: string | undefined;
+  containmentIdentity?: FilesystemIdentity | undefined;
 }
 
 /**
@@ -139,13 +147,19 @@ function pathExists(path: string): boolean {
   }
 }
 
+interface TrashRootPin {
+  path: string;
+  dev: bigint;
+  ino: bigint;
+}
+
 /**
  * Move an entry into the trash dir, preserving its path relative to
  * `trashRoot`. `rename` on a symlink moves the link itself, never the target.
  * A path outside `trashRoot` or an absolute relative result is refused -
  * the trash layout must stay inside `trashDir`.
  *
- * `realTrashDir` is the trash root's identity pinned once in `clean()`:
+ * `trashPin` is the trash root's path and identity pinned once in `clean()`:
  * re-resolving it per move would follow a post-validation swap and the
  * "destination under wherever trashDir currently resolves" check becomes
  * tautological. The pin is compared per move so a swapped trash root fails.
@@ -154,7 +168,7 @@ async function moveToTrash(
   entry: ScanEntry,
   trashDir: string,
   trashRoot: string,
-  realTrashDir: string | undefined,
+  trashPin: TrashRootPin | undefined,
 ): Promise<void> {
   const rel = relative(trashRoot, entry.path);
   // `..foo` is a legal directory name - only an actual `..` first segment
@@ -178,7 +192,7 @@ async function moveToTrash(
     // recursive mkdir: a symlink planted inside the trash layout would
     // otherwise redirect both the mkdir AND the rename outside the trash
     // root. Each existing segment must be a real directory.
-    ensureTrashParent(trashDir, dirname(destination), realTrashDir);
+    ensureTrashParent(trashDir, dirname(destination), trashPin);
     try {
       if (wantDirSlot) {
         mkdirSync(destination);
@@ -216,11 +230,15 @@ async function moveToTrash(
 function ensureTrashParent(
   trashDir: string,
   parent: string,
-  realTrashDir: string | undefined,
+  trashPin: TrashRootPin | undefined,
 ): void {
   // The pin check rides along: a trashDir swapped to a symlink mid-apply
   // re-resolves somewhere else and the comparison fails closed.
-  if (realTrashDir === undefined || realpathSync(trashDir) !== realTrashDir) {
+  if (trashPin === undefined || realpathSync(trashDir) !== trashPin.path) {
+    throw new Error(`trash root ${trashDir} changed during apply`);
+  }
+  const currentRoot = statSync(trashDir, { bigint: true });
+  if (currentRoot.dev !== trashPin.dev || currentRoot.ino !== trashPin.ino) {
     throw new Error(`trash root ${trashDir} changed during apply`);
   }
   const relParent = relative(trashDir, parent);
@@ -262,8 +280,9 @@ function ensureTrashParent(
  * force stays off so a vanished or renamed-away entry reports honestly, and
  * the file/dir dispatch means a top-level type swap fails instead of being
  * deleted as the wrong kind. Residual: Node's fs API has no fd-relative
- * delete, so an interior directory swapped for a symlink mid-traversal can
- * still escape containment - `--engine rust` deletes fd-relative on unix.
+ * delete. The surrounding ancestor and mount boundaries still need stronger
+ * protection; Rust's std remover protects interior symlink races on supported
+ * platforms, but that does not make sweep's full operation race-free.
  *
  * Returns a CleanResult with stats. Never throws for per-entry failures -
  * failed entries are collected. When `isCancelled` turns true, unprocessed
@@ -291,11 +310,17 @@ export async function clean(
   // directory - identity, not string equality.
   const containmentRequired = options.containmentRoot !== undefined;
   let realContainmentRoot: string | undefined;
-  let containmentRootId: { dev: number; ino: number } | undefined;
+  let containmentRootId: { dev: bigint; ino: bigint } | undefined;
   if (containmentRequired) {
     try {
       realContainmentRoot = realpathSync(options.containmentRoot!);
-      const rootStat = statSync(realContainmentRoot);
+      const rootStat = statSync(realContainmentRoot, { bigint: true });
+      if (
+        options.containmentIdentity &&
+        !sameFilesystemIdentity(options.containmentIdentity, identityFromStat(rootStat))
+      ) {
+        throw new Error("containment root identity changed since scan");
+      }
       containmentRootId = { dev: rootStat.dev, ino: rootStat.ino };
     } catch {
       realContainmentRoot = undefined;
@@ -307,13 +332,15 @@ export async function clean(
   // against this value, so a trashDir swapped for a symlink mid-apply fails
   // instead of re-resolving to wherever the attacker pointed it. The dir is
   // created first - a not-yet-existing trash root cannot be canonicalized.
-  let realTrashDir: string | undefined;
+  let trashPin: TrashRootPin | undefined;
   if (options.trashDir) {
     try {
       mkdirSync(options.trashDir, { recursive: true });
-      realTrashDir = realpathSync(options.trashDir);
+      const path = realpathSync(options.trashDir);
+      const metadata = statSync(path, { bigint: true });
+      trashPin = { path, dev: metadata.dev, ino: metadata.ino };
     } catch {
-      realTrashDir = undefined;
+      trashPin = undefined;
     }
   }
 
@@ -328,7 +355,10 @@ export async function clean(
         // Re-lstat before touching anything: an entry that vanished since
         // validation must report "missing" (rm force:true never complains),
         // and a type flip must not be deleted as the wrong kind.
-        const current = lstatSync(entry.path);
+        const current = lstatSync(entry.path, { bigint: true });
+        if (entry.identity && !sameFilesystemIdentity(entry.identity, identityFromStat(current))) {
+          throw new Error("candidate identity changed since scan; scan again");
+        }
         const nowSymlink = current.isSymbolicLink();
         const nowType = nowSymlink ? "symlink" : current.isDirectory() ? "directory" : "file";
         if (nowSymlink !== entry.isSymlink) {
@@ -340,6 +370,18 @@ export async function clean(
           throw Object.assign(new Error(`entry type changed since validation`), {
             code: "ECHANGED",
           });
+        }
+        try {
+          options.onBegin?.(entry, index, deduplicated.length);
+        } catch {
+          // Reporting failure alone does not determine an operation outcome.
+        }
+        if (options.isCancelled?.()) return entry;
+        // A callback may block or yield to a concurrent path replacement.
+        // Compare exact inode values, then run containment checks afterwards.
+        const afterBegin = lstatSync(entry.path, { bigint: true });
+        if (afterBegin.dev !== current.dev || afterBegin.ino !== current.ino) {
+          throw new Error("entry was replaced before the destructive operation");
         }
         if (containmentRequired) {
           // Fail closed: a supplied root that no longer resolves means the
@@ -353,7 +395,7 @@ export async function clean(
           // root resolves to the same spelling but is a different directory.
           const rootNow = (() => {
             try {
-              return statSync(realContainmentRoot);
+              return statSync(realContainmentRoot, { bigint: true });
             } catch {
               return undefined;
             }
@@ -393,13 +435,11 @@ export async function clean(
             });
           }
         }
-        try {
-          options.onBegin?.(entry, index, deduplicated.length);
-        } catch {
-          // A throwing progress sink must not abort the delete loop.
+        if (process.platform === "linux" && nowType === "directory" && !entry.isSymlink) {
+          assertNoMountsWithin(realpathSync(entry.path), readLinuxMountPoints());
         }
         if (options.trashDir && options.trashRoot) {
-          await moveToTrash(entry, options.trashDir, options.trashRoot, realTrashDir);
+          await moveToTrash(entry, options.trashDir, options.trashRoot, trashPin);
         } else if (
           entry.isSymlink ||
           (process.platform === "win32" && isReparsePointOrSymlink(entry.path))

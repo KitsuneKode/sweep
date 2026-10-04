@@ -63,6 +63,11 @@ let rowsLast: { inputs: RowsInputs; visible: ScanCandidate[]; result: UiDisplayR
   null;
 let groupMembers = new Map<string, string[]>();
 
+export function clearRowsCache(): void {
+  rowsLast = null;
+  groupMembers.clear();
+}
+
 export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
   const inputs: RowsInputs = {
     candidates: state.candidates,

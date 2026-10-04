@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-03",
+  "scope": "Local Linux docs foundation and CLI output safety, uncommitted and not deployed",
+  "docs": {
+    "framework": "TanStack Start 1.168.60 / Router 1.170.41",
+    "content": "Fumadocs core/UI 16.15.18, MDX 15.4.6",
+    "prerenderedPages": 18,
+    "previewAndPublicSeoSmoke": "pass",
+    "searchMappedLinks404BenchmarkRoute": "pass",
+    "oneMainLandmarkPerPage": "pass",
+    "browserReview": "unavailable backend; keyboard/mobile/copy visual checks open",
+    "reactDoctor": "no app-code findings; two intentional sequential-loop warnings in build smoke",
+    "upstreamWarning": "Fumadocs macro contains an unused lazy raw-text node:fs helper; app never invokes it in the browser"
+  },
+  "gates": {
+    "bunCheck": {
+      "pass": true,
+      "testCount": 643,
+      "tasks": 48
+    },
+    "rustCheck": {
+      "pass": true,
+      "testCount": 77,
+      "tasks": 8
+    },
+    "focusedLinuxPty": "passed, confirmed one artifact and preserved other queued artifact",
+    "standalone": "embedded engine/no-runtime-PATH and UI import probes passed"
+  },
+  "distribution": {
+    "npmCompressedBytes": 505360,
+    "npmUnpackedBytes": 2222412,
+    "npmFiles": [
+      "LICENSE",
+      "README.md",
+      "dist/sweep-lib.js",
+      "dist/sweep-ui.js",
+      "dist/sweep.js",
+      "package.json"
+    ],
+    "docsExcludedFromCliBuildGraph": true,
+    "standaloneBytes": 102802912
+  },
+  "standaloneBrokenApplyPipes": [
+    {
+      "engine": "js",
+      "candidates": 40,
+      "deleted": 5,
+      "remaining": 35,
+      "exitCode": 1,
+      "historyMatchesDisk": true
+    },
+    {
+      "engine": "rust",
+      "candidates": 40,
+      "deleted": 3,
+      "remaining": 37,
+      "exitCode": 1,
+      "historyMatchesDisk": true
+    }
+  ],
+  "qualificationOpen": [
+    "mobile/keyboard browser behavior",
+    "hosting adapter and public domain",
+    "installed Windows/macOS/ARM64 packages",
+    "physically allocated 200 GiB destructive tests",
+    "mount/path race qualification",
+    "dependency advisories and publisher configuration"
+  ]
+}

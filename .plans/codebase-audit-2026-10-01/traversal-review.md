@@ -104,6 +104,20 @@ best-in-class or leak-free claims. Remaining plans are linked from the
 
 ## Final worktree refresh
 
+Refresh on 2026-10-03: main is `cc7dab6`; traversal-engine remains `3e458e8`
+and is not an ancestor of main. Its dirty `bun.lock`, `package.json`,
+`turbo.json` and two fixture marker deletions were preserved. Main contains
+later fixes for scoped deletion, sizing-budget starvation, malformed input and
+concurrent confirmation keys. Integrating the older implementation wholesale
+would replace those fixes. No merge/cherry-pick was performed by this session.
+
+The sizing refinement in this pass bounds _aggregate live_ identities, queued
+paths, path bytes and logical memory across all sizing jobs, returning their
+reservations on job completion/error/abort. Per-job limits alone multiply by
+the concurrent job count. Structural discovery exhaustion remains fatal;
+sizing saturation produces an explicit partial estimate without starving the
+walk. This does not eliminate allocation failure or destructive pathname races.
+
 On 2026-10-02 the worktree still points at `3e458e8`, without integration. Its
 `bun.lock`, `package.json` and `turbo.json` now have unrelated tooling changes.
 They were preserved. Root remediation implements the cooperative apply channel,

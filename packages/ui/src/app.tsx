@@ -171,7 +171,8 @@ const HELP_QUEUE: ReadonlyArray<HelpRow> = [
   [null, "queue"],
   ["space", "queue / unqueue row"],
   ["v", "visual range - space queues"],
-  ["a · s · u", "queue visible · safe · clear"],
+  ["a · s", "queue visible · safe"],
+  ["u / U", "clear entire queue / visible only"],
   ["x · d", "delete just this row"],
   ["enter", "apply queue (always confirms)"],
 ];
@@ -481,7 +482,7 @@ function InspectOverlay({
         ) : null}
         <text content="" />
         <text
-          content={t`${bold(fg(tokens.text)("i"))} ${fg(tokens.textMuted)(" / esc close")}`}
+          content={t`${bold(fg(tokens.text)("x / d"))} ${fg(tokens.textMuted)("delete this artifact (confirms)")}    ${bold(fg(tokens.text)("i / esc"))} ${fg(tokens.textMuted)("close")}`}
           wrapMode="none"
         />
       </box>
@@ -505,6 +506,9 @@ export function SweepApp({
   // Non-null while the confirm dialog is scoped to one row (x/d): the same
   // dialog renders, but `y` applies only that candidate.
   const [pendingSingleId, setPendingSingleId] = useState<string | null>(null);
+  // Inspect pins identity across streaming/sort changes; x must never follow a
+  // cursor that moved underneath the displayed detail overlay.
+  const inspectedIdRef = useRef<string | null>(null);
   // An in-session apply is running: keys trap (except ctrl-c = stop), and the
   // report merges back into the list instead of ending the session.
   const [applying, setApplyingState] = useState<string | null>(null);
@@ -592,9 +596,11 @@ export function SweepApp({
         setNotice("finish this dialog first");
         return;
       }
+      inspectedIdRef.current = getCurrentCandidate(readFreshState())?.id ?? null;
       setShowInspectState(true);
     } else {
       closeModal("inspect");
+      inspectedIdRef.current = null;
       setShowInspectState(false);
     }
   };
@@ -648,66 +654,69 @@ export function SweepApp({
     dispatch({ type: "mutate", fn: (s) => setScanning(s, true) });
     // Deliberately floating: a rejecting UiScanControl still becomes an
     // unhandled rejection - funnel it through the same path as onError.
-    void Promise.resolve(
-      scan.start(
-        {
-          onBatch: (candidates) => {
-            if (gen !== generationRef.current || controller.signal.aborted) return;
-            dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
+    void Promise.resolve()
+      .then(() => {
+        if (gen !== generationRef.current || controller.signal.aborted) return;
+        return scan.start(
+          {
+            onBatch: (candidates) => {
+              if (gen !== generationRef.current || controller.signal.aborted) return;
+              dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
+            },
+            onProgress: ({ scannedDirs, skippedDirs, currentDir, sizedCount }) => {
+              if (gen !== generationRef.current || controller.signal.aborted) return;
+              dispatch({
+                type: "mutate",
+                fn: (s) => ({
+                  ...setScanCurrentDir(
+                    setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
+                    currentDir ?? null,
+                  ),
+                  scanSizedCount: sizedCount ?? s.scanSizedCount,
+                }),
+              });
+            },
+            onDone: ({ scannedDirs, skippedDirs, plan: finalPlan }) => {
+              if (gen !== generationRef.current || controller.signal.aborted) return;
+              // Monotonic elapsed for this generation - excludes UI idle time and
+              // any earlier aborted run, so js-vs-rust comparisons stay honest.
+              const elapsedMs = Math.max(0, performance.now() - startedAt);
+              scanDurationsRef.current = { ...scanDurationsRef.current, [engineForRun]: elapsedMs };
+              setScanDurations(scanDurationsRef.current);
+              // The scan chip quietly flipping to NORMAL is the only signal today
+              // - say what landed so the end of a long scan is legible at a
+              // glance, with the engine comparison the E-toggle is for.
+              const found = finalPlan?.candidates.length;
+              const base =
+                found !== undefined
+                  ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
+                  : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
+              setNotice(
+                `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}${isColdRequested() ? " · cold" : ""}`,
+              );
+              dispatch({
+                type: "mutate",
+                fn: (s) =>
+                  finalizeScan(
+                    setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
+                    finalPlan,
+                  ),
+              });
+            },
+            onError: (error) => {
+              if (gen !== generationRef.current || controller.signal.aborted) return;
+              dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
+              setScanError(error instanceof Error ? error.message : String(error));
+            },
           },
-          onProgress: ({ scannedDirs, skippedDirs, currentDir, sizedCount }) => {
-            if (gen !== generationRef.current || controller.signal.aborted) return;
-            dispatch({
-              type: "mutate",
-              fn: (s) => ({
-                ...setScanCurrentDir(
-                  setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
-                  currentDir ?? null,
-                ),
-                scanSizedCount: sizedCount ?? s.scanSizedCount,
-              }),
-            });
-          },
-          onDone: ({ scannedDirs, skippedDirs, plan: finalPlan }) => {
-            if (gen !== generationRef.current || controller.signal.aborted) return;
-            // Monotonic elapsed for this generation - excludes UI idle time and
-            // any earlier aborted run, so js-vs-rust comparisons stay honest.
-            const elapsedMs = Math.max(0, performance.now() - startedAt);
-            scanDurationsRef.current = { ...scanDurationsRef.current, [engineForRun]: elapsedMs };
-            setScanDurations(scanDurationsRef.current);
-            // The scan chip quietly flipping to NORMAL is the only signal today
-            // - say what landed so the end of a long scan is legible at a
-            // glance, with the engine comparison the E-toggle is for.
-            const found = finalPlan?.candidates.length;
-            const base =
-              found !== undefined
-                ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
-                : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
-            setNotice(
-              `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}${isColdRequested() ? " · cold" : ""}`,
-            );
-            dispatch({
-              type: "mutate",
-              fn: (s) =>
-                finalizeScan(
-                  setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
-                  finalPlan,
-                ),
-            });
-          },
-          onError: (error) => {
-            if (gen !== generationRef.current || controller.signal.aborted) return;
-            dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
-            setScanError(error instanceof Error ? error.message : String(error));
-          },
-        },
-        controller.signal,
-      ),
-    ).catch((error: unknown) => {
-      if (gen !== generationRef.current || controller.signal.aborted) return;
-      dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
-      setScanError(error instanceof Error ? error.message : String(error));
-    });
+          controller.signal,
+        );
+      })
+      .catch((error: unknown) => {
+        if (gen !== generationRef.current || controller.signal.aborted) return;
+        dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
+        setScanError(error instanceof Error ? error.message : String(error));
+      });
   }, [scan, activeEngine]);
 
   useEffect(() => {
@@ -846,7 +855,7 @@ export function SweepApp({
    * Same gates as the queued apply - a running or incomplete scan means the
    * row under the cursor is not the row the engine would see.
    */
-  const requestSingleApply = useCallback(() => {
+  const requestSingleApply = useCallback((inspectedId?: string) => {
     // Flush first: j+x in one stdin drain must scope the dialog to the row
     // the cursor actually lands on, not the pre-move row.
     const s = readFreshState();
@@ -858,10 +867,17 @@ export function SweepApp({
       setNotice("scan incomplete: press r to retry before applying");
       return;
     }
-    const candidate = getCurrentCandidate(s);
+    const candidate =
+      inspectedId === undefined
+        ? getCurrentCandidate(s)
+        : s.candidates.find((c) => c.id === inspectedId);
     if (!candidate) {
       // Header rows and empty lists land here - x is per-artifact only.
-      setNotice("x deletes one artifact - space queues, enter applies the queue");
+      setNotice(
+        inspectedId === undefined
+          ? "x deletes one artifact - space queues, enter applies the queue"
+          : "viewed artifact is no longer present - nothing to delete",
+      );
       return;
     }
     if (candidate.riskTier === "blocked") {
@@ -932,7 +948,7 @@ export function SweepApp({
               : "";
           const failures = merged.failed > 0 ? ` · ${merged.failed} failed` : "";
           setNotice(
-            `${verb} ${name}${extra} · freed ${formatBytes(merged.freedBytes)}${failures}${stopped}`,
+            `${verb} ${name}${extra} · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${failures}${stopped}`,
           );
         }
       } catch (error) {
@@ -1121,6 +1137,12 @@ export function SweepApp({
         writeSweeprc,
         submitPatternDraft,
         requestSingleApply,
+        requestInspectedApply: () => {
+          const id = inspectedIdRef.current;
+          if (!id) return;
+          setInspect(false);
+          requestSingleApply(id);
+        },
         confirmSingle,
         abortApply,
         notify: setNotice,
@@ -1135,7 +1157,10 @@ export function SweepApp({
   usePaste(() => noteCtrlCHandled());
 
   const inspectCandidate = useMemo(
-    () => (showInspect ? getCurrentCandidate(state) : undefined),
+    () =>
+      showInspect
+        ? state.candidates.find((candidate) => candidate.id === inspectedIdRef.current)
+        : undefined,
     [showInspect, state],
   );
 

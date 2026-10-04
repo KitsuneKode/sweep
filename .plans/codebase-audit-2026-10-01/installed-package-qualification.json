@@ -1,0 +1,18 @@
+{
+  "platform": "linux",
+  "arch": "x64",
+  "installation": "Actual local npm CLI/native tarballs, offline, no scripts, native package resolved without SWEEP_ENGINE_PATH",
+  "outcomes": [
+    {
+      "engine": "js",
+      "deletedCount": 1,
+      "snapshotsPreserved": true
+    },
+    {
+      "engine": "rust",
+      "deletedCount": 1,
+      "snapshotsPreserved": true
+    }
+  ],
+  "nativeSha256": "9783df3908466ec16c6feed492e1f70c767acfe4ac36fa5ff4ddb1c3a98b98f4"
+}

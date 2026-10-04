@@ -83,3 +83,13 @@ describe("assertPublishable", () => {
     ).not.toThrow();
   });
 });
+
+test("bundled CLI dependencies are omitted while external dependencies stay", () => {
+  expect(
+    resolveDependencies(
+      { commander: "catalog:", external: "1.0.0" },
+      catalogs,
+      new Set(["commander"]),
+    ),
+  ).toEqual({ external: "1.0.0" });
+});

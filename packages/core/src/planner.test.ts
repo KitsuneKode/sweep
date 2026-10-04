@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clean } from "./cleaner.js";
+import { readFilesystemIdentity } from "./filesystem-identity.js";
 import type { ScanEntry, ScanResult } from "@kitsunekode/sweep-protocol";
 import {
   buildPlan,
@@ -30,6 +31,31 @@ afterEach(() => {
 });
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
+
+test("plan construction cannot invent missing scan approval snapshots", () => {
+  mkdirSync(dir("node_modules"));
+  const plan = buildPlan(tmpDir, {
+    entries: [
+      {
+        path: dir("node_modules"),
+        name: "node_modules",
+        entryType: "directory",
+        isSymlink: false,
+        estimatedBytes: 0,
+      },
+    ],
+    scannedDirs: 1,
+    skippedDirs: 0,
+    estimatedTotalBytes: 0,
+    exact: false,
+  });
+  expect(plan.targetIdentity).toBeUndefined();
+  expect(plan.candidates[0]?.identity).toBeUndefined();
+  const checked = revalidateCandidates(plan.candidates, tmpDir);
+  expect(checked.ready).toHaveLength(0);
+  expect(checked.failedPaths[0]?.error).toContain("identity");
+  expect(existsSync(dir("node_modules"))).toBe(true);
+});
 
 describe("planner", () => {
   test.skipIf(process.platform === "win32")(
@@ -250,6 +276,7 @@ describe("planner", () => {
     symlinkSync(outside, dir("linked-dist"));
     const candidate = toCandidate({
       path: dir("linked-dist"),
+      identity: readFilesystemIdentity(dir("linked-dist")),
       name: "dist",
       estimatedBytes: 0,
       isSymlink: true,
@@ -353,6 +380,7 @@ describe("revalidateCandidates canonical spelling", () => {
     mkdirSync(dir(".vite"), { recursive: true });
     const mk = (name: string) =>
       toCandidate({
+        identity: readFilesystemIdentity(dir(name)),
         path: dir(name),
         name,
         estimatedBytes: 0,

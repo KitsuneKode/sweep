@@ -79,8 +79,18 @@ impl Default for SelectionPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FilesystemIdentity {
+    pub platform: String,
+    pub device: String,
+    pub inode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanEntry {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<FilesystemIdentity>,
     pub path: String,
     pub name: String,
     pub estimated_bytes: u64,
@@ -149,6 +159,8 @@ pub struct ScanPlanSummary {
 pub struct ScanPlan {
     pub protocol_version: String,
     pub target_dir: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_identity: Option<FilesystemIdentity>,
     pub selection_policy: SelectionPolicy,
     pub candidates: Vec<ScanCandidate>,
     pub summary: ScanPlanSummary,
@@ -161,6 +173,7 @@ impl ScanPlan {
         Self {
             protocol_version: PROTOCOL_VERSION.to_owned(),
             target_dir: target_dir.into(),
+            target_identity: None,
             selection_policy: SelectionPolicy::default(),
             candidates: Vec::new(),
             summary: ScanPlanSummary {

@@ -13,6 +13,16 @@
 
 ## Next
 
+- [x] Implement local [production qualification and long-session UX](production-qualification.md):
+      native Linux descriptor removal, private bind mounts, installed packages,
+      serialized paced decoding, queue/tree gestures, cache release and one final review.
+      Real-platform, crash, trash-restore and dependency qualification remain open.
+
+- [x] Implement [saved-plan identity safety](saved-plan-identity.md) locally:
+      scan-time snapshots, legacy refusal, stream/TUI preservation and fresh
+      benchmark/resource/runtime evidence. Real platform execution and
+      ancestor/mount safety remain open release qualifications.
+
 - [x] Implement [codebase audit follow-ups](codebase-audit-2026-10-01/README.md) locally — native interruption/outcomes, large UI selection caching and history bounds. Platform/release qualification remains open.
 
 - [x] Implement [traversal engine](traversal-engine.md) locally — linear globs, a Rust

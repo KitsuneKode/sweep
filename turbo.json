@@ -6,7 +6,7 @@
     "experimentalTaskCommand": true
   },
   "cacheMaxAge": "14d",
-  "cacheMaxSize": "10GB",
+  "cacheMaxSize": "1GB",
   "globalDependencies": [".oxfmtrc.json", ".oxlintrc.json"],
   "globalEnv": ["CI", "OS", "RUNNER_OS"],
   "globalPassThroughEnv": [
@@ -21,7 +21,22 @@
     "SWEEP_ENGINE_PATH",
     "SWEEP_ENGINE_FROM_NPM",
     "CARGO_HOME",
-    "RUSTUP_HOME"
+    "RUSTUP_HOME",
+    "RUSTFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "CARGO_BUILD_*",
+    "CARGO_TARGET_*",
+    "RUSTC",
+    "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "RUSTUP_TOOLCHAIN",
+    "CC",
+    "CXX",
+    "CFLAGS",
+    "CXXFLAGS",
+    "AR",
+    "SDKROOT",
+    "MACOSX_DEPLOYMENT_TARGET"
   ],
   "tasks": {
     "transit": {
@@ -33,27 +48,33 @@
     },
     "typecheck": {
       "dependsOn": ["transit"],
-      "outputLogs": "new-only"
+      "outputLogs": "new-only",
+      "tags": ["quality"]
     },
     "lint": {
       "dependsOn": ["transit"],
-      "outputLogs": "new-only"
+      "outputLogs": "new-only",
+      "tags": ["quality"]
     },
     "fmt": {
       "dependsOn": ["transit"],
-      "cache": true
+      "cache": false
     },
     "fmt:check": {
       "dependsOn": ["transit"],
-      "outputLogs": "new-only"
+      "outputLogs": "new-only",
+      "tags": ["quality"]
     },
     "test": {
       "dependsOn": ["transit", "^build"],
-      "outputLogs": "new-only"
+      "outputLogs": "new-only",
+      "cache": false,
+      "tags": ["quality"]
     },
     "check": {
       "dependsOn": ["fmt:check", "lint", "test", "typecheck"],
-      "cache": false
+      "cache": false,
+      "tags": ["quality"]
     },
     "preflight": {
       "dependsOn": ["build"],
@@ -69,28 +90,47 @@
     },
     "sweep-rust#fmt:check": {
       "command": ["cargo", "fmt", "--all", "--check"],
-      "cache": true,
+      "cache": false,
       "inputs": [
         "$TURBO_ROOT$/crates/**",
         "$TURBO_ROOT$/Cargo.toml",
         "$TURBO_ROOT$/Cargo.lock",
         "$TURBO_ROOT$/rust-toolchain.toml",
         "$TURBO_ROOT$/rustfmt.toml"
-      ]
+      ],
+      "tags": ["native", "quality"]
     },
     "sweep-rust#lint": {
       "command": ["cargo", "clippy", "--workspace", "--locked", "--", "-D", "warnings"],
-      "cache": true,
+      "cache": false,
       "inputs": [
         "$TURBO_ROOT$/crates/**",
         "$TURBO_ROOT$/Cargo.toml",
         "$TURBO_ROOT$/Cargo.lock",
         "$TURBO_ROOT$/rust-toolchain.toml"
-      ]
+      ],
+      "env": [
+        "RUSTFLAGS",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_*",
+        "CARGO_TARGET_*",
+        "RUSTC",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "RUSTUP_TOOLCHAIN",
+        "CC",
+        "CXX",
+        "CFLAGS",
+        "CXXFLAGS",
+        "AR",
+        "SDKROOT",
+        "MACOSX_DEPLOYMENT_TARGET"
+      ],
+      "tags": ["native"]
     },
     "sweep-engine-cli#build:release": {
       "command": ["cargo", "build", "--release", "--package", "sweep-engine-cli", "--locked"],
-      "cache": true,
+      "cache": false,
       "inputs": [
         "$TURBO_ROOT$/crates/**",
         "$TURBO_ROOT$/Cargo.toml",
@@ -100,7 +140,66 @@
       "outputs": [
         "$TURBO_ROOT$/target/release/sweep-engine",
         "$TURBO_ROOT$/target/release/sweep-engine.exe"
-      ]
+      ],
+      "env": [
+        "RUSTFLAGS",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_BUILD_*",
+        "CARGO_TARGET_*",
+        "RUSTC",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "RUSTUP_TOOLCHAIN",
+        "CC",
+        "CXX",
+        "CFLAGS",
+        "CXXFLAGS",
+        "AR",
+        "SDKROOT",
+        "MACOSX_DEPLOYMENT_TARGET"
+      ],
+      "tags": ["native"]
+    },
+    "sweep-engine-cli#build": {
+      "cache": false,
+      "tags": ["native"]
+    },
+    "sweep-engine#build": {
+      "cache": false,
+      "tags": ["native"]
+    },
+    "sweep-errors#build": {
+      "cache": false,
+      "tags": ["native"]
+    },
+    "sweep-fs#build": {
+      "cache": false,
+      "tags": ["native"]
+    },
+    "sweep-types#build": {
+      "cache": false,
+      "tags": ["native"]
+    },
+    "sweep-engine-cli#lint": {
+      "cache": false,
+      "tags": ["native", "quality"]
+    },
+    "sweep-engine#lint": {
+      "cache": false,
+      "tags": ["native", "quality"]
+    },
+    "sweep-errors#lint": {
+      "cache": false,
+      "tags": ["native", "quality"]
+    },
+    "sweep-fs#lint": {
+      "cache": false,
+      "tags": ["native", "quality"]
+    },
+    "sweep-types#lint": {
+      "cache": false,
+      "tags": ["native", "quality"]
     }
-  }
+  },
+  "concurrency": "4"
 }

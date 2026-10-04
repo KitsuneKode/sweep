@@ -1,0 +1,296 @@
+{
+  "date": "2026-10-03T11:06:12.487Z",
+  "runtime": "1.4.2",
+  "cpu": "13th Gen Intel(R) Core(TM) i5-13450HX",
+  "nativeBinary": "/home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine",
+  "nativeSha256": "000d9f5e410ba0a7d2b28d6cc32f81b181a1f4019d5e364c5592d2ac45a6ee6e",
+  "method": "Owned temporary fixtures; alternating engines; current-size guard enabled. Includes validation, fresh sizing, native startup/control and deletion. Excludes fixture creation and cleanup. Seven samples are exploratory maxima, not p99 qualification.",
+  "summary": [
+    {
+      "scenario": "many",
+      "engine": "js",
+      "samples": 7,
+      "medianMs": 43.62865199999999,
+      "maxMs": 61.44892900000001,
+      "p99Ms": null
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "samples": 7,
+      "medianMs": 12.744216999999992,
+      "maxMs": 56.775713999999994,
+      "p99Ms": null
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "samples": 7,
+      "medianMs": 301.3671059999997,
+      "maxMs": 313.96974599999976,
+      "p99Ms": null
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "samples": 7,
+      "medianMs": 94.50865199999998,
+      "maxMs": 98.86620200000016,
+      "p99Ms": null
+    }
+  ],
+  "rows": [
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 0,
+      "totalMs": 61.44892900000001,
+      "firstBeginMs": 56.90942700000001,
+      "firstDeletedMs": 58.223744999999994,
+      "maxLagMs": 17.663053000000005
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 0,
+      "totalMs": 56.775713999999994,
+      "firstBeginMs": 9.174303000000009,
+      "firstDeletedMs": 9.26913300000001,
+      "maxLagMs": 40.821743
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 1,
+      "totalMs": 15.423654999999997,
+      "firstBeginMs": 6.199856000000011,
+      "firstDeletedMs": 6.384638999999993,
+      "maxLagMs": 0.06488000000001648
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 1,
+      "totalMs": 43.62865199999999,
+      "firstBeginMs": 40.28150700000003,
+      "firstDeletedMs": 40.61278900000002,
+      "maxLagMs": 0.8349549999999795
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 2,
+      "totalMs": 39.15374299999996,
+      "firstBeginMs": 35.695651999999995,
+      "firstDeletedMs": 35.885943,
+      "maxLagMs": 0.20597699999996166
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 2,
+      "totalMs": 11.805467000000021,
+      "firstBeginMs": 6.428661000000034,
+      "firstDeletedMs": 6.561007000000018,
+      "maxLagMs": 0.060582000000010794
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 3,
+      "totalMs": 12.744216999999992,
+      "firstBeginMs": 5.69071699999995,
+      "firstDeletedMs": 5.858533999999963,
+      "maxLagMs": 0.07349799999997231
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 3,
+      "totalMs": 41.653876999999966,
+      "firstBeginMs": 37.96616,
+      "firstDeletedMs": 38.179621999999995,
+      "maxLagMs": 0.16284999999999172
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 4,
+      "totalMs": 42.77578399999999,
+      "firstBeginMs": 39.647951999999975,
+      "firstDeletedMs": 39.91261300000002,
+      "maxLagMs": 0.1980490000000259
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 4,
+      "totalMs": 11.213966000000028,
+      "firstBeginMs": 5.590821000000005,
+      "firstDeletedMs": 5.7049950000000536,
+      "maxLagMs": 0.07361300000002302
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 5,
+      "totalMs": 11.865827999999965,
+      "firstBeginMs": 5.717353000000003,
+      "firstDeletedMs": 5.808210999999915,
+      "maxLagMs": 0.0636659999998983
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 5,
+      "totalMs": 43.71280899999999,
+      "firstBeginMs": 39.95201199999997,
+      "firstDeletedMs": 40.191614999999956,
+      "maxLagMs": 0.07562400000006164
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 6,
+      "totalMs": 43.883763000000044,
+      "firstBeginMs": 40.55122700000004,
+      "firstDeletedMs": 40.776297,
+      "maxLagMs": 0.29874599999993734
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 6,
+      "totalMs": 13.714170999999965,
+      "firstBeginMs": 6.695758999999953,
+      "firstDeletedMs": 6.800118999999995,
+      "maxLagMs": 0.06960700000001907
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 0,
+      "totalMs": 307.5852460000001,
+      "firstBeginMs": 218.5767659999999,
+      "firstDeletedMs": 307.468073,
+      "maxLagMs": 2.4077409999999873
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 0,
+      "totalMs": 94.50865199999998,
+      "firstBeginMs": 7.635471999999936,
+      "firstDeletedMs": 94.0586659999999,
+      "maxLagMs": 0.11730800000009367
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 1,
+      "totalMs": 96.85784899999999,
+      "firstBeginMs": 7.026783000000023,
+      "firstDeletedMs": 96.45670999999993,
+      "maxLagMs": 0.08753799999999501
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 1,
+      "totalMs": 313.96974599999976,
+      "firstBeginMs": 224.5876699999999,
+      "firstDeletedMs": 313.7532379999998,
+      "maxLagMs": 0.24431800000002113
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 2,
+      "totalMs": 271.5931529999998,
+      "firstBeginMs": 189.19362299999966,
+      "firstDeletedMs": 271.4883689999997,
+      "maxLagMs": 1.2524690000000192
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 2,
+      "totalMs": 88.31578300000001,
+      "firstBeginMs": 6.267861999999695,
+      "firstDeletedMs": 87.86157800000001,
+      "maxLagMs": 0.7039740000000165
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 3,
+      "totalMs": 87.40432100000044,
+      "firstBeginMs": 5.692937000000256,
+      "firstDeletedMs": 86.97298600000022,
+      "maxLagMs": 0.2926850000003469
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 3,
+      "totalMs": 267.96693300000015,
+      "firstBeginMs": 184.1502099999998,
+      "firstDeletedMs": 267.88481999999976,
+      "maxLagMs": 1.6488509999999224
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 4,
+      "totalMs": 306.84266899999966,
+      "firstBeginMs": 216.2483459999994,
+      "firstDeletedMs": 306.7623229999999,
+      "maxLagMs": 0.1974159999999756
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 4,
+      "totalMs": 86.26313399999981,
+      "firstBeginMs": 6.156036999999742,
+      "firstDeletedMs": 85.83002099999976,
+      "maxLagMs": 0.10883600000033766
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 5,
+      "totalMs": 98.86620200000016,
+      "firstBeginMs": 6.181510000000344,
+      "firstDeletedMs": 98.34789900000033,
+      "maxLagMs": 0.1556140000002415
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 5,
+      "totalMs": 301.3671059999997,
+      "firstBeginMs": 211.34237499999927,
+      "firstDeletedMs": 301.2886789999993,
+      "maxLagMs": 1.616783000000396
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 6,
+      "totalMs": 271.8439759999992,
+      "firstBeginMs": 180.16497999999956,
+      "firstDeletedMs": 271.7544849999995,
+      "maxLagMs": 1.4901069999996253
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 6,
+      "totalMs": 95.26153900000008,
+      "firstBeginMs": 8.15943199999947,
+      "firstDeletedMs": 94.87051799999972,
+      "maxLagMs": 0.8251780000000508
+    }
+  ]
+}

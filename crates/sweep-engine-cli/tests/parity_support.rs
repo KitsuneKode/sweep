@@ -117,6 +117,13 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
     };
 
     value["targetDir"] = Value::String(FIXTURE_ROOT_PLACEHOLDER.to_owned());
+    assert!(
+        plan.target_identity.is_some(),
+        "scan root identity is missing"
+    );
+    if let Some(object) = value.as_object_mut() {
+        object.remove("targetIdentity");
+    }
     value["createdAt"] = Value::String("1970-01-01T00:00:00.000Z".to_owned());
     value["summary"]["estimatedTotalBytes"] = Value::Number(0.into());
 
@@ -154,6 +161,10 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
             // Filesystem timestamps differ per checkout, so goldens never carry them.
             if let Some(object) = candidate.as_object_mut() {
                 object.remove("modifiedMs");
+                assert!(
+                    object.remove("identity").is_some(),
+                    "candidate identity is missing"
+                );
             }
         }
     }

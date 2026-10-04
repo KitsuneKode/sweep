@@ -1,0 +1,20 @@
+{
+  "scope": "Private Linux namespace, owned nested same-device bind mounts, actual CLI scan/save/apply",
+  "results": [
+    {
+      "engine": "rust",
+      "exit": 4,
+      "failedCount": 1,
+      "outsideSentinelPreserved": true,
+      "sameDeviceBindMount": true
+    },
+    {
+      "engine": "js",
+      "exit": 4,
+      "failedCount": 1,
+      "outsideSentinelPreserved": true,
+      "sameDeviceBindMount": true
+    }
+  ],
+  "nativeSha256": "9783df3908466ec16c6feed492e1f70c767acfe4ac36fa5ff4ddb1c3a98b98f4"
+}

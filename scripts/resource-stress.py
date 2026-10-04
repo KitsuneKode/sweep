@@ -25,7 +25,11 @@ parser.add_argument("--fds", type=int, default=64)
 parser.add_argument("--rss-mb", type=int, default=512)
 parser.add_argument("--fixture-parent", default=tempfile.gettempdir())
 parser.add_argument("--output", required=True)
+parser.add_argument("--sparse-gib", type=int, default=0)
+parser.add_argument("--existing-tree", help="optional read-only scan; never modified or cleaned up")
 args = parser.parse_args()
+if not 0 <= args.sparse_gib <= 1024:
+    parser.error("sparse-gib must be 0–1024")
 if not (1 <= args.files <= 1000000 and 1 <= args.repeats <= 100 and 32 <= args.fds <= 1024 and 64 <= args.rss_mb <= 4096):
     parser.error("invalid file, repeat, descriptor or RSS bound")
 if not Path("/proc/self/status").exists():
@@ -77,7 +81,7 @@ def limit_fds():
     resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
 
 
-def run(name, command, request=None, expected=0, slow=False):
+def run(name, command, request=None, expected=0, slow=False, allow_partial=False):
     started = time.monotonic()
     with tempfile.TemporaryFile() as errors:
         proc = subprocess.Popen(command, cwd=REPO, stdin=subprocess.PIPE if request else subprocess.DEVNULL,
@@ -124,7 +128,7 @@ def run(name, command, request=None, expected=0, slow=False):
             summaries = [json.loads(line) for line in output.splitlines()]
             if slow:
                 summaries = [event["summary"] for event in summaries if event.get("type") == "scan_completed"]
-            if not summaries or any(s["exact"] is not True or s.get("skippedDirs", 0) != 0 for s in summaries):
+            if not summaries or (not allow_partial and any(s["exact"] is not True or s.get("skippedDirs", 0) != 0 for s in summaries)):
                 raise RuntimeError(f"{name}: unexpected incomplete result under descriptor limit")
         return {"name": name, "exit": code, "elapsedMs": (time.monotonic() - started) * 1000,
                 "sampledProcessTreePeakRssBytes": peak, "summaries": summaries, "error": error.strip()}
@@ -142,12 +146,19 @@ with tempfile.TemporaryDirectory(prefix="sweep-resource-stress-", dir=args.fixtu
         artifact.mkdir(parents=True)
         (artifact / "file").write_bytes(b"x")
     rows = []
+    if args.sparse_gib:
+        sparse = root / "sparse/node_modules"
+        sparse.mkdir(parents=True)
+        with (sparse / "large-file").open("wb") as handle:
+            handle.truncate(args.sparse_gib * 1024 ** 3)
+        if (sparse / "large-file").stat().st_blocks * 512 > 16 * 1024 * 1024:
+            raise RuntimeError("fixture is not sparse; refusing resource qualification")
     for engine in ["js", "rust"]:
-        for shape in ["flat", "wide"]:
+        for shape in ["flat", "wide"] + (["sparse"] if args.sparse_gib else []):
             command = [bun, "packages/core/benchmarks/engine-resource-sample.ts", engine, str(root / shape),
                        "true", str(BINARY), "{}", str(args.repeats)]
             row = run(f"{engine}-{shape}-rescans", command)
-            expected_bytes = args.files if shape == "flat" else 256
+            expected_bytes = args.files if shape == "flat" else args.sparse_gib * 1024 ** 3 if shape == "sparse" else 256
             if any(s["estimatedTotalBytes"] != expected_bytes for s in row["summaries"]):
                 raise RuntimeError("byte parity mismatch")
             rows.append(row)
@@ -157,8 +168,17 @@ with tempfile.TemporaryDirectory(prefix="sweep-resource-stress-", dir=args.fixtu
     request["limits"] = {"maxCandidates": 8}
     rows.append(run("rust-native-budget-failure", [str(BINARY), "scan", str(wide)], request, expected=2))
     result = {"platform": os.uname().sysname, "binarySha256": hashlib.sha256(BINARY.read_bytes()).hexdigest(),
-              "files": args.files, "repeats": args.repeats, "fdSoftLimit": args.fds, "rssAbortMb": args.rss_mb,
+              "files": args.files, "sparseGiB": args.sparse_gib, "existingTreeReadOnly": bool(args.existing_tree), "repeats": args.repeats, "fdSoftLimit": args.fds, "rssAbortMb": args.rss_mb,
               "notes": "Sampled RSS includes the Bun host and native child; host UI rendering excluded. No forced GC. Warm cache. No leak or OOM-proof claim.",
               "rows": rows}
-    Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
-    print(json.dumps({"passed": len(rows), "output": args.output}))
+
+# Probe after owned fixtures are removed: the fixture parent may itself live
+# inside the existing tree. Including synthetic data would inflate its totals.
+if args.existing_tree:
+    existing = Path(args.existing_tree).resolve(strict=True)
+    for engine in ["js", "rust"]:
+        row = run(f"{engine}-existing-read-only", [bun, "packages/core/benchmarks/engine-resource-sample.ts", engine,
+                  str(existing), "false", str(BINARY), "{}", str(args.repeats)], allow_partial=True)
+        rows.append(row)
+Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
+print(json.dumps({"passed": len(rows), "output": args.output}))

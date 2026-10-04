@@ -11,12 +11,13 @@ import {
 } from "../sidebar.js";
 import {
   buildDisplayRows,
+  clearRowsCache,
   firstItemRowIndex,
   moveItemRowIndex,
   rowCandidateId,
   snapRowIndexToItem,
 } from "../rows.js";
-import { artifactScopeKey, candidateMatchesScope } from "../scope-tree.js";
+import { clearScopeTreeCache, artifactScopeKey, candidateMatchesScope } from "../scope-tree.js";
 import type { ThemeMode } from "../theme.js";
 import { ancestorKeysOf } from "../tree-line.js";
 import { getVisibleCandidates, invalidateSelectorCache } from "./selectors.js";
@@ -33,6 +34,7 @@ const SORT_ORDER: readonly UiSortBy[] = ["size", "name", "age"];
 
 export interface SweepUiState {
   targetDir: string;
+  targetIdentity: ScanPlan["targetIdentity"];
   candidates: ScanCandidate[];
   catalogPatterns: string[];
   disabledPatterns: Set<string>;
@@ -138,6 +140,7 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
   const candidates = plan.candidates.slice();
   const state: SweepUiState = {
     targetDir: plan.targetDir,
+    targetIdentity: plan.targetIdentity,
     candidates,
     // The menu lists the whole curated catalog - defaults and opt-ins - so a
     // non-default ecosystem entry is one space-press away, not a config edit.
@@ -517,6 +520,18 @@ export function toggleScopeExpand(state: SweepUiState): SweepUiState {
   return { ...state, expandedScopes };
 }
 
+/** Right expands a folder, then enters its first visible child. */
+export function expandScopeFolder(state: SweepUiState): SweepUiState {
+  const rows = sidebarRowsFor(state);
+  const row = rows[state.sidebarIndex];
+  if (!row?.hasChildren || row.key === null) return state;
+  if (!state.expandedScopes.has(row.key)) return toggleScopeExpand(state);
+  if (rows[state.sidebarIndex + 1]?.depth === row.depth + 1) {
+    return { ...state, sidebarIndex: state.sidebarIndex + 1 };
+  }
+  return state;
+}
+
 export function collapseScopeFolder(state: SweepUiState): SweepUiState {
   const rows = sidebarRowsFor(state);
   const row = rows[state.sidebarIndex];
@@ -524,6 +539,11 @@ export function collapseScopeFolder(state: SweepUiState): SweepUiState {
     const expandedScopes = new Set(state.expandedScopes);
     expandedScopes.delete(row.key);
     return { ...state, expandedScopes };
+  }
+  if (row && row.depth > 0) {
+    for (let index = state.sidebarIndex - 1; index >= 0; index--) {
+      if (rows[index]!.depth < row.depth) return { ...state, sidebarIndex: index };
+    }
   }
   return setFocus(state, "list");
 }
@@ -550,6 +570,8 @@ export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[])
   invalidateSelectorCache();
 
   const anchoredId = getCurrentCandidate(state)?.id;
+  const anchoredScope =
+    state.focus === "sidebar" ? sidebarRowsFor(state)[state.sidebarIndex]?.key : undefined;
   const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
   const selectedIds = new Set(state.selectedIds);
   for (const candidate of incoming) {
@@ -568,7 +590,15 @@ export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[])
     }
   }
 
-  return reanchor({ ...state, candidates: [...byId.values()], selectedIds }, undefined, anchoredId);
+  const next = reanchor(
+    { ...state, candidates: [...byId.values()], selectedIds },
+    undefined,
+    anchoredId,
+  );
+  if (anchoredScope !== undefined) {
+    next.sidebarIndex = scopeFilterToSidebarIndex(anchoredScope, sidebarRowsFor(next));
+  }
+  return next;
 }
 
 /** Re-run display rows and keep the cursor on `anchoredId` (or nearest item). */
@@ -666,6 +696,7 @@ export function finalizeScan(state: SweepUiState, plan: ScanPlan | undefined): S
   if (!plan) return setScanning({ ...state, scanIncomplete: true }, false);
   state = {
     ...state,
+    targetIdentity: plan.targetIdentity,
     scanIncomplete: false,
     scanSizedCount: plan.candidates.length,
   };
@@ -775,8 +806,16 @@ export function escapeStep(state: SweepUiState): SweepUiState | null {
  * Begin a fresh scan generation: drop discovered artifacts and selections,
  * keep user view/config preferences (theme, patterns editor state, filters).
  */
-export function resetForRescan(state: SweepUiState): SweepUiState {
+/** Release strong module caches at generation and session boundaries. */
+export function releaseUiCaches(): void {
   invalidateSelectorCache();
+  clearRowsCache();
+  clearScopeTreeCache();
+  summaryLast = null;
+}
+
+export function resetForRescan(state: SweepUiState): SweepUiState {
+  releaseUiCaches();
   return {
     ...state,
     candidates: [],
@@ -1038,6 +1077,17 @@ export function applyVisualRange(state: SweepUiState): VisualApplyResult {
   };
 }
 
+/** Unqueue the currently filtered artifacts; hidden selections stay untouched. */
+export function clearVisibleSelection(state: SweepUiState): SweepUiState {
+  const selectedIds = new Set(state.selectedIds);
+  const selectionTouched = new Set(state.selectionTouched);
+  for (const candidate of getVisibleCandidates(state)) {
+    selectedIds.delete(candidate.id);
+    selectionTouched.add(candidate.id);
+  }
+  return { ...state, selectedIds, selectionTouched, visualAnchorId: null };
+}
+
 export function clearSelection(state: SweepUiState): SweepUiState {
   // Everything currently known counts as user-handled: a mid-scan `u` means
   // "queue nothing at all" - not "nothing I can see" - so discoveries after
@@ -1050,6 +1100,7 @@ export function clearSelection(state: SweepUiState): SweepUiState {
     selectedIds: new Set<string>(),
     selectionTouched,
     queueCleared: true,
+    visualAnchorId: null,
   };
 }
 
@@ -1144,6 +1195,7 @@ export function planForCandidateIds(
   return {
     ...plan,
     targetDir: state.targetDir,
+    targetIdentity: state.targetIdentity,
     candidates: state.candidates.slice(),
     selectedCandidateIds,
     summary: {

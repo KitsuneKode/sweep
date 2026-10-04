@@ -7,8 +7,7 @@ use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use sweep_engine::{
-    apply_plan, apply_plan_controlled_with_limit, scan_to_plan_with_sweep_config, ScanHooks,
-    ScanOptions,
+    apply_plan_controlled_with_limit, scan_to_plan_with_sweep_config, ScanHooks, ScanOptions,
 };
 use sweep_errors::EngineError;
 use sweep_types::{ApplyReport, ScanCandidate, ScanPlan, SelectionPolicy, SweepConfig};
@@ -89,7 +88,9 @@ fn run() -> Result<(), CliFailure> {
     match arg(1)?.as_deref() {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
-        Some("--capabilities") => write_json_stdout(&serde_json::json!({"applyControl": true})),
+        Some("--capabilities") => {
+            write_json_stdout(&serde_json::json!({"applyControl": true, "planIdentity": true}))
+        }
         Some("--version" | "-V") => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -125,6 +126,8 @@ struct ScanStdinOptions {
 enum ScanStreamEvent {
     #[serde(rename = "scan_started")]
     ScanStarted {
+        #[serde(rename = "targetIdentity", skip_serializing_if = "Option::is_none")]
+        target_identity: Option<sweep_types::FilesystemIdentity>,
         #[serde(rename = "targetDir")]
         target_dir: String,
     },
@@ -211,7 +214,16 @@ fn run_scan() -> Result<(), CliFailure> {
     let target_utf8 = Utf8Path::new(&target_dir);
 
     if json_stream {
+        let target_identity = std::fs::symlink_metadata(&target_dir)
+            .ok()
+            .and_then(|meta| {
+                sweep_fs::file_identity(std::path::Path::new(&target_dir), &meta)
+                    .ok()
+                    .flatten()
+            })
+            .map(sweep_fs::FileIdentity::snapshot);
         write_json_line(&ScanStreamEvent::ScanStarted {
+            target_identity,
             target_dir: target_dir.clone(),
         })
         .map_err(CliFailure::failure)?;
@@ -605,6 +617,7 @@ fn read_stdin_if_present() -> Result<Option<String>, CliFailure> {
 }
 
 fn run_apply() -> Result<(), CliFailure> {
+    install_apply_control()?;
     // arg(), not env::args(): args() panics on non-UTF-8 argv - a mangled
     // argument must produce an invalid_input error, not an abort.
     if arg(2)?.as_deref() == Some("--json-control") {
@@ -619,8 +632,17 @@ fn run_apply() -> Result<(), CliFailure> {
         CliFailure::invalid_input(format!("failed to parse ScanPlan JSON: {err}"))
     })?;
 
-    let report: ApplyReport = apply_plan(&plan).map_err(CliFailure::from)?;
-    write_json_stdout(&report)
+    let report: ApplyReport =
+        apply_plan_controlled_with_limit(&plan, &APPLY_CANCELLED, &mut |_| {}, &mut |_| {}, None)
+            .map_err(CliFailure::from)?;
+    write_json_stdout(&report)?;
+    if report.interrupted == Some(true) {
+        return Err(CliFailure {
+            code: EXIT_ABORTED,
+            message: "apply interrupted; see outcome report".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// One-shot process: the detached stdin reader lives until main exits. Never
@@ -628,6 +650,39 @@ fn run_apply() -> Result<(), CliFailure> {
 // One controlled apply per CLI process. Static lifetime also lets the Windows
 // console callback signal cancellation without pointers, allocation or locks.
 static APPLY_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn unix_apply_signal(_signal: libc::c_int) {
+    APPLY_CANCELLED.store(true, Ordering::Release);
+}
+
+fn install_apply_control() -> Result<(), CliFailure> {
+    #[cfg(unix)]
+    {
+        // SAFETY: zero is a valid initial sigaction representation on the
+        // supported Unix targets. Its mask is initialized by sigemptyset.
+        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+        action.sa_sigaction = unix_apply_signal as *const () as usize;
+        action.sa_flags = libc::SA_RESTART;
+        // SAFETY: callback has the signal ABI and static lifetime; it only
+        // stores a lock-free boolean. Pointers reference live initialized
+        // storage. No borrowed pointers, allocation, locks or unwinding.
+        let failed = unsafe {
+            libc::sigemptyset(&mut action.sa_mask) != 0
+                || libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut()) != 0
+                || libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut()) != 0
+        };
+        if failed {
+            return Err(CliFailure::failure(format!(
+                "cannot install apply cancellation: {}",
+                io::Error::last_os_error()
+            )));
+        }
+    }
+    #[cfg(windows)]
+    install_console_control()?;
+    Ok(())
+}
 
 #[cfg(windows)]
 unsafe extern "system" fn console_control(event: u32) -> windows_sys::core::BOOL {
@@ -658,8 +713,6 @@ fn install_console_control() -> Result<(), CliFailure> {
 }
 
 fn run_apply_controlled() -> Result<(), CliFailure> {
-    #[cfg(windows)]
-    install_console_control()?;
     let mut reader = BufReader::new(io::stdin());
     let mut line = Vec::new();
     reader
@@ -767,6 +820,7 @@ mod tests {
     fn candidate(name: &str) -> ScanCandidate {
         ScanCandidate {
             entry: ScanEntry {
+                identity: None,
                 path: format!("/tmp/sweep-emitter/{name}"),
                 name: name.to_owned(),
                 estimated_bytes: 1,

@@ -1,0 +1,501 @@
+{
+  "date": "2026-10-03",
+  "turbo": "2.11.7",
+  "config": {
+    "concurrency": 4,
+    "cacheMaxSize": "1GB",
+    "cacheMaxAge": "14d",
+    "strictEnv": true,
+    "experimentalCargoWorkspaces": true,
+    "experimentalTaskCommand": true
+  },
+  "requiredCheck": {
+    "successfulTasks": 41,
+    "timeSeconds": 41.286,
+    "cached": 21,
+    "note": "627 Bun tests pass; executable tests run fresh; docs/frontmatter/navigation validated"
+  },
+  "requiredRustCheck": {
+    "successfulTasks": 8,
+    "timeSeconds": 4.67,
+    "cached": 0
+  },
+  "warmJsBuild": {
+    "successfulTasks": 1,
+    "cached": 1,
+    "timeMs": 34
+  },
+  "assertions": [
+    "filesystem tests do not reuse source-only cache",
+    "native builds/lints execute Cargo instead of restoring host-ambiguous artifacts",
+    "CLI bundle includes UI tsconfig as an input",
+    "Cargo library build cache policy is explicit"
+  ],
+  "tasks": [
+    {
+      "id": "@kitsunekode/sweep#build",
+      "cache": true,
+      "dependencies": [
+        "@kitsunekode/sweep-core#build",
+        "@kitsunekode/sweep-display#build",
+        "@kitsunekode/sweep-protocol#build",
+        "@kitsunekode/sweep-typescript-config#build",
+        "@kitsunekode/sweep-ui#build"
+      ],
+      "outputs": ["dist/**"],
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep#fmt:check",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep#lint",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep#test",
+      "cache": false,
+      "dependencies": [
+        "@kitsunekode/sweep#transit",
+        "@kitsunekode/sweep-core#build",
+        "@kitsunekode/sweep-display#build",
+        "@kitsunekode/sweep-protocol#build",
+        "@kitsunekode/sweep-typescript-config#build",
+        "@kitsunekode/sweep-ui#build"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep#transit",
+      "cache": true,
+      "dependencies": [
+        "@kitsunekode/sweep-core#transit",
+        "@kitsunekode/sweep-display#transit",
+        "@kitsunekode/sweep-protocol#transit",
+        "@kitsunekode/sweep-typescript-config#transit",
+        "@kitsunekode/sweep-ui#transit"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep#typecheck",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-core#fmt:check",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-core#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-core#lint",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-core#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-core#test",
+      "cache": false,
+      "dependencies": [
+        "@kitsunekode/sweep-core#transit",
+        "@kitsunekode/sweep-protocol#build",
+        "@kitsunekode/sweep-test-fixtures#build",
+        "@kitsunekode/sweep-typescript-config#build"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-core#transit",
+      "cache": true,
+      "dependencies": [
+        "@kitsunekode/sweep-protocol#transit",
+        "@kitsunekode/sweep-test-fixtures#transit",
+        "@kitsunekode/sweep-typescript-config#transit"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-core#typecheck",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-core#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-display#fmt:check",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-display#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-display#lint",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-display#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-display#test",
+      "cache": false,
+      "dependencies": [
+        "@kitsunekode/sweep-display#transit",
+        "@kitsunekode/sweep-protocol#build",
+        "@kitsunekode/sweep-typescript-config#build"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-display#transit",
+      "cache": true,
+      "dependencies": [
+        "@kitsunekode/sweep-protocol#transit",
+        "@kitsunekode/sweep-typescript-config#transit"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-display#typecheck",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-display#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-engine-native#fmt:check",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-engine-native#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-engine-native#lint",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-engine-native#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-engine-native#transit",
+      "cache": true,
+      "dependencies": [
+        "@kitsunekode/sweep-core#transit",
+        "@kitsunekode/sweep-typescript-config#transit"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-engine-native#typecheck",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-engine-native#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-integration-tests#fmt:check",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-integration-tests#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-integration-tests#lint",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-integration-tests#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-integration-tests#test",
+      "cache": false,
+      "dependencies": [
+        "@kitsunekode/sweep#build",
+        "@kitsunekode/sweep#build",
+        "@kitsunekode/sweep-core#build",
+        "@kitsunekode/sweep-integration-tests#transit",
+        "@kitsunekode/sweep-protocol#build",
+        "@kitsunekode/sweep-test-fixtures#build",
+        "sweep-engine-cli#build"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-integration-tests#transit",
+      "cache": true,
+      "dependencies": [
+        "@kitsunekode/sweep#transit",
+        "@kitsunekode/sweep-core#transit",
+        "@kitsunekode/sweep-protocol#transit",
+        "@kitsunekode/sweep-test-fixtures#transit"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-integration-tests#typecheck",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-integration-tests#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-protocol#fmt:check",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-protocol#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-protocol#lint",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-protocol#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-protocol#test",
+      "cache": false,
+      "dependencies": [
+        "@kitsunekode/sweep-protocol#transit",
+        "@kitsunekode/sweep-typescript-config#build"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-protocol#transit",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-typescript-config#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-protocol#typecheck",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-protocol#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-test-fixtures#fmt:check",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-test-fixtures#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-test-fixtures#lint",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-test-fixtures#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-test-fixtures#transit",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-typescript-config#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-test-fixtures#typecheck",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-test-fixtures#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-typescript-config#transit",
+      "cache": true,
+      "dependencies": [],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-ui#fmt:check",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-ui#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-ui#lint",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-ui#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-ui#test",
+      "cache": false,
+      "dependencies": [
+        "@kitsunekode/sweep-core#build",
+        "@kitsunekode/sweep-display#build",
+        "@kitsunekode/sweep-protocol#build",
+        "@kitsunekode/sweep-typescript-config#build",
+        "@kitsunekode/sweep-ui#transit"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-ui#transit",
+      "cache": true,
+      "dependencies": [
+        "@kitsunekode/sweep-core#transit",
+        "@kitsunekode/sweep-display#transit",
+        "@kitsunekode/sweep-protocol#transit",
+        "@kitsunekode/sweep-typescript-config#transit"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "@kitsunekode/sweep-ui#typecheck",
+      "cache": true,
+      "dependencies": ["@kitsunekode/sweep-ui#transit"],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-engine#build",
+      "cache": false,
+      "dependencies": [],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-engine-cli#build",
+      "cache": false,
+      "dependencies": [],
+      "outputs": ["../../target/debug/sweep-engine"],
+      "tags": []
+    },
+    {
+      "id": "sweep-engine-cli#build:release",
+      "cache": false,
+      "dependencies": [],
+      "outputs": ["../../target/release/sweep-engine", "../../target/release/sweep-engine.exe"],
+      "tags": []
+    },
+    {
+      "id": "sweep-engine-cli#check",
+      "cache": false,
+      "dependencies": [
+        "sweep-engine-cli#fmt:check",
+        "sweep-engine-cli#lint",
+        "sweep-engine-cli#test",
+        "sweep-engine-cli#typecheck"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-engine-cli#lint",
+      "cache": false,
+      "dependencies": [],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-engine-cli#test",
+      "cache": false,
+      "dependencies": [
+        "sweep-engine#build",
+        "sweep-engine-cli#transit",
+        "sweep-errors#build",
+        "sweep-fs#build",
+        "sweep-types#build"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-errors#build",
+      "cache": false,
+      "dependencies": [],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-fs#build",
+      "cache": false,
+      "dependencies": [],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-rust#check",
+      "cache": false,
+      "dependencies": [
+        "sweep-rust#fmt:check",
+        "sweep-rust#lint",
+        "sweep-rust#test",
+        "sweep-rust#typecheck"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-rust#fmt:check",
+      "cache": false,
+      "dependencies": [],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-rust#lint",
+      "cache": false,
+      "dependencies": [],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-rust#test",
+      "cache": false,
+      "dependencies": [
+        "sweep-engine#build",
+        "sweep-engine-cli#build",
+        "sweep-errors#build",
+        "sweep-fs#build",
+        "sweep-rust#transit",
+        "sweep-types#build"
+      ],
+      "outputs": null,
+      "tags": []
+    },
+    {
+      "id": "sweep-types#build",
+      "cache": false,
+      "dependencies": [],
+      "outputs": null,
+      "tags": []
+    }
+  ],
+  "limits": [
+    "cache eviction occurs at run start and is not a hard quota",
+    "Cargo target is outside Turbo cache quota",
+    "Rust toolchain remains required for experimental workspace discovery",
+    "local Linux validation is not hosted platform qualification"
+  ]
+}

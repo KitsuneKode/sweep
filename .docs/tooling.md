@@ -138,8 +138,37 @@ Root `package.json` scripts are orchestrators (`turbo run build`, etc.).
   detection rejects a script that calls `turbo run` back into the same task
   suffix.
 
-Local cache eviction is on: `cacheMaxAge: 14d`, `cacheMaxSize: 10GB`. Cached
-task logs are quiet (`outputLogs: "new-only"`).
+The catalog and lockfile resolve Turbo 2.11.7. Review its installed `docs/README.md`
+before changing configuration; this update includes consistent input hashing
+and macOS `SDKROOT` forwarding fixes. Upstream evidence:
+[2.11.6](https://github.com/vercel/turborepo/releases/tag/v2.11.6),
+[2.11.7](https://github.com/vercel/turborepo/releases/tag/v2.11.7).
+
+Task concurrency is limited to four. Local cache eviction is on:
+`cacheMaxAge: 14d`, `cacheMaxSize: 1GB`. This is background eviction at run start,
+not a hard disk quota or a limit on Cargo's `target/`. Cached task logs are quiet
+(`outputLogs: "new-only"`). The default shared worktree cache is preserved.
+
+Lint, typecheck, format checks and JS bundles remain cached; the CLI bundle also
+hashes the UI tsconfig it reads. Mutating `fmt`, filesystem tests and native
+build/fmt/clippy tasks run fresh. Test outcomes depend on filesystem capabilities,
+external engine binaries and configuration ancestry that a source-only key cannot
+fully represent. Host-native binaries must not be restored across platforms from
+an unqualified shared cache. Cargo still performs its own incremental compilation.
+Compiler, target and macOS SDK environment variables are explicitly available in
+strict mode. Native build tasks are host builds; cross-compilation needs separate
+output paths and test qualification.
+
+Task tags label `quality` and `native` tasks for graph inspection, without changing
+the public gates or introducing another future flag. For example:
+
+```bash
+bunx --no-install turbo run typecheck lint fmt:check --filter=tag:quality --dry=json
+```
+
+The Rust toolchain is still required for package discovery. Cached checks do not
+replace `bun run check` / `bun run rust:check`. See
+[local cache-policy evidence](../.plans/codebase-audit-2026-10-01/turbo-qualification.json).
 
 The Cargo workspace flags are `futureFlags` - experimental and reversible. If
 the feature is ever removed upstream, the fallback is `//#` root tasks or
@@ -219,3 +248,15 @@ Test layout, prompts, and engine parity: [.docs/testing.md](testing.md).
 - README remains user-facing; internal tooling policy lives here and in
   `AGENTS.md`.
 - Local dev and `npm link`: [.docs/getting-started.md](getting-started.md)
+
+## Documentation website
+
+- `bun run docs:dev`: loopback-only development on port 3000.
+- `bun run docs:build`: prerender the public pages and build the SSR/search entry.
+- `bun run docs:check`: format/lint/type/test/build gates plus Markdown validation.
+- `bun run docs:preview`: loopback-only production preview.
+
+`DOCS_SITE_URL` is an optional, validated public HTTPS origin and part of the
+docs build cache key. Unset builds stay unindexable without canonical URLs.
+Content changes in root `docs/` invalidate this workspace's build/test inputs.
+Website tasks have no dependency on CLI bundles or native engine outputs.

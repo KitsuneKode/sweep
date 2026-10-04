@@ -56,6 +56,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       } else {
         console.log("Nothing selected to apply.");
       }
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
@@ -82,6 +83,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
           `Dry run: would ${opts.trash ? "move to .sweep-trash" : "delete"} ${selectedCount} item(s) (~${formatBytes(totalBytes)}).`,
         );
       }
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 

@@ -1,5 +1,6 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
+import { releaseUiCaches } from "./state/store.js";
 import type { SweepUiOutcome } from "./outcome.js";
 
 export interface UiSession {
@@ -61,6 +62,7 @@ export async function openUiSession(): Promise<UiSession> {
     } catch {
       // ignore
     }
+    releaseUiCaches();
   };
 
   const finish = (outcome: SweepUiOutcome) => {

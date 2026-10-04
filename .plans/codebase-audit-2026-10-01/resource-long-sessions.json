@@ -1,0 +1,1412 @@
+{
+  "platform": "Linux",
+  "binarySha256": "9783df3908466ec16c6feed492e1f70c767acfe4ac36fa5ff4ddb1c3a98b98f4",
+  "files": 10000,
+  "sparseGiB": 200,
+  "existingTreeReadOnly": false,
+  "repeats": 10,
+  "fdSoftLimit": 64,
+  "rssAbortMb": 512,
+  "notes": "Sampled RSS includes the Bun host and native child; host UI rendering excluded. No forced GC. Warm cache. No leak or OOM-proof claim.",
+  "rows": [
+    {
+      "name": "js-flat-rescans",
+      "exit": 0,
+      "elapsedMs": 3593.645205022767,
+      "sampledProcessTreePeakRssBytes": 125231104,
+      "summaries": [
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 189.12295400000002,
+          "memory": {
+            "rss": 62693376,
+            "heapTotal": 9270272,
+            "heapUsed": 6416082,
+            "external": 4949251,
+            "arrayBuffers": 3455455
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 298.838641,
+          "memory": {
+            "rss": 66314240,
+            "heapTotal": 8367104,
+            "heapUsed": 8667245,
+            "external": 8623285,
+            "arrayBuffers": 6910910
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 617.5908850000001,
+          "memory": {
+            "rss": 62894080,
+            "heapTotal": 6801408,
+            "heapUsed": 13047508,
+            "external": 12243540,
+            "arrayBuffers": 10366365
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 383.8775509999998,
+          "memory": {
+            "rss": 69627904,
+            "heapTotal": 9421824,
+            "heapUsed": 3708188,
+            "external": 2490428,
+            "arrayBuffers": 728717
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 458.4562330000001,
+          "memory": {
+            "rss": 65433600,
+            "heapTotal": 8567808,
+            "heapUsed": 6559445,
+            "external": 6019952,
+            "arrayBuffers": 4184172
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 335.87456299999985,
+          "memory": {
+            "rss": 66535424,
+            "heapTotal": 8156160,
+            "heapUsed": 9750983,
+            "external": 9616214,
+            "arrayBuffers": 7639627
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 653.993739,
+          "memory": {
+            "rss": 65654784,
+            "heapTotal": 7904256,
+            "heapUsed": 3915149,
+            "external": 3796462,
+            "arrayBuffers": 1895807
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 359.94385999999986,
+          "memory": {
+            "rss": 66646016,
+            "heapTotal": 8896512,
+            "heapUsed": 7584460,
+            "external": 7403386,
+            "arrayBuffers": 5351262
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 137.67056700000012,
+          "memory": {
+            "rss": 66920448,
+            "heapTotal": 8980480,
+            "heapUsed": 11524985,
+            "external": 10942946,
+            "arrayBuffers": 8806717
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 104.36902700000019,
+          "memory": {
+            "rss": 67575808,
+            "heapTotal": 9044992,
+            "heapUsed": 3962847,
+            "external": 3223135,
+            "arrayBuffers": 1268975
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "js-wide-rescans",
+      "exit": 0,
+      "elapsedMs": 892.4047769978642,
+      "sampledProcessTreePeakRssBytes": 133152768,
+      "summaries": [
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 97.39837100000001,
+          "memory": {
+            "rss": 57348096,
+            "heapTotal": 8117248,
+            "heapUsed": 3835492,
+            "external": 2184127,
+            "arrayBuffers": 442512
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 88.53618599999999,
+          "memory": {
+            "rss": 64352256,
+            "heapTotal": 9317376,
+            "heapUsed": 3835492,
+            "external": 2626639,
+            "arrayBuffers": 885024
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 84.61224100000001,
+          "memory": {
+            "rss": 65744896,
+            "heapTotal": 10269696,
+            "heapUsed": 5246934,
+            "external": 3599409,
+            "arrayBuffers": 1327536
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 71.95680700000003,
+          "memory": {
+            "rss": 67592192,
+            "heapTotal": 11388928,
+            "heapUsed": 6741235,
+            "external": 4202194,
+            "arrayBuffers": 1770048
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 76.71048000000002,
+          "memory": {
+            "rss": 67624960,
+            "heapTotal": 11425792,
+            "heapUsed": 7822697,
+            "external": 4780223,
+            "arrayBuffers": 2212560
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 74.02957200000003,
+          "memory": {
+            "rss": 67702784,
+            "heapTotal": 11823104,
+            "heapUsed": 7822697,
+            "external": 5222735,
+            "arrayBuffers": 2655072
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 78.30840999999998,
+          "memory": {
+            "rss": 68530176,
+            "heapTotal": 11988992,
+            "heapUsed": 8911776,
+            "external": 5839739,
+            "arrayBuffers": 3097584
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 89.63672200000008,
+          "memory": {
+            "rss": 69316608,
+            "heapTotal": 12648448,
+            "heapUsed": 10444851,
+            "external": 6434797,
+            "arrayBuffers": 3540096
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 80.23364300000003,
+          "memory": {
+            "rss": 71675904,
+            "heapTotal": 12652544,
+            "heapUsed": 11524528,
+            "external": 6998491,
+            "arrayBuffers": 3982608
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 76.50537200000008,
+          "memory": {
+            "rss": 72396800,
+            "heapTotal": 13835264,
+            "heapUsed": 12834908,
+            "external": 7647324,
+            "arrayBuffers": 4425120
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "js-sparse-rescans",
+      "exit": 0,
+      "elapsedMs": 321.3105599861592,
+      "sampledProcessTreePeakRssBytes": 97562624,
+      "summaries": [
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 30.557699999999997,
+          "memory": {
+            "rss": 42733568,
+            "heapTotal": 3073024,
+            "heapUsed": 3073024,
+            "external": 67009,
+            "arrayBuffers": 67009
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 26.493880000000004,
+          "memory": {
+            "rss": 44015616,
+            "heapTotal": 3174400,
+            "heapUsed": 3174400,
+            "external": 134018,
+            "arrayBuffers": 134018
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 27.54835899999999,
+          "memory": {
+            "rss": 44044288,
+            "heapTotal": 3243008,
+            "heapUsed": 3243008,
+            "external": 201027,
+            "arrayBuffers": 201027
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 27.732139999999987,
+          "memory": {
+            "rss": 44568576,
+            "heapTotal": 3359744,
+            "heapUsed": 3359744,
+            "external": 268036,
+            "arrayBuffers": 268036
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 30.20166500000002,
+          "memory": {
+            "rss": 45617152,
+            "heapTotal": 3444736,
+            "heapUsed": 3444736,
+            "external": 335045,
+            "arrayBuffers": 335045
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 27.745288000000016,
+          "memory": {
+            "rss": 45879296,
+            "heapTotal": 3479552,
+            "heapUsed": 3479552,
+            "external": 402054,
+            "arrayBuffers": 402054
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 27.643811,
+          "memory": {
+            "rss": 46272512,
+            "heapTotal": 3530752,
+            "heapUsed": 3530752,
+            "external": 469063,
+            "arrayBuffers": 469063
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 26.095855999999998,
+          "memory": {
+            "rss": 46403584,
+            "heapTotal": 3632128,
+            "heapUsed": 3632128,
+            "external": 536072,
+            "arrayBuffers": 536072
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 23.956064000000026,
+          "memory": {
+            "rss": 47058944,
+            "heapTotal": 3814400,
+            "heapUsed": 3814400,
+            "external": 603081,
+            "arrayBuffers": 603081
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 28.54495000000003,
+          "memory": {
+            "rss": 47058944,
+            "heapTotal": 3879936,
+            "heapUsed": 3879936,
+            "external": 670090,
+            "arrayBuffers": 670090
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-flat-rescans",
+      "exit": 0,
+      "elapsedMs": 165.42176296934485,
+      "sampledProcessTreePeakRssBytes": 49786880,
+      "summaries": [
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 17.294516999999995,
+          "memory": {
+            "rss": 41824256,
+            "heapTotal": 3052544,
+            "heapUsed": 3052544,
+            "external": 65854,
+            "arrayBuffers": 65854
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 13.322983999999998,
+          "memory": {
+            "rss": 42508288,
+            "heapTotal": 3102720,
+            "heapUsed": 3102720,
+            "external": 131708,
+            "arrayBuffers": 131708
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 12.130859000000008,
+          "memory": {
+            "rss": 43352064,
+            "heapTotal": 3217408,
+            "heapUsed": 3217408,
+            "external": 197562,
+            "arrayBuffers": 197562
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 11.231937000000002,
+          "memory": {
+            "rss": 43913216,
+            "heapTotal": 3300352,
+            "heapUsed": 3300352,
+            "external": 263416,
+            "arrayBuffers": 263416
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 10.393184000000005,
+          "memory": {
+            "rss": 44568576,
+            "heapTotal": 3365888,
+            "heapUsed": 3365888,
+            "external": 329270,
+            "arrayBuffers": 329270
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 14.064324999999997,
+          "memory": {
+            "rss": 44421120,
+            "heapTotal": 3398656,
+            "heapUsed": 3398656,
+            "external": 395124,
+            "arrayBuffers": 395124
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 10.873610999999997,
+          "memory": {
+            "rss": 44421120,
+            "heapTotal": 3431424,
+            "heapUsed": 3431424,
+            "external": 460978,
+            "arrayBuffers": 460978
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 12.500928999999985,
+          "memory": {
+            "rss": 44421120,
+            "heapTotal": 3513344,
+            "heapUsed": 3513344,
+            "external": 526832,
+            "arrayBuffers": 526832
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 12.071949000000018,
+          "memory": {
+            "rss": 44421120,
+            "heapTotal": 3612672,
+            "heapUsed": 3612672,
+            "external": 592686,
+            "arrayBuffers": 592686
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 10000,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 11.490046000000007,
+          "memory": {
+            "rss": 44552192,
+            "heapTotal": 3630080,
+            "heapUsed": 3630080,
+            "external": 658540,
+            "arrayBuffers": 658540
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-wide-rescans",
+      "exit": 0,
+      "elapsedMs": 130.61048102099448,
+      "sampledProcessTreePeakRssBytes": 70451200,
+      "summaries": [
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 16.911183,
+          "memory": {
+            "rss": 48300032,
+            "heapTotal": 4265984,
+            "heapUsed": 4265984,
+            "external": 303711,
+            "arrayBuffers": 303711
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 7.153376999999999,
+          "memory": {
+            "rss": 51970048,
+            "heapTotal": 5645312,
+            "heapUsed": 5645312,
+            "external": 607720,
+            "arrayBuffers": 607720
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 7.971579999999996,
+          "memory": {
+            "rss": 54915072,
+            "heapTotal": 6153216,
+            "heapUsed": 4396772,
+            "external": 2618838,
+            "arrayBuffers": 911741
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 7.649721999999997,
+          "memory": {
+            "rss": 55701504,
+            "heapTotal": 6155264,
+            "heapUsed": 4396772,
+            "external": 2959810,
+            "arrayBuffers": 1252713
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 7.457062000000008,
+          "memory": {
+            "rss": 56619008,
+            "heapTotal": 6501376,
+            "heapUsed": 4396772,
+            "external": 3300805,
+            "arrayBuffers": 1593708
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 7.131428999999997,
+          "memory": {
+            "rss": 59764736,
+            "heapTotal": 7798784,
+            "heapUsed": 4396772,
+            "external": 3641774,
+            "arrayBuffers": 1934677
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 8.760149000000013,
+          "memory": {
+            "rss": 63684608,
+            "heapTotal": 7913472,
+            "heapUsed": 6020318,
+            "external": 4280232,
+            "arrayBuffers": 2223103
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 6.401344000000009,
+          "memory": {
+            "rss": 64184320,
+            "heapTotal": 7915520,
+            "heapUsed": 6020318,
+            "external": 4621211,
+            "arrayBuffers": 2564082
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 7.787447,
+          "memory": {
+            "rss": 65085440,
+            "heapTotal": 7917568,
+            "heapUsed": 6020318,
+            "external": 4925286,
+            "arrayBuffers": 2868157
+          }
+        },
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "exact": true,
+          "selectedCount": 256,
+          "riskCounts": {
+            "safe": 256,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 8.870402999999996,
+          "memory": {
+            "rss": 66002944,
+            "heapTotal": 7965696,
+            "heapUsed": 7994224,
+            "external": 5774546,
+            "arrayBuffers": 3171802
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-sparse-rescans",
+      "exit": 0,
+      "elapsedMs": 65.23639196529984,
+      "sampledProcessTreePeakRssBytes": 49459200,
+      "summaries": [
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 8.667782000000003,
+          "memory": {
+            "rss": 41660416,
+            "heapTotal": 3035136,
+            "heapUsed": 3035136,
+            "external": 65856,
+            "arrayBuffers": 65856
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 2.317498999999998,
+          "memory": {
+            "rss": 42815488,
+            "heapTotal": 3102720,
+            "heapUsed": 3102720,
+            "external": 131712,
+            "arrayBuffers": 131712
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 2.172697999999997,
+          "memory": {
+            "rss": 43343872,
+            "heapTotal": 3201024,
+            "heapUsed": 3201024,
+            "external": 197568,
+            "arrayBuffers": 197568
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 2.0837220000000016,
+          "memory": {
+            "rss": 43868160,
+            "heapTotal": 3300352,
+            "heapUsed": 3300352,
+            "external": 263424,
+            "arrayBuffers": 263424
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 2.229822999999996,
+          "memory": {
+            "rss": 44036096,
+            "heapTotal": 3365888,
+            "heapUsed": 3365888,
+            "external": 329280,
+            "arrayBuffers": 329280
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 2.1481720000000024,
+          "memory": {
+            "rss": 44167168,
+            "heapTotal": 3398656,
+            "heapUsed": 3398656,
+            "external": 395136,
+            "arrayBuffers": 395136
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 1.871101000000003,
+          "memory": {
+            "rss": 44298240,
+            "heapTotal": 3431424,
+            "heapUsed": 3431424,
+            "external": 460992,
+            "arrayBuffers": 460992
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 1.7397059999999982,
+          "memory": {
+            "rss": 44429312,
+            "heapTotal": 3513344,
+            "heapUsed": 3513344,
+            "external": 526848,
+            "arrayBuffers": 526848
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 1.5979699999999966,
+          "memory": {
+            "rss": 44429312,
+            "heapTotal": 3612672,
+            "heapUsed": 3612672,
+            "external": 592704,
+            "arrayBuffers": 592704
+          }
+        },
+        {
+          "candidateCount": 1,
+          "estimatedTotalBytes": 214748364800,
+          "scannedDirs": 1,
+          "exact": true,
+          "selectedCount": 1,
+          "riskCounts": {
+            "safe": 1,
+            "caution": 0,
+            "dangerous": 0,
+            "blocked": 0
+          },
+          "unknownSizeCount": 0,
+          "elapsedMs": 1.8025349999999989,
+          "memory": {
+            "rss": 44429312,
+            "heapTotal": 3630080,
+            "heapUsed": 3630080,
+            "external": 658560,
+            "arrayBuffers": 658560
+          }
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-slow-consumer",
+      "exit": 0,
+      "elapsedMs": 580.508932005614,
+      "sampledProcessTreePeakRssBytes": 4898816,
+      "summaries": [
+        {
+          "candidateCount": 256,
+          "estimatedTotalBytes": 256,
+          "scannedDirs": 257,
+          "skippedDirs": 0,
+          "exact": true,
+          "elapsedMs": 373
+        }
+      ],
+      "error": ""
+    },
+    {
+      "name": "rust-native-budget-failure",
+      "exit": 2,
+      "elapsedMs": 7.114303996786475,
+      "sampledProcessTreePeakRssBytes": 1175552,
+      "summaries": [],
+      "error": "error: Scan resource limit exceeded (maxCandidates); scan is incomplete. Scan a smaller subtree."
+    }
+  ]
+}

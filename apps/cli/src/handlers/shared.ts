@@ -37,6 +37,7 @@ import {
   defaultRustSelectionPolicy,
   type EngineBackend,
 } from "@kitsunekode/sweep-core/rust-engine";
+import { JsonOutput } from "../json-output.js";
 import { setActiveApply } from "../apply-lifecycle.js";
 
 export type OutputOptions = Pick<CliOptions, "quiet" | "verbose">;
@@ -201,7 +202,9 @@ export async function runScanToPlan(
 
 function scanResultFromPlan(plan: ScanPlan): ScanResult {
   return {
+    targetIdentity: plan.targetIdentity,
     entries: plan.candidates.map((candidate) => ({
+      identity: candidate.identity,
       path: candidate.path,
       name: candidate.name,
       estimatedBytes: candidate.estimatedBytes,
@@ -249,55 +252,24 @@ export function assertOpenTuiAvailable(): void {
   );
 }
 
-/**
- * Tracks a pending drain after a write() returned false. write() still
- * buffers in userspace when the pipe is full - remembering that state lets
- * drainStdout await the real flush instead of guessing.
- */
-let pendingStdoutDrain: Promise<void> | undefined;
-
-function writeStdout(chunk: string): void {
-  if (process.stdout.write(chunk)) return;
-  pendingStdoutDrain ??= new Promise<void>((resolvePromise) => {
-    const done = () => {
-      pendingStdoutDrain = undefined;
-      resolvePromise();
-    };
-    process.stdout.once("drain", done);
-    process.stdout.once("error", done);
-    process.stdout.once("close", done);
-  });
-}
+let jsonOutput: JsonOutput | undefined;
+const output = () => (jsonOutput ??= new JsonOutput(process.stdout));
 
 export function writeJson(value: unknown): void {
-  writeStdout(`${JSON.stringify(value, null, 2)}\n`);
+  output().write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 export function writeJsonLine(value: unknown): void {
-  writeStdout(`${JSON.stringify(value)}\n`);
+  output().write(`${JSON.stringify(value)}\n`);
 }
 
-/**
- * Wait (bounded) for buffered stdout bytes to flush before exit. A large
- * `--json` payload to a pipe can sit in the write buffer when a handler
- * reaches `process.exit` - exiting then truncates the payload. The 500ms
- * cap keeps a wedged consumer from hanging the CLI; callers still exit on
- * the normal path when the buffer is empty.
- */
+export function waitForStdoutConsumer(): Promise<void> | undefined {
+  return output().waitForConsumer();
+}
+
+/** Fail explicitly on a closed/stalled pipe rather than exiting with truncated JSON. */
 export async function drainStdout(): Promise<void> {
-  await pendingStdoutDrain;
-  const out = process.stdout;
-  if (out.destroyed || out.writableLength === 0) return;
-  return new Promise((resolvePromise) => {
-    const bail = setTimeout(() => resolvePromise(), 500);
-    bail.unref();
-    const done = () => {
-      clearTimeout(bail);
-      resolvePromise();
-    };
-    out.once("error", done);
-    out.write("", done);
-  });
+  await output().flush();
 }
 
 /**

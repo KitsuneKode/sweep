@@ -24,6 +24,10 @@ const failFast = argv.includes("--fail-fast");
 const jsonOut = argv.includes("--json");
 const stepFilter = (() => {
   const i = argv.indexOf("--step");
+  if (i >= 0 && (!argv[i + 1] || argv[i + 1]!.startsWith("--"))) {
+    console.error("verify: --step requires a step name");
+    process.exit(2);
+  }
   return i >= 0 ? argv[i + 1]?.toLowerCase() : undefined;
 })();
 
@@ -65,6 +69,13 @@ const steps: Step[] = [
     cmd: ["bunx", "turbo", "run", "preflight", "--filter", "@kitsunekode/sweep"],
     release: true,
   },
+  {
+    name: "installed package smoke",
+    cmd: ["bun", "run", "scripts/smoke-package.ts"],
+    release: true,
+    unless: () =>
+      engineBin()?.includes("release") ? false : "no release engine for native package install",
+  },
   { name: "pack:preview", cmd: ["bun", "run", "pack:preview"], release: true },
   {
     name: "standalone smoke",
@@ -87,6 +98,22 @@ interface StepResult {
   outputTail?: string;
 }
 
+async function outputTail(stream: ReadableStream<Uint8Array>): Promise<string> {
+  const decoder = new TextDecoder();
+  const reader = stream.getReader();
+  let tail = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      tail = (tail + decoder.decode(value, { stream: true })).slice(-65_536);
+    }
+    return (tail + decoder.decode()).slice(-65_536);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function runStep(step: Step): Promise<StepResult> {
   const start = performance.now();
   const proc = Bun.spawn(step.cmd, {
@@ -97,8 +124,8 @@ async function runStep(step: Step): Promise<StepResult> {
   });
   const [code, out, err] = await Promise.all([
     proc.exited,
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
+    outputTail(proc.stdout),
+    outputTail(proc.stderr),
   ]);
   const ms = performance.now() - start;
   if (code === 0) return { name: step.name, status: "pass", ms };
@@ -109,6 +136,10 @@ async function runStep(step: Step): Promise<StepResult> {
 const selected = steps.filter(
   (s) => (!s.release || all) && (stepFilter === undefined || s.name.includes(stepFilter)),
 );
+if (selected.length === 0) {
+  console.error(`verify: no steps match ${JSON.stringify(stepFilter)}`);
+  process.exit(2);
+}
 
 const results: StepResult[] = [];
 for (const step of selected) {

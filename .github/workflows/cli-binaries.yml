@@ -90,6 +90,10 @@ jobs:
           fi
           cat "$OUT.sha256"
 
+      - name: Compress and verify standalone download
+        shell: bash
+        run: bun run apps/cli/scripts/compress-standalone.ts "$OUT"
+
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -97,6 +101,8 @@ jobs:
           path: |
             ${{ env.OUT }}
             ${{ env.OUT }}.sha256
+            ${{ env.OUT }}.gz
+            ${{ env.OUT }}.gz.sha256
 
   attach:
     name: attach binaries to release

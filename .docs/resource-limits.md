@@ -19,15 +19,20 @@ path length; inode identities cost 128. Freed objects do not refund these
 charges. This conservative policy can stop a long scan whose current retained
 data is smaller than its cumulative charges.
 
-**Sizing is post-admission work and does not share these counters.** A
-candidate's own subtree was already bounded when it matched during discovery;
-re-charging it would double-count and could starve the walk. Each sizing job
-instead bounds its transient state locally: the inode-dedup sets are capped at
-`maxIdentities` entries per job (~16 MB transient), and the job's pending
-directory queue is capped at `maxQueuedDirs`. Reaching a cap never kills the
+**Sizing uses separate, shared live reservations.** Discovery stops at a matched
+artifact; its descendants have not been admitted by the walk. Charging all of
+their identities cumulatively can exhaust discovery merely by sizing hundreds
+of artifacts. Instead, concurrent sizing jobs share live identity, queued-path,
+path-byte and estimated-memory limits with the same default values. Reservations
+are returned when paths are popped and jobs end, including on error or abort.
+The discovery and sizing pools can each admit up to 128 MiB of logical charges;
+they are separate pools, not a combined 128 MiB RSS limit. The directory and
+hardlink sets together share one sizing identity limit across all jobs; per-job caps remain as additional bounds. Reaching a sizing cap never kills the
 scan: an over-cap hardlink is counted again (the estimate becomes an upper
 bound) and an over-cap directory is skipped (an under bound) - both mark the
-entry `bytesKnown: false` and render with `~`. The walk-level directory dedup
+entry `bytesKnown: false` and render with `~`. These are estimates, not certified
+upper/lower bounds if a concurrent filesystem change also occurs. Apply's normal
+size ceiling requires complete refreshed sizing before deleting. The walk-level directory dedup
 is structural cycle protection, so it stays on the fatal budget; it is bounded
 by `maxDirectories` and cannot be starved by sizing.
 
@@ -78,6 +83,12 @@ arithmetic must fit JavaScript safe integers. Oversized or overflowing totals
 are rejected before destructive operations. Intermediate native sizing overflow
 marks sizing incomplete and causes the engine scan to fail.
 
+The host counts native final output as UTF-8 bytes before retaining each chunk,
+including multibyte Unicode. Discovery accepts only filename bytes that
+round-trip through UTF-8; an unrepresentable filename marks its containing
+directory incomplete instead of creating a lossy alias to another real entry.
+Raw filenames inside an already selected artifact remain supported by sizing.
+
 The optional UI folder index has separate bounds: 100,000 nodes and 16 MiB of
 retained UTF-8 prefix keys. Its traversal is iterative. If the index is too
 large, the sidebar says `all scopes (folder index limit)` and the full candidate
@@ -93,9 +104,16 @@ and native child together. Repeated rescans without forced GC are observations,
 not leak proofs. Capacity checks do not detect every filesystem quota; fixture
 creation can still fail safely and clean up its owned temporary directory.
 
-Scans can cross mounted filesystems. There is no single-filesystem policy or
-mount-safe deletion qualification yet. A mount inside a selected artifact can
-contain data reachable through that project path. Guardrails and revalidation
+Scans can cross mounted filesystems. Native Linux deletion now opens the root
+once per candidate and resolves relative entries with `openat2` restrictions,
+refusing mount crossings (including same-device bind mounts), symlinked
+ancestors and escape paths. It retains at most 32 directory frames and polls
+cancellation within each artifact. Missing kernel support refuses deletion;
+there is no pathname fallback. JS checks a bounded 1 MiB Linux mountinfo snapshot
+before a directory removal or trash move, including nested bind mounts. Actual
+owned bind-mount CLI qualification passed for both engines in a private namespace.
+JS's snapshot is not atomic protection against subsequently changed mounts;
+other platform policies still need runtime qualification. Guardrails and revalidation
 reduce pathname replacement races; they do not provide fd-relative containment
 through every destructive operation. Concurrent mounts/path changes, real
 platform consoles, installers and terminal emulators remain release gates.

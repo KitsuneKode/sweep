@@ -1,0 +1,1402 @@
+{
+  "date": "2026-10-03",
+  "status": "local source qualification; awaiting release",
+  "platform": "linux-x64",
+  "cpu": "Intel Core i5-13450HX",
+  "bun": "1.4.2",
+  "nativeSha256": "e6ac8099572b7344f84e99de4ec4b0f8f02bed2fbdce602c7d748e7395aefc5f",
+  "latencyConditions": {
+    "cache": "warm",
+    "samples": 100,
+    "warmups": 3,
+    "includes": "engine API and bridge; no terminal rendering or CLI startup"
+  },
+  "latencyRows": [
+    {
+      "scenario": "small",
+      "exact": false,
+      "engine": "js",
+      "candidates": 32,
+      "estimatedBytes": 32768,
+      "total": {
+        "p50": 52.55,
+        "p95": 62.25,
+        "p99": 69.37
+      },
+      "first": {
+        "p50": 35.56,
+        "p95": 43.17,
+        "p99": 44.07
+      },
+      "sized": {
+        "p50": 40.07,
+        "p95": 48.95,
+        "p99": 52.29
+      },
+      "maxLag": {
+        "p50": 0.11,
+        "p95": 1.69,
+        "p99": 2.12
+      }
+    },
+    {
+      "scenario": "small",
+      "exact": false,
+      "engine": "rust",
+      "candidates": 32,
+      "estimatedBytes": 32768,
+      "total": {
+        "p50": 3.77,
+        "p95": 5.16,
+        "p99": 6.87
+      },
+      "first": {
+        "p50": 1.9,
+        "p95": 3.18,
+        "p99": 3.61
+      },
+      "sized": {
+        "p50": 2.93,
+        "p95": 4.37,
+        "p99": 5.43
+      },
+      "maxLag": {
+        "p50": 0,
+        "p95": 0,
+        "p99": 0.13
+      }
+    },
+    {
+      "scenario": "small",
+      "exact": true,
+      "engine": "js",
+      "candidates": 32,
+      "estimatedBytes": 32768,
+      "total": {
+        "p50": 57.46,
+        "p95": 74.31,
+        "p99": 85.99
+      },
+      "first": {
+        "p50": 42.33,
+        "p95": 52.8,
+        "p99": 62.29
+      },
+      "sized": {
+        "p50": 49.49,
+        "p95": 64.29,
+        "p99": 75.95
+      },
+      "maxLag": {
+        "p50": 0.32,
+        "p95": 2.5,
+        "p99": 3.91
+      }
+    },
+    {
+      "scenario": "small",
+      "exact": true,
+      "engine": "rust",
+      "candidates": 32,
+      "estimatedBytes": 32768,
+      "total": {
+        "p50": 4.61,
+        "p95": 8.86,
+        "p99": 9.89
+      },
+      "first": {
+        "p50": 2.27,
+        "p95": 4.23,
+        "p99": 6.17
+      },
+      "sized": {
+        "p50": 3.72,
+        "p95": 7.13,
+        "p99": 7.72
+      },
+      "maxLag": {
+        "p50": 0,
+        "p95": 0.55,
+        "p99": 1.18
+      }
+    },
+    {
+      "scenario": "wide",
+      "exact": false,
+      "engine": "js",
+      "candidates": 1024,
+      "estimatedBytes": 393216,
+      "total": {
+        "p50": 262.81,
+        "p95": 331.24,
+        "p99": 415.12
+      },
+      "first": {
+        "p50": 45.41,
+        "p95": 56.75,
+        "p99": 64.37
+      },
+      "sized": {
+        "p50": 55.3,
+        "p95": 68.77,
+        "p99": 82.72
+      },
+      "maxLag": {
+        "p50": 1.2,
+        "p95": 3.83,
+        "p99": 6.06
+      }
+    },
+    {
+      "scenario": "wide",
+      "exact": false,
+      "engine": "rust",
+      "candidates": 1024,
+      "estimatedBytes": 393216,
+      "total": {
+        "p50": 26.41,
+        "p95": 36.55,
+        "p99": 47.82
+      },
+      "first": {
+        "p50": 1.97,
+        "p95": 2.51,
+        "p99": 2.89
+      },
+      "sized": {
+        "p50": 2.78,
+        "p95": 3.76,
+        "p99": 4.19
+      },
+      "maxLag": {
+        "p50": 3.27,
+        "p95": 12.37,
+        "p99": 15.55
+      }
+    },
+    {
+      "scenario": "wide",
+      "exact": true,
+      "engine": "js",
+      "candidates": 1024,
+      "estimatedBytes": 393216,
+      "total": {
+        "p50": 269.83,
+        "p95": 314.16,
+        "p99": 325.04
+      },
+      "first": {
+        "p50": 45.77,
+        "p95": 55.35,
+        "p99": 56.34
+      },
+      "sized": {
+        "p50": 144.14,
+        "p95": 172.58,
+        "p99": 186.68
+      },
+      "maxLag": {
+        "p50": 1,
+        "p95": 3.16,
+        "p99": 3.48
+      }
+    },
+    {
+      "scenario": "wide",
+      "exact": true,
+      "engine": "rust",
+      "candidates": 1024,
+      "estimatedBytes": 393216,
+      "total": {
+        "p50": 25.79,
+        "p95": 34.19,
+        "p99": 35.27
+      },
+      "first": {
+        "p50": 1.98,
+        "p95": 2.67,
+        "p99": 3.99
+      },
+      "sized": {
+        "p50": 2.71,
+        "p95": 4.36,
+        "p99": 4.95
+      },
+      "maxLag": {
+        "p50": 3.32,
+        "p95": 11.08,
+        "p99": 13.15
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 335.4,
+        "p95": 435.97,
+        "p99": 913.26
+      },
+      "first": {
+        "p50": 30.57,
+        "p95": 39.58,
+        "p99": 58.02
+      },
+      "sized": {
+        "p50": 335.2,
+        "p95": 435.67,
+        "p99": 912.95
+      },
+      "maxLag": {
+        "p50": 1.06,
+        "p95": 3.32,
+        "p99": 8.45
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 7.58,
+        "p95": 10.67,
+        "p99": 23.32
+      },
+      "first": {
+        "p50": 1.81,
+        "p95": 3.14,
+        "p99": 3.54
+      },
+      "sized": {
+        "p50": 7.26,
+        "p95": 10.28,
+        "p99": 23.02
+      },
+      "maxLag": {
+        "p50": 0.08,
+        "p95": 0.64,
+        "p99": 1.05
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 365.7,
+        "p95": 1147.47,
+        "p99": 1542.01
+      },
+      "first": {
+        "p50": 32.65,
+        "p95": 87.32,
+        "p99": 93.73
+      },
+      "sized": {
+        "p50": 365.53,
+        "p95": 1147.16,
+        "p99": 1540.31
+      },
+      "maxLag": {
+        "p50": 1.65,
+        "p95": 16.61,
+        "p99": 40.32
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 8.02,
+        "p95": 41.82,
+        "p99": 50.83
+      },
+      "first": {
+        "p50": 2.02,
+        "p95": 5.25,
+        "p99": 10
+      },
+      "sized": {
+        "p50": 7.5,
+        "p95": 40.75,
+        "p99": 47.63
+      },
+      "maxLag": {
+        "p50": 0.08,
+        "p95": 1.61,
+        "p99": 5.19
+      }
+    },
+    {
+      "scenario": "flat",
+      "exact": false,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 220.71,
+        "p95": 258.96,
+        "p99": 270.62
+      },
+      "first": {
+        "p50": 30.17,
+        "p95": 36.94,
+        "p99": 37.43
+      },
+      "sized": {
+        "p50": 220.52,
+        "p95": 258.78,
+        "p99": 270.44
+      },
+      "maxLag": {
+        "p50": 0.98,
+        "p95": 2.66,
+        "p99": 3.65
+      }
+    },
+    {
+      "scenario": "flat",
+      "exact": false,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 26.43,
+        "p95": 31.03,
+        "p99": 34.33
+      },
+      "first": {
+        "p50": 1.79,
+        "p95": 3.25,
+        "p99": 4.69
+      },
+      "sized": {
+        "p50": 25.64,
+        "p95": 30.47,
+        "p99": 33.31
+      },
+      "maxLag": {
+        "p50": 0.08,
+        "p95": 0.13,
+        "p99": 0.17
+      }
+    },
+    {
+      "scenario": "flat",
+      "exact": true,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 242.14,
+        "p95": 274.72,
+        "p99": 283.93
+      },
+      "first": {
+        "p50": 32.67,
+        "p95": 39.57,
+        "p99": 41.87
+      },
+      "sized": {
+        "p50": 241.97,
+        "p95": 274.53,
+        "p99": 283.73
+      },
+      "maxLag": {
+        "p50": 1.32,
+        "p95": 3.4,
+        "p99": 4.43
+      }
+    },
+    {
+      "scenario": "flat",
+      "exact": true,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 28.11,
+        "p95": 33.5,
+        "p99": 35.61
+      },
+      "first": {
+        "p50": 1.85,
+        "p95": 3.28,
+        "p99": 3.61
+      },
+      "sized": {
+        "p50": 27.36,
+        "p95": 32.92,
+        "p99": 34.39
+      },
+      "maxLag": {
+        "p50": 0.08,
+        "p95": 0.52,
+        "p99": 1.65
+      }
+    }
+  ],
+  "resourceConditions": {
+    "repeats": 2,
+    "fdSoftLimit": 64,
+    "sampledProcessTreeWatchdogMiB": 512
+  },
+  "resources": [
+    {
+      "shape": "million flat files exact",
+      "rustMs": [1079.0, 1064.6],
+      "jsMs": [9096.9, 7844.7],
+      "rustPeakMiB": 45.6,
+      "jsPeakMiB": 131.6
+    },
+    {
+      "shape": "read-only existing tree",
+      "candidateCount": 609,
+      "apparentBytes": 30182297457,
+      "rustMs": [959.8, 802.9],
+      "jsMs": [23315.9, 18733.9],
+      "rustPeakMiB": 69.9,
+      "jsPeakMiB": 379.4
+    },
+    {
+      "shape": "200 GiB sparse file exact",
+      "rustMs": [9.0, 2.4],
+      "jsMs": [41.6, 30.7],
+      "rustPeakMiB": 44.9,
+      "jsPeakMiB": 92.0
+    }
+  ],
+  "distribution": {
+    "date": "2026-10-03",
+    "platform": "linux-x64",
+    "method": "Local npm pack --dry-run; binary stat and bounded streaming gzip level 9 size estimate. Gzip binaries are measurements, not published assets. npm dependencies and installed runtimes are excluded.",
+    "npm": {
+      "compressedBytes": 503868,
+      "unpackedBytes": 2216717,
+      "files": [
+        "LICENSE",
+        "README.md",
+        "dist/sweep-lib.js",
+        "dist/sweep-ui.js",
+        "dist/sweep.js",
+        "package.json"
+      ]
+    },
+    "binaries": [
+      {
+        "artifact": "sweep-engine",
+        "bytes": 981648,
+        "gzipLevel9Bytes": 464943,
+        "sha256": "e6ac8099572b7344f84e99de4ec4b0f8f02bed2fbdce602c7d748e7395aefc5f"
+      },
+      {
+        "artifact": "sweep-bytecode",
+        "bytes": 102794720,
+        "gzipLevel9Bytes": 43685948,
+        "sha256": "d8f519672e563f2d22b3d6563870a97a5fd757880f0e4c63a8ea6143ad22e364",
+        "actualGzipBytes": 43685948,
+        "gzipRoundTripVerified": true,
+        "gzipSha256": "11dd99cf71b9a05b80325ef38095425553205f2f6c50a69a7d8ccffe361608fa",
+        "emptyPathScanPassed": true
+      }
+    ]
+  },
+  "limitations": [
+    "No production p99 guarantee",
+    "No allocated 200 GB deletion qualification",
+    "No actual Windows/macOS/ARM64 result here",
+    "No direct fzf/fff ranking",
+    "Logical scan budgets are not RSS/OOM guarantees"
+  ],
+  "savedPlanIdentities": {
+    "date": "2026-10-03T16:10:54.308Z",
+    "nativeSha256": "ff4c8338ac7640602fc0c89e0d663039927de8562a1d33e87ca2fce317ae78c3",
+    "nativeBytes": 1017432,
+    "standaloneBytes": 102852064,
+    "scan": {
+      "samples": 100,
+      "warmups": 3,
+      "method": "Alternating engines; warm filesystem cache; API scan-to-plan including Rust spawn, NDJSON and JS planning; no CLI startup, rendering, apply, cold-cache or memory measurement. p99 is empirical nearest rank, not a production guarantee. maxLag uses a 5 ms heartbeat and misses stalls shorter than a scan.",
+      "rows": [
+        {
+          "scenario": "wide",
+          "exact": false,
+          "engine": "js",
+          "candidates": 1024,
+          "estimatedBytes": 393216,
+          "total": {
+            "p50": 185.05,
+            "p95": 209.45,
+            "p99": 214.62
+          },
+          "first": {
+            "p50": 37.01,
+            "p95": 45.15,
+            "p99": 46.55
+          },
+          "sized": {
+            "p50": 43.58,
+            "p95": 51.4,
+            "p99": 56.08
+          },
+          "maxLag": {
+            "p50": 0.56,
+            "p95": 2.08,
+            "p99": 3.4
+          }
+        },
+        {
+          "scenario": "wide",
+          "exact": false,
+          "engine": "rust",
+          "candidates": 1024,
+          "estimatedBytes": 393216,
+          "total": {
+            "p50": 22.16,
+            "p95": 26.5,
+            "p99": 29.67
+          },
+          "first": {
+            "p50": 1.72,
+            "p95": 2.07,
+            "p99": 2.44
+          },
+          "sized": {
+            "p50": 2.38,
+            "p95": 2.89,
+            "p99": 3.92
+          },
+          "maxLag": {
+            "p50": 8.81,
+            "p95": 11.1,
+            "p99": 13.16
+          }
+        },
+        {
+          "scenario": "wide",
+          "exact": true,
+          "engine": "js",
+          "candidates": 1024,
+          "estimatedBytes": 393216,
+          "total": {
+            "p50": 204.43,
+            "p95": 233.17,
+            "p99": 258.95
+          },
+          "first": {
+            "p50": 38.7,
+            "p95": 45.88,
+            "p99": 49.48
+          },
+          "sized": {
+            "p50": 110.86,
+            "p95": 134.6,
+            "p99": 139.45
+          },
+          "maxLag": {
+            "p50": 0.6,
+            "p95": 2,
+            "p99": 3.3
+          }
+        },
+        {
+          "scenario": "wide",
+          "exact": true,
+          "engine": "rust",
+          "candidates": 1024,
+          "estimatedBytes": 393216,
+          "total": {
+            "p50": 22.87,
+            "p95": 26.58,
+            "p99": 30.46
+          },
+          "first": {
+            "p50": 1.89,
+            "p95": 2.25,
+            "p99": 2.53
+          },
+          "sized": {
+            "p50": 2.6,
+            "p95": 3.26,
+            "p99": 4.51
+          },
+          "maxLag": {
+            "p50": 8.99,
+            "p95": 12.3,
+            "p99": 13.19
+          }
+        },
+        {
+          "scenario": "fat",
+          "exact": false,
+          "engine": "js",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 250.45,
+            "p95": 289.55,
+            "p99": 305.05
+          },
+          "first": {
+            "p50": 26.25,
+            "p95": 32.13,
+            "p99": 33.38
+          },
+          "sized": {
+            "p50": 250.3,
+            "p95": 289.36,
+            "p99": 304.85
+          },
+          "maxLag": {
+            "p50": 0.59,
+            "p95": 2.17,
+            "p99": 2.87
+          }
+        },
+        {
+          "scenario": "fat",
+          "exact": false,
+          "engine": "rust",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 5.9,
+            "p95": 7.11,
+            "p99": 7.44
+          },
+          "first": {
+            "p50": 1.65,
+            "p95": 2.59,
+            "p99": 2.98
+          },
+          "sized": {
+            "p50": 5.61,
+            "p95": 6.83,
+            "p99": 6.88
+          },
+          "maxLag": {
+            "p50": 0.07,
+            "p95": 0.26,
+            "p99": 0.59
+          }
+        },
+        {
+          "scenario": "fat",
+          "exact": true,
+          "engine": "js",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 210.65,
+            "p95": 270.18,
+            "p99": 275.37
+          },
+          "first": {
+            "p50": 25.08,
+            "p95": 28.99,
+            "p99": 32.57
+          },
+          "sized": {
+            "p50": 210.5,
+            "p95": 269.96,
+            "p99": 275.21
+          },
+          "maxLag": {
+            "p50": 0.36,
+            "p95": 1.57,
+            "p99": 2.46
+          }
+        },
+        {
+          "scenario": "fat",
+          "exact": true,
+          "engine": "rust",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 5.43,
+            "p95": 6.19,
+            "p99": 6.34
+          },
+          "first": {
+            "p50": 1.54,
+            "p95": 1.79,
+            "p99": 2.82
+          },
+          "sized": {
+            "p50": 5.15,
+            "p95": 5.95,
+            "p99": 6.13
+          },
+          "maxLag": {
+            "p50": 0.07,
+            "p95": 0.17,
+            "p99": 0.19
+          }
+        },
+        {
+          "scenario": "flat",
+          "exact": false,
+          "engine": "js",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 141.9,
+            "p95": 155.68,
+            "p99": 166.38
+          },
+          "first": {
+            "p50": 24.37,
+            "p95": 28.24,
+            "p99": 29.29
+          },
+          "sized": {
+            "p50": 141.76,
+            "p95": 155.5,
+            "p99": 166.22
+          },
+          "maxLag": {
+            "p50": 0.26,
+            "p95": 1.54,
+            "p99": 1.67
+          }
+        },
+        {
+          "scenario": "flat",
+          "exact": false,
+          "engine": "rust",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 18.96,
+            "p95": 21.67,
+            "p99": 22.18
+          },
+          "first": {
+            "p50": 1.56,
+            "p95": 1.8,
+            "p99": 2.08
+          },
+          "sized": {
+            "p50": 18.66,
+            "p95": 21.27,
+            "p99": 21.96
+          },
+          "maxLag": {
+            "p50": 0.08,
+            "p95": 0.1,
+            "p99": 0.21
+          }
+        },
+        {
+          "scenario": "flat",
+          "exact": true,
+          "engine": "js",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 144.73,
+            "p95": 176.1,
+            "p99": 187.66
+          },
+          "first": {
+            "p50": 24.81,
+            "p95": 27.76,
+            "p99": 29.38
+          },
+          "sized": {
+            "p50": 144.58,
+            "p95": 175.96,
+            "p99": 187.51
+          },
+          "maxLag": {
+            "p50": 0.43,
+            "p95": 2.22,
+            "p99": 3
+          }
+        },
+        {
+          "scenario": "flat",
+          "exact": true,
+          "engine": "rust",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 19.28,
+            "p95": 21.27,
+            "p99": 22.12
+          },
+          "first": {
+            "p50": 1.56,
+            "p95": 1.82,
+            "p99": 1.85
+          },
+          "sized": {
+            "p50": 18.98,
+            "p95": 21,
+            "p99": 21.76
+          },
+          "maxLag": {
+            "p50": 0.08,
+            "p95": 0.15,
+            "p99": 0.25
+          }
+        }
+      ]
+    },
+    "apply": {
+      "samplesPerEnginePerShape": 100,
+      "verifiedRuns": 400,
+      "method": "Owned temporary fixtures; alternating engines; current-size guard enabled. Includes validation, fresh sizing, native startup/control and deletion. Excludes fixture creation and cleanup. Empirical nearest-rank p99 on this local workload; not a production SLO or physical-reclaim benchmark.",
+      "summary": [
+        {
+          "scenario": "many",
+          "engine": "js",
+          "samples": 100,
+          "medianMs": 40.1458869999999,
+          "maxMs": 48.89027899999928,
+          "p99Ms": 48.08584000000019
+        },
+        {
+          "scenario": "many",
+          "engine": "rust",
+          "samples": 100,
+          "medianMs": 11.764079999999922,
+          "maxMs": 46.938186999999985,
+          "p99Ms": 17.393421000000217
+        },
+        {
+          "scenario": "large",
+          "engine": "js",
+          "samples": 100,
+          "medianMs": 281.5945930000016,
+          "maxMs": 315.5228729999999,
+          "p99Ms": 314.3127259999965
+        },
+        {
+          "scenario": "large",
+          "engine": "rust",
+          "samples": 100,
+          "medianMs": 92.40608600000269,
+          "maxMs": 104.92558299999655,
+          "p99Ms": 104.73176300000341
+        }
+      ]
+    },
+    "resources": {
+      "files": 100000,
+      "repeats": 3,
+      "fdSoftLimit": 64,
+      "rssWatchdogMb": 512,
+      "sparseGiB": 200,
+      "notes": "Sampled RSS includes the Bun host and native child; host UI rendering excluded. No forced GC. Warm cache. No leak or OOM-proof claim.",
+      "observations": [
+        {
+          "name": "js-flat-rescans",
+          "exit": 0,
+          "sampledProcessTreePeakRssBytes": 133955584
+        },
+        {
+          "name": "js-wide-rescans",
+          "exit": 0,
+          "sampledProcessTreePeakRssBytes": 128040960
+        },
+        {
+          "name": "js-sparse-rescans",
+          "exit": 0,
+          "sampledProcessTreePeakRssBytes": 92831744
+        },
+        {
+          "name": "rust-flat-rescans",
+          "exit": 0,
+          "sampledProcessTreePeakRssBytes": 46649344
+        },
+        {
+          "name": "rust-wide-rescans",
+          "exit": 0,
+          "sampledProcessTreePeakRssBytes": 56066048
+        },
+        {
+          "name": "rust-sparse-rescans",
+          "exit": 0,
+          "sampledProcessTreePeakRssBytes": 46096384
+        },
+        {
+          "name": "rust-slow-consumer",
+          "exit": 0,
+          "sampledProcessTreePeakRssBytes": 5017600
+        },
+        {
+          "name": "rust-native-budget-failure",
+          "exit": 2,
+          "sampledProcessTreePeakRssBytes": 2547712
+        }
+      ]
+    },
+    "limitations": [
+      "Warm local workloads; not production SLOs, cold/network-storage or terminal rendering.",
+      "Sparse 200 GiB is not allocated-data deletion or measured physical reclaim.",
+      "Source/runtime checks are local; platform installs and hostile ancestor/mount races remain open."
+    ],
+    "sourceFiles": [
+      "engine-results-saved-identities.json",
+      "apply-results-saved-identities.json",
+      "resource-saved-identities.json"
+    ]
+  },
+  "productionQualification": {
+    "date": "2026-10-04T07:54:37.033Z",
+    "platform": "linux-x64",
+    "nativeSha256": "9783df3908466ec16c6feed492e1f70c767acfe4ac36fa5ff4ddb1c3a98b98f4",
+    "nativeBytes": 1031584,
+    "scan": {
+      "samples": 100,
+      "warmups": 3,
+      "method": "Alternating engines; warm filesystem cache; API scan-to-plan including Rust spawn, NDJSON and JS planning; no CLI startup, rendering, apply, cold-cache or memory measurement. p99 is empirical nearest rank, not a production guarantee. maxLag uses a 5 ms heartbeat and misses stalls shorter than a scan.",
+      "rows": [
+        {
+          "scenario": "wide",
+          "exact": false,
+          "engine": "js",
+          "candidates": 1024,
+          "estimatedBytes": 393216,
+          "total": {
+            "p50": 153.88,
+            "p95": 186.91,
+            "p99": 202.52
+          },
+          "first": {
+            "p50": 34.84,
+            "p95": 40.88,
+            "p99": 42.72
+          },
+          "sized": {
+            "p50": 39.91,
+            "p95": 46.37,
+            "p99": 50.42
+          },
+          "maxLag": {
+            "p50": 0.54,
+            "p95": 2.06,
+            "p99": 3.24
+          }
+        },
+        {
+          "scenario": "wide",
+          "exact": false,
+          "engine": "rust",
+          "candidates": 1024,
+          "estimatedBytes": 393216,
+          "total": {
+            "p50": 21.94,
+            "p95": 24.84,
+            "p99": 27.93
+          },
+          "first": {
+            "p50": 1.73,
+            "p95": 2.16,
+            "p99": 3.27
+          },
+          "sized": {
+            "p50": 2.3,
+            "p95": 3.06,
+            "p99": 3.73
+          },
+          "maxLag": {
+            "p50": 8.17,
+            "p95": 11.05,
+            "p99": 11.35
+          }
+        },
+        {
+          "scenario": "wide",
+          "exact": true,
+          "engine": "js",
+          "candidates": 1024,
+          "estimatedBytes": 393216,
+          "total": {
+            "p50": 167.38,
+            "p95": 207.39,
+            "p99": 386.03
+          },
+          "first": {
+            "p50": 36.22,
+            "p95": 41.05,
+            "p99": 45.18
+          },
+          "sized": {
+            "p50": 94.19,
+            "p95": 112.3,
+            "p99": 134.36
+          },
+          "maxLag": {
+            "p50": 0.35,
+            "p95": 1.79,
+            "p99": 3.51
+          }
+        },
+        {
+          "scenario": "wide",
+          "exact": true,
+          "engine": "rust",
+          "candidates": 1024,
+          "estimatedBytes": 393216,
+          "total": {
+            "p50": 21.9,
+            "p95": 24.71,
+            "p99": 30.69
+          },
+          "first": {
+            "p50": 1.78,
+            "p95": 2,
+            "p99": 2.24
+          },
+          "sized": {
+            "p50": 2.4,
+            "p95": 2.95,
+            "p99": 4.26
+          },
+          "maxLag": {
+            "p50": 8.47,
+            "p95": 10.12,
+            "p99": 10.77
+          }
+        },
+        {
+          "scenario": "fat",
+          "exact": false,
+          "engine": "js",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 197.98,
+            "p95": 221.6,
+            "p99": 228.36
+          },
+          "first": {
+            "p50": 23.86,
+            "p95": 26.96,
+            "p99": 28.93
+          },
+          "sized": {
+            "p50": 197.82,
+            "p95": 221.47,
+            "p99": 228.2
+          },
+          "maxLag": {
+            "p50": 0.25,
+            "p95": 1.78,
+            "p99": 2.15
+          }
+        },
+        {
+          "scenario": "fat",
+          "exact": false,
+          "engine": "rust",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 5.34,
+            "p95": 6.38,
+            "p99": 6.7
+          },
+          "first": {
+            "p50": 1.56,
+            "p95": 1.87,
+            "p99": 2.52
+          },
+          "sized": {
+            "p50": 5.1,
+            "p95": 5.82,
+            "p99": 6.42
+          },
+          "maxLag": {
+            "p50": 0.06,
+            "p95": 0.17,
+            "p99": 0.2
+          }
+        },
+        {
+          "scenario": "fat",
+          "exact": true,
+          "engine": "js",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 193.97,
+            "p95": 219.57,
+            "p99": 225.18
+          },
+          "first": {
+            "p50": 23.98,
+            "p95": 26.75,
+            "p99": 29.62
+          },
+          "sized": {
+            "p50": 193.83,
+            "p95": 219.45,
+            "p99": 225.07
+          },
+          "maxLag": {
+            "p50": 0.24,
+            "p95": 2.01,
+            "p99": 2.51
+          }
+        },
+        {
+          "scenario": "fat",
+          "exact": true,
+          "engine": "rust",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 5.29,
+            "p95": 5.97,
+            "p99": 6.6
+          },
+          "first": {
+            "p50": 1.52,
+            "p95": 1.8,
+            "p99": 2.9
+          },
+          "sized": {
+            "p50": 5.06,
+            "p95": 5.66,
+            "p99": 6.41
+          },
+          "maxLag": {
+            "p50": 0.06,
+            "p95": 0.15,
+            "p99": 0.2
+          }
+        },
+        {
+          "scenario": "flat",
+          "exact": false,
+          "engine": "js",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 136.55,
+            "p95": 150.61,
+            "p99": 164.44
+          },
+          "first": {
+            "p50": 23.86,
+            "p95": 26.85,
+            "p99": 28.54
+          },
+          "sized": {
+            "p50": 136.39,
+            "p95": 150.46,
+            "p99": 164.3
+          },
+          "maxLag": {
+            "p50": 0.45,
+            "p95": 1.7,
+            "p99": 2.05
+          }
+        },
+        {
+          "scenario": "flat",
+          "exact": false,
+          "engine": "rust",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 19.37,
+            "p95": 20.88,
+            "p99": 21.79
+          },
+          "first": {
+            "p50": 1.55,
+            "p95": 1.86,
+            "p99": 2.49
+          },
+          "sized": {
+            "p50": 18.94,
+            "p95": 20.56,
+            "p99": 21.44
+          },
+          "maxLag": {
+            "p50": 0.07,
+            "p95": 0.1,
+            "p99": 0.16
+          }
+        },
+        {
+          "scenario": "flat",
+          "exact": true,
+          "engine": "js",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 139.71,
+            "p95": 157.48,
+            "p99": 166.56
+          },
+          "first": {
+            "p50": 23.58,
+            "p95": 27.23,
+            "p99": 29.29
+          },
+          "sized": {
+            "p50": 139.58,
+            "p95": 157.34,
+            "p99": 166.41
+          },
+          "maxLag": {
+            "p50": 0.34,
+            "p95": 2.09,
+            "p99": 2.84
+          }
+        },
+        {
+          "scenario": "flat",
+          "exact": true,
+          "engine": "rust",
+          "candidates": 1,
+          "estimatedBytes": 2560000,
+          "total": {
+            "p50": 19.16,
+            "p95": 21.6,
+            "p99": 23.12
+          },
+          "first": {
+            "p50": 1.57,
+            "p95": 1.85,
+            "p99": 2.78
+          },
+          "sized": {
+            "p50": 18.9,
+            "p95": 21.32,
+            "p99": 22.69
+          },
+          "maxLag": {
+            "p50": 0.07,
+            "p95": 0.1,
+            "p99": 0.14
+          }
+        }
+      ]
+    },
+    "apply": {
+      "samplesPerEnginePerShape": 100,
+      "method": "Owned temporary fixtures; alternating engines; current-size guard enabled. Includes validation, fresh sizing, native startup/control and deletion. Excludes fixture creation and cleanup. Empirical nearest-rank p99 on this local workload; not a production SLO or physical-reclaim benchmark.",
+      "summary": [
+        {
+          "scenario": "many",
+          "engine": "js",
+          "samples": 100,
+          "medianMs": 54.38377899999978,
+          "maxMs": 70.671909,
+          "p99Ms": 63.9263949999995
+        },
+        {
+          "scenario": "many",
+          "engine": "rust",
+          "samples": 100,
+          "medianMs": 13.048940000000584,
+          "maxMs": 51.390975999999995,
+          "p99Ms": 19.144397000000026
+        },
+        {
+          "scenario": "large",
+          "engine": "js",
+          "samples": 100,
+          "medianMs": 295.83774500000436,
+          "maxMs": 418.21267799999623,
+          "p99Ms": 401.7751639999915
+        },
+        {
+          "scenario": "large",
+          "engine": "rust",
+          "samples": 100,
+          "medianMs": 114.65010400000028,
+          "maxMs": 146.46947399999772,
+          "p99Ms": 139.2192570000043
+        }
+      ]
+    },
+    "resources": {
+      "files": 10000,
+      "repeats": 10,
+      "fdSoftLimit": 64,
+      "rssAbortMb": 512,
+      "sparseGiB": 200,
+      "notes": "Sampled RSS includes the Bun host and native child; host UI rendering excluded. No forced GC. Warm cache. No leak or OOM-proof claim."
+    },
+    "resourceObservations": [
+      {
+        "name": "js-flat-rescans",
+        "exit": 0,
+        "sampledProcessTreePeakRssBytes": 125231104
+      },
+      {
+        "name": "js-wide-rescans",
+        "exit": 0,
+        "sampledProcessTreePeakRssBytes": 133152768
+      },
+      {
+        "name": "js-sparse-rescans",
+        "exit": 0,
+        "sampledProcessTreePeakRssBytes": 97562624
+      },
+      {
+        "name": "rust-flat-rescans",
+        "exit": 0,
+        "sampledProcessTreePeakRssBytes": 49786880
+      },
+      {
+        "name": "rust-wide-rescans",
+        "exit": 0,
+        "sampledProcessTreePeakRssBytes": 70451200
+      },
+      {
+        "name": "rust-sparse-rescans",
+        "exit": 0,
+        "sampledProcessTreePeakRssBytes": 49459200
+      },
+      {
+        "name": "rust-slow-consumer",
+        "exit": 0,
+        "sampledProcessTreePeakRssBytes": 4898816
+      },
+      {
+        "name": "rust-native-budget-failure",
+        "exit": 2,
+        "sampledProcessTreePeakRssBytes": 1175552
+      }
+    ],
+    "uiSessions": {
+      "cycles": 30,
+      "candidatesPerCycle": 10000,
+      "method": "30 sessions, 10k candidates, 100 cursor moves, queue clear and rescan/cache release each. No forced GC. State derivation only; no real scan, painting or leak-proof claim.",
+      "peakRssBytes": 232837120,
+      "maxCursor100Ms": 1.2768709999999999
+    },
+    "limits": [
+      "Warm owned Linux fixtures; no production SLO, allocated-200-GB deletion or terminal painting benchmark.",
+      "Ten rescans and thirty synthetic UI sessions do not prove leak absence or OOM immunity.",
+      "Native hash is exact; apply/resource runs precede the final host transport regression fixes, and scan results follow them.",
+      "Actual installed Linux local tarballs and same-device private bind mounts qualified; hosted platform results remain open."
+    ],
+    "sourceFiles": [
+      "engine-results-paced-decoding.json",
+      "apply-results-anchored-removal.json",
+      "resource-long-sessions.json",
+      "ui-long-session.json",
+      "linux-mount-qualification.json",
+      "installed-package-qualification.json"
+    ]
+  }
+}

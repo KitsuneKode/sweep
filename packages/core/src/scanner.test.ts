@@ -43,6 +43,27 @@ afterEach(() => {
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
+test.skipIf(process.platform === "win32")(
+  "discovery never aliases invalid UTF-8 bytes to a real replacement-character name",
+  async () => {
+    const invalid = Buffer.concat([
+      Buffer.from(`${tmpDir}/`),
+      Buffer.from([0xff]),
+      Buffer.from(".tmp"),
+    ]);
+    writeFileSync(invalid, "invalid");
+    const valid = dir("\ufffd.tmp");
+    writeFileSync(valid, "valid");
+    const revealed: string[] = [];
+    const result = await scan(tmpDir, { ...DEFAULT_CONFIG, patterns: ["*.tmp"] }, false, {
+      onEntry: (entry) => revealed.push(entry.path),
+    });
+    expect(result.entries.map((entry) => entry.path)).toEqual([valid]);
+    expect(revealed).toEqual([valid]);
+    expect(result.skippedDirs).toBe(1);
+  },
+);
+
 test("resource exhaustion rejects without presenting a partial scan as complete", async () => {
   mkdirSync(dir("node_modules"));
   mkdirSync(dir("dist"));
@@ -535,15 +556,19 @@ test("a full dedup set overcounts hardlinks but keeps the scan alive", async () 
   const { linkSync } = await import("node:fs");
   const target = dir("node_modules");
   mkdirSync(target);
-  // Two distinct inode pairs. With maxIdentities=1 the set holds the first
-  // pair; the second pair counts twice - an upper bound flagged partial.
+  // One directory identity plus the first inode pair fill the shared cap;
+  // the second pair counts twice - an upper bound flagged partial.
   writeFileSync(join(target, "a"), Buffer.alloc(64));
   linkSync(join(target, "a"), join(target, "a2"));
   writeFileSync(join(target, "b"), Buffer.alloc(64));
   linkSync(join(target, "b"), join(target, "b2"));
-  const budget = new ResourceBudget({ maxIdentities: 1 });
+  const budget = new ResourceBudget({ maxIdentities: 2 });
   const size = await apparentSizeDetailed(target, undefined, budget);
   expect(size).toEqual({ bytes: 192, complete: false });
+  expect(budget.sizingIdentity()).toBe(true);
+  expect(budget.sizingIdentity()).toBe(true);
+  expect(budget.sizingIdentity()).toBe(false);
+  budget.releaseSizingIdentities(2);
 });
 
 test("sizing does not charge the scan-wide budget for transient dedup work", async () => {
@@ -685,4 +710,48 @@ test("a resource-limit sizing failure still fails the scan", async () => {
     estimatedBytes: 0,
   });
   await expect(sizer.finish()).rejects.toThrow("maxCandidates");
+});
+
+test("downstream backpressure pauses discovery until the consumer resumes", async () => {
+  mkdirSync(dir("node_modules"));
+  mkdirSync(dir("target"));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let blocked = true;
+  let revealed = 0;
+  const scanning = scan(tmpDir, DEFAULT_CONFIG, false, {
+    onEntry: () => {
+      revealed++;
+    },
+    waitForConsumer: () => (blocked ? gate : undefined),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(revealed).toBe(0);
+  blocked = false;
+  release();
+  const result = await scanning;
+  expect(result.entries).toHaveLength(2);
+  expect(revealed).toBe(2);
+});
+
+test("a failing output consumer cannot be swallowed by sizing fallback", async () => {
+  mkdirSync(dir("node_modules"));
+  writeFileSync(dir("node_modules", "f"), "hello");
+  const sizer = new ProgressiveSizer({
+    onEntrySized: () => {},
+    waitForConsumer: async () => {
+      throw new Error("consumer pipe closed");
+    },
+  });
+  sizer.add({
+    path: dir("node_modules"),
+    name: "node_modules",
+    entryType: "directory",
+    isSymlink: false,
+    estimatedBytes: 0,
+  });
+  await expect(sizer.finish()).rejects.toThrow("consumer pipe closed");
+  await sizer.dispose();
 });

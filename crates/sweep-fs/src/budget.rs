@@ -13,6 +13,7 @@ pub struct ResourceBudget {
     retained: AtomicUsize,
     failed: AtomicBool,
     error: Mutex<Option<String>>,
+    sizing: Mutex<(usize, usize, usize, usize)>, // identities, queue, paths, charges
 }
 
 impl ResourceBudget {
@@ -27,6 +28,7 @@ impl ResourceBudget {
             retained: AtomicUsize::new(0),
             failed: AtomicBool::new(false),
             error: Mutex::new(None),
+            sizing: Mutex::new((0, 0, 0, 0)),
         };
         if [
             limits.max_candidates,
@@ -164,6 +166,59 @@ impl ResourceBudget {
             self.limits.max_queued_dirs as usize,
         )
     }
+
+    /// Shared live sizing reservations. Failure is partial sizing, not fatal
+    /// discovery exhaustion. Keep this lock around bookkeeping only.
+    pub fn sizing_identity(&self) -> bool {
+        let mut used = self.sizing.lock().unwrap_or_else(|p| p.into_inner());
+        if used.0 >= self.limits.max_identities as usize
+            || used
+                .3
+                .checked_add(128)
+                .is_none_or(|n| n > self.limits.max_retained_bytes as usize)
+        {
+            return false;
+        }
+        used.0 += 1;
+        used.3 += 128;
+        true
+    }
+
+    pub fn release_sizing_identities(&self, count: usize) {
+        let mut used = self.sizing.lock().unwrap_or_else(|p| p.into_inner());
+        used.0 -= count;
+        used.3 -= count * 128;
+    }
+
+    pub fn sizing_directory(&self, bytes: usize) -> bool {
+        let Some(retained) = bytes.checked_mul(4).and_then(|n| n.checked_add(128)) else {
+            return false;
+        };
+        let mut used = self.sizing.lock().unwrap_or_else(|p| p.into_inner());
+        if used.1 >= self.limits.max_queued_dirs as usize
+            || used
+                .2
+                .checked_add(bytes)
+                .is_none_or(|n| n > self.limits.max_path_bytes as usize)
+            || used
+                .3
+                .checked_add(retained)
+                .is_none_or(|n| n > self.limits.max_retained_bytes as usize)
+        {
+            return false;
+        }
+        used.1 += 1;
+        used.2 += bytes;
+        used.3 += retained;
+        true
+    }
+
+    pub fn release_sizing_directories(&self, count: usize, bytes: usize) {
+        let mut used = self.sizing.lock().unwrap_or_else(|p| p.into_inner());
+        used.1 -= count;
+        used.2 -= bytes;
+        used.3 -= count * 128 + bytes * 4;
+    }
 }
 
 impl Default for ResourceBudget {
@@ -175,6 +230,27 @@ impl Default for ResourceBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn live_sizing_limits_are_shared_reusable_and_nonfatal() {
+        let budget = ResourceBudget::new(ScanLimits {
+            max_identities: 1,
+            max_queued_dirs: 1,
+            max_path_bytes: 4,
+            max_retained_bytes: 256,
+            ..ScanLimits::default()
+        });
+        assert!(budget.sizing_identity());
+        assert!(!budget.sizing_identity());
+        assert!(!budget.sizing_directory(1)); // shared estimated memory limit
+        budget.release_sizing_identities(1);
+        assert!(budget.sizing_directory(4));
+        assert!(!budget.sizing_directory(1));
+        budget.release_sizing_directories(1, 4);
+        assert!(!budget.sizing_directory(5));
+        assert!(budget.sizing_identity());
+        budget.release_sizing_identities(1);
+        assert!(!budget.failed());
+    }
     #[test]
     fn queue_slots_reuse_but_first_failure_sticks() {
         let budget = ResourceBudget::new(ScanLimits {

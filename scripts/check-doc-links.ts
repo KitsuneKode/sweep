@@ -1,10 +1,18 @@
 #!/usr/bin/env bun
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(import.meta.dir, "..");
-const IGNORE_DIRS = new Set(["node_modules", ".git", "target", "dist", ".turbo", ".changeset"]);
+const IGNORE_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "target",
+  "dist",
+  ".turbo",
+  ".changeset",
+  ".worktrees",
+]);
 
 function walkMdFiles(dir: string, results: string[] = []): string[] {
   const entries = readdirSync(dir, { withFileTypes: true });
@@ -13,7 +21,7 @@ function walkMdFiles(dir: string, results: string[] = []): string[] {
     if (entry.isDirectory()) {
       if (IGNORE_DIRS.has(entry.name)) continue;
       walkMdFiles(fullPath, results);
-    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+    } else if (entry.isFile() && /\.mdx?$/.test(entry.name)) {
       results.push(fullPath);
     }
   }
@@ -105,6 +113,58 @@ function main() {
   for (const file of files) {
     const broken = checkFile(file);
     allBroken.push(...broken);
+  }
+
+  const publicRoot = join(REPO_ROOT, "docs");
+  const publicFiles = files.filter((file) => file.startsWith(`${publicRoot}${sep}`));
+  const publicErrors: string[] = [];
+  const titles = new Set<string>();
+  for (const file of publicFiles) {
+    const content = readFileSync(file, "utf8");
+    const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(content)?.[1];
+    const title = frontmatter && /^title:\s*(.+)$/m.exec(frontmatter)?.[1];
+    const description = frontmatter && /^description:\s*(.+)$/m.exec(frontmatter)?.[1];
+    if (!title || !description)
+      publicErrors.push(`${file}: title/description frontmatter required`);
+    if (title && titles.has(title)) publicErrors.push(`${file}: duplicate page title ${title}`);
+    if (title) titles.add(title);
+  }
+  const folders = new Set([publicRoot, ...publicFiles.map(dirname)]);
+  for (const folder of folders) {
+    const meta = join(folder, "meta.json");
+    try {
+      const navigation: unknown = JSON.parse(readFileSync(meta, "utf8"));
+      if (typeof navigation !== "object" || navigation === null || !("pages" in navigation)) {
+        throw new Error("pages array required");
+      }
+      const pages = navigation.pages;
+      if (
+        !Array.isArray(pages) ||
+        pages.some((slug) => typeof slug !== "string" || !/^[a-z0-9-]+$/.test(slug))
+      ) {
+        throw new Error("pages must contain simple content slugs");
+      }
+      if (new Set(pages).size !== pages.length) throw new Error("duplicate navigation slug");
+      for (const slug of pages as string[]) {
+        if (
+          ![`${slug}.md`, `${slug}.mdx`, `${slug}/index.md`, `${slug}/index.mdx`].some((path) =>
+            existsSync(join(folder, path)),
+          )
+        ) {
+          publicErrors.push(`${meta}: missing page ${slug}`);
+        }
+      }
+      for (const file of publicFiles.filter((path) => dirname(path) === folder)) {
+        const slug = file.slice(folder.length + 1).replace(/\.mdx?$/, "");
+        if (!pages.includes(slug)) publicErrors.push(`${meta}: unlisted page ${slug}`);
+      }
+    } catch (error) {
+      publicErrors.push(`${meta}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (publicErrors.length > 0) {
+    console.error(publicErrors.join("\n"));
+    process.exit(1);
   }
 
   if (allBroken.length > 0) {

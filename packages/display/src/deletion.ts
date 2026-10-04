@@ -132,7 +132,8 @@ export function printDeletionProgress(
     return;
   }
 
-  console.log(`sweep: ${built.plain}`);
+  // Bun console.log bypasses stdout stream errors; apply needs observable EPIPE.
+  process.stdout.write(`sweep: ${built.plain}\n`);
 }
 
 /**

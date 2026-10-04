@@ -15,6 +15,7 @@ import {
   warnIgnoredOptions,
   writeJson,
   writeJsonLine,
+  waitForStdoutConsumer,
 } from "./shared.js";
 
 export async function handleScan(
@@ -41,15 +42,20 @@ export async function handleScan(
     const engine = resolveEngineBackend(opts);
 
     if (opts.jsonStream) {
-      const startedEvent: ScanEvent = { type: "scan_started", targetDir };
-      writeJsonLine(startedEvent);
-
       const scanStartedAt = performance.now();
       const { result } = await runScanToPlan(targetDir, config, {
         exact: false,
+        waitForConsumer: waitForStdoutConsumer,
         selectionPolicy,
         engine,
         projectConfig,
+        onStarted: (targetIdentity) => {
+          writeJsonLine({
+            type: "scan_started",
+            targetDir,
+            ...(targetIdentity ? { targetIdentity } : {}),
+          } satisfies ScanEvent);
+        },
         onProgress: (progress) => {
           writeJsonLine({ type: "scan_progress", ...progress } satisfies ScanEvent);
         },

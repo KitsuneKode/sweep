@@ -54,11 +54,13 @@ export function readCatalogs(repoRoot: string): Catalogs {
 export function resolveDependencies(
   block: DependencyBlock | undefined,
   catalogs: Catalogs,
+  bundled: ReadonlySet<string> = new Set(),
 ): DependencyBlock | undefined {
   if (!block) return undefined;
 
   const resolved: DependencyBlock = {};
   for (const [name, range] of Object.entries(block)) {
+    if (bundled.has(name)) continue;
     if (range.startsWith("workspace:")) continue;
 
     if (range.startsWith("catalog:")) {
@@ -118,7 +120,13 @@ function main(): void {
   };
 
   for (const field of ["dependencies", "optionalDependencies", "peerDependencies"] as const) {
-    const resolved = resolveDependencies(manifest[field] as DependencyBlock | undefined, catalogs);
+    // Commander is compiled into both CLI/library bundles. Keeping it in
+    // dependencies needlessly requires a registry install for headless use.
+    const resolved = resolveDependencies(
+      manifest[field] as DependencyBlock | undefined,
+      catalogs,
+      field === "dependencies" ? new Set(["commander"]) : new Set(),
+    );
     if (resolved) manifest[field] = resolved;
     else delete manifest[field];
   }

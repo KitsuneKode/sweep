@@ -37,9 +37,18 @@ destroy review context or exit the process.
   safe and caution rows and skips dangerous and blocked ones, reporting how
   many it skipped. A span can never smuggle a dangerous item past the red
   confirm.
+
 - The confirm dialog is where reversibility is offered: `t` flips between
   deleting and moving to trash, and the verb in the dialog always matches
   what will happen.
+
+`x` / `d` on an artifact row or inside `i` inspect requests a confirmation for
+exactly that artifact ID. Inspect pins that ID while the overlay is open. This
+does not expand to a group, current scope or the existing queue. Header rows,
+blocked paths and running/incomplete scans cannot start it. The normal apply
+path revalidates the target and candidate at the destructive boundary; no UI
+action invokes recursive deletion directly. Concurrent path/mount races remain
+a qualification limit, so do not promise absolute deletion immunity.
 
 ## 4. The screen answers three questions at all times
 
@@ -115,3 +124,13 @@ Two corollaries that keep the list stable at boundaries:
   order; the list re-sorts once on completion so nothing moves mid-cursor.
 - Narrow widths degrade by shedding detail (brand → `◆`, stats → queued only,
   footer → minimal hints), never by clipping mid-word.
+
+## Queue clearing and folder movement
+
+`u` clears the entire queue from the artifact or scope pane, including hidden
+items, and prevents streaming discoveries from restoring defaults in that scan.
+`U` unqueues only currently visible items. Text inputs and pattern editing retain
+their own keys. Right expands a scope and then enters its first visible child;
+Left collapses or moves to the visible parent. Streaming sizes preserve folder
+identity under the cursor. Rescan and session teardown release retained display,
+summary, scope topology and path caches.

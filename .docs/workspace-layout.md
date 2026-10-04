@@ -101,3 +101,11 @@ turbo. Root `bun run test` runs the integration test package against `tests/`.
 All workspaces except `apps/cli` are `"private": true`. Consumers install
 `@kitsunekode/sweep` from npm and receive the bundled `apps/cli/dist/` artifacts
 plus an optional native engine package for their OS/arch when supported.
+
+## Public documentation app
+
+`apps/docs` is the private `@sweep/docs` TanStack Start/Fumadocs workspace. It
+reads repository `docs/` Markdown and ordered navigation. It does not import
+cleanup engines, internal documentation or local user data. Its separate name
+keeps the `@kitsunekode/*` CLI build/release filters independent; root `check`
+explicitly includes both groups. See [its README](../apps/docs/README.md).

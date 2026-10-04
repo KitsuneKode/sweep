@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-03",
+  "platform": "linux-x64",
+  "method": "Local npm pack --dry-run; binary stat and bounded streaming gzip level 9 size estimate. Gzip binaries are measurements, not published assets. npm dependencies and installed runtimes are excluded.",
+  "npm": {
+    "compressedBytes": 503868,
+    "unpackedBytes": 2216717,
+    "files": [
+      "LICENSE",
+      "README.md",
+      "dist/sweep-lib.js",
+      "dist/sweep-ui.js",
+      "dist/sweep.js",
+      "package.json"
+    ]
+  },
+  "binaries": [
+    {
+      "artifact": "sweep-engine",
+      "bytes": 981648,
+      "gzipLevel9Bytes": 464943,
+      "sha256": "e6ac8099572b7344f84e99de4ec4b0f8f02bed2fbdce602c7d748e7395aefc5f"
+    },
+    {
+      "artifact": "sweep-bytecode",
+      "bytes": 102794720,
+      "gzipLevel9Bytes": 43685948,
+      "sha256": "d8f519672e563f2d22b3d6563870a97a5fd757880f0e4c63a8ea6143ad22e364",
+      "actualGzipBytes": 43685948,
+      "gzipRoundTripVerified": true,
+      "gzipSha256": "11dd99cf71b9a05b80325ef38095425553205f2f6c50a69a7d8ccffe361608fa",
+      "emptyPathScanPassed": true
+    }
+  ]
+}

@@ -25,6 +25,25 @@ const complete = {
 const send = (stream: RustScanStream, event: unknown) => stream.push(JSON.stringify(event));
 
 describe("Rust scan stream contract", () => {
+  test("discovery identity survives sizing and cannot be changed by an update", () => {
+    const identity = { platform: "unix" as const, device: "123", inode: "9007199254740993" };
+    const item = { ...candidate, identity };
+    const stream = new RustScanStream(target);
+    send(stream, { ...start, targetIdentity: identity });
+    send(stream, { ...found, candidate: item });
+    expect(() =>
+      send(stream, {
+        ...updated,
+        candidate: { ...item, identity: { ...identity, inode: "9007199254740994" } },
+      }),
+    ).toThrow("update does not match discovery");
+    send(stream, { ...updated, candidate: { ...item, estimatedBytes: 123 } });
+    send(stream, complete);
+    const result = stream.finish();
+    expect(result.targetIdentity).toEqual(identity);
+    expect(result.entries[0]?.identity).toEqual(identity);
+  });
+
   test("a native stream cannot exceed the host candidate budget", () => {
     let revealed = 0;
     const stream = new RustScanStream(target, {

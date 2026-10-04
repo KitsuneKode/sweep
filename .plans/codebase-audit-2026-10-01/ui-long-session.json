@@ -1,0 +1,187 @@
+{
+  "date": "2026-10-04T07:29:57.789Z",
+  "runtime": "1.4.2",
+  "method": "30 sessions, 10k candidates, 100 cursor moves, queue clear and rescan/cache release each. No forced GC. State derivation only; no real scan, painting or leak-proof claim.",
+  "rows": [
+    {
+      "cycle": 0,
+      "cursor100Ms": 1.2768709999999999,
+      "rssBytes": 135147520,
+      "heapUsedBytes": 43118874
+    },
+    {
+      "cycle": 1,
+      "cursor100Ms": 0.41403700000000754,
+      "rssBytes": 161009664,
+      "heapUsedBytes": 55629234
+    },
+    {
+      "cycle": 2,
+      "cursor100Ms": 0.5933479999999918,
+      "rssBytes": 173727744,
+      "heapUsedBytes": 55629234
+    },
+    {
+      "cycle": 3,
+      "cursor100Ms": 0.5067309999999736,
+      "rssBytes": 175169536,
+      "heapUsedBytes": 58698748
+    },
+    {
+      "cycle": 4,
+      "cursor100Ms": 0.4111130000000003,
+      "rssBytes": 175546368,
+      "heapUsedBytes": 58723522
+    },
+    {
+      "cycle": 5,
+      "cursor100Ms": 0.39197200000000976,
+      "rssBytes": 180412416,
+      "heapUsedBytes": 58742480
+    },
+    {
+      "cycle": 6,
+      "cursor100Ms": 0.5596560000000181,
+      "rssBytes": 181854208,
+      "heapUsedBytes": 58761998
+    },
+    {
+      "cycle": 7,
+      "cursor100Ms": 0.4442739999999503,
+      "rssBytes": 182247424,
+      "heapUsedBytes": 58761998
+    },
+    {
+      "cycle": 8,
+      "cursor100Ms": 0.4459349999999631,
+      "rssBytes": 178606080,
+      "heapUsedBytes": 61276336
+    },
+    {
+      "cycle": 9,
+      "cursor100Ms": 0.43253399999997555,
+      "rssBytes": 209014784,
+      "heapUsedBytes": 69085929
+    },
+    {
+      "cycle": 10,
+      "cursor100Ms": 0.34711499999997386,
+      "rssBytes": 216879104,
+      "heapUsedBytes": 69085929
+    },
+    {
+      "cycle": 11,
+      "cursor100Ms": 0.44383700000003046,
+      "rssBytes": 217149440,
+      "heapUsedBytes": 74970156
+    },
+    {
+      "cycle": 12,
+      "cursor100Ms": 0.40213099999999713,
+      "rssBytes": 215928832,
+      "heapUsedBytes": 82676937
+    },
+    {
+      "cycle": 13,
+      "cursor100Ms": 0.512081999999964,
+      "rssBytes": 229822464,
+      "heapUsedBytes": 82676937
+    },
+    {
+      "cycle": 14,
+      "cursor100Ms": 0.4837690000000521,
+      "rssBytes": 231264256,
+      "heapUsedBytes": 91194900
+    },
+    {
+      "cycle": 15,
+      "cursor100Ms": 0.3738740000000007,
+      "rssBytes": 232837120,
+      "heapUsedBytes": 91215994
+    },
+    {
+      "cycle": 16,
+      "cursor100Ms": 0.31993499999998676,
+      "rssBytes": 217759744,
+      "heapUsedBytes": 91234952
+    },
+    {
+      "cycle": 17,
+      "cursor100Ms": 0.41593299999999545,
+      "rssBytes": 229294080,
+      "heapUsedBytes": 91253910
+    },
+    {
+      "cycle": 18,
+      "cursor100Ms": 0.41261999999994714,
+      "rssBytes": 229294080,
+      "heapUsedBytes": 91272868
+    },
+    {
+      "cycle": 19,
+      "cursor100Ms": 0.44455100000004677,
+      "rssBytes": 229294080,
+      "heapUsedBytes": 91291826
+    },
+    {
+      "cycle": 20,
+      "cursor100Ms": 0.38941399999998794,
+      "rssBytes": 217468928,
+      "heapUsedBytes": 91311040
+    },
+    {
+      "cycle": 21,
+      "cursor100Ms": 0.4289770000000317,
+      "rssBytes": 229134336,
+      "heapUsedBytes": 91329998
+    },
+    {
+      "cycle": 22,
+      "cursor100Ms": 0.3592840000000024,
+      "rssBytes": 229265408,
+      "heapUsedBytes": 91348956
+    },
+    {
+      "cycle": 23,
+      "cursor100Ms": 0.47824099999991176,
+      "rssBytes": 229265408,
+      "heapUsedBytes": 91367914
+    },
+    {
+      "cycle": 24,
+      "cursor100Ms": 0.4303579999999556,
+      "rssBytes": 219525120,
+      "heapUsedBytes": 91386872
+    },
+    {
+      "cycle": 25,
+      "cursor100Ms": 0.4382580000000189,
+      "rssBytes": 230129664,
+      "heapUsedBytes": 91415398
+    },
+    {
+      "cycle": 26,
+      "cursor100Ms": 0.3771849999999404,
+      "rssBytes": 231571456,
+      "heapUsedBytes": 91434356
+    },
+    {
+      "cycle": 27,
+      "cursor100Ms": 0.4125259999999571,
+      "rssBytes": 231571456,
+      "heapUsedBytes": 91453314
+    },
+    {
+      "cycle": 28,
+      "cursor100Ms": 0.49984699999993154,
+      "rssBytes": 216592384,
+      "heapUsedBytes": 91472272
+    },
+    {
+      "cycle": 29,
+      "cursor100Ms": 0.40885800000000927,
+      "rssBytes": 228126720,
+      "heapUsedBytes": 91491230
+    }
+  ]
+}

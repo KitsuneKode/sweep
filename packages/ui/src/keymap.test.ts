@@ -479,6 +479,18 @@ describe("single-row apply (x/d)", () => {
     }
   });
 
+  test("inspect deletion requests its own candidate confirmation and never bulk apply", () => {
+    for (const name of ["x", "d"]) {
+      const actions = makeActions();
+      actions.requestInspectedApply = mock(() => {});
+      actions.requestSingleApply = mock(() => {});
+      handleKeymap(makeContext({ key: { name }, inspectOpen: true }), actions);
+      expect(actions.requestInspectedApply).toHaveBeenCalledTimes(1);
+      expect(actions.requestSingleApply).not.toHaveBeenCalled();
+      expect(actions.applyPlan).not.toHaveBeenCalled();
+    }
+  });
+
   test("y inside a single-scoped confirm calls confirmSingle, not applyPlan", () => {
     const actions = makeActions();
     actions.confirmSingle = mock(() => {});
@@ -676,5 +688,67 @@ describe("single-row apply (x/d)", () => {
           out.extraPatterns.includes(expected!) !== committed.extraPatterns.includes(expected!),
       ).toBe(true);
     });
+  });
+});
+
+describe("scope queue gestures", () => {
+  test("u clears the whole queue while the sidebar has focus", () => {
+    let state: SweepUiState = { ...createUiState(mockPlan()), focus: "sidebar", scanning: true };
+    const notify = mock(() => {});
+    const actions: KeymapActions = {
+      finalize: mock(() => {}),
+      setShowHelp: mock(() => {}),
+      setPendingApply: mock(() => {}),
+      applyPlan: mock(() => {}),
+      mutate: (fn) => {
+        state = fn(state);
+      },
+      focusPanel: mock(() => {}),
+      requestApply: mock(() => {}),
+      notify,
+    };
+    handleKeymap(
+      { key: { name: "u" }, state, showHelp: false, pendingApply: false, showSidebar: true },
+      actions,
+    );
+    expect(state.selectedIds.size).toBe(0);
+    expect(state.queueCleared).toBe(true);
+    expect(notify).toHaveBeenCalled();
+  });
+
+  test("shift-u removes visible selections and preserves hidden ones", () => {
+    const plan = mockPlan();
+    plan.candidates.push({
+      ...plan.candidates[0]!,
+      id: "hidden",
+      path: "/tmp/sweep-ui/build",
+      name: "build",
+    });
+    plan.selectedCandidateIds.push("hidden");
+    let state: SweepUiState = { ...createUiState(plan), filter: "path:node_modules" };
+    const actions: KeymapActions = {
+      finalize: mock(() => {}),
+      setShowHelp: mock(() => {}),
+      setPendingApply: mock(() => {}),
+      applyPlan: mock(() => {}),
+      mutate: (fn) => {
+        state = fn(state);
+      },
+      focusPanel: mock(() => {}),
+      requestApply: mock(() => {}),
+      notify: mock(() => {}),
+    };
+    handleKeymap(
+      {
+        key: { name: "u", shift: true },
+        state,
+        showHelp: false,
+        pendingApply: false,
+        showSidebar: true,
+      },
+      actions,
+    );
+    expect([...state.selectedIds]).toEqual(["hidden"]);
+    expect(state.selectionTouched.has("cand_1")).toBe(true);
   });
 });

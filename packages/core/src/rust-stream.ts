@@ -3,11 +3,13 @@ import type {
   ScanCompletedEvent,
   ScanEntry,
   ScanResult,
+  FilesystemIdentity,
 } from "@kitsunekode/sweep-protocol";
 import { hasCanonicalPathSpelling, isPathWithinRoot, isSameResolvedPath } from "./guardrails.js";
 import { PlanValidationError, validateScanEvent } from "./plan.js";
 import type { ScanHooks } from "./scanner.js";
 import { ResourceBudget, candidateFieldChars, checkedBytes } from "./resource-budget.js";
+import { sameFilesystemIdentity } from "./filesystem-identity.js";
 
 // Progress/warning events carry no candidates, so the per-line byte cap is
 // the only bound on their count - a hostile engine could emit millions and
@@ -17,6 +19,7 @@ const MAX_AUXILIARY_EVENTS = 1_000_000;
 
 function entryFrom(candidate: ScanCandidate): ScanEntry {
   return {
+    identity: candidate.identity,
     path: candidate.path,
     name: candidate.name,
     estimatedBytes: candidate.estimatedBytes,
@@ -30,6 +33,7 @@ function entryFrom(candidate: ScanCandidate): ScanEntry {
 /** Validate the native stream before allowing it to influence UI or plans. */
 export class RustScanStream {
   private started = false;
+  private targetIdentity: FilesystemIdentity | undefined;
   private summary: ScanCompletedEvent["summary"] | null = null;
   private readonly candidates = new Map<string, ScanCandidate>();
   private readonly ids = new Set<string>();
@@ -58,6 +62,8 @@ export class RustScanStream {
       if (this.started) throw new PlanValidationError("duplicate scan_started event");
       if (event.targetDir !== this.target) throw new PlanValidationError("scan target mismatch");
       this.started = true;
+      this.targetIdentity = event.targetIdentity;
+      this.hooks.onStarted?.(event.targetIdentity);
       return;
     }
     if (!this.started) throw new PlanValidationError("scan event received before scan_started");
@@ -134,7 +140,9 @@ export class RustScanStream {
       prior.id !== candidate.id ||
       prior.name !== candidate.name ||
       prior.entryType !== candidate.entryType ||
-      prior.isSymlink !== candidate.isSymlink
+      prior.isSymlink !== candidate.isSymlink ||
+      ((prior.identity !== undefined || candidate.identity !== undefined) &&
+        !sameFilesystemIdentity(prior.identity, candidate.identity))
     ) {
       throw new PlanValidationError("scan candidate update does not match discovery");
     }
@@ -152,6 +160,7 @@ export class RustScanStream {
     if (!this.summary)
       throw new PlanValidationError("scan incomplete: scan_completed event missing");
     return {
+      targetIdentity: this.targetIdentity,
       entries: [...this.candidates.values()].map(entryFrom),
       estimatedTotalBytes: this.summary.estimatedTotalBytes,
       scannedDirs: this.summary.scannedDirs,

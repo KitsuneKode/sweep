@@ -1,0 +1,63 @@
+---
+title: Platforms and large trees
+description: Choose an engine and understand runtime, memory and filesystem limits.
+---
+
+## Distribution targets
+
+| Target              | Native engine / standalone release target |
+| ------------------- | ----------------------------------------- |
+| Linux glibc x64     | Configured                                |
+| Linux glibc ARM64   | Configured                                |
+| macOS Intel         | Configured                                |
+| macOS Apple Silicon | Configured                                |
+| Windows x64         | Configured                                |
+
+Actual installed packages and interactive terminals need qualification on each
+target. Current measurements were collected on Linux x64. Alpine/musl and Windows
+ARM64 are not currently shipped targets. Refer to the specific release assets
+rather than assuming an unsupported binary will work.
+
+## Runtime and engine selection
+
+Node.js 20.3+ supports the plain npm CLI. The full-screen UI needs Bun and
+OpenTUI, or a standalone build that embeds them. Both UI streams must be TTYs.
+
+`--engine auto` prefers a usable Rust engine and otherwise uses JavaScript.
+`--engine rust` explicitly requests native execution; failures are surfaced.
+An engine failure after scanning starts must not silently turn into a successful
+partial cleanup.
+
+Under Bun, the JS engine uses one Node child for genuinely incremental directory
+enumeration. It therefore needs Node on PATH. Under Node it enumerates directly.
+The embedded-native standalone's normal scan does not need external Node or Bun.
+
+## Large trees
+
+File count, directory shape and metadata latency usually matter more than the
+sum of file lengths. A 200 GiB sparse file is cheap to size; a million small files
+can require a million metadata operations. Network drives and cold storage need
+separate measurements.
+
+Defaults bound discovery to 100,000 candidates, 250,000 admitted directories,
+32,768 queued paths, 500,000 inode identities, 64 MiB admitted path bytes and
+128 MiB estimated retained charges. Sizing has a separate shared pool with live
+reservations, released as work completes. Reaching a sizing limit marks sizes
+partial; reaching a discovery limit makes the scan incomplete.
+
+Discovery and sizing can each admit 128 MiB of logical charges; they are
+separate pools, not one combined memory cap. These are accounting limits, not an RSS cap. Runtime heaps, terminal
+state, native libraries, buffers and thread stacks add memory. Sweep cannot
+promise immunity from OOM on an already constrained device.
+
+If a resource error appears, scan a smaller project subtree. There are currently
+no public resource-limit CLI flags or `.sweeprc` fields. On a very large scope
+tree, the sidebar may fall back to `all scopes (folder index limit)` while the
+full candidate list remains available.
+
+Project paths use UTF-8. A filename containing unrepresentable raw bytes is
+skipped with partial-scan feedback, rather than converted into another file's
+name. Ordinary Unicode names, including `�`, are supported. Sizing inside an
+already selected artifact still handles raw filenames.
+
+For distribution sizes and measurement conditions, read [Benchmarks](../developer/benchmarks.md).

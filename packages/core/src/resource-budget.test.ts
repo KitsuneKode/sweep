@@ -1,6 +1,26 @@
 import { expect, test } from "bun:test";
 import { ResourceBudget, checkedBytes } from "./resource-budget.js";
 
+test("live sizing reservations are shared, returned, and never poison discovery", () => {
+  const budget = new ResourceBudget({
+    maxIdentities: 1,
+    maxQueuedDirs: 1,
+    maxPathBytes: 4,
+    maxRetainedBytes: 256,
+  });
+  expect(budget.sizingIdentity()).toBe(true);
+  expect(budget.sizingIdentity()).toBe(false);
+  expect(budget.sizingDirectory("a")).toBe(false);
+  budget.releaseSizingIdentities(1);
+  expect(budget.sizingDirectory("abcd")).toBe(true);
+  expect(budget.sizingDirectory("a")).toBe(false);
+  budget.releaseSizingDirectory("abcd");
+  expect(budget.sizingDirectory("abcde")).toBe(false);
+  expect(budget.sizingIdentity()).toBe(true);
+  budget.releaseSizingIdentities(1);
+  expect(() => budget.check()).not.toThrow();
+});
+
 test("queued paths are bounded and dequeued slots are reusable", () => {
   const budget = new ResourceBudget({ maxQueuedDirs: 1 });
   budget.directory("a");

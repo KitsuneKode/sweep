@@ -639,6 +639,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "insta",
+ "libc",
  "serde",
  "serde_json",
  "sha2",
@@ -666,8 +667,10 @@ dependencies = [
  "camino",
  "crossbeam-deque",
  "rayon",
+ "rustix",
  "sweep-types",
  "tempfile",
+ "windows-sys",
 ]
 
 [[package]]

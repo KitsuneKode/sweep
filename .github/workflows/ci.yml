@@ -66,6 +66,28 @@ jobs:
       - name: Check, build, and preflight
         run: bunx turbo run check build preflight --filter "@kitsunekode/*" --continue
 
+  docs:
+    name: documentation foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - name: Check and prerender docs
+        run: bun run docs:check
+      - name: Validate prerendered content
+        run: bun run --cwd apps/docs smoke
+
   rust:
     name: rust
     runs-on: ubuntu-latest
@@ -96,6 +118,17 @@ jobs:
       - name: Rust fmt, clippy, and tests via turbo
         run: bunx turbo run "sweep-rust#fmt:check" "sweep-rust#lint" "sweep-rust#test" --continue
 
+      - name: Build release engine and CLI for Linux qualification
+        run: |
+          cargo build --release -p sweep-engine-cli --locked
+          bun run build
+
+      - name: Install local tarballs and verify owned scan-save-apply
+        run: bun run scripts/smoke-package.ts
+
+      - name: Qualify nested bind mounts in a private namespace
+        run: python3 scripts/qualify-linux-mounts.py
+
   platform:
     name: cross-platform (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -103,7 +136,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -117,11 +150,18 @@ jobs:
       - name: Sync parity fixture trees
         run: bun run fixtures:sync
 
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
       # Typecheck + pure-TS tests on every OS. The TUI itself needs a TTY and
       # OpenTUI native FFI (Bun), so it is smoke-checked via unit render tests
       # only; interactive verification stays manual/local by design.
-      - name: Typecheck all workspaces
-        run: bunx turbo run typecheck
+      - name: Typecheck CLI workspaces
+        run: bunx turbo run typecheck --filter "@kitsunekode/*"
 
       - name: Unit tests (core + protocol + ui + cli)
         run: |
@@ -130,17 +170,20 @@ jobs:
       # The Rust engine's bugs live in platform code (reparse points, verbatim
       # paths, ignore separators) - Linux-only Rust CI left every one of them
       # invisible. Parity insta tests run inside `cargo test`.
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: stable
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Rust lint including platform tests
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Rust tests (walk, engine, parity)
         run: cargo test --workspace --locked
 
       - name: Build CLI bundle
         run: bunx turbo run build --filter=@kitsunekode/sweep
+
+      - name: Build release engine for installed package qualification
+        run: cargo build --release -p sweep-engine-cli --locked
+
+      - name: Install local tarballs and verify owned scan-save-apply
+        run: bun run scripts/smoke-package.ts
 
       - name: Smoke - scan a temp tree (no deletion, no TTY)
         shell: bash

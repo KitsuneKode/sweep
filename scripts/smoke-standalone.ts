@@ -27,6 +27,8 @@ try {
   const plan = JSON.parse(output);
   if (plan.candidates.length !== 1 || plan.summary.estimatedTotalBytes !== 15)
     throw new Error(`Unexpected standalone scan: ${output}`);
+  if (!plan.targetIdentity || !plan.candidates[0]?.identity)
+    throw new Error("Standalone scan omitted approval identity snapshots");
   console.log("ok: embedded Rust scan without Node, Bun or external engine on PATH");
 } finally {
   rmSync(owned, { recursive: true, force: true });

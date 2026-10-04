@@ -1,7 +1,13 @@
 //! Filesystem traversal helpers for the sweep engine.
 
 mod budget;
+mod identity;
+#[cfg(target_os = "linux")]
+mod removal;
 pub use budget::ResourceBudget;
+pub use identity::{file_identity, FileIdentity};
+#[cfg(target_os = "linux")]
+pub use removal::RemovalRoot;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
@@ -13,19 +19,10 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock};
 
-/// mtime of the path itself in epoch milliseconds, or `None` if it cannot be read.
-fn modified_ms(path: &Utf8Path) -> Option<u64> {
-    let modified = fs::symlink_metadata(path.as_std_path())
-        .ok()?
-        .modified()
-        .ok()?;
-    let since_epoch = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
-    u64::try_from(since_epoch.as_millis()).ok()
-}
-
 /// Describes a filesystem entry discovered during a scan walk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalkEntry {
+    pub identity: Option<sweep_types::FilesystemIdentity>,
     pub path: Utf8PathBuf,
     pub name: String,
     pub is_symlink: bool,
@@ -295,12 +292,9 @@ fn mark_dir(ctx: &WalkCtx<'_>, dir: &Utf8Path) -> bool {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        match (meta.volume_serial_number(), meta.file_index()) {
-            // Filesystems without file indices (some network drives) cannot
-            // dedupe - links are refused above, so no revisit cycle can form.
-            (Some(vol), Some(idx)) if idx != 0 => visited.insert(vol, idx, ctx.budget),
-            _ => true,
+        match file_identity(dir.as_std_path(), &meta) {
+            Ok(Some(id)) => visited.insert(id.device, id.inode, ctx.budget),
+            _ => false,
         }
     }
     #[cfg(not(any(unix, windows)))]
@@ -576,13 +570,14 @@ fn scan_dir_entries(
                 continue;
             }
         };
-        // Lossy-decode invalid UTF-8 instead of dropping the entry - the JS
-        // engine sees the same U+FFFD-mangled name. The mangled path cannot be
-        // lstat'd, so the entry ends up counted skipped on both engines rather
-        // than invisible on Rust and skipped on JS. `Cow` stays borrowed for
-        // valid names - the owned copy is paid only by entries we keep.
+        // The wire contract carries UTF-8 paths. Lossy conversion can name a
+        // different, real entry containing U+FFFD, so never use it for paths.
+        // Sizing below an already selected artifact still uses raw OsStrings.
         let file_name = item.file_name();
-        let file_name = file_name.to_string_lossy();
+        let Some(file_name) = file_name.to_str() else {
+            incomplete = true;
+            continue;
+        };
 
         let file_type = match item.file_type() {
             Ok(ft) => ft,
@@ -608,7 +603,7 @@ fn scan_dir_entries(
             (is_symlink, file_type.is_dir() && !is_symlink)
         };
         let is_file = file_type.is_file() && !is_symlink;
-        let matched = ctx.matcher.matches(&file_name);
+        let matched = ctx.matcher.matches(file_name);
 
         // Cheap reject before any path allocation: a leaf that matches no
         // pattern produces nothing and descends nowhere, so ignore rules are
@@ -618,17 +613,17 @@ fn scan_dir_entries(
             if is_file || is_symlink {
                 continue;
             }
-            if is_dir && is_skip_dir_name(&file_name) {
+            if is_dir && is_skip_dir_name(file_name) {
                 continue;
             }
         }
 
         // From here the entry is a candidate, a descent target, or a dirent
         // the filesystem could not classify - all of which need the path.
-        let full_path = dir.join(file_name.as_ref());
+        let full_path = dir.join(file_name);
         if ctx
             .ignore
-            .is_some_and(|matcher| matcher.matches(ctx.root, &full_path, &file_name))
+            .is_some_and(|matcher| matcher.matches(ctx.root, &full_path, file_name))
         {
             continue;
         }
@@ -673,10 +668,20 @@ fn scan_dir_entries(
                 WalkEntryType::File
             };
 
-            let modified_ms = modified_ms(&full_path);
+            let metadata = fs::symlink_metadata(full_path.as_std_path()).ok();
+            let identity = metadata
+                .as_ref()
+                .and_then(|meta| file_identity(full_path.as_std_path(), meta).ok().flatten())
+                .map(FileIdentity::snapshot);
+            let modified_ms = metadata
+                .as_ref()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok());
             let entry = WalkEntry {
+                identity,
                 path: full_path,
-                name: file_name.into_owned(),
+                name: file_name.to_owned(),
                 is_symlink,
                 entry_type,
                 estimated_bytes: 0,
@@ -696,7 +701,7 @@ fn scan_dir_entries(
         // The skip-name check repeats here, not only in the dirent-type fast
         // path above: a DT_UNKNOWN dirent only learns it is a dir from the
         // lstat, and its name was never checked.
-        if is_dir && !is_skip_dir_name(&file_name) {
+        if is_dir && !is_skip_dir_name(file_name) {
             if !ctx.budget.queue_dir(full_path.as_str().len()) {
                 break;
             }
@@ -947,6 +952,7 @@ impl SubtreeSize {
 
 struct SizeContext<'a> {
     budget: &'a ResourceBudget,
+    cancelled: Option<&'a AtomicBool>,
     exact: bool,
     parallel: bool,
     /// Per-job caps on the transient dedup sets and pending queue. These sets
@@ -954,8 +960,32 @@ struct SizeContext<'a> {
     dedup_cap: usize,
     pending_cap: usize,
     pending: AtomicUsize,
+    path_bytes: AtomicUsize,
     links: Mutex<HashSet<(u64, u64)>>,
     dirs: Mutex<HashSet<(u64, u64)>>,
+}
+
+impl SizeContext<'_> {
+    fn stopped(&self) -> bool {
+        self.budget.failed()
+            || self
+                .cancelled
+                .is_some_and(|flag| flag.load(Ordering::Acquire))
+    }
+}
+
+impl Drop for SizeContext<'_> {
+    fn drop(&mut self) {
+        let links = self
+            .links
+            .get_mut()
+            .unwrap_or_else(|p| p.into_inner())
+            .len();
+        let dirs = self.dirs.get_mut().unwrap_or_else(|p| p.into_inner()).len();
+        self.budget.release_sizing_identities(links + dirs);
+        self.budget
+            .release_sizing_directories(*self.pending.get_mut(), *self.path_bytes.get_mut());
+    }
 }
 
 /// Admits a directory to the job-local queue. The walk already bounded these
@@ -969,11 +999,21 @@ fn queue_sizing_dir(
         ctx.pending.fetch_sub(1, Ordering::Relaxed);
         return false;
     }
+    let bytes = path.as_os_str().len();
+    if !ctx.budget.sizing_directory(bytes) {
+        ctx.pending.fetch_sub(1, Ordering::Relaxed);
+        return false;
+    }
+    ctx.path_bytes.fetch_add(bytes, Ordering::Relaxed);
     children.push(path);
     true
 }
 
-fn price_sizing_inode(meta: &fs::Metadata, ctx: &SizeContext<'_>) -> SubtreeSize {
+fn price_sizing_inode(
+    meta: &fs::Metadata,
+    ctx: &SizeContext<'_>,
+    path: impl FnOnce() -> std::path::PathBuf,
+) -> SubtreeSize {
     let exact = ctx.exact;
     let links = &ctx.links;
     let mut complete = true;
@@ -987,12 +1027,43 @@ fn price_sizing_inode(meta: &fs::Metadata, ctx: &SizeContext<'_>) -> SubtreeSize
     let mut bytes = meta.len();
     if meta.is_dir() || (!meta.is_file() && !meta.is_symlink()) {
         bytes = 0;
-    } else if hardlink_candidate(meta) {
+    } else {
+        #[cfg(unix)]
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            let _ = path;
+            if meta.nlink() > 1 {
+                file_identity(Path::new(""), meta)
+            } else {
+                Ok(None)
+            }
+        };
+        #[cfg(not(unix))]
+        let identity = file_identity(&path(), meta);
+        let identity = match identity {
+            Ok(identity) => identity,
+            Err(_) => {
+                return SubtreeSize {
+                    bytes,
+                    complete: false,
+                }
+            }
+        };
+        #[cfg(windows)]
+        if identity.is_none() {
+            return SubtreeSize {
+                bytes,
+                complete: false,
+            };
+        }
+        let Some(identity) = identity.filter(|id| id.links > 1) else {
+            return SubtreeSize { bytes, complete };
+        };
         let mut seen = links.lock().unwrap_or_else(|p| p.into_inner());
-        let key = inode_id(meta);
+        let key = (identity.device, identity.inode);
         if seen.contains(&key) {
             bytes = 0;
-        } else if seen.len() >= ctx.dedup_cap {
+        } else if seen.len() >= ctx.dedup_cap || !ctx.budget.sizing_identity() {
             // Set at cap: count the link anyway (overcount, flagged partial)
             // rather than undercounting zero or killing the scan.
             complete = false;
@@ -1049,7 +1120,10 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
     };
     while let Some(dir) = pending.pop() {
         ctx.pending.fetch_sub(1, Ordering::Relaxed);
-        if ctx.budget.failed() {
+        let bytes = dir.as_os_str().len();
+        ctx.path_bytes.fetch_sub(bytes, Ordering::Relaxed);
+        ctx.budget.release_sizing_directories(1, bytes);
+        if ctx.stopped() {
             total.complete = false;
             break;
         }
@@ -1064,20 +1138,33 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
         // is priced as the link and never deliberately followed. Pathname
         // operations still have a residual swap window before read_dir.
         if !meta.is_dir() || meta.is_symlink() || meta_is_reparse_point(&meta) {
-            total.merge(price_sizing_inode(&meta, ctx));
+            total.merge(price_sizing_inode(&meta, ctx, || dir.clone()));
             continue;
         }
-        if let Some(key) = directory_id(&meta) {
+        let identity = match file_identity(&dir, &meta) {
+            Ok(identity) => identity,
+            Err(_) => {
+                total.complete = false;
+                continue;
+            }
+        };
+        #[cfg(windows)]
+        if identity.is_none() {
+            total.complete = false;
+            continue;
+        }
+        if let Some(identity) = identity {
+            let key = (identity.device, identity.inode);
             let mut dirs = ctx.dirs.lock().unwrap_or_else(|p| p.into_inner());
             // Skip repeats and capped-set inserts alike - without the dedup
             // entry a hardlinked-dir cycle could recurse forever.
-            if dirs.contains(&key) || dirs.len() >= ctx.dedup_cap {
+            if dirs.contains(&key) || dirs.len() >= ctx.dedup_cap || !ctx.budget.sizing_identity() {
                 total.complete = false;
                 continue;
             }
             dirs.insert(key);
         }
-        total.merge(price_sizing_inode(&meta, ctx));
+        total.merge(price_sizing_inode(&meta, ctx, || dir.clone()));
         let items = match fs::read_dir(&dir) {
             Ok(items) => items,
             Err(_) => {
@@ -1087,7 +1174,7 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
         };
         let mut children = Vec::with_capacity(SIZE_DIR_BATCH);
         for item in items {
-            if ctx.budget.failed() {
+            if ctx.stopped() {
                 total.complete = false;
                 break;
             }
@@ -1126,7 +1213,7 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
                         }
                     }
                     Ok(meta) => {
-                        total.merge(price_sizing_inode(&meta, ctx));
+                        total.merge(price_sizing_inode(&meta, ctx, || item.path()));
                     }
                     Err(_) => total.complete = false,
                 }
@@ -1143,7 +1230,7 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
                         }
                     }
                     Ok(meta) => {
-                        total.merge(price_sizing_inode(&meta, ctx));
+                        total.merge(price_sizing_inode(&meta, ctx, || item.path()));
                     }
                     Err(_) => total.complete = false,
                 }
@@ -1165,54 +1252,8 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
     if total.bytes > 9_007_199_254_740_991 {
         ctx.budget.fail("byte counter overflow");
     }
-    total.complete &= !ctx.budget.failed();
+    total.complete &= !ctx.stopped();
     total
-}
-
-fn directory_id(meta: &fs::Metadata) -> Option<(u64, u64)> {
-    let key = inode_id(meta);
-    (key.1 != 0).then_some(key)
-}
-
-fn hardlink_candidate(meta: &fs::Metadata) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        !meta.is_dir() && meta.nlink() > 1 && meta.ino() != 0
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        !meta.is_dir()
-            && meta.number_of_links().is_some_and(|n| n > 1)
-            && meta.file_index().is_some_and(|n| n != 0)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = meta;
-        false
-    }
-}
-
-fn inode_id(meta: &fs::Metadata) -> (u64, u64) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        (meta.dev(), meta.ino())
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        (
-            u64::from(meta.volume_serial_number().unwrap_or(0)),
-            meta.file_index().unwrap_or(0),
-        )
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _ = meta;
-        (0, 0)
-    }
 }
 
 pub fn measure_size_with_budget(
@@ -1220,7 +1261,18 @@ pub fn measure_size_with_budget(
     exact: bool,
     budget: &ResourceBudget,
 ) -> SubtreeSize {
-    if budget.failed() {
+    measure_size_with_budget_controlled(path, exact, budget, None)
+}
+
+/// Cancel a read-only preflight inside large subtrees without poisoning the
+/// resource budget. Blocking filesystem syscalls themselves remain blocking.
+pub fn measure_size_with_budget_controlled(
+    path: &Utf8Path,
+    exact: bool,
+    budget: &ResourceBudget,
+    cancelled: Option<&AtomicBool>,
+) -> SubtreeSize {
+    if budget.failed() || cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
         return SubtreeSize {
             bytes: 0,
             complete: false,
@@ -1262,13 +1314,22 @@ pub fn measure_size_with_budget(
         };
     }
     let (dedup_cap, pending_cap) = budget.sizing_caps();
+    let root_bytes = path.as_std_path().as_os_str().len();
+    if !budget.sizing_directory(root_bytes) {
+        return SubtreeSize {
+            bytes: 0,
+            complete: false,
+        };
+    }
     let ctx = SizeContext {
         budget,
+        cancelled,
         exact,
         parallel: sizing_pool().is_some(),
         dedup_cap,
         pending_cap,
         pending: AtomicUsize::new(1),
+        path_bytes: AtomicUsize::new(root_bytes),
         links: Mutex::new(HashSet::new()),
         dirs: Mutex::new(HashSet::new()),
     };
@@ -1428,6 +1489,94 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn cancelled_sizing_returns_incomplete_and_refunds_queued_paths() {
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        fs::write(dir.path().join("file"), b"keep").unwrap_or_else(|e| panic!("write: {e}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("path"));
+        let budget = ResourceBudget::new(ScanLimits {
+            max_queued_dirs: 1,
+            max_identities: 1,
+            ..ScanLimits::default()
+        });
+        let cancel = AtomicBool::new(true);
+        for exact in [true, false] {
+            assert_eq!(
+                measure_size_with_budget_controlled(root, exact, &budget, Some(&cancel)),
+                SubtreeSize {
+                    bytes: 0,
+                    complete: false
+                }
+            );
+            // Exercise cancellation after a sizing job's path reservation.
+            let bytes = root.as_std_path().as_os_str().len();
+            assert!(budget.sizing_directory(bytes));
+            let ctx = SizeContext {
+                budget: &budget,
+                cancelled: Some(&cancel),
+                exact,
+                parallel: false,
+                dedup_cap: 1,
+                pending_cap: 1,
+                pending: AtomicUsize::new(1),
+                path_bytes: AtomicUsize::new(bytes),
+                links: Mutex::new(HashSet::new()),
+                dirs: Mutex::new(HashSet::new()),
+            };
+            assert_eq!(
+                size_directories(root.as_std_path(), &ctx, 0),
+                SubtreeSize {
+                    bytes: 0,
+                    complete: false
+                }
+            );
+            drop(ctx);
+            assert!(budget.sizing_directory(bytes));
+            budget.release_sizing_directories(1, bytes);
+            assert!(budget.sizing_identity());
+            budget.release_sizing_identities(1);
+            assert!(!budget.failed());
+        }
+        cancel.store(false, Ordering::Release);
+        assert_eq!(
+            measure_size_with_budget_controlled(root, false, &budget, Some(&cancel)),
+            SubtreeSize {
+                bytes: 4,
+                complete: true
+            }
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discovery_does_not_alias_invalid_utf8_to_a_real_replacement_name() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        fs::write(
+            dir.path().join(std::ffi::OsStr::from_bytes(b"\xff.tmp")),
+            b"invalid",
+        )
+        .unwrap_or_else(|e| panic!("write: {e}"));
+        let valid = dir.path().join("\u{fffd}.tmp");
+        fs::write(&valid, b"valid").unwrap_or_else(|e| panic!("write: {e}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("path"));
+        let result = walk_matched_entries(
+            root,
+            &WalkConfig {
+                patterns: vec!["*.tmp".to_owned()],
+                ignore: vec![],
+                depth: -1,
+            },
+        );
+        assert_eq!(
+            result.entries.len(),
+            1,
+            "invalid bytes must never name another entry"
+        );
+        assert_eq!(result.entries[0].path.as_std_path(), valid);
+        assert_eq!(result.skipped_dirs, 1);
+    }
+
+    #[test]
     fn worker_callback_panic_does_not_strand_other_walkers() {
         let dir = tempdir().unwrap_or_else(|err| panic!("fixture operation failed: {err}"));
         fs::create_dir(dir.path().join("node_modules"))
@@ -1456,15 +1605,23 @@ mod tests {
             exact: false,
             parallel: false,
             budget: &budget,
+            cancelled: None,
             dedup_cap,
             pending_cap,
             pending: AtomicUsize::new(0),
+            path_bytes: AtomicUsize::new(0),
             links: Mutex::new(HashSet::new()),
             dirs: Mutex::new(HashSet::new()),
         };
-        assert_eq!(price_sizing_inode(&meta, &ctx).bytes, 0);
+        assert_eq!(
+            price_sizing_inode(&meta, &ctx, || dir.path().to_owned()).bytes,
+            0
+        );
         ctx.exact = true;
-        assert_eq!(price_sizing_inode(&meta, &ctx).bytes, 0);
+        assert_eq!(
+            price_sizing_inode(&meta, &ctx, || dir.path().to_owned()).bytes,
+            0
+        );
     }
 
     #[cfg(unix)]
@@ -1477,14 +1634,14 @@ mod tests {
         fs::write(&source, vec![0u8; 64]).unwrap_or_else(|err| panic!("write failed: {err}"));
         fs::hard_link(&source, dir.path().join("copy"))
             .unwrap_or_else(|err| panic!("link failed: {err}"));
-        // A second inode pair - the dedup set is already at cap=1, so both
+        // The root directory and one inode fill the shared cap=2, so both
         // links count and the result is a flagged upper bound, not a dead scan.
         let other = dir.path().join("other");
         fs::write(&other, vec![0u8; 64]).unwrap_or_else(|err| panic!("write failed: {err}"));
         fs::hard_link(&other, dir.path().join("other2"))
             .unwrap_or_else(|err| panic!("link failed: {err}"));
         let budget = ResourceBudget::new(ScanLimits {
-            max_identities: 1,
+            max_identities: 2,
             ..ScanLimits::default()
         });
         let size = measure_size_with_budget(
@@ -1494,6 +1651,10 @@ mod tests {
         );
         assert_eq!(size.bytes, 192); // source once; other+other2 overcounted
         assert!(!size.complete);
+        assert!(budget.sizing_identity());
+        assert!(budget.sizing_identity());
+        assert!(!budget.sizing_identity());
+        budget.release_sizing_identities(2);
         // And critically: the shared budget was never tripped by sizing.
         assert!(!budget.failed());
     }
@@ -1612,9 +1773,8 @@ mod tests {
         assert_eq!(result.scanned_dirs, 2);
     }
 
-    // JS readdir yields U+FFFD-mangled names for invalid UTF-8; the lossy path
-    // cannot be lstat'd back to the real entry, so both engines must count the
-    // dir as skipped rather than silently dropping it from the walk entirely.
+    // Paths that cannot be represented by the UTF-8 wire contract make the
+    // containing directory incomplete; they never become lossy path aliases.
     #[cfg(unix)]
     #[test]
     fn non_utf8_directory_counts_as_skipped() {
@@ -1834,7 +1994,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn apparent_size_dedups_hardlinks() {
         let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
         let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| {

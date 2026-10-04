@@ -25,6 +25,6 @@ for (let i = 0; i < repeats; i++) {
       ? (await scanToPlan(path, DEFAULT_CONFIG, options)).plan
       : await scanToPlanViaRust(path, { config: DEFAULT_CONFIG, ...options });
   process.stdout.write(
-    `${JSON.stringify({ ...plan.summary, elapsedMs: performance.now() - started, memory: process.memoryUsage() })}\n`,
+    `${JSON.stringify({ ...plan.summary, unknownSizeCount: plan.candidates.filter((candidate) => candidate.bytesKnown === false).length, elapsedMs: performance.now() - started, memory: process.memoryUsage() })}\n`,
   );
 }

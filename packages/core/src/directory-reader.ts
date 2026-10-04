@@ -206,6 +206,11 @@ async function* enumerateDirectory(
   signal?: AbortSignal,
 ): AsyncGenerator<{ name: Buffer; type: string }> {
   budget.check();
+  if (signal?.aborted) {
+    const error = new Error("Directory enumeration cancelled");
+    error.name = "AbortError";
+    throw error;
+  }
   if (process.versions.bun) {
     let worker = workers.get(budget);
     if (!worker?.available) {
@@ -218,7 +223,12 @@ async function* enumerateDirectory(
   // @ts-expect-error Node runtime supports raw filename encoding.
   const handle = await opendir(path, { encoding: "buffer", bufferSize: 32 });
   try {
-    while (!signal?.aborted) {
+    while (true) {
+      if (signal?.aborted) {
+        const error = new Error("Directory enumeration cancelled");
+        error.name = "AbortError";
+        throw error;
+      }
       const item = await handle.read();
       if (!item) return;
       yield {

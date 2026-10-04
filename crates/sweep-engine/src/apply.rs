@@ -13,6 +13,17 @@ use sweep_types::{
 
 use crate::guardrails;
 
+type FileIdentity = (u64, u64);
+
+struct RevalidatedEntry {
+    entry: ScanEntry,
+    identity: Option<FileIdentity>,
+}
+
+fn file_identity(path: &Path, meta: &fs::Metadata) -> std::io::Result<Option<FileIdentity>> {
+    sweep_fs::file_identity(path, meta).map(|id| id.map(|id| (id.device, id.inode)))
+}
+
 /// Apply a [`ScanPlan`]: revalidate selected candidates, delete ready entries, return a report.
 pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
     apply_plan_controlled(plan, &AtomicBool::new(false), &mut |_| {})
@@ -57,6 +68,11 @@ pub fn apply_plan_controlled_with_limit(
             candidate.id.len()
                 + candidate.entry.name.len()
                 + candidate.kind.len()
+                + candidate
+                    .entry
+                    .identity
+                    .as_ref()
+                    .map_or(0, |id| id.platform.len() + id.device.len() + id.inode.len())
                 + candidate.reasons.iter().map(|r| r.len()).sum::<usize>(),
         ) {
             break;
@@ -143,17 +159,31 @@ pub fn apply_plan_controlled_with_limit(
     let real_root = fs::canonicalize(&plan.target_dir).ok();
     // Identity pin, not just a path: a root renamed away and recreated under
     // the same spelling resolves identically but is a different directory.
-    // dev:ino is unix-only; on other platforms the canonical spelling is
-    // all we have (documented residual). JS parity: containmentRootId.
-    #[cfg(unix)]
-    let real_root_id: Option<(u64, u64)> = real_root.as_deref().and_then(|root| {
-        use std::os::unix::fs::MetadataExt;
-        fs::metadata(root).ok().map(|meta| (meta.dev(), meta.ino()))
+    // Unix dev:ino and Windows volume:file-index pin the directory identity.
+    let real_root_id = real_root.as_deref().and_then(|root| {
+        fs::metadata(root)
+            .ok()
+            .and_then(|meta| file_identity(root, &meta).ok().flatten())
     });
-    #[cfg(not(unix))]
-    let real_root_id: Option<(u64, u64)> = None;
+    let scanned_root = plan.target_identity.as_ref();
+    let current_root = real_root_id.map(|(device, inode)| {
+        sweep_fs::FileIdentity {
+            device,
+            inode,
+            links: 0,
+        }
+        .snapshot()
+    });
+    if scanned_root.is_none() || scanned_root != current_root.as_ref() {
+        return Err(EngineError::InvalidPlan {
+            message:
+                "plan root identity is missing or changed since scan; scan again before applying"
+                    .to_owned(),
+        });
+    }
 
     let mut ready: Vec<ScanEntry> = Vec::new();
+    let mut entry_identities = std::collections::HashMap::new();
     let mut failed_paths: Vec<PathFailure> = Vec::new();
 
     let mut outcomes: Vec<ApplyOutcome> = selected
@@ -222,9 +252,10 @@ pub fn apply_plan_controlled_with_limit(
         }
 
         match revalidate_candidate(candidate, real_root.as_deref()) {
-            Ok(entry) => {
+            Ok(validated) => {
                 outcomes[outcome_index[candidate.id.as_str()]].status = "unattempted".to_owned();
-                ready.push(entry);
+                entry_identities.insert(validated.entry.path.clone(), validated.identity);
+                ready.push(validated.entry);
             }
             Err(failure) => failed_paths.push(failure),
         }
@@ -237,10 +268,11 @@ pub fn apply_plan_controlled_with_limit(
             if cancelled.load(Ordering::Acquire) {
                 break;
             }
-            let size = sweep_fs::measure_size_with_budget(
+            let size = sweep_fs::measure_size_with_budget_controlled(
                 camino::Utf8Path::new(&entry.path),
                 plan.summary.exact,
                 &budget,
+                Some(cancelled),
             );
             if let Some(message) = budget.error() {
                 return Err(EngineError::ResourceLimit { message });
@@ -282,20 +314,29 @@ pub fn apply_plan_controlled_with_limit(
     let mut total_bytes_freed = 0u64;
 
     let mut retained_ids = std::collections::HashMap::new();
+    // Freeze aliases before removals: canonicalizing an alias whose parent
+    // was just deleted falls back to its lexical spelling and loses coverage.
+    let selected_keys: std::collections::HashMap<&str, String> = selected
+        .iter()
+        .map(|c| (c.id.as_str(), dedupe_key(&c.entry.path)))
+        .collect();
     for c in &selected {
         if outcomes[outcome_index[c.id.as_str()]].status == "unattempted" {
             retained_ids
-                .entry(dedupe_key(&c.entry.path))
+                .entry(selected_keys[c.id.as_str()].clone())
                 .or_insert(c.id.as_str());
         }
     }
+    let ready: Vec<(String, ScanEntry)> = ready
+        .into_iter()
+        .map(|entry| (dedupe_key(&entry.path), entry))
+        .collect();
     let mut removed = std::collections::HashMap::new();
     let mut removed_dirs = std::collections::HashMap::new();
-    for entry in ready {
+    for (key, entry) in ready {
         if cancelled.load(Ordering::Acquire) {
             break;
         }
-        let key = dedupe_key(&entry.path);
         let id = retained_ids[key.as_str()];
         if cancelled.load(Ordering::Acquire) {
             break;
@@ -304,8 +345,19 @@ pub fn apply_plan_controlled_with_limit(
         // attempted - a cancel landing between the checks above used to
         // paint a phantom "deleting" line for work that never ran.
         on_begin(id);
+        // The callback can block on stdout or discover a closed consumer.
+        // Recheck before crossing the destructive boundary in either case.
+        if cancelled.load(Ordering::Acquire) {
+            break;
+        }
         let result = match real_root.as_deref() {
-            Some(root) => delete_entry(&entry, root, real_root_id),
+            Some(root) => delete_entry(
+                &entry,
+                root,
+                real_root_id,
+                entry_identities[&entry.path],
+                cancelled,
+            ),
             None => Err(path_failure(
                 &entry.path,
                 FailureReasonCode::OutsideTarget,
@@ -334,8 +386,8 @@ pub fn apply_plan_controlled_with_limit(
         if outcomes[index].status != "unattempted" {
             continue;
         }
-        let key = dedupe_key(&c.entry.path);
-        let mut covering = removed.get(&key).copied();
+        let key = &selected_keys[c.id.as_str()];
+        let mut covering = removed.get(key.as_str()).copied();
         let mut parent = Path::new(&key).parent();
         while covering.is_none() {
             let Some(path) = parent else {
@@ -366,7 +418,7 @@ pub fn apply_plan_controlled_with_limit(
 fn revalidate_candidate(
     candidate: &ScanCandidate,
     real_root: Option<&Path>,
-) -> Result<ScanEntry, PathFailure> {
+) -> Result<RevalidatedEntry, PathFailure> {
     let path = Path::new(candidate.entry.path.as_str());
     if let Some(root) = real_root {
         validate_real_parent(path, root)?;
@@ -455,7 +507,26 @@ fn revalidate_candidate(
         }
     }
 
-    Ok(candidate.entry.clone())
+    let current = sweep_fs::file_identity(path, &meta).map_err(|err| {
+        path_failure(
+            &candidate.entry.path,
+            classify_io_error(&err),
+            err.to_string(),
+        )
+    })?;
+    if candidate.entry.identity.is_none()
+        || candidate.entry.identity != current.map(sweep_fs::FileIdentity::snapshot)
+    {
+        return Err(path_failure(
+            &candidate.entry.path,
+            FailureReasonCode::FilesystemError,
+            "candidate identity is missing or changed since scan; scan again".to_owned(),
+        ));
+    }
+    Ok(RevalidatedEntry {
+        entry: candidate.entry.clone(),
+        identity: current.map(|id| (id.device, id.inode)),
+    })
 }
 
 /// True when a path resolves through a process-relative magic root
@@ -629,20 +700,23 @@ fn delete_entry(
     entry: &ScanEntry,
     real_root: &Path,
     real_root_id: Option<(u64, u64)>,
+    expected_identity: Option<FileIdentity>,
+    cancelled: &AtomicBool,
 ) -> Result<(), PathFailure> {
     let path = Path::new(entry.path.as_str());
+    #[cfg(not(target_os = "linux"))]
+    let _ = cancelled;
 
     // Identity pin, not just a path: a renamed-away-and-recreated root
     // resolves to the same spelling but is a different directory. Re-stat
     // right before the delete so that swap fails closed. JS parity.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
-        use std::os::unix::fs::MetadataExt;
         let root_ok = real_root_id
-            .and_then(|(dev, ino)| {
+            .and_then(|expected| {
                 fs::metadata(real_root)
                     .ok()
-                    .map(|meta| meta.dev() == dev && meta.ino() == ino)
+                    .map(|meta| file_identity(real_root, &meta).ok().flatten() == Some(expected))
             })
             .unwrap_or(false);
         if !root_ok {
@@ -685,15 +759,24 @@ fn delete_entry(
                     "entry type changed since validation".to_owned(),
                 ));
             }
+            let current_identity = file_identity(path, &meta).map_err(|err| {
+                path_failure(&entry.path, classify_io_error(&err), err.to_string())
+            })?;
+            if expected_identity.is_some() && current_identity != expected_identity {
+                return Err(path_failure(
+                    &entry.path,
+                    FailureReasonCode::FilesystemError,
+                    "entry was replaced since revalidation".to_owned(),
+                ));
+            }
             // A mount point inside the root is invisible to canonical paths
             // - they still spell "inside" - but st_dev exposes it. Removing
             // across that boundary would delete a filesystem the scan never
             // covered. JS parity: current.dev !== rootNow.dev.
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             {
-                use std::os::unix::fs::MetadataExt;
                 if let Some((root_dev, _)) = real_root_id {
-                    if meta.dev() != root_dev {
+                    if current_identity.is_none_or(|(device, _)| device != root_dev) {
                         return Err(path_failure(
                             &entry.path,
                             FailureReasonCode::OutsideTarget,
@@ -712,6 +795,36 @@ fn delete_entry(
         }
     }
 
+    #[cfg(target_os = "linux")]
+    let result = (|| -> std::io::Result<()> {
+        let root_identity = real_root_id
+            .ok_or_else(|| std::io::Error::other("missing containment root identity"))?;
+        let identity =
+            expected_identity.ok_or_else(|| std::io::Error::other("missing candidate identity"))?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| std::io::Error::other("missing candidate parent"))?;
+        let parent = fs::canonicalize(parent)?;
+        if guardrails::path_has_protected_vcs_segment(&parent.to_string_lossy()) {
+            return Err(std::io::Error::other(
+                "parent resolves inside protected VCS metadata",
+            ));
+        }
+        let relative = parent.join(
+            path.file_name()
+                .ok_or_else(|| std::io::Error::other("missing candidate leaf"))?,
+        );
+        let relative = relative
+            .strip_prefix(real_root)
+            .map_err(|_| std::io::Error::other("candidate parent outside root"))?;
+        sweep_fs::RemovalRoot::open(real_root, root_identity)?.remove(
+            relative,
+            identity,
+            !entry.is_symlink && entry.entry_type == EntryType::Directory,
+            cancelled,
+        )
+    })();
+    #[cfg(not(target_os = "linux"))]
     let result = if entry.is_symlink {
         fs::remove_file(path).or_else(|err| {
             // Windows refuses remove_file on dir symlinks/junctions; remove_dir
@@ -741,16 +854,20 @@ fn delete_entry(
         // removal is an anomaly (recreated mid-delete or exotic fs
         // semantics) - report it, don't claim it. JS parity.
         if fs::symlink_metadata(path).is_ok() {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "path still exists after delete",
-            ))
+            Err(std::io::Error::other("path still exists after delete"))
         } else {
             Ok(())
         }
     });
 
-    result.map_err(|err| path_failure(&entry.path, classify_io_error(&err), err.to_string()))
+    result.map_err(|err| {
+        let message = if entry.entry_type == EntryType::Directory && !entry.is_symlink {
+            format!("{err}; directory removal may already have removed some descendants")
+        } else {
+            err.to_string()
+        };
+        path_failure(&entry.path, classify_io_error(&err), message)
+    })
 }
 
 /// Windows dir-symlinks and junctions are reparse points - distinguishable
@@ -764,7 +881,7 @@ fn is_reparse_or_symlink(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "linux")))]
 fn is_reparse_or_symlink(_path: &Path) -> bool {
     false
 }
@@ -839,6 +956,79 @@ mod tests {
     use sweep_types::{RiskTier, ScanCandidate, ScanPlanSummary, SelectionPolicy};
     use tempfile::tempdir;
 
+    #[test]
+    fn saved_snapshots_refuse_replaced_candidates_and_roots() {
+        for replace_root in [false, true] {
+            let owned = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+            let root = owned.path().join("project");
+            let artifact = root.join("node_modules");
+            fs::create_dir_all(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+            let path = camino::Utf8Path::from_path(&root).unwrap_or_else(|| panic!("utf8"));
+            let plan = crate::scan_to_plan(path).unwrap_or_else(|e| panic!("scan: {e}"));
+            if replace_root {
+                fs::rename(&root, owned.path().join("original"))
+                    .unwrap_or_else(|e| panic!("rename: {e}"));
+            } else {
+                fs::rename(&artifact, root.join("original"))
+                    .unwrap_or_else(|e| panic!("rename: {e}"));
+            }
+            fs::create_dir_all(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+            fs::write(artifact.join("keep"), b"replacement")
+                .unwrap_or_else(|e| panic!("write: {e}"));
+            let applied = super::apply_plan(&plan);
+            if replace_root {
+                assert!(applied.is_err(), "replaced root was approved");
+            } else {
+                let report = applied.unwrap_or_else(|e| panic!("apply: {e}"));
+                assert_eq!(report.deleted_count, 0);
+                assert_eq!(report.failed_count, 1);
+                assert!(report.failed_paths[0].error.contains("identity"));
+            }
+            assert_eq!(
+                fs::read(artifact.join("keep")).unwrap_or_else(|e| panic!("read: {e}")),
+                b"replacement"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_scan_snapshots_cannot_authorize_deletion() {
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let artifact = dir.path().join("node_modules");
+        fs::create_dir(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        let root = camino::Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("utf8"));
+        let mut plan = crate::scan_to_plan(root).unwrap_or_else(|e| panic!("scan: {e}"));
+        plan.candidates[0].entry.identity = None;
+        let report = super::apply_plan(&plan).unwrap_or_else(|e| panic!("apply: {e}"));
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(report.failed_count, 1);
+        plan.target_identity = None;
+        assert!(super::apply_plan(&plan).is_err());
+        assert!(artifact.exists());
+    }
+
+    // Hand-built operation fixtures intentionally capture their approval snapshot
+    // before invoking apply. Saved-plan regressions call the real entrypoint
+    // directly and never refresh a snapshot after replacement.
+    fn approved_fixture(plan: &ScanPlan) -> ScanPlan {
+        let mut approved = plan.clone();
+        let snapshot = |path: &str| {
+            fs::symlink_metadata(path)
+                .ok()
+                .and_then(|meta| {
+                    sweep_fs::file_identity(Path::new(path), &meta)
+                        .ok()
+                        .flatten()
+                })
+                .map(sweep_fs::FileIdentity::snapshot)
+        };
+        approved.target_identity = snapshot(&approved.target_dir);
+        for candidate in &mut approved.candidates {
+            candidate.entry.identity = snapshot(&candidate.entry.path);
+        }
+        approved
+    }
+
     #[cfg(unix)]
     #[test]
     fn protect_symlink_candidates_beneath_vcs_aliases() {
@@ -863,7 +1053,14 @@ mod tests {
         let validation = revalidate_candidate(&selected, Some(&root));
         assert!(validation.is_err(), "VCS symlink passed revalidation");
         assert!(
-            delete_entry(&selected.entry, &root, root_id).is_err(),
+            delete_entry(
+                &selected.entry,
+                &root,
+                root_id,
+                None,
+                &AtomicBool::new(false)
+            )
+            .is_err(),
             "VCS symlink passed delete-time checks"
         );
         assert!(fs::symlink_metadata(git.join("node_modules")).is_ok());
@@ -891,7 +1088,7 @@ mod tests {
         ];
         plan.selected_candidate_ids = plan.candidates.iter().map(|c| c.id.clone()).collect();
         let cancel = AtomicBool::new(false);
-        let report = apply_plan_controlled(&plan, &cancel, &mut |_| {
+        let report = apply_plan_controlled(&approved_fixture(&plan), &cancel, &mut |_| {
             cancel.store(true, Ordering::Release)
         })
         .unwrap_or_else(|e| panic!("apply: {e}"));
@@ -910,6 +1107,163 @@ mod tests {
             vec!["deleted", "covered", "unattempted"]
         );
         assert_eq!(outcomes[1].covered_by.as_deref(), Some("cand_a"));
+    }
+
+    #[test]
+    fn cancellation_during_begin_preserves_the_candidate() {
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let artifact = dir.path().join("node_modules");
+        fs::create_dir(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        let mut plan = ScanPlan::empty(dir.path().to_string_lossy().into_owned(), "test");
+        plan.candidates = vec![candidate(
+            &artifact.to_string_lossy(),
+            "node_modules",
+            EntryType::Directory,
+            false,
+        )];
+        plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
+        let cancel = AtomicBool::new(false);
+        let report = apply_plan_controlled_with_limit(
+            &approved_fixture(&plan),
+            &cancel,
+            &mut |_| cancel.store(true, Ordering::Release),
+            &mut |_| panic!("cancelled candidate was deleted"),
+            None,
+        )
+        .unwrap_or_else(|e| panic!("apply: {e}"));
+        assert!(artifact.exists());
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(report.interrupted, Some(true));
+        assert_eq!(report.outcomes.unwrap_or_default()[0].status, "unattempted");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn same_type_replacement_during_begin_is_preserved() {
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let artifact = dir.path().join("node_modules");
+        let moved = dir.path().join("original");
+        fs::create_dir(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        let mut plan = ScanPlan::empty(dir.path().to_string_lossy().into_owned(), "test");
+        plan.candidates = vec![candidate(
+            &artifact.to_string_lossy(),
+            "node_modules",
+            EntryType::Directory,
+            false,
+        )];
+        plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
+        let report = apply_plan_controlled_with_limit(
+            &approved_fixture(&plan),
+            &AtomicBool::new(false),
+            &mut |_| {
+                fs::rename(&artifact, &moved).unwrap_or_else(|e| panic!("rename: {e}"));
+                fs::create_dir(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+                fs::write(artifact.join("keep"), b"replacement")
+                    .unwrap_or_else(|e| panic!("write: {e}"));
+            },
+            &mut |_| {},
+            None,
+        )
+        .unwrap_or_else(|e| panic!("apply: {e}"));
+        assert_eq!(report.deleted_count, 0);
+        assert_eq!(report.failed_count, 1);
+        assert!(artifact.join("keep").exists());
+        assert!(moved.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recursive_delete_unlinks_interior_symlinks_without_touching_their_targets() {
+        let owned = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let root = owned.path().join("project");
+        let artifact = root.join("node_modules");
+        let external = owned.path().join("external");
+        fs::create_dir_all(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        fs::create_dir(&external).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        fs::write(external.join("keep"), b"keep").unwrap_or_else(|e| panic!("write: {e}"));
+        std::os::unix::fs::symlink(&external, artifact.join("linked-dir"))
+            .unwrap_or_else(|e| panic!("symlink: {e}"));
+        std::os::unix::fs::symlink(external.join("keep"), artifact.join("linked-file"))
+            .unwrap_or_else(|e| panic!("symlink: {e}"));
+        let mut plan = ScanPlan::empty(root.to_string_lossy().into_owned(), "test");
+        plan.candidates = vec![candidate(
+            &artifact.to_string_lossy(),
+            "node_modules",
+            EntryType::Directory,
+            false,
+        )];
+        plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
+        let report = apply_plan(&approved_fixture(&plan)).unwrap_or_else(|e| panic!("apply: {e}"));
+        assert_eq!(report.deleted_count, 1);
+        assert_eq!(report.failed_count, 0);
+        assert!(!artifact.exists());
+        assert_eq!(
+            fs::read(external.join("keep")).ok().as_deref(),
+            Some(b"keep".as_slice())
+        );
+    }
+
+    #[test]
+    fn recursive_delete_preserves_external_hardlink_contents() {
+        let owned = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let root = owned.path().join("project");
+        let artifact = root.join("node_modules");
+        let external = owned.path().join("keep");
+        fs::create_dir_all(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        fs::write(&external, b"keep").unwrap_or_else(|e| panic!("write: {e}"));
+        fs::hard_link(&external, artifact.join("linked"))
+            .unwrap_or_else(|e| panic!("hardlink: {e}"));
+        let mut plan = ScanPlan::empty(root.to_string_lossy().into_owned(), "test");
+        plan.candidates = vec![candidate(
+            &artifact.to_string_lossy(),
+            "node_modules",
+            EntryType::Directory,
+            false,
+        )];
+        plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
+        let report = apply_plan(&approved_fixture(&plan)).unwrap_or_else(|e| panic!("apply: {e}"));
+        assert_eq!(report.deleted_count, 1);
+        assert_eq!(report.failed_count, 0);
+        assert_eq!(
+            fs::read(&external).ok().as_deref(),
+            Some(b"keep".as_slice())
+        );
+        assert!(!artifact.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn covered_outcomes_keep_the_pre_delete_alias_identity() {
+        let dir = tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
+        let artifact = dir.path().join("node_modules");
+        let child = artifact.join("child");
+        let alias = dir.path().join("alias");
+        fs::create_dir_all(&child).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        std::os::unix::fs::symlink(&artifact, &alias).unwrap_or_else(|e| panic!("symlink: {e}"));
+        let mut plan = ScanPlan::empty(dir.path().to_string_lossy().into_owned(), "test");
+        plan.candidates = vec![
+            candidate(
+                &artifact.to_string_lossy(),
+                "node_modules",
+                EntryType::Directory,
+                false,
+            ),
+            candidate(
+                &alias.join("child").to_string_lossy(),
+                "child",
+                EntryType::Directory,
+                false,
+            ),
+        ];
+        plan.selected_candidate_ids = plan.candidates.iter().map(|c| c.id.clone()).collect();
+        let report = apply_plan(&approved_fixture(&plan)).unwrap_or_else(|e| panic!("apply: {e}"));
+        assert_eq!(report.deleted_count, 1);
+        assert_eq!(report.failed_count, 0);
+        assert!(!artifact.exists());
+        let outcomes = report.outcomes.unwrap_or_default();
+        assert_eq!(outcomes[0].status, "deleted");
+        assert_eq!(outcomes[1].status, "covered");
+        assert_eq!(outcomes[1].covered_by.as_deref(), Some("cand_node_modules"));
     }
 
     #[test]
@@ -932,7 +1286,7 @@ mod tests {
         )];
         plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
 
-        let report = apply_plan(&plan).unwrap_or_else(|e| panic!("apply: {e}"));
+        let report = apply_plan(&approved_fixture(&plan)).unwrap_or_else(|e| panic!("apply: {e}"));
         assert_eq!(report.deleted_count, 0);
         assert_eq!(report.failed_count, 1);
         assert_eq!(report.failed_paths[0].code, "filesystem_error");
@@ -958,7 +1312,10 @@ mod tests {
         plan.selected_candidate_ids = vec!["cand_node_modules".to_owned()];
         fs::remove_dir_all(&ghost).unwrap_or_else(|e| panic!("rmdir: {e}"));
 
-        let err = apply_plan(&plan).expect_err("vanished target must refuse the plan");
+        let err = match apply_plan(&approved_fixture(&plan)) {
+            Err(err) => err,
+            Ok(_) => panic!("vanished target must refuse the plan"),
+        };
         assert!(err.to_string().contains("cannot be inspected"), "{err}");
         assert!(!ghost.exists());
     }
@@ -981,7 +1338,7 @@ mod tests {
 
         let cancel = AtomicBool::new(true);
         let mut begins = 0u32;
-        let report = apply_plan_controlled(&plan, &cancel, &mut |_| begins += 1)
+        let report = apply_plan_controlled(&approved_fixture(&plan), &cancel, &mut |_| begins += 1)
             .unwrap_or_else(|e| panic!("apply: {e}"));
         assert_eq!(begins, 0, "apply_begin fired for a cancelled entry");
         assert_eq!(report.deleted_count, 0);
@@ -992,6 +1349,7 @@ mod tests {
     fn candidate(path: &str, name: &str, entry_type: EntryType, is_symlink: bool) -> ScanCandidate {
         ScanCandidate {
             entry: ScanEntry {
+                identity: None,
                 path: path.to_owned(),
                 name: name.to_owned(),
                 estimated_bytes: 0,
@@ -1017,6 +1375,7 @@ mod tests {
 
         let artifact_path = artifact.to_string_lossy().into_owned();
         let plan = ScanPlan {
+            target_identity: None,
             protocol_version: PROTOCOL_VERSION.to_owned(),
             target_dir: root.to_string(),
             selection_policy: SelectionPolicy::default(),
@@ -1039,7 +1398,8 @@ mod tests {
             created_at: "1970-01-01T00:00:00.000Z".to_owned(),
         };
 
-        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        let report = apply_plan(&approved_fixture(&plan))
+            .unwrap_or_else(|err| panic!("apply failed: {err}"));
         assert_eq!(report.deleted_count, 1);
         assert_eq!(report.failed_count, 0);
         assert!(!artifact.exists());
@@ -1055,6 +1415,7 @@ mod tests {
         let artifact_path = artifact.to_string_lossy().into_owned();
         let outside_path = "/tmp/outside-node_modules".to_owned();
         let plan = ScanPlan {
+            target_identity: None,
             protocol_version: PROTOCOL_VERSION.to_owned(),
             target_dir: root.to_string(),
             selection_policy: SelectionPolicy::default(),
@@ -1062,6 +1423,7 @@ mod tests {
                 candidate(&artifact_path, "node_modules", EntryType::Directory, false),
                 ScanCandidate {
                     entry: ScanEntry {
+                        identity: None,
                         path: outside_path.clone(),
                         name: "node_modules".to_owned(),
                         estimated_bytes: 0,
@@ -1090,7 +1452,8 @@ mod tests {
             created_at: "1970-01-01T00:00:00.000Z".to_owned(),
         };
 
-        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        let report = apply_plan(&approved_fixture(&plan))
+            .unwrap_or_else(|err| panic!("apply failed: {err}"));
         assert_eq!(report.deleted_count, 1);
         assert_eq!(report.failed_count, 1);
         assert_eq!(
@@ -1122,6 +1485,7 @@ mod tests {
 
         let candidate_path = sub.join("node_modules").to_string_lossy().into_owned();
         let plan = ScanPlan {
+            target_identity: None,
             protocol_version: PROTOCOL_VERSION.to_owned(),
             target_dir: root.to_string(),
             selection_policy: SelectionPolicy::default(),
@@ -1144,7 +1508,8 @@ mod tests {
             created_at: "1970-01-01T00:00:00.000Z".to_owned(),
         };
 
-        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        let report = apply_plan(&approved_fixture(&plan))
+            .unwrap_or_else(|err| panic!("apply failed: {err}"));
         assert_eq!(report.deleted_count, 0);
         assert_eq!(report.failed_count, 1);
         assert_eq!(
@@ -1166,6 +1531,7 @@ mod tests {
 
         let root_for_candidate = root.clone();
         let plan = ScanPlan {
+            target_identity: None,
             protocol_version: PROTOCOL_VERSION.to_owned(),
             target_dir: root.clone(),
             selection_policy: SelectionPolicy::default(),
@@ -1188,7 +1554,8 @@ mod tests {
             created_at: "1970-01-01T00:00:00.000Z".to_owned(),
         };
 
-        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        let report = apply_plan(&approved_fixture(&plan))
+            .unwrap_or_else(|err| panic!("apply failed: {err}"));
         assert_eq!(report.deleted_count, 0);
         assert_eq!(report.failed_count, 1);
         assert_eq!(
@@ -1211,6 +1578,7 @@ mod tests {
 
         for spelling in [format!("{root}/."), format!("{root}/sub/..")] {
             let plan = ScanPlan {
+                target_identity: None,
                 protocol_version: PROTOCOL_VERSION.to_owned(),
                 target_dir: root.clone(),
                 selection_policy: SelectionPolicy::default(),
@@ -1228,7 +1596,8 @@ mod tests {
                 created_at: "1970-01-01T00:00:00.000Z".to_owned(),
             };
 
-            let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+            let report = apply_plan(&approved_fixture(&plan))
+                .unwrap_or_else(|err| panic!("apply failed: {err}"));
             assert_eq!(report.deleted_count, 0, "spelling {spelling} deleted root");
             assert_eq!(
                 report.failed_paths[0].code,
@@ -1250,11 +1619,13 @@ mod tests {
 
         let git_path = git_dir.to_string_lossy().into_owned();
         let plan = ScanPlan {
+            target_identity: None,
             protocol_version: PROTOCOL_VERSION.to_owned(),
             target_dir: root.to_string(),
             selection_policy: SelectionPolicy::default(),
             candidates: vec![ScanCandidate {
                 entry: ScanEntry {
+                    identity: None,
                     path: git_path,
                     name: ".git".to_owned(),
                     estimated_bytes: 0,
@@ -1282,7 +1653,8 @@ mod tests {
             created_at: "1970-01-01T00:00:00.000Z".to_owned(),
         };
 
-        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        let report = apply_plan(&approved_fixture(&plan))
+            .unwrap_or_else(|err| panic!("apply failed: {err}"));
         assert_eq!(report.deleted_count, 0);
         assert_eq!(
             report.failed_paths[0].code,
@@ -1304,6 +1676,7 @@ mod tests {
         let mut dupe = candidate(&artifact_path, "node_modules", EntryType::Directory, false);
         dupe.id = "cand_dupe".to_owned();
         let plan = ScanPlan {
+            target_identity: None,
             protocol_version: PROTOCOL_VERSION.to_owned(),
             target_dir: root.to_string(),
             selection_policy: SelectionPolicy::default(),
@@ -1324,7 +1697,8 @@ mod tests {
             created_at: "1970-01-01T00:00:00.000Z".to_owned(),
         };
 
-        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        let report = apply_plan(&approved_fixture(&plan))
+            .unwrap_or_else(|err| panic!("apply failed: {err}"));
         assert_eq!(report.deleted_count, 1);
         assert_eq!(report.failed_count, 0);
         assert!(!artifact.exists());
@@ -1347,6 +1721,7 @@ mod tests {
         child_candidate.entry.estimated_bytes = 40;
 
         let plan = ScanPlan {
+            target_identity: None,
             protocol_version: PROTOCOL_VERSION.to_owned(),
             target_dir: root.to_string(),
             selection_policy: SelectionPolicy::default(),
@@ -1364,7 +1739,8 @@ mod tests {
             created_at: "1970-01-01T00:00:00.000Z".to_owned(),
         };
 
-        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply failed: {err}"));
+        let report = apply_plan(&approved_fixture(&plan))
+            .unwrap_or_else(|err| panic!("apply failed: {err}"));
         assert_eq!(report.deleted_count, 1);
         assert_eq!(report.failed_count, 0);
         assert_eq!(report.total_bytes_freed, 100);

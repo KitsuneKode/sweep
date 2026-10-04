@@ -20,6 +20,15 @@ import { mapPool } from "./async-pool.js";
 import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./planner.js";
 import { GuardrailError, assertSafeCwd, assertSizeLimit } from "./guardrails.js";
 import { applyPlanViaRust, type EngineBackend } from "./rust-engine.js";
+import { readFilesystemIdentity, sameFilesystemIdentity } from "./filesystem-identity.js";
+
+function assertPlanRootIdentity(plan: ScanPlan): void {
+  if (!sameFilesystemIdentity(plan.targetIdentity, readFilesystemIdentity(plan.targetDir))) {
+    throw new GuardrailError(
+      "Plan root identity is missing or changed since scan; scan again before applying",
+    );
+  }
+}
 
 export interface ScanToPlanOptions extends ScanHooks {
   exact?: boolean;
@@ -93,6 +102,7 @@ export async function applyPlan(
   if (selected.length === 0) {
     return emptyApplyPlanResult(plan);
   }
+  assertPlanRootIdentity(plan);
 
   // Plans are untrusted input: every selected path is revalidated per entry
   // (containment, target-root, VCS segments, symlink/type state), matching the
@@ -105,6 +115,12 @@ export async function applyPlan(
     plan.targetDir,
     isCancelled,
   );
+  // Canonical aliases can stop resolving after their parent is removed.
+  // Freeze receipt keys before any sizing callback or destructive operation.
+  const receiptKeys = new Map(
+    selected.map((candidate) => [candidate.path, dedupeKey(candidate.path)]),
+  );
+  const frozenKey = (path: string) => receiptKeys.get(path) ?? dedupeKey(path);
   // Dedupe up front so `interrupted` compares against the real work set -
   // entries deduped away are never attempted and must not read as skipped.
   const workSet = deduplicateNestedEntries(ready);
@@ -141,6 +157,7 @@ export async function applyPlan(
     trashDir: options.trashDir,
     trashRoot: options.trashRoot,
     containmentRoot: plan.targetDir,
+    containmentIdentity: plan.targetIdentity,
   });
   const allFailures = [...revalidationFailures, ...cleanResult.failedPaths];
   // Rust parity: `interrupted` is whether the cancel flag was observed at
@@ -152,38 +169,38 @@ export async function applyPlan(
     cleanResult.deleted.length + cleanResult.failedPaths.length < workSet.length;
 
   const firstByPath = new Map(
-    workSet.map((entry) => [dedupeKey(entry.path), entry as ScanCandidate]),
+    workSet.map((entry) => [frozenKey(entry.path), entry as ScanCandidate]),
   );
   // Candidates revalidation never reached (cancelled mid-loop) must report
   // "unattempted", not "failed": the tail has no failedPaths entry, and
   // counting it would disagree with failedCount (Rust parity).
   const readySet = new Set(ready);
   const revalidationFailureKeys = new Set(
-    revalidationFailures.map((failure) => dedupeKey(failure.path)),
+    revalidationFailures.map((failure) => frozenKey(failure.path)),
   );
   const failedIds = new Set(
     selected
       .filter(
         (candidate) =>
-          !readySet.has(candidate) && revalidationFailureKeys.has(dedupeKey(candidate.path)),
+          !readySet.has(candidate) && revalidationFailureKeys.has(frozenKey(candidate.path)),
       )
       .map((candidate) => candidate.id),
   );
   for (const failure of cleanResult.failedPaths) {
-    const candidate = firstByPath.get(dedupeKey(failure.path));
+    const candidate = firstByPath.get(frozenKey(failure.path));
     if (candidate) failedIds.add(candidate.id);
   }
   const removed = new Map<string, string>();
   const removedDirs = new Map<string, string>();
   for (const entry of cleanResult.deleted) {
-    const key = dedupeKey(entry.path);
+    const key = frozenKey(entry.path);
     const id = firstByPath.get(key)!.id;
     removed.set(key, id);
     if (entry.entryType === "directory" && !entry.isSymlink) removedDirs.set(key, id);
   }
   const outcomes: ApplyOutcome[] = selected.map((candidate) => {
     if (failedIds.has(candidate.id)) return { candidateId: candidate.id, status: "failed" };
-    const key = dedupeKey(candidate.path);
+    const key = frozenKey(candidate.path);
     let coveredBy = removed.get(key);
     if (coveredBy === candidate.id) return { candidateId: candidate.id, status: "deleted" };
     let parent = dirname(key);
@@ -267,6 +284,7 @@ export async function applyPlanWithBackend(
   if (selected.length === 0) {
     return emptyApplyPlanResult(plan);
   }
+  assertPlanRootIdentity(plan);
 
   // The Rust engine revalidates per entry itself (containment, protected
   // paths, symlink/type state); forged candidates come back as failures.

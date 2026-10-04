@@ -1,9 +1,161 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clean, deduplicateNestedEntries } from "./cleaner.js";
 import type { ScanEntry } from "@kitsunekode/sweep-protocol";
+
+test("recursive deletion preserves the contents of an external hardlink", async () => {
+  const owned = mkdtempSync(join(tmpdir(), "sweep-interior-hardlink-"));
+  try {
+    const root = join(owned, "project");
+    const artifact = join(root, "node_modules");
+    const external = join(owned, "keep");
+    mkdirSync(artifact, { recursive: true });
+    writeFileSync(external, "keep");
+    linkSync(external, join(artifact, "linked"));
+    const result = await clean(
+      [
+        {
+          path: artifact,
+          name: "node_modules",
+          entryType: "directory",
+          isSymlink: false,
+          estimatedBytes: 4,
+        },
+      ],
+      { containmentRoot: root },
+    );
+    expect(result.deleted).toHaveLength(1);
+    expect(result.failedPaths).toHaveLength(0);
+    expect(readFileSync(external, "utf8")).toBe("keep");
+    expect(existsSync(artifact)).toBe(false);
+  } finally {
+    rmSync(owned, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(process.platform === "win32")(
+  "recursive deletion preserves interior symlink targets",
+  async () => {
+    const owned = mkdtempSync(join(tmpdir(), "sweep-interior-links-"));
+    try {
+      const root = join(owned, "project");
+      const artifact = join(root, "node_modules");
+      const external = join(owned, "external");
+      mkdirSync(artifact, { recursive: true });
+      mkdirSync(external);
+      writeFileSync(join(external, "keep"), "keep");
+      symlinkSync(external, join(artifact, "linked-dir"));
+      symlinkSync(join(external, "keep"), join(artifact, "linked-file"));
+      const result = await clean(
+        [
+          {
+            path: artifact,
+            name: "node_modules",
+            entryType: "directory",
+            isSymlink: false,
+            estimatedBytes: 0,
+          },
+        ],
+        { containmentRoot: root },
+      );
+      expect(result.deleted).toHaveLength(1);
+      expect(result.failedPaths).toHaveLength(0);
+      expect(readFileSync(join(external, "keep"), "utf8")).toBe("keep");
+      expect(existsSync(artifact)).toBe(false);
+    } finally {
+      rmSync(owned, { recursive: true, force: true });
+    }
+  },
+);
+
+test("cancellation in onBegin preserves the entry for delete and trash", async () => {
+  for (const trash of [false, true]) {
+    const root = mkdtempSync(join(tmpdir(), "sweep-begin-cancel-"));
+    try {
+      const path = join(root, "node_modules");
+      mkdirSync(path);
+      let cancelled = false;
+      let progressed = 0;
+      const result = await clean(
+        [
+          {
+            path,
+            name: "node_modules",
+            estimatedBytes: 0,
+            entryType: "directory",
+            isSymlink: false,
+          },
+        ],
+        {
+          containmentRoot: root,
+          ...(trash ? { trashDir: join(root, "trash"), trashRoot: root } : {}),
+          isCancelled: () => cancelled,
+          onBegin: () => {
+            cancelled = true;
+          },
+          onProgress: () => {
+            progressed++;
+          },
+        },
+      );
+      expect(result.deleted).toHaveLength(0);
+      expect(result.failedPaths).toHaveLength(0);
+      expect(progressed).toBe(0);
+      expect(existsSync(path)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("a same-type replacement in onBegin is preserved for delete and trash", async () => {
+  for (const trash of [false, true]) {
+    const root = mkdtempSync(join(tmpdir(), "sweep-begin-replace-"));
+    try {
+      const path = join(root, "node_modules");
+      const original = join(root, "original");
+      mkdirSync(path);
+      const result = await clean(
+        [
+          {
+            path,
+            name: "node_modules",
+            estimatedBytes: 0,
+            entryType: "directory",
+            isSymlink: false,
+          },
+        ],
+        {
+          containmentRoot: root,
+          ...(trash ? { trashDir: join(root, "trash"), trashRoot: root } : {}),
+          onBegin: () => {
+            renameSync(path, original);
+            mkdirSync(path);
+            writeFileSync(join(path, "keep"), "replacement");
+          },
+        },
+      );
+      expect(result.deleted).toHaveLength(0);
+      expect(result.failedPaths).toHaveLength(1);
+      expect(readFileSync(join(path, "keep"), "utf8")).toBe("replacement");
+      expect(existsSync(original)).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
 
 describe("deduplicateNestedEntries", () => {
   const root = join(tmpdir(), "sweep-cleaner-test");
@@ -109,6 +261,47 @@ describe("clean", () => {
 });
 
 describe("clean with trashDir", () => {
+  test("a trash root recreated at the same path is refused", async () => {
+    const owned = mkdtempSync(join(tmpdir(), "sweep-trash-root-replace-"));
+    try {
+      const root = join(owned, "project");
+      const path = join(root, "node_modules");
+      const trashDir = join(owned, "trash");
+      const originalTrash = join(owned, "original-trash");
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, "keep"), "source");
+      const result = await clean(
+        [
+          {
+            path,
+            name: "node_modules",
+            entryType: "directory",
+            isSymlink: false,
+            estimatedBytes: 6,
+          },
+        ],
+        {
+          containmentRoot: root,
+          trashRoot: root,
+          trashDir,
+          onBegin: () => {
+            renameSync(trashDir, originalTrash);
+            mkdirSync(trashDir);
+            writeFileSync(join(trashDir, "sentinel"), "replacement");
+          },
+        },
+      );
+      expect(result.deleted).toHaveLength(0);
+      expect(result.failedPaths).toHaveLength(1);
+      expect(result.failedPaths[0]?.error).toContain("changed during apply");
+      expect(readFileSync(join(path, "keep"), "utf8")).toBe("source");
+      expect(readFileSync(join(trashDir, "sentinel"), "utf8")).toBe("replacement");
+      expect(existsSync(join(trashDir, "node_modules"))).toBe(false);
+    } finally {
+      rmSync(owned, { recursive: true, force: true });
+    }
+  });
+
   test("moves entries into the trash dir preserving target-relative paths", async () => {
     const root = mkdtempSync(join(tmpdir(), "sweep-trash-test-"));
     try {

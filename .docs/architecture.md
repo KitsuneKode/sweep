@@ -94,12 +94,33 @@ See [.docs/workspace-layout.md](workspace-layout.md) for the directory map and
   `lstat` per match. Both engines fill it, the schemas allow it, and the parity
   normalizers drop it because timestamps differ per checkout. Anything that
   reads it must treat "absent" as unknown, never as zero.
+- `targetIdentity` and candidate `identity` bind approval to discovery's exact
+  platform/device/inode identifiers. Identifiers are decimal strings, preserving
+  uint64 precision through JSON. They are optional for reading legacy plans,
+  required for nonempty destructive apply. Never refresh them during load,
+  enrichment or sizing. Native apply requires the `planIdentity` capability;
+  an older executable is refused before an apply request starts.
 - Artifact matching should evolve from flat patterns toward artifact definitions
   with richer semantics.
 - Saved plans should carry candidate lists, default selections, and aggregate
   risk counts so apply does not need to rediscover intent.
 
 ## Performance direction
+
+### Linux deletion containment
+
+Native Linux apply opens the approved root and each relative component through
+safe rustix descriptors. `openat2` enforces beneath-root, no-symlink and
+no-mount-crossing resolution; deletion uses descriptor-relative `unlinkat`.
+The iterative remover retains at most 32 directory frames and checks
+cancellation between entries. Missing kernel support fails closed. Errors
+after deletion starts can describe a partially removed artifact.
+
+JS Linux apply checks a bounded current mount table before directory deletion,
+including same-device bind mounts. That snapshot is not atomic with removal.
+Other platforms retain their existing portable removal paths. Discovery
+identities protect approved root/leaf objects, not every mutable descendant or
+the final name-to-unlink race. See [resource limits](resource-limits.md).
 
 ### Implemented scan transport and UI lifecycle
 
@@ -108,6 +129,10 @@ structurally validates every event, and requires a matching start, discovered
 and sized candidates, and consistent completion counts and bytes. A malformed
 or truncated stream fails the scan instead of returning a partial executable
 plan. Cancellation and non-EPIPE request-write failures stop the child process.
+Decoding yields after 128 lines or 4 ms. Chunk work is serialized even when Node
+resumes a paused pipe as its child exits; completion awaits the entire chain.
+JSON output observes drains throughout its lifetime, preventing a producer's
+intervening yield from losing backpressure completion.
 Engine emit is buffered: found/updated candidates batch into
 `candidates_found`/`candidates_updated` lines that flush on a 16 ms heartbeat,
 at 64 pending, immediately on the first batch, on cadence inside `push`,
@@ -135,8 +160,9 @@ subdirectories. Its external dispatcher admits at most 32 candidate jobs,
 behind a 256-entry channel. Directory subdivision batches at 64 paths and
 three parallel levels; deeper sizing uses a local LIFO, and leaf metadata does
 not retain one allocated path per file. Hardlink dedupe is per artifact;
-visited-directory identities, admitted paths and candidates share explicit
-resource budgets with sizing. See [resource limits](resource-limits.md) for
+discovery identities, admitted paths and candidates use cumulative bounds;
+concurrent sizing uses separate shared live reservations returned on completion.
+See [resource limits](resource-limits.md) for
 numbers, failure behavior and the difference between logical charges and RSS.
 Worker panic stops the walk and propagates failure; idle workers back off
 instead of spinning indefinitely. JS uses one global 16-worker traversal queue,
@@ -193,6 +219,13 @@ Both engines re-validate before deleting:
   than deleted.
 - **Type drift** - symlink-state or entry-type changes since the plan are
   rejected (`changed_symlink_state` / `changed_entry_type`).
+  Both scanners capture root identity before traversal and leaf identity at
+  discovery. Apply refuses missing/replaced roots and fails candidates whose
+  identity differs from that snapshot. Legacy plans must be rescanned.
+  Rust pins each revalidated leaf's filesystem identity during apply and checks
+  it again at deletion. JS compares exact BigInt identities across its begin
+  callback. Same-type replacements in those windows fail rather than deleting
+  the replacement. Pathname operations are still not atomic.
 - **Realpath containment** - a lexical check alone misses an ancestor swapped
   to a symlink after scanning (`proj/sub` → `/etc` would make `rm` recurse
   outside the target). Both engines canonicalize the target root and each
@@ -221,6 +254,15 @@ Both engines re-validate before deleting:
   force-kill is necessary. A process failure or malformed report after apply
   begins also reports unknown outcomes; destructive operations are never
   automatically retried.
+  Both engines recheck cancellation after the begin callback and before the
+  destructive operation. Native size preflight polls cancellation within each
+  subtree and refunds live sizing reservations on exit. A blocked filesystem
+  syscall cannot be interrupted by that flag. Native covered-outcome alias keys
+  are frozen before deletion; removing a parent cannot change report identity.
+  Direct native apply also handles Unix SIGINT/SIGTERM cooperatively. The
+  non-control command flushes its JSON partition and exits 1 on interruption;
+  the control command returns its terminal report for the host to interpret.
+  Windows console cancellation is installed for both native apply modes.
   Engines without this capability are refused before native apply starts;
   upgrade the native package or explicitly choose JS. Scan cancellation still
   terminates its read-only child.
@@ -245,6 +287,9 @@ so they can't be re-selected; the user purges by deleting the dir. Trash
 is JS-engine only - the CLI falls back from `--engine rust` with a warning.
 `relative()` refuses entries outside `trashRoot` (defense in depth under
 the apply-time containment checks).
+The trash root is pinned by canonical path and exact filesystem identity.
+Recreating it at the same spelling fails before moving a candidate. These
+pathname rechecks narrow races; they do not create an atomic handle boundary.
 
 ### History
 
@@ -262,6 +307,17 @@ concurrently appended inode. Windows privacy follows the config directory ACL.
 Stats describe this retained window and estimated removed or moved bytes,
 not lifetime totals or measured physical reclaim. Best-effort history is not
 a crash-durable recovery journal.
+
+### Windows filesystem identities
+
+The Rust filesystem layer uses stable `OpenOptionsExt` and
+`GetFileInformationByHandle` for volume, file index and link count. The owned
+metadata handle opens the leaf without following reparse points, permits
+read/write/delete sharing, and closes on return. Discovery, apparent hardlink
+sizing and apply checks share this implementation. Stable Rust's `DirEntry`
+metadata cannot supply these identity fields. Failed identity reads mark sizing
+incomplete or refuse the operation. Windows root identity and volume checks now
+match the Unix intent; actual NTFS/ReFS/SMB execution still needs qualification.
 
 ### Terminal-output safety
 
@@ -283,3 +339,21 @@ Glob question marks consume Unicode scalars in both engines, with Unicode
 lowercasing on case-insensitive platforms; pattern limits count scalars too.
 Native iterator/file-type errors count the directory as partially skipped once.
 Async pools stop claiming jobs on failure and drain admitted work before rejecting.
+
+## CLI output backpressure
+
+JSON output uses a shared writer with a 64 MiB queued-byte ceiling and a
+30-second drain timeout. Drain/error/close listeners are removed after every
+wait; pipe failure produces a nonzero exit instead of a truncated-success claim.
+For `scan --json-stream`, JS traversal and sizing await the consumer's drain
+when needed. The native bridge pauses stdout reads so Rust's existing bounded
+event channel transmits pressure to its workers. This hook is absent for the TUI
+and ordinary scans, preserving their existing scheduling.
+
+Bun 1.4.2's stdout can return `false` while its Node-compatible
+`writableNeedDrain` and `writableLength` report false/zero. The writer tracks the
+return value and waits for the actual drain rather than a zero-byte callback in
+that state. A delayed-consumer CLI regression covers this truncation case.
+Both entrypoints share EPIPE handling: structured output owns its failure,
+human read-only pipes retain normal `head` behavior, and active apply cancels
+further scheduling without killing the outcome/history path.

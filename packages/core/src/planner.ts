@@ -21,6 +21,7 @@ import {
   WORKSPACE_STUB_REASON,
 } from "./candidate-insights.js";
 import { catalogMatchFor } from "./catalog.js";
+import { identityFromStat, sameFilesystemIdentity } from "./filesystem-identity.js";
 import {
   GuardrailError,
   hasCanonicalPathSpelling,
@@ -39,6 +40,7 @@ export function buildPlan(
   return applyPlanInsights({
     protocolVersion: PROTOCOL_VERSION,
     targetDir,
+    targetIdentity: result.targetIdentity,
     selectionPolicy,
     candidates,
     summary: {
@@ -205,7 +207,7 @@ export function revalidateCandidates(
     }
 
     try {
-      const stat = lstatSync(candidate.path);
+      const stat = lstatSync(candidate.path, { bigint: true });
       const isSymlink = stat.isSymbolicLink();
       const entryType = isSymlink ? "symlink" : stat.isDirectory() ? "directory" : "file";
 
@@ -276,6 +278,14 @@ export function revalidateCandidates(
         }
       }
 
+      if (!sameFilesystemIdentity(candidate.identity, identityFromStat(stat))) {
+        failedPaths.push({
+          path: candidate.path,
+          code: "filesystem_error",
+          error: "candidate identity is missing or changed since scan; scan again",
+        });
+        continue;
+      }
       ready.push(candidate);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;

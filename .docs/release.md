@@ -105,7 +105,9 @@ is disabled so scanning a project does not import its Bun runtime settings.
 No external Node, Bun or Rust engine is needed for the default standalone scan.
 
 Before upload, every runner checks `--ui-probe`, `--version`, and an owned scan
-with PATH emptied. All five binaries attach to one release; preview releases
+with PATH emptied. Each binary also gets a streaming, round-trip-verified `.gz` archive with its
+own SHA-256 sidecar. The raw assets and installer path remain available; archives
+reduce download size without changing the executable. All five binaries attach to one release; preview releases
 are marked prerelease and cannot update the stable Homebrew formula. Linux
 local success does not substitute for passing those hosted platform jobs.
 
@@ -144,6 +146,17 @@ Commit, tag and publish still require explicit user authorization in agent work.
       tree fold/unfold, filter ladder (`esc`), confirm dialog on risky select
 - [ ] Changesets present for every user-facing change
 - [ ] Resource/latency evidence recorded; actual platform artifacts qualified
+
+`bun run verify -- --all` includes installation of local CLI/native npm tarballs
+into an owned temporary directory, followed by installed JS/Rust scan/save/apply
+without an engine-path override. This uses the local offline npm cache and makes
+no registry writes. It does not qualify remote package availability, optional
+dependency auto-installation, or interactive terminals on other operating systems.
+
+Native Linux destructive apply requires kernel support for restricted `openat2`
+resolution. Older kernels refuse safely; users can choose JS with the documented
+mount-snapshot and pathname limitations. Run the private namespace mount fixture
+from [testing](testing.md) before accepting a Linux deletion release.
 
 ## Known distribution gaps
 

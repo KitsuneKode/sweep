@@ -69,6 +69,46 @@ async function mount(onDone: (outcome: SweepUiOutcome) => void) {
 }
 
 describe("sweep TUI render", () => {
+  test("inspect x confirms exactly the displayed candidate without applying the queue", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const setup = await mount((outcome) => outcomes.push(outcome));
+    const paint = async () => {
+      for (let i = 0; i < 3; i++)
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          await setup.renderOnce();
+        });
+    };
+    await act(async () => {
+      setup.mockInput.pressKey("i");
+      await setup.renderOnce();
+    });
+    await paint();
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("artifact");
+    const pathRow = frame.split("\n").find((line) => /\bpath\s/.test(line));
+    const displayed = createPlan().candidates.find((candidate) =>
+      pathRow?.includes(candidate.name),
+    );
+    expect(displayed, frame).toBeDefined();
+    await act(async () => {
+      setup.mockInput.pressKey("x");
+      await setup.renderOnce();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Permanently delete");
+    expect(outcomes).toEqual([]);
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.renderOnce();
+    });
+    await paint();
+    expect(outcomes).toHaveLength(1);
+    const outcome = outcomes[0]!;
+    expect(outcome.type).toBe("apply");
+    if (outcome.type === "apply")
+      expect(outcome.plan.selectedCandidateIds).toEqual([displayed!.id]);
+  });
   test("draws brand header, stats, and statusline chrome", async () => {
     const setup = await mount(() => {});
     const frame = setup.captureCharFrame();
@@ -605,4 +645,27 @@ describe("streaming reorder", () => {
       console.warn = originalWarn;
     }
   });
+});
+
+test("a synchronous scan startup failure renders an incomplete error instead of escaping", async () => {
+  const scan: UiScanControl = {
+    start: () => {
+      throw new Error("startup failed");
+    },
+    syncPatterns: () => {},
+    setEngine: () => true,
+  };
+  const setup = await testRender(
+    <SweepApp plan={createPlan()} onDone={() => {}} scan={scan} initiallyScanning />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  for (let round = 0; round < 3; round++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await setup.renderOnce();
+    });
+  }
+  expect(setup.captureCharFrame()).toContain("startup failed");
+  expect(setup.captureCharFrame()).toContain("scan error");
 });

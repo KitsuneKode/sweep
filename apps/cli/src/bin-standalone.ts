@@ -7,7 +7,7 @@
  * makes Bun embed the UI code and OpenTUI's native assets into the executable.
  */
 import { makeProgram } from "./cli.js";
-import { handleFatalError } from "./errors.js";
+import { installGlobalErrorHandlers } from "./global-errors.js";
 import { registerUiModule } from "./handlers/ui.js";
 import { registerEmbeddedEngine } from "@kitsunekode/sweep-core/rust-engine";
 import { mkdtempSync, writeFileSync, rmSync, chmodSync, readFileSync } from "node:fs";
@@ -21,22 +21,6 @@ import { join } from "node:path";
 import * as sweepUi from "@kitsunekode/sweep-ui";
 
 registerUiModule(sweepUi);
-
-function installGlobalErrorHandlers(): void {
-  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EPIPE") {
-      process.exit(0);
-    }
-  });
-
-  process.on("unhandledRejection", (reason) => {
-    handleFatalError(reason);
-  });
-
-  process.on("uncaughtException", (err) => {
-    handleFatalError(err);
-  });
-}
 
 // Build-time probe: proves the static UI graph (including OpenTUI native
 // dlopen at import time) survived compilation. Used by cli-binaries CI.

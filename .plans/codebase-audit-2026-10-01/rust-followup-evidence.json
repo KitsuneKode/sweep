@@ -1,0 +1,180 @@
+{
+  "recordedAt": "2026-10-03T11:34:21.149372+00:00",
+  "scope": "Inline Rust/JS destructive-boundary, filename, transport and platform-build follow-up; dirty working tree preserved.",
+  "sourceHead": "cc7dab6c4c0bf8accb9f18d87c1aed57bc194b9d",
+  "worktreeHead": "3e458e8e7b2ecf8b93114cd6b775bfe4d2bf97f5",
+  "committed": false,
+  "merged": false,
+  "published": false,
+  "deployed": false,
+  "native": {
+    "path": "target/release/sweep-engine",
+    "bytes": 989488,
+    "sha256": "000d9f5e410ba0a7d2b28d6cc32f81b181a1f4019d5e364c5592d2ac45a6ee6e"
+  },
+  "standalone": {
+    "path": "target/sweep-rust-review-standalone",
+    "bytes": 102811104,
+    "sha256": "c485f48c6dff3a620c5527cd619f467011e7d651e2bf0de22819480f5ea42d89",
+    "modules": 202
+  },
+  "gates": [
+    {
+      "command": "bun run check",
+      "exit": 0,
+      "tasks": 48,
+      "bunTests": 650,
+      "log": "/tmp/sweep-rust-review-final-all-check.log"
+    },
+    {
+      "command": "bun run rust:check",
+      "exit": 0,
+      "tasks": 8,
+      "rustTests": 87,
+      "log": "/tmp/sweep-rust-review-complete-rust.log"
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "exit": 0,
+      "log": "/tmp/sweep-rust-review-complete-all-targets.log"
+    },
+    {
+      "command": "cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu --locked -- -D warnings",
+      "exit": 0,
+      "runtimeExecution": false,
+      "log": "/tmp/sweep-rust-review-complete-windows.log"
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    },
+    {
+      "check": "CI YAML parse and clippy component provisioning precedes platform lint",
+      "passed": true
+    }
+  ],
+  "benchmarks": {
+    "scan": {
+      "file": "engine-results-rust-review-final.json",
+      "samplesPerEnginePerShapePerMode": 100,
+      "warmups": 3,
+      "coldStorage": false,
+      "terminalRendering": false
+    },
+    "apply": {
+      "file": "apply-results-rust-review-p99.json",
+      "samplesPerEnginePerShape": 100,
+      "verifiedRuns": 400,
+      "summary": [
+        {
+          "scenario": "many",
+          "engine": "js",
+          "samples": 100,
+          "medianMs": 39.944218999999975,
+          "maxMs": 47.16199999999981,
+          "p99Ms": 46.727436000000004
+        },
+        {
+          "scenario": "many",
+          "engine": "rust",
+          "samples": 100,
+          "medianMs": 11.61093399999936,
+          "maxMs": 46.03416600000001,
+          "p99Ms": 15.757902999999715
+        },
+        {
+          "scenario": "large",
+          "engine": "js",
+          "samples": 100,
+          "medianMs": 280.6817449999944,
+          "maxMs": 420.5817479999969,
+          "p99Ms": 352.875810000005
+        },
+        {
+          "scenario": "large",
+          "engine": "rust",
+          "samples": 100,
+          "medianMs": 92.3082510000022,
+          "maxMs": 105.39943900000071,
+          "p99Ms": 101.88570099999924
+        }
+      ],
+      "physicalReclaimMeasured": false
+    },
+    "debugApply": {
+      "file": "apply-results-rust-review-debug-p99.json",
+      "note": "Separate debug executable, not mixed into release comparisons."
+    },
+    "resource": {
+      "file": "resource-rust-review.json",
+      "checks": 8,
+      "allPassed": true,
+      "files": 100000,
+      "rescans": 3,
+      "fdSoftLimit": 64,
+      "watchdogMb": 512,
+      "sparseGiB": 200,
+      "allocated200GiBQualified": false,
+      "leakAbsenceProven": false
+    }
+  },
+  "runtimeChecks": {
+    "focusedDeletionPty": {
+      "passedRuns": 6,
+      "log": "/tmp/sweep-rust-review-ui-final-repeats.log",
+      "note": "Harness pins labeled inspector and confirmation preview; only owned fixtures."
+    },
+    "embeddedNativeWithEmptyPath": {
+      "passed": true,
+      "log": "/tmp/sweep-rust-review-standalone-smoke-latest.log"
+    },
+    "standaloneUiModules": {
+      "passed": true,
+      "log": "/tmp/sweep-rust-review-ui-probe-latest.log"
+    },
+    "standaloneClosedApplyOutput": {
+      "results": [
+        {
+          "engine": "js",
+          "candidates": 40,
+          "deleted": 5,
+          "remaining": 35,
+          "exitCode": 1,
+          "historyMatchesDisk": true
+        },
+        {
+          "engine": "rust",
+          "candidates": 40,
+          "deleted": 4,
+          "remaining": 36,
+          "exitCode": 1,
+          "historyMatchesDisk": true
+        }
+      ],
+      "log": "/tmp/sweep-rust-review-final-standalone-pipe.log"
+    },
+    "nativeUnixApplySignals": {
+      "signals": ["SIGINT", "SIGTERM"],
+      "controlledPartitions": "Covered by Rust CLI integration tests; 2000 owned entries, terminal outcome agrees with disk.",
+      "legacy": "Owned release probes returned exit 1 with full deleted/unattempted report; signal handler is installed in both apply modes."
+    },
+    "trashRootSamePathReplacement": {
+      "redReproduced": true,
+      "greenPassed": true,
+      "logs": ["/tmp/sweep-trash-identity-red.log", "/tmp/sweep-trash-identity-green.log"]
+    }
+  },
+  "limitations": [
+    "Pathname identity/revalidation is not atomic ancestor containment; nested mounts and same-device bind mounts remain P0.",
+    "Saved plans have no root/leaf identity snapshot from original scan; current pins begin during apply.",
+    "Windows cross-compilation does not qualify NTFS/ReFS/SMB runtime, junctions, installed packages or consoles; macOS/ARM64 hosted evidence remains open.",
+    "Failed recursive deletion can have removed descendants; unattempted nested entries are not proof their contents survived.",
+    "Filesystem calls may block despite cooperative cancellation; SIGKILL/power loss cannot flush outcomes.",
+    "Logical resource bounds and sampled fixture RSS do not prove OOM immunity or leak absence.",
+    "Warm local empirical percentiles do not qualify cold/network storage, allocated 200 GiB deletion or physical reclamation.",
+    "History is best-effort, not a crash-durable recovery journal; trash is not a complete restore/purge product.",
+    "Dependency advisory/license provenance and hosted release qualification remain open.",
+    "Host parse/planning/terminal input latency and real docs browser/mobile qualification remain open."
+  ],
+  "logsNote": "Ephemeral /tmp logs supplement durable benchmark JSON and regression tests. They are not hosted CI evidence."
+}

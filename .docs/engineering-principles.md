@@ -55,3 +55,11 @@ Before merge or publish:
 - `bun run build` - bundle to `apps/cli/dist/sweep.js` and `apps/cli/dist/sweep-ui.js`.
 - `bun run preflight` - publish guardrails (also runs on `prepublishOnly`).
 - Rust path changes: `bun run rust:check`.
+
+## Public documentation
+
+`docs/` owns user-facing guides and contributor explanations, with ordered
+navigation and title/description frontmatter. `.docs/` remains internal project
+truth and `.plans/` active execution. The future website reads public content
+without shipping its dependencies/assets in the CLI package. See
+[documentation maintenance](../docs/developer/docs-maintenance.md).

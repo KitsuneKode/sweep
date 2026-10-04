@@ -3,6 +3,7 @@ import type { ErrorObject, ValidateFunction } from "ajv";
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { assertPlanResources } from "./resource-budget.js";
 import { hasCanonicalPathSpelling, pathUsesProcessRelativeRoot } from "./guardrails.js";
+import { validFilesystemIdentity } from "./filesystem-identity.js";
 import type { ApplyReport, ScanCandidate, ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   APPLY_REPORT_SCHEMA,
@@ -70,6 +71,9 @@ export function validatePlan(value: unknown): ScanPlan {
   const validator = getValidator();
   if (validator(value)) {
     const plan = value as ScanPlan;
+    if (plan.targetIdentity !== undefined && !validFilesystemIdentity(plan.targetIdentity)) {
+      throw new PlanValidationError("Invalid scan plan: target identity");
+    }
     assertPlanResources(plan);
     // The target is untrusted input too: "" or a relative spelling resolves
     // against the applying process's cwd, and a process-relative magic root
@@ -100,6 +104,9 @@ export function validatePlan(value: unknown): ScanPlan {
     // reaching a different entry. sweep never writes one - a plan carrying
     // it is malformed input, rejected wholesale.
     for (const candidate of plan.candidates) {
+      if (candidate.identity !== undefined && !validFilesystemIdentity(candidate.identity)) {
+        throw new PlanValidationError("Invalid scan plan: candidate identity");
+      }
       if (!hasCanonicalPathSpelling(candidate.path)) {
         throw new PlanValidationError(
           `Invalid scan plan: candidate path is not in canonical form: ${sanitizeTerminalText(candidate.path)}`,
@@ -183,6 +190,7 @@ export function validateScanEvent(value: unknown): ScanEvent {
       Number.isSafeInteger(c.estimatedBytes) &&
       c.estimatedBytes >= 0 &&
       (c.bytesKnown === undefined || typeof c.bytesKnown === "boolean") &&
+      (c.identity === undefined || validFilesystemIdentity(c.identity)) &&
       (c.modifiedMs === undefined ||
         (typeof c.modifiedMs === "number" &&
           Number.isSafeInteger(c.modifiedMs) &&
@@ -209,6 +217,8 @@ export function validateScanEvent(value: unknown): ScanEvent {
   switch (event.type) {
     case "scan_started":
       if (typeof event.targetDir !== "string") fail("scan_started.targetDir");
+      if (event.targetIdentity !== undefined && !validFilesystemIdentity(event.targetIdentity))
+        fail("scan_started.targetIdentity");
       break;
     case "candidate_found":
     case "candidate_updated":

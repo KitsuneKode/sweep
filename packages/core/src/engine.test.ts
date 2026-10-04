@@ -1,10 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPlan, applyPlanWithBackend, scanToPlan } from "./engine.js";
 import { isRustEngineAvailable, resolveRustEngineBinary } from "./rust-engine.js";
 import { DEFAULT_CONFIG } from "./config.js";
+import { loadPlan } from "./plan.js";
+import { readFilesystemIdentity } from "./filesystem-identity.js";
 import { cleanupSeededFixtures, seedScenario } from "@kitsunekode/sweep-test-fixtures";
 
 let tmpDir: string;
@@ -20,7 +31,92 @@ afterEach(() => {
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
+for (const backend of ["js", "rust"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `${backend}: covered alias receipts survive parent removal`,
+    async () => {
+      mkdirSync(dir("node_modules", "pkg"), { recursive: true });
+      symlinkSync(dir("node_modules"), dir("alias"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      const parent = plan.candidates.find((c) => c.name === "node_modules")!;
+      const child = {
+        ...parent,
+        path: dir("alias", "pkg"),
+        name: "pkg",
+        id: "alias-child",
+        identity: readFilesystemIdentity(dir("alias", "pkg")),
+      };
+      plan.candidates.push(child);
+      plan.selectedCandidateIds.push(child.id);
+      const applied = await applyPlanWithBackend(plan, backend);
+      expect(applied.report.deletedCount).toBe(1);
+      expect(applied.report.failedCount).toBe(0);
+      expect(applied.report.outcomes).toEqual([
+        { candidateId: parent.id, status: "deleted" },
+        { candidateId: child.id, status: "covered", coveredBy: parent.id },
+      ]);
+      expect(applied.interrupted).toBe(false);
+      expect(existsSync(dir("node_modules"))).toBe(false);
+    },
+  );
+}
+
 describe("core engine", () => {
+  for (const backend of ["js", "rust"] as const) {
+    test(`legacy plans without snapshots cannot authorize ${backend} deletion`, async () => {
+      mkdirSync(dir("node_modules"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      const withoutRoot = { ...plan };
+      delete withoutRoot.targetIdentity;
+      const saved = dir("legacy-plan.json");
+      writeFileSync(saved, JSON.stringify(withoutRoot));
+      const loaded = loadPlan(saved);
+      expect(loaded.targetIdentity).toBeUndefined();
+      await expect(applyPlanWithBackend(loaded, backend)).rejects.toThrow("root identity");
+      const candidate = plan.candidates[0]!;
+      delete candidate.identity;
+      const applied = await applyPlanWithBackend(plan, backend);
+      expect(applied.report.deletedCount).toBe(0);
+      expect(applied.report.failedCount).toBe(1);
+      expect(applied.report.failedPaths[0]?.error).toContain("identity");
+      expect(existsSync(dir("node_modules"))).toBe(true);
+    });
+
+    test(`saved plans preserve same-type replacements before ${backend} apply`, async () => {
+      const root = dir("project");
+      const artifact = join(root, "node_modules");
+      mkdirSync(artifact, { recursive: true });
+      const { plan } = await scanToPlan(root, DEFAULT_CONFIG);
+      const saved = dir("plan.json");
+      writeFileSync(saved, JSON.stringify(plan));
+      renameSync(artifact, join(root, "original"));
+      mkdirSync(artifact);
+      writeFileSync(join(artifact, "keep"), "replacement");
+      const applied = await applyPlanWithBackend(loadPlan(saved), backend);
+      expect(applied.report.deletedCount).toBe(0);
+      expect(applied.report.failedCount).toBe(1);
+      expect(applied.report.failedPaths[0]?.error).toContain("identity");
+      expect(readFileSync(join(artifact, "keep"), "utf8")).toBe("replacement");
+      expect(existsSync(join(root, "original"))).toBe(true);
+    });
+
+    test(`saved plans refuse a root replaced before ${backend} apply`, async () => {
+      const root = dir("project");
+      mkdirSync(join(root, "node_modules"), { recursive: true });
+      const { plan } = await scanToPlan(root, DEFAULT_CONFIG);
+      const saved = dir("plan.json");
+      writeFileSync(saved, JSON.stringify(plan));
+      renameSync(root, dir("original-project"));
+      mkdirSync(join(root, "node_modules"), { recursive: true });
+      writeFileSync(join(root, "node_modules", "keep"), "replacement");
+      await expect(applyPlanWithBackend(loadPlan(saved), backend)).rejects.toThrow(
+        /root.*changed/i,
+      );
+      expect(readFileSync(join(root, "node_modules", "keep"), "utf8")).toBe("replacement");
+      expect(existsSync(dir("original-project", "node_modules"))).toBe(true);
+    });
+  }
+
   test("scanToPlan returns both scan summary and a selected plan", async () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir(".vite"));
@@ -170,6 +266,7 @@ describe("core engine", () => {
       ...parent,
       id: "cand_nested",
       path: dir("node_modules", "pkg"),
+      identity: readFilesystemIdentity(dir("node_modules", "pkg")),
       name: "pkg",
     };
     const forged = {
@@ -358,6 +455,39 @@ for (const backend of ["js", "rust"] as const) {
   });
 }
 
+test.skipIf(process.platform === "win32")(
+  "rust: an older engine cannot silently omit identity enforcement",
+  async () => {
+    const { chmodSync } = await import("node:fs");
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const binary = dir("old-engine");
+    const started = dir("started");
+    writeFileSync(
+      binary,
+      `#!/usr/bin/env bun
+import {writeFileSync} from "node:fs";
+if (process.argv[2] === "--capabilities") {
+  process.stdout.write(JSON.stringify({applyControl:true}));
+} else {
+  writeFileSync(${JSON.stringify(started)}, "unsafe apply started");
+}
+`,
+    );
+    chmodSync(binary, 0o700);
+    const previous = process.env.SWEEP_ENGINE_PATH;
+    process.env.SWEEP_ENGINE_PATH = binary;
+    try {
+      await expect(applyPlanWithBackend(plan, "rust")).rejects.toThrow("saved-plan identity");
+      expect(existsSync(started)).toBe(false);
+      expect(existsSync(dir("node_modules"))).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previous;
+    }
+  },
+);
+
 test("rust: closed initial control channel cannot start deletion", async () => {
   if (!isRustEngineAvailable()) return;
   const { spawnSync } = await import("node:child_process");
@@ -383,7 +513,7 @@ for (const failure of ["exit", "bad-report"] as const) {
         binary,
         `#!/usr/bin/env bun
 if (process.argv[2] === "--capabilities") {
-  process.stdout.write('{"applyControl":true}\\n');
+  process.stdout.write('{"applyControl":true,"planIdentity":true}\\n');
   process.exit(0);
 }
 process.stdout.write(${JSON.stringify(JSON.stringify({ type: "apply_begin", candidateId: plan.selectedCandidateIds[0] }) + "\n")});
@@ -415,7 +545,7 @@ test.skipIf(process.platform === "win32")(
       binary,
       `#!/usr/bin/env bun
 if (process.argv[2] === "--capabilities") {
-  process.stdout.write('{"applyControl":true}\\n');
+  process.stdout.write('{"applyControl":true,"planIdentity":true}\\n');
   process.exit(0);
 }
 setInterval(() => {}, 1000);

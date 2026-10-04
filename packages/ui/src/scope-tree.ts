@@ -145,6 +145,13 @@ let treeLast: {
   rows: ScopeSidebarRow[];
 } | null = null;
 
+export function clearScopeTreeCache(): void {
+  topology = null;
+  treeLast = null;
+  scopeKeyTarget = null;
+  scopeKeyCache.clear();
+}
+
 /** Visible sidebar rows: all-scopes, then an indented folder tree. */
 export function buildScopeTreeRows(
   targetDir: string,

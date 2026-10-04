@@ -39,19 +39,22 @@ function withStableCandidateIds(plan: ScanPlan): ScanPlan {
 
 /** Normalize volatile plan fields for golden fixture comparison. */
 export function normalizePlan(plan: ScanPlan, fixtureRoot: string): ScanPlan {
+  const { targetIdentity: _targetIdentity, ...stablePlan } = plan;
   const replaceRoot = (value: string) =>
     value.startsWith(fixtureRoot) ? value.replace(fixtureRoot, FIXTURE_ROOT_PLACEHOLDER) : value;
 
   return sortCandidates(
     withStableCandidateIds({
-      ...plan,
+      ...stablePlan,
       targetDir: FIXTURE_ROOT_PLACEHOLDER,
       createdAt: "1970-01-01T00:00:00.000Z",
-      candidates: plan.candidates.map(({ modifiedMs: _modifiedMs, ...candidate }) => ({
-        ...candidate,
-        path: replaceRoot(candidate.path),
-        estimatedBytes: 0,
-      })),
+      candidates: plan.candidates.map(
+        ({ modifiedMs: _modifiedMs, identity: _identity, ...candidate }) => ({
+          ...candidate,
+          path: replaceRoot(candidate.path),
+          estimatedBytes: 0,
+        }),
+      ),
       summary: {
         ...plan.summary,
         estimatedTotalBytes: 0,

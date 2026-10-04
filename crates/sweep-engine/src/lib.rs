@@ -100,6 +100,10 @@ pub fn scan_to_plan_with_config(
         message: format!("cannot read scan root {target_dir}: {err}"),
     })?;
 
+    let target_identity = sweep_fs::file_identity(target_dir.as_std_path(), &meta)
+        .ok()
+        .flatten()
+        .map(sweep_fs::FileIdentity::snapshot);
     let budget = ResourceBudget::new(options.limits);
     let on_entry = options.hooks.on_entry;
     let on_progress = options.hooks.on_progress;
@@ -216,6 +220,7 @@ pub fn scan_to_plan_with_config(
 
     build_plan(
         target_dir.as_str(),
+        target_identity,
         candidates,
         scanned_dirs,
         skipped_dirs,
@@ -292,6 +297,7 @@ pub use apply::{apply_plan_controlled, apply_plan_controlled_with_limit};
 
 fn build_plan(
     target_dir: &str,
+    target_identity: Option<sweep_types::FilesystemIdentity>,
     candidates: Vec<ScanCandidate>,
     scanned_dirs: u32,
     skipped_dirs: u32,
@@ -326,6 +332,7 @@ fn build_plan(
             .all(|c| c.entry.bytes_known != Some(false));
 
     Ok(ScanPlan {
+        target_identity,
         protocol_version: PROTOCOL_VERSION.to_owned(),
         target_dir: target_dir.to_owned(),
         selection_policy: selection_policy.clone(),
@@ -358,6 +365,7 @@ fn to_candidate(entry: &WalkEntry, size: sweep_fs::SubtreeSize) -> ScanCandidate
 
     ScanCandidate {
         entry: sweep_types::ScanEntry {
+            identity: entry.identity.clone(),
             path,
             name: entry.name.clone(),
             estimated_bytes: size.bytes,

@@ -3,6 +3,7 @@ import {
   applySidebarScope,
   cancelVisual,
   clearSelection,
+  clearVisibleSelection,
   escapeStep,
   expandAllGroups,
   moveCursor,
@@ -18,7 +19,7 @@ import {
   toggleCurrentSelection,
   toggleGroup,
   togglePattern,
-  toggleScopeExpand,
+  expandScopeFolder,
   collapseScopeFolder,
   setPatternIndex,
   setFilter,
@@ -151,6 +152,8 @@ export interface KeymapActions {
   applyVisual?: () => void;
   /** Ask for the confirm dialog on just the row under the cursor (x/d). */
   requestSingleApply?: () => void;
+  /** Request confirmation for the candidate actually shown by inspect. */
+  requestInspectedApply?: () => void;
   /** Confirm the scoped single-row apply (y while a single confirm is open). */
   confirmSingle?: () => void;
   /** Abort an in-session apply: stop scheduling, keep the report. */
@@ -285,6 +288,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (inspectOpen) {
+    if (key.name === "x" || key.name === "d") {
+      actions.requestInspectedApply?.();
+      return;
+    }
     if (key.name === "i" || key.name === "escape" || key.name === "q" || key.name === "return") {
       actions.setInspect?.(false);
     }
@@ -438,6 +445,22 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     return;
   }
 
+  if (
+    (state.focus === "list" || state.focus === "sidebar") &&
+    (key.name === "u" || key.name === "U")
+  ) {
+    const visibleOnly = key.name === "U" || key.shift === true;
+    actions.mutate(visibleOnly ? clearVisibleSelection : clearSelection);
+    actions.notify?.(
+      visibleOnly
+        ? "visible artifacts unqueued · hidden selections kept"
+        : state.scanning
+          ? "queue cleared · new discoveries stay unqueued"
+          : "entire queue cleared",
+    );
+    return;
+  }
+
   if (state.focus === "sidebar") {
     if (key.name === "up" || key.name === "k") {
       actions.mutate((s) => moveSidebarCursor(s, -1));
@@ -452,7 +475,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (key.name === "right" || key.name === "l") {
-      actions.mutate((s) => toggleScopeExpand(s));
+      actions.mutate((s) => expandScopeFolder(s));
       return;
     }
     if (key.name === "left" || key.name === "h") {
@@ -659,11 +682,6 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     // items require an explicit per-item toggle, which then routes through
     // the red confirmation dialog before anything is deleted.
     actions.mutate((s) => selectVisible(s, false));
-    return;
-  }
-
-  if (key.name === "u") {
-    actions.mutate((s) => clearSelection(s));
     return;
   }
 

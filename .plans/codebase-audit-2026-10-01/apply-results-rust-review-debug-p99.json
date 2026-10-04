@@ -1,0 +1,3644 @@
+{
+  "date": "2026-10-03T11:27:02.208Z",
+  "runtime": "1.4.2",
+  "cpu": "13th Gen Intel(R) Core(TM) i5-13450HX",
+  "nativeBinary": "/home/kitsunekode/Projects/cli-tools/sweep/target/debug/sweep-engine",
+  "nativeSha256": "59afd91b3a93bd074e3f9796bbec33e52a573b876446c1b3b4b346595c2e69ba",
+  "method": "Owned temporary fixtures; alternating engines; current-size guard enabled. Includes validation, fresh sizing, native startup/control and deletion. Excludes fixture creation and cleanup. Empirical nearest-rank p99 on this local workload; not a production SLO or physical-reclaim benchmark.",
+  "summary": [
+    {
+      "scenario": "many",
+      "engine": "js",
+      "samples": 100,
+      "medianMs": 44.08886900000016,
+      "maxMs": 252.14168,
+      "p99Ms": 174.9579450000001
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "samples": 100,
+      "medianMs": 19.577458999999635,
+      "maxMs": 181.06857200000002,
+      "p99Ms": 97.59789100000012
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "samples": 100,
+      "medianMs": 314.4831400000112,
+      "maxMs": 403.7329759999993,
+      "p99Ms": 402.1192200000078
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "samples": 100,
+      "medianMs": 98.46288500000082,
+      "maxMs": 118.2364799999923,
+      "p99Ms": 115.73362099999213
+    }
+  ],
+  "rows": [
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 0,
+      "totalMs": 252.14168,
+      "firstBeginMs": 204.92553299999997,
+      "firstDeletedMs": 208.345974,
+      "maxLagMs": 31.914584999999988
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 0,
+      "totalMs": 181.06857200000002,
+      "firstBeginMs": 47.47504600000002,
+      "firstDeletedMs": 47.50621899999999,
+      "maxLagMs": 113.61847599999999
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 1,
+      "totalMs": 50.53907300000003,
+      "firstBeginMs": 34.25256200000001,
+      "firstDeletedMs": 34.26814999999999,
+      "maxLagMs": 7.179916000000048
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 1,
+      "totalMs": 139.51018399999998,
+      "firstBeginMs": 116.98977000000002,
+      "firstDeletedMs": 117.975235,
+      "maxLagMs": 4.868458999999916
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 2,
+      "totalMs": 174.9579450000001,
+      "firstBeginMs": 152.30238099999997,
+      "firstDeletedMs": 153.28163500000005,
+      "maxLagMs": 6.879206000000067
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 2,
+      "totalMs": 63.553719,
+      "firstBeginMs": 26.085927000000083,
+      "firstDeletedMs": 26.60410999999999,
+      "maxLagMs": 3.3160689999999704
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 3,
+      "totalMs": 54.00240199999985,
+      "firstBeginMs": 31.999943999999914,
+      "firstDeletedMs": 32.9013359999999,
+      "maxLagMs": 3.0063299999999344
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 3,
+      "totalMs": 159.40221399999996,
+      "firstBeginMs": 152.67121900000006,
+      "firstDeletedMs": 153.02057400000012,
+      "maxLagMs": 5.117016999999805
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 4,
+      "totalMs": 110.43068799999992,
+      "firstBeginMs": 96.42679599999997,
+      "firstDeletedMs": 96.84340999999995,
+      "maxLagMs": 1.5983280000000377
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 4,
+      "totalMs": 97.59789100000012,
+      "firstBeginMs": 54.45252000000005,
+      "firstDeletedMs": 56.84712200000013,
+      "maxLagMs": 6.298444000000018
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 5,
+      "totalMs": 40.131853999999976,
+      "firstBeginMs": 22.067735000000084,
+      "firstDeletedMs": 22.62298499999997,
+      "maxLagMs": 4.0443870000001425
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 5,
+      "totalMs": 82.54416400000014,
+      "firstBeginMs": 72.54517299999998,
+      "firstDeletedMs": 72.99768900000004,
+      "maxLagMs": 0.8758940000000166
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 6,
+      "totalMs": 103.73191599999996,
+      "firstBeginMs": 88.60029999999983,
+      "firstDeletedMs": 89.23475500000018,
+      "maxLagMs": 4.8460290000002715
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 6,
+      "totalMs": 36.28414100000009,
+      "firstBeginMs": 19.973047999999835,
+      "firstDeletedMs": 20.630759000000126,
+      "maxLagMs": 1.40769199999977
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 7,
+      "totalMs": 34.25778100000025,
+      "firstBeginMs": 17.810499000000164,
+      "firstDeletedMs": 17.815361000000394,
+      "maxLagMs": 0.6022460000003775
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 7,
+      "totalMs": 61.87013799999977,
+      "firstBeginMs": 56.40528799999993,
+      "firstDeletedMs": 56.858822999999575,
+      "maxLagMs": 1.4953989999999067
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 8,
+      "totalMs": 52.24178099999972,
+      "firstBeginMs": 47.57579600000008,
+      "firstDeletedMs": 47.85746100000006,
+      "maxLagMs": 0.11473100000011982
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 8,
+      "totalMs": 22.507278000000042,
+      "firstBeginMs": 12.884792999999718,
+      "firstDeletedMs": 13.065894999999728,
+      "maxLagMs": 0.18762100000003556
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 9,
+      "totalMs": 23.296740999999656,
+      "firstBeginMs": 13.554246999999577,
+      "firstDeletedMs": 13.794172999999773,
+      "maxLagMs": 0.4274230000000898
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 9,
+      "totalMs": 62.744928999999956,
+      "firstBeginMs": 58.02136999999993,
+      "firstDeletedMs": 58.34421199999997,
+      "maxLagMs": 0.38676500000019587
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 10,
+      "totalMs": 116.6725919999999,
+      "firstBeginMs": 113.00313000000006,
+      "firstDeletedMs": 113.25312500000018,
+      "maxLagMs": 4.303684999999859
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 10,
+      "totalMs": 20.056461000000127,
+      "firstBeginMs": 10.890214999999898,
+      "firstDeletedMs": 11.057216000000153,
+      "maxLagMs": 0.07216300000027331
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 11,
+      "totalMs": 22.3330390000001,
+      "firstBeginMs": 12.525206999999682,
+      "firstDeletedMs": 12.800457999999708,
+      "maxLagMs": 0.07726899999988746
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 11,
+      "totalMs": 52.82229499999994,
+      "firstBeginMs": 48.65078700000004,
+      "firstDeletedMs": 48.89923399999998,
+      "maxLagMs": 0.16171500000018568
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 12,
+      "totalMs": 56.21875100000034,
+      "firstBeginMs": 50.64245400000027,
+      "firstDeletedMs": 50.95295800000031,
+      "maxLagMs": 1.276459000000159
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 12,
+      "totalMs": 22.550858999999946,
+      "firstBeginMs": 13.341554000000087,
+      "firstDeletedMs": 13.5247260000001,
+      "maxLagMs": 0.23140300000022762
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 13,
+      "totalMs": 26.150003000000197,
+      "firstBeginMs": 12.246269000000211,
+      "firstDeletedMs": 12.513926999999967,
+      "maxLagMs": 0.08183199999984936
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 13,
+      "totalMs": 65.19518900000003,
+      "firstBeginMs": 59.8506169999996,
+      "firstDeletedMs": 60.26803599999994,
+      "maxLagMs": 2.872263999999632
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 14,
+      "totalMs": 52.623063,
+      "firstBeginMs": 49.10886500000015,
+      "firstDeletedMs": 49.38071100000025,
+      "maxLagMs": 0.22269599999981438
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 14,
+      "totalMs": 30.799693999999818,
+      "firstBeginMs": 18.35115799999994,
+      "firstDeletedMs": 18.600042999999914,
+      "maxLagMs": 2.1509829999999965
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 15,
+      "totalMs": 19.105874000000313,
+      "firstBeginMs": 11.883506000000125,
+      "firstDeletedMs": 12.037033000000065,
+      "maxLagMs": 0.07301800000004732
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 15,
+      "totalMs": 41.18805199999997,
+      "firstBeginMs": 37.41806799999995,
+      "firstDeletedMs": 37.670152000000144,
+      "maxLagMs": 0.23680400000012014
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 16,
+      "totalMs": 45.743437000000085,
+      "firstBeginMs": 42.562770999999884,
+      "firstDeletedMs": 42.838526,
+      "maxLagMs": 1.920144000000164
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 16,
+      "totalMs": 17.748712999999952,
+      "firstBeginMs": 10.613577999999961,
+      "firstDeletedMs": 10.739626999999928,
+      "maxLagMs": 0.07033400000000256
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 17,
+      "totalMs": 25.421334000000115,
+      "firstBeginMs": 13.330483000000186,
+      "firstDeletedMs": 13.535958000000392,
+      "maxLagMs": 0.062453999999888765
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 17,
+      "totalMs": 55.395014000000174,
+      "firstBeginMs": 49.50985600000013,
+      "firstDeletedMs": 49.74542100000008,
+      "maxLagMs": 0.14543499999990672
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 18,
+      "totalMs": 43.97352600000022,
+      "firstBeginMs": 40.205061000000114,
+      "firstDeletedMs": 40.40655000000015,
+      "maxLagMs": 0.15204099999982645
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 18,
+      "totalMs": 16.443967000000157,
+      "firstBeginMs": 9.79742400000032,
+      "firstDeletedMs": 9.95251700000017,
+      "maxLagMs": 0.06716800000003786
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 19,
+      "totalMs": 20.22568199999978,
+      "firstBeginMs": 10.669424999999592,
+      "firstDeletedMs": 10.943569999999909,
+      "maxLagMs": 0.07356299999992189
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 19,
+      "totalMs": 43.66579700000011,
+      "firstBeginMs": 40.31976500000019,
+      "firstDeletedMs": 40.660637999999835,
+      "maxLagMs": 0.09177600000020902
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 20,
+      "totalMs": 47.17802400000028,
+      "firstBeginMs": 43.362665000000106,
+      "firstDeletedMs": 43.563368999999966,
+      "maxLagMs": 0.5610390000001644
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 20,
+      "totalMs": 19.577458999999635,
+      "firstBeginMs": 12.432308999999805,
+      "firstDeletedMs": 12.586927999999716,
+      "maxLagMs": 0.0678290000000743
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 21,
+      "totalMs": 20.499430000000302,
+      "firstBeginMs": 11.920834000000013,
+      "firstDeletedMs": 12.187780000000203,
+      "maxLagMs": 0.07021400000030553
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 21,
+      "totalMs": 49.13501600000018,
+      "firstBeginMs": 42.3107829999999,
+      "firstDeletedMs": 42.776908000000276,
+      "maxLagMs": 0.8596959999999854
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 22,
+      "totalMs": 45.912103000000116,
+      "firstBeginMs": 42.62183300000015,
+      "firstDeletedMs": 42.83856199999991,
+      "maxLagMs": 0.08028599999988728
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 22,
+      "totalMs": 19.339073999999982,
+      "firstBeginMs": 11.25850999999966,
+      "firstDeletedMs": 11.423871999999847,
+      "maxLagMs": 0.07016499999963344
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 23,
+      "totalMs": 20.78205600000001,
+      "firstBeginMs": 12.354972000000089,
+      "firstDeletedMs": 12.58817399999998,
+      "maxLagMs": 0.07271300000002157
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 23,
+      "totalMs": 52.675122999999985,
+      "firstBeginMs": 48.49663199999986,
+      "firstDeletedMs": 48.74451999999974,
+      "maxLagMs": 1.5755929999995715
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 24,
+      "totalMs": 45.904527000000144,
+      "firstBeginMs": 42.70115299999998,
+      "firstDeletedMs": 42.94056100000034,
+      "maxLagMs": 0.26458099999990736
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 24,
+      "totalMs": 21.040187999999944,
+      "firstBeginMs": 11.846086999999898,
+      "firstDeletedMs": 12.085312000000158,
+      "maxLagMs": 0.08187399999951595
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 25,
+      "totalMs": 21.115560999999616,
+      "firstBeginMs": 12.610525000000052,
+      "firstDeletedMs": 12.616279999999279,
+      "maxLagMs": 0.08331699999962439
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 25,
+      "totalMs": 44.85213500000009,
+      "firstBeginMs": 41.348747,
+      "firstDeletedMs": 41.568021000000044,
+      "maxLagMs": 0.08678799999961484
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 26,
+      "totalMs": 47.510740000000624,
+      "firstBeginMs": 44.26591200000075,
+      "firstDeletedMs": 44.493202000000565,
+      "maxLagMs": 0.2992370000001756
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 26,
+      "totalMs": 20.05482099999972,
+      "firstBeginMs": 10.937388999999712,
+      "firstDeletedMs": 11.219818999999916,
+      "maxLagMs": 0.06457399999999325
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 27,
+      "totalMs": 22.34901600000012,
+      "firstBeginMs": 13.200305000000299,
+      "firstDeletedMs": 13.44463900000028,
+      "maxLagMs": 0.076336000000083
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 27,
+      "totalMs": 49.324063000000024,
+      "firstBeginMs": 44.84565699999985,
+      "firstDeletedMs": 45.13664400000016,
+      "maxLagMs": 0.07297999999991589
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 28,
+      "totalMs": 46.544966999999815,
+      "firstBeginMs": 43.51518399999986,
+      "firstDeletedMs": 43.72965099999965,
+      "maxLagMs": 0.1148140000004787
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 28,
+      "totalMs": 21.98106699999971,
+      "firstBeginMs": 12.528038999999808,
+      "firstDeletedMs": 12.741345999999794,
+      "maxLagMs": 0.07815499999924214
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 29,
+      "totalMs": 18.307018999999855,
+      "firstBeginMs": 10.176693000000341,
+      "firstDeletedMs": 10.322092999999768,
+      "maxLagMs": 0.12268899999980931
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 29,
+      "totalMs": 51.08707600000071,
+      "firstBeginMs": 42.291229000000385,
+      "firstDeletedMs": 42.69642300000032,
+      "maxLagMs": 1.6285439999992377
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 30,
+      "totalMs": 52.097077000000354,
+      "firstBeginMs": 48.74312800000007,
+      "firstDeletedMs": 48.96278400000028,
+      "maxLagMs": 0.12186999999994441
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 30,
+      "totalMs": 19.120999999999185,
+      "firstBeginMs": 11.764541999999892,
+      "firstDeletedMs": 11.890905999999632,
+      "maxLagMs": 0.07376899999962916
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 31,
+      "totalMs": 20.865670000000136,
+      "firstBeginMs": 11.423937999999907,
+      "firstDeletedMs": 11.669162000000142,
+      "maxLagMs": 0.07458599999972648
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 31,
+      "totalMs": 47.01773199999934,
+      "firstBeginMs": 43.28572499999973,
+      "firstDeletedMs": 43.529630999999426,
+      "maxLagMs": 0.07017900000028021
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 32,
+      "totalMs": 46.168383000000176,
+      "firstBeginMs": 42.24884100000054,
+      "firstDeletedMs": 42.61479000000054,
+      "maxLagMs": 1.1945050000003903
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 32,
+      "totalMs": 17.769555999999284,
+      "firstBeginMs": 10.60386699999981,
+      "firstDeletedMs": 10.720571999999265,
+      "maxLagMs": 0.07323699999960809
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 33,
+      "totalMs": 17.32109500000024,
+      "firstBeginMs": 9.950721000000158,
+      "firstDeletedMs": 10.061947000000146,
+      "maxLagMs": 0.06971699999940029
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 33,
+      "totalMs": 43.70773499999996,
+      "firstBeginMs": 39.776906000000054,
+      "firstDeletedMs": 40.02509000000009,
+      "maxLagMs": 0.07206399999995483
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 34,
+      "totalMs": 50.69588699999986,
+      "firstBeginMs": 47.22542599999997,
+      "firstDeletedMs": 47.49396499999966,
+      "maxLagMs": 1.011677000000418
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 34,
+      "totalMs": 18.90962600000057,
+      "firstBeginMs": 11.401212000000669,
+      "firstDeletedMs": 11.529171000000133,
+      "maxLagMs": 0.06835399999999936
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 35,
+      "totalMs": 18.975522000000637,
+      "firstBeginMs": 12.202792000000045,
+      "firstDeletedMs": 12.318668000000798,
+      "maxLagMs": 0.06787600000006933
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 35,
+      "totalMs": 42.411951000000045,
+      "firstBeginMs": 39.084883999999875,
+      "firstDeletedMs": 39.307144999999764,
+      "maxLagMs": 0.09276800000043295
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 36,
+      "totalMs": 44.1961680000004,
+      "firstBeginMs": 40.991259000000355,
+      "firstDeletedMs": 41.228744000000006,
+      "maxLagMs": 0.6126020000001517
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 36,
+      "totalMs": 17.067489000000023,
+      "firstBeginMs": 9.793603000000076,
+      "firstDeletedMs": 9.910249999999905,
+      "maxLagMs": 0.0720339999998032
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 37,
+      "totalMs": 19.874346999999943,
+      "firstBeginMs": 12.040963000000374,
+      "firstDeletedMs": 12.253582999999708,
+      "maxLagMs": 0.06468000000040774
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 37,
+      "totalMs": 41.64186900000004,
+      "firstBeginMs": 38.2303839999995,
+      "firstDeletedMs": 38.464594000000034,
+      "maxLagMs": 0.12061999999968975
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 38,
+      "totalMs": 36.985751000000164,
+      "firstBeginMs": 33.91337399999975,
+      "firstDeletedMs": 34.14740400000028,
+      "maxLagMs": 0.07160399999975198
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 38,
+      "totalMs": 16.910221000000092,
+      "firstBeginMs": 10.422778000000108,
+      "firstDeletedMs": 10.5659169999999,
+      "maxLagMs": 0.08518900000035501
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 39,
+      "totalMs": 18.079915000000256,
+      "firstBeginMs": 10.376150999999481,
+      "firstDeletedMs": 10.513132000000041,
+      "maxLagMs": 0.06667400000060297
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 39,
+      "totalMs": 42.205175000000054,
+      "firstBeginMs": 38.55814499999997,
+      "firstDeletedMs": 38.804331000000275,
+      "maxLagMs": 0.08613599999989674
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 40,
+      "totalMs": 46.840972999999394,
+      "firstBeginMs": 43.632431999999426,
+      "firstDeletedMs": 43.86515799999961,
+      "maxLagMs": 0.08546500000011292
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 40,
+      "totalMs": 17.725346000000172,
+      "firstBeginMs": 10.186835999999857,
+      "firstDeletedMs": 10.374952000000121,
+      "maxLagMs": 0.141048999999839
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 41,
+      "totalMs": 18.883029000000533,
+      "firstBeginMs": 11.49369200000001,
+      "firstDeletedMs": 11.71172100000058,
+      "maxLagMs": 0.06367699999918841
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 41,
+      "totalMs": 40.845956000000115,
+      "firstBeginMs": 37.3882880000001,
+      "firstDeletedMs": 37.684314000000086,
+      "maxLagMs": 0.8456529999994018
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 42,
+      "totalMs": 44.104341000000204,
+      "firstBeginMs": 41.11573500000031,
+      "firstDeletedMs": 41.32574999999997,
+      "maxLagMs": 0.08760199999960605
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 42,
+      "totalMs": 16.40568600000006,
+      "firstBeginMs": 10.158623000000262,
+      "firstDeletedMs": 10.282383000000664,
+      "maxLagMs": 0.09749400000055175
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 43,
+      "totalMs": 17.233353000000534,
+      "firstBeginMs": 10.568264999999883,
+      "firstDeletedMs": 10.6899370000001,
+      "maxLagMs": 0.06861900000058085
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 43,
+      "totalMs": 42.087634999999864,
+      "firstBeginMs": 38.966066999999384,
+      "firstDeletedMs": 39.155643999999484,
+      "maxLagMs": 0.09877999999935128
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 44,
+      "totalMs": 44.51458900000034,
+      "firstBeginMs": 41.53603699999985,
+      "firstDeletedMs": 41.74644799999987,
+      "maxLagMs": 2.0278260000004593
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 44,
+      "totalMs": 17.825880999999754,
+      "firstBeginMs": 10.46688499999982,
+      "firstDeletedMs": 10.678197000000182,
+      "maxLagMs": 0.06585499999982858
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 45,
+      "totalMs": 19.659679000000324,
+      "firstBeginMs": 12.354145000000244,
+      "firstDeletedMs": 12.561400000000503,
+      "maxLagMs": 0.0641540000005989
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 45,
+      "totalMs": 39.28109899999981,
+      "firstBeginMs": 36.10837100000026,
+      "firstDeletedMs": 36.325536000000284,
+      "maxLagMs": 0.6607340000000477
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 46,
+      "totalMs": 45.232968999999684,
+      "firstBeginMs": 42.21415199999956,
+      "firstDeletedMs": 42.49098799999956,
+      "maxLagMs": 0.07205199999953038
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 46,
+      "totalMs": 21.584945999999945,
+      "firstBeginMs": 10.290889999999308,
+      "firstDeletedMs": 10.474341999999524,
+      "maxLagMs": 0.15241299999979674
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 47,
+      "totalMs": 18.218353000000207,
+      "firstBeginMs": 10.007031999999526,
+      "firstDeletedMs": 10.208311000000322,
+      "maxLagMs": 0.06013199999961216
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 47,
+      "totalMs": 41.136389000000236,
+      "firstBeginMs": 37.529663000000255,
+      "firstDeletedMs": 37.70106600000054,
+      "maxLagMs": 1.0522390000005544
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 48,
+      "totalMs": 40.25458600000002,
+      "firstBeginMs": 37.024467999999615,
+      "firstDeletedMs": 37.23928999999953,
+      "maxLagMs": 3.0903830000006565
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 48,
+      "totalMs": 17.17118600000049,
+      "firstBeginMs": 9.581728000000112,
+      "firstDeletedMs": 9.693255000000136,
+      "maxLagMs": 0.06661800000074436
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 49,
+      "totalMs": 17.960605000000214,
+      "firstBeginMs": 10.271606999999676,
+      "firstDeletedMs": 10.422356999999465,
+      "maxLagMs": 0.06722399999944173
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 49,
+      "totalMs": 44.03909299999941,
+      "firstBeginMs": 41.297913999999764,
+      "firstDeletedMs": 41.51532999999927,
+      "maxLagMs": 0.14052999999967142
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 50,
+      "totalMs": 39.3603549999998,
+      "firstBeginMs": 36.48123099999975,
+      "firstDeletedMs": 36.65596800000003,
+      "maxLagMs": 0.09054000000014639
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 50,
+      "totalMs": 20.58652600000005,
+      "firstBeginMs": 11.30500099999972,
+      "firstDeletedMs": 11.490977999999814,
+      "maxLagMs": 0.10306300000047486
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 51,
+      "totalMs": 17.70604800000001,
+      "firstBeginMs": 9.915812999999616,
+      "firstDeletedMs": 10.026252999999997,
+      "maxLagMs": 0.055446000000301865
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 51,
+      "totalMs": 40.30177099999946,
+      "firstBeginMs": 37.22875699999986,
+      "firstDeletedMs": 37.44125600000007,
+      "maxLagMs": 0.3578139999999621
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 52,
+      "totalMs": 42.847890999999436,
+      "firstBeginMs": 39.34149499999967,
+      "firstDeletedMs": 39.62067399999978,
+      "maxLagMs": 1.5745900000001711
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 52,
+      "totalMs": 17.959709000000657,
+      "firstBeginMs": 10.870356000000356,
+      "firstDeletedMs": 10.98425000000043,
+      "maxLagMs": 0.0681300000005649
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 53,
+      "totalMs": 18.554399999999987,
+      "firstBeginMs": 11.712574000000131,
+      "firstDeletedMs": 11.853619999999864,
+      "maxLagMs": 0.06676599999991595
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 53,
+      "totalMs": 45.272493999999824,
+      "firstBeginMs": 42.115052000000105,
+      "firstDeletedMs": 42.31688200000008,
+      "maxLagMs": 0.13594699999976
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 54,
+      "totalMs": 42.69560999999976,
+      "firstBeginMs": 39.39413299999978,
+      "firstDeletedMs": 39.650337999999465,
+      "maxLagMs": 0.14547499999935098
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 54,
+      "totalMs": 24.36519799999951,
+      "firstBeginMs": 12.060449999999946,
+      "firstDeletedMs": 12.294243000000279,
+      "maxLagMs": 0.07222700000056648
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 55,
+      "totalMs": 20.31534599999941,
+      "firstBeginMs": 13.157502000000022,
+      "firstDeletedMs": 13.306970999999976,
+      "maxLagMs": 0.07064199999967968
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 55,
+      "totalMs": 42.04980299999988,
+      "firstBeginMs": 38.80095799999981,
+      "firstDeletedMs": 39.084159,
+      "maxLagMs": 0.4005539999998291
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 56,
+      "totalMs": 41.437457999999424,
+      "firstBeginMs": 38.257370999999694,
+      "firstDeletedMs": 38.471104999999625,
+      "maxLagMs": 0.15377600000010716
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 56,
+      "totalMs": 22.44877499999984,
+      "firstBeginMs": 11.379020999999739,
+      "firstDeletedMs": 11.604158999999527,
+      "maxLagMs": 0.171516999999767
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 57,
+      "totalMs": 18.91884100000061,
+      "firstBeginMs": 11.261556000000382,
+      "firstDeletedMs": 11.534005000000434,
+      "maxLagMs": 0.09627100000034261
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 57,
+      "totalMs": 44.10368000000017,
+      "firstBeginMs": 40.35626600000069,
+      "firstDeletedMs": 40.637799000000086,
+      "maxLagMs": 0.8000640000000203
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 58,
+      "totalMs": 36.85046299999976,
+      "firstBeginMs": 33.94729699999971,
+      "firstDeletedMs": 34.18490699999984,
+      "maxLagMs": 0.11745100000007369
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 58,
+      "totalMs": 18.56452200000058,
+      "firstBeginMs": 11.771903000000748,
+      "firstDeletedMs": 12.009493000000475,
+      "maxLagMs": 0.08131800000046496
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 59,
+      "totalMs": 18.263573999999608,
+      "firstBeginMs": 11.217931999999564,
+      "firstDeletedMs": 11.388323000000128,
+      "maxLagMs": 0.07736899999963498
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 59,
+      "totalMs": 37.27721999999994,
+      "firstBeginMs": 34.165406000000075,
+      "firstDeletedMs": 34.3960189999998,
+      "maxLagMs": 0.074706000000333
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 60,
+      "totalMs": 44.77771500000017,
+      "firstBeginMs": 40.654945000000225,
+      "firstDeletedMs": 40.86088600000039,
+      "maxLagMs": 0.24609199999940756
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 60,
+      "totalMs": 17.904891000000134,
+      "firstBeginMs": 11.065139000000272,
+      "firstDeletedMs": 11.186413999999786,
+      "maxLagMs": 0.06616000000030908
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 61,
+      "totalMs": 17.892181999999593,
+      "firstBeginMs": 10.36750800000027,
+      "firstDeletedMs": 10.52705700000024,
+      "maxLagMs": 0.07217099999979837
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 61,
+      "totalMs": 43.53424100000029,
+      "firstBeginMs": 40.31796699999995,
+      "firstDeletedMs": 40.57977000000028,
+      "maxLagMs": 0.09298099999978149
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 62,
+      "totalMs": 42.31444999999985,
+      "firstBeginMs": 39.29902399999992,
+      "firstDeletedMs": 39.54469700000027,
+      "maxLagMs": 0.07519500000034895
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 62,
+      "totalMs": 17.764806999999564,
+      "firstBeginMs": 10.144553999999516,
+      "firstDeletedMs": 10.312816999999995,
+      "maxLagMs": 0.08701899999960006
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 63,
+      "totalMs": 17.89303800000016,
+      "firstBeginMs": 10.76064899999983,
+      "firstDeletedMs": 10.897957000000133,
+      "maxLagMs": 0.07431799999994837
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 63,
+      "totalMs": 38.83628300000055,
+      "firstBeginMs": 35.99749500000053,
+      "firstDeletedMs": 36.2089390000001,
+      "maxLagMs": 0.48898800000006304
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 64,
+      "totalMs": 40.57142399999975,
+      "firstBeginMs": 36.71715200000017,
+      "firstDeletedMs": 36.96491199999946,
+      "maxLagMs": 0.07375200000024051
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 64,
+      "totalMs": 16.962351000000126,
+      "firstBeginMs": 9.707135999999991,
+      "firstDeletedMs": 9.872558000000026,
+      "maxLagMs": 0.09151099999962753
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 65,
+      "totalMs": 18.237230999999156,
+      "firstBeginMs": 10.629122999999709,
+      "firstDeletedMs": 10.782052999999905,
+      "maxLagMs": 0.07094499999948312
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 65,
+      "totalMs": 44.08886900000016,
+      "firstBeginMs": 41.11297699999977,
+      "firstDeletedMs": 41.33052500000031,
+      "maxLagMs": 0.08077899999989313
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 66,
+      "totalMs": 45.16202700000031,
+      "firstBeginMs": 37.97744899999998,
+      "firstDeletedMs": 38.219554000000244,
+      "maxLagMs": 0.22250100000019302
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 66,
+      "totalMs": 20.804572000000007,
+      "firstBeginMs": 12.201121000000057,
+      "firstDeletedMs": 12.328255000000354,
+      "maxLagMs": 0.0772690000003422
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 67,
+      "totalMs": 20.27221500000087,
+      "firstBeginMs": 13.274115000000165,
+      "firstDeletedMs": 13.51997400000073,
+      "maxLagMs": 0.06474800000069081
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 67,
+      "totalMs": 40.81022799999937,
+      "firstBeginMs": 37.287601999999424,
+      "firstDeletedMs": 37.548909000000094,
+      "maxLagMs": 0.07251299999916228
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 68,
+      "totalMs": 40.648669000000154,
+      "firstBeginMs": 37.66909900000064,
+      "firstDeletedMs": 37.90578199999982,
+      "maxLagMs": 0.06737000000066473
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 68,
+      "totalMs": 19.873415000000023,
+      "firstBeginMs": 12.72379600000022,
+      "firstDeletedMs": 12.868204000000333,
+      "maxLagMs": 0.07452099999954953
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 69,
+      "totalMs": 17.678839999999582,
+      "firstBeginMs": 10.163359999999557,
+      "firstDeletedMs": 10.388066999999864,
+      "maxLagMs": 0.11609999999927823
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 69,
+      "totalMs": 38.256334999999126,
+      "firstBeginMs": 35.26318699999956,
+      "firstDeletedMs": 35.48599599999943,
+      "maxLagMs": 0.620918999999958
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 70,
+      "totalMs": 37.913149999999405,
+      "firstBeginMs": 34.671134999999595,
+      "firstDeletedMs": 34.91138199999932,
+      "maxLagMs": 0.07693800000015472
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 70,
+      "totalMs": 16.60244899999998,
+      "firstBeginMs": 9.714562000000114,
+      "firstDeletedMs": 9.841972999999598,
+      "maxLagMs": 0.46224999999958527
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 71,
+      "totalMs": 17.52556199999981,
+      "firstBeginMs": 10.657361999999921,
+      "firstDeletedMs": 10.792757000000165,
+      "maxLagMs": 0.06625199999962206
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 71,
+      "totalMs": 41.721246999999494,
+      "firstBeginMs": 38.73463100000117,
+      "firstDeletedMs": 38.949335999999676,
+      "maxLagMs": 0.15868199999931676
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 72,
+      "totalMs": 38.0676569999996,
+      "firstBeginMs": 34.94665299999906,
+      "firstDeletedMs": 35.132354999999734,
+      "maxLagMs": 0.11300800000026356
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 72,
+      "totalMs": 18.70690099999956,
+      "firstBeginMs": 10.479605999998967,
+      "firstDeletedMs": 10.662958999999319,
+      "maxLagMs": 0.07272199999897566
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 73,
+      "totalMs": 19.689125999999305,
+      "firstBeginMs": 11.152452000000267,
+      "firstDeletedMs": 11.343897999999172,
+      "maxLagMs": 0.07046599999921455
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 73,
+      "totalMs": 46.40647999999965,
+      "firstBeginMs": 43.068659999999,
+      "firstDeletedMs": 43.29171999999926,
+      "maxLagMs": 0.2152509999996255
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 74,
+      "totalMs": 42.65688700000101,
+      "firstBeginMs": 39.50402900000154,
+      "firstDeletedMs": 39.77143000000069,
+      "maxLagMs": 1.255130999999892
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 74,
+      "totalMs": 18.742792999999438,
+      "firstBeginMs": 11.061063999999533,
+      "firstDeletedMs": 11.252098999999362,
+      "maxLagMs": 0.07427599999937229
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 75,
+      "totalMs": 23.396562000001722,
+      "firstBeginMs": 13.560361000001649,
+      "firstDeletedMs": 13.793203000001085,
+      "maxLagMs": 0.06859799999983807
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 75,
+      "totalMs": 46.02626799999962,
+      "firstBeginMs": 42.60305299999891,
+      "firstDeletedMs": 42.86528100000032,
+      "maxLagMs": 0.14330899999913527
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 76,
+      "totalMs": 49.238610000000335,
+      "firstBeginMs": 45.36728700000094,
+      "firstDeletedMs": 45.5853330000009,
+      "maxLagMs": 0.1876380000012432
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 76,
+      "totalMs": 19.844277000000147,
+      "firstBeginMs": 11.546218999999837,
+      "firstDeletedMs": 11.988091999999597,
+      "maxLagMs": 0.07298100000116392
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 77,
+      "totalMs": 21.782665999999153,
+      "firstBeginMs": 10.943570999999793,
+      "firstDeletedMs": 11.16733000000022,
+      "maxLagMs": 0.07311699999991106
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 77,
+      "totalMs": 47.15969100000075,
+      "firstBeginMs": 43.3424040000009,
+      "firstDeletedMs": 43.549293000000034,
+      "maxLagMs": 0.38020899999901303
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 78,
+      "totalMs": 55.56526899999881,
+      "firstBeginMs": 50.03034200000002,
+      "firstDeletedMs": 50.250638999999865,
+      "maxLagMs": 0.165367999999944
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 78,
+      "totalMs": 21.035909999998694,
+      "firstBeginMs": 11.398232999999891,
+      "firstDeletedMs": 11.669898000000103,
+      "maxLagMs": 0.09310999999979686
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 79,
+      "totalMs": 22.282594000000245,
+      "firstBeginMs": 10.913613999999143,
+      "firstDeletedMs": 11.000417999999627,
+      "maxLagMs": 0.06728199999997742
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 79,
+      "totalMs": 42.360029999999824,
+      "firstBeginMs": 39.15647499999977,
+      "firstDeletedMs": 39.37061899999935,
+      "maxLagMs": 0.42021999999997206
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 80,
+      "totalMs": 44.90271600000051,
+      "firstBeginMs": 41.48463400000037,
+      "firstDeletedMs": 41.69271200000003,
+      "maxLagMs": 1.0663659999991069
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 80,
+      "totalMs": 18.580877000000328,
+      "firstBeginMs": 10.68822899999941,
+      "firstDeletedMs": 10.824636999999711,
+      "maxLagMs": 0.06720700000005309
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 81,
+      "totalMs": 24.463407999999617,
+      "firstBeginMs": 11.522774000000936,
+      "firstDeletedMs": 11.76606399999946,
+      "maxLagMs": 0.06751299999996263
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 81,
+      "totalMs": 39.95393100000001,
+      "firstBeginMs": 37.07908099999986,
+      "firstDeletedMs": 37.29009800000131,
+      "maxLagMs": 0.1434030000000348
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 82,
+      "totalMs": 42.35521499999959,
+      "firstBeginMs": 38.899593000000095,
+      "firstDeletedMs": 39.122418000000835,
+      "maxLagMs": 0.0831369999996241
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 82,
+      "totalMs": 21.689648999999918,
+      "firstBeginMs": 11.917555999998513,
+      "firstDeletedMs": 12.151946999998472,
+      "maxLagMs": 0.07684400000107416
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 83,
+      "totalMs": 23.545964000000822,
+      "firstBeginMs": 14.878754000001209,
+      "firstDeletedMs": 15.068715999999768,
+      "maxLagMs": 1.0072419999996782
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 83,
+      "totalMs": 44.69380199999978,
+      "firstBeginMs": 41.70416099999966,
+      "firstDeletedMs": 41.9353540000011,
+      "maxLagMs": 0.07962100000077044
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 84,
+      "totalMs": 44.310804999999164,
+      "firstBeginMs": 41.04116000000067,
+      "firstDeletedMs": 41.319219999999405,
+      "maxLagMs": 2.5607970000000932
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 84,
+      "totalMs": 22.653725999998642,
+      "firstBeginMs": 12.508158999999068,
+      "firstDeletedMs": 12.733822999998665,
+      "maxLagMs": 0.09979199999906996
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 85,
+      "totalMs": 22.27262999999948,
+      "firstBeginMs": 11.848770000000513,
+      "firstDeletedMs": 12.014000999999553,
+      "maxLagMs": 0.06703200000083598
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 85,
+      "totalMs": 43.21758000000045,
+      "firstBeginMs": 38.813146000000415,
+      "firstDeletedMs": 39.055656000000454,
+      "maxLagMs": 0.07635200000004261
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 86,
+      "totalMs": 45.36675000000105,
+      "firstBeginMs": 41.19350200000008,
+      "firstDeletedMs": 41.466904000000795,
+      "maxLagMs": 0.10876100000132283
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 86,
+      "totalMs": 18.901325000000725,
+      "firstBeginMs": 10.762640000000829,
+      "firstDeletedMs": 10.94023500000003,
+      "maxLagMs": 0.06535799999983283
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 87,
+      "totalMs": 17.321422999999413,
+      "firstBeginMs": 10.342760999999882,
+      "firstDeletedMs": 10.541336000000229,
+      "maxLagMs": 0.06328199999916251
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 87,
+      "totalMs": 41.674441000001025,
+      "firstBeginMs": 38.22371200000089,
+      "firstDeletedMs": 38.43628600000011,
+      "maxLagMs": 0.1677589999999327
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 88,
+      "totalMs": 50.88266599999952,
+      "firstBeginMs": 46.63894000000073,
+      "firstDeletedMs": 46.896482000000105,
+      "maxLagMs": 0.33296900000095775
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 88,
+      "totalMs": 21.819687999999587,
+      "firstBeginMs": 12.69198200000028,
+      "firstDeletedMs": 12.910534999999072,
+      "maxLagMs": 0.07467999999971653
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 89,
+      "totalMs": 18.705289000001358,
+      "firstBeginMs": 11.144949000001361,
+      "firstDeletedMs": 11.247311000000991,
+      "maxLagMs": 0.06259399999908055
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 89,
+      "totalMs": 44.04920799999854,
+      "firstBeginMs": 39.93053599999985,
+      "firstDeletedMs": 40.115280999998504,
+      "maxLagMs": 0.2378549999993993
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 90,
+      "totalMs": 40.613218000000415,
+      "firstBeginMs": 37.81123000000116,
+      "firstDeletedMs": 38.0124109999997,
+      "maxLagMs": 0.597154999999475
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 90,
+      "totalMs": 20.765097000001333,
+      "firstBeginMs": 11.415904999999839,
+      "firstDeletedMs": 11.611276999999973,
+      "maxLagMs": 0.0710560000006808
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 91,
+      "totalMs": 21.421888999999283,
+      "firstBeginMs": 12.989618999999948,
+      "firstDeletedMs": 13.164878999999928,
+      "maxLagMs": 0.07275699999991048
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 91,
+      "totalMs": 41.71445600000152,
+      "firstBeginMs": 37.88413600000058,
+      "firstDeletedMs": 38.14267100000143,
+      "maxLagMs": 0.7972280000012688
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 92,
+      "totalMs": 34.61327600000004,
+      "firstBeginMs": 31.930034000000887,
+      "firstDeletedMs": 32.10498100000041,
+      "maxLagMs": 0.08075099999950908
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 92,
+      "totalMs": 17.309010999999373,
+      "firstBeginMs": 10.627731000000495,
+      "firstDeletedMs": 10.737268000000768,
+      "maxLagMs": 0.0648220000002766
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 93,
+      "totalMs": 21.934258999999656,
+      "firstBeginMs": 12.472173999998631,
+      "firstDeletedMs": 12.752363999999943,
+      "maxLagMs": 0.08217299999887473
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 93,
+      "totalMs": 38.79257300000063,
+      "firstBeginMs": 35.79963400000088,
+      "firstDeletedMs": 36.00863500000014,
+      "maxLagMs": 0.442323999999644
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 94,
+      "totalMs": 41.07289800000035,
+      "firstBeginMs": 37.78066300000137,
+      "firstDeletedMs": 38.00739500000054,
+      "maxLagMs": 0.3519379999997909
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 94,
+      "totalMs": 18.621891999999207,
+      "firstBeginMs": 11.711563999999271,
+      "firstDeletedMs": 11.954233999998905,
+      "maxLagMs": 0.06706300000041665
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 95,
+      "totalMs": 18.078058000000965,
+      "firstBeginMs": 11.608291000000463,
+      "firstDeletedMs": 11.877988000000187,
+      "maxLagMs": 0.06733299999905284
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 95,
+      "totalMs": 39.588456999999835,
+      "firstBeginMs": 36.3125770000006,
+      "firstDeletedMs": 36.59004300000015,
+      "maxLagMs": 0.30480700000043726
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 96,
+      "totalMs": 40.91014499999983,
+      "firstBeginMs": 38.19672900000114,
+      "firstDeletedMs": 38.38860100000056,
+      "maxLagMs": 0.2536889999992127
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 96,
+      "totalMs": 16.978132000000187,
+      "firstBeginMs": 10.363011999999799,
+      "firstDeletedMs": 10.512302000001,
+      "maxLagMs": 0.08473900000171852
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 97,
+      "totalMs": 17.820576999998593,
+      "firstBeginMs": 9.768616999999722,
+      "firstDeletedMs": 9.878323999999338,
+      "maxLagMs": 0.08929299999908835
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 97,
+      "totalMs": 39.83833699999923,
+      "firstBeginMs": 36.879863000000114,
+      "firstDeletedMs": 37.14300999999978,
+      "maxLagMs": 0.13798799999858602
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 98,
+      "totalMs": 41.08340700000008,
+      "firstBeginMs": 38.01391100000001,
+      "firstDeletedMs": 38.25498999999945,
+      "maxLagMs": 0.0915709999990213
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 98,
+      "totalMs": 17.580472999999984,
+      "firstBeginMs": 10.029508999999962,
+      "firstDeletedMs": 10.201130999999805,
+      "maxLagMs": 0.07911999999851105
+    },
+    {
+      "scenario": "many",
+      "engine": "rust",
+      "iteration": 99,
+      "totalMs": 18.253654000000097,
+      "firstBeginMs": 10.27690100000109,
+      "firstDeletedMs": 10.494941000000836,
+      "maxLagMs": 0.062346000000616186
+    },
+    {
+      "scenario": "many",
+      "engine": "js",
+      "iteration": 99,
+      "totalMs": 43.072221000000354,
+      "firstBeginMs": 39.21959000000061,
+      "firstDeletedMs": 39.42868400000043,
+      "maxLagMs": 0.4492739999986952
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 0,
+      "totalMs": 290.27559499999916,
+      "firstBeginMs": 204.46485199999915,
+      "firstDeletedMs": 290.21318099999917,
+      "maxLagMs": 0.09130499999992026
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 0,
+      "totalMs": 95.83120899999994,
+      "firstBeginMs": 8.491705999998885,
+      "firstDeletedMs": 95.289526999999,
+      "maxLagMs": 0.6885739999997895
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 1,
+      "totalMs": 97.21718999999939,
+      "firstBeginMs": 7.644381000000067,
+      "firstDeletedMs": 96.5729199999987,
+      "maxLagMs": 0.07597199999872828
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 1,
+      "totalMs": 292.1697089999998,
+      "firstBeginMs": 203.1172209999986,
+      "firstDeletedMs": 292.1065929999986,
+      "maxLagMs": 0.13904700000057346
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 2,
+      "totalMs": 274.4528960000007,
+      "firstBeginMs": 185.81775500000003,
+      "firstDeletedMs": 273.5429289999993,
+      "maxLagMs": 1.1614129999998113
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 2,
+      "totalMs": 95.31136400000105,
+      "firstBeginMs": 7.994516000000658,
+      "firstDeletedMs": 94.84518500000013,
+      "maxLagMs": 0.7664519999998447
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 3,
+      "totalMs": 92.32295000000158,
+      "firstBeginMs": 7.0157170000002225,
+      "firstDeletedMs": 91.82149700000082,
+      "maxLagMs": 0.08996099999967555
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 3,
+      "totalMs": 310.9012619999994,
+      "firstBeginMs": 224.7869300000002,
+      "firstDeletedMs": 310.81901599999946,
+      "maxLagMs": 3.6556560000008176
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 4,
+      "totalMs": 300.59706600000027,
+      "firstBeginMs": 209.010905000001,
+      "firstDeletedMs": 300.45992099999967,
+      "maxLagMs": 0.5347689999998693
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 4,
+      "totalMs": 109.19817700000021,
+      "firstBeginMs": 7.54954700000053,
+      "firstDeletedMs": 108.77472999999918,
+      "maxLagMs": 0.11716200000046229
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 5,
+      "totalMs": 106.59280799999942,
+      "firstBeginMs": 7.0915489999988495,
+      "firstDeletedMs": 106.42327799999839,
+      "maxLagMs": 0.09260600000015984
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 5,
+      "totalMs": 347.43751300000076,
+      "firstBeginMs": 255.23765699999967,
+      "firstDeletedMs": 347.3765110000004,
+      "maxLagMs": 0.6372090000004391
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 6,
+      "totalMs": 303.396804,
+      "firstBeginMs": 210.64635500000077,
+      "firstDeletedMs": 303.3241510000007,
+      "maxLagMs": 0.9894829999993817
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 6,
+      "totalMs": 95.21675399999913,
+      "firstBeginMs": 7.560074999999415,
+      "firstDeletedMs": 94.5470949999999,
+      "maxLagMs": 0.07920499999818276
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 7,
+      "totalMs": 98.46947900000305,
+      "firstBeginMs": 7.544764000002033,
+      "firstDeletedMs": 98.07231900000261,
+      "maxLagMs": 0.09116799999901559
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 7,
+      "totalMs": 339.63217000000077,
+      "firstBeginMs": 244.21192000000156,
+      "firstDeletedMs": 339.544973,
+      "maxLagMs": 1.8511429999998654
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 8,
+      "totalMs": 287.3405440000024,
+      "firstBeginMs": 197.1123710000029,
+      "firstDeletedMs": 287.26466600000276,
+      "maxLagMs": 0.11841500000082306
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 8,
+      "totalMs": 98.76455999999962,
+      "firstBeginMs": 7.28045800000109,
+      "firstDeletedMs": 98.37099600000147,
+      "maxLagMs": 0.08862299999964307
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 9,
+      "totalMs": 103.28938100000232,
+      "firstBeginMs": 6.9184970000023895,
+      "firstDeletedMs": 102.78829800000312,
+      "maxLagMs": 0.09800800000084564
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 9,
+      "totalMs": 275.82839899999817,
+      "firstBeginMs": 187.2710369999986,
+      "firstDeletedMs": 275.76568099999713,
+      "maxLagMs": 0.08491800000047078
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 10,
+      "totalMs": 308.5583460000016,
+      "firstBeginMs": 216.8197509999991,
+      "firstDeletedMs": 308.47223400000075,
+      "maxLagMs": 0.1738020000011602
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 10,
+      "totalMs": 100.85086099999899,
+      "firstBeginMs": 8.357600999999704,
+      "firstDeletedMs": 100.32627100000173,
+      "maxLagMs": 1.3049769999997807
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 11,
+      "totalMs": 94.99038199999995,
+      "firstBeginMs": 8.019019999999728,
+      "firstDeletedMs": 94.4630810000017,
+      "maxLagMs": 0.07346300000062911
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 11,
+      "totalMs": 296.89478900000177,
+      "firstBeginMs": 207.87387500000114,
+      "firstDeletedMs": 296.81741500000135,
+      "maxLagMs": 2.2179880000003322
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 12,
+      "totalMs": 312.2561139999998,
+      "firstBeginMs": 220.30126799999925,
+      "firstDeletedMs": 312.1969319999989,
+      "maxLagMs": 1.2712589999973716
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 12,
+      "totalMs": 98.43337600000086,
+      "firstBeginMs": 7.996171999999206,
+      "firstDeletedMs": 97.88691200000176,
+      "maxLagMs": 0.08973999999943771
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 13,
+      "totalMs": 102.80583999999726,
+      "firstBeginMs": 8.16853799999808,
+      "firstDeletedMs": 102.2304469999981,
+      "maxLagMs": 0.0911500000001979
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 13,
+      "totalMs": 277.11318200000096,
+      "firstBeginMs": 194.28994600000078,
+      "firstDeletedMs": 277.05478700000094,
+      "maxLagMs": 2.974293999999645
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 14,
+      "totalMs": 346.391302,
+      "firstBeginMs": 255.88171899999725,
+      "firstDeletedMs": 346.33027599999696,
+      "maxLagMs": 0.17066500000146334
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 14,
+      "totalMs": 98.13163399999758,
+      "firstBeginMs": 8.075190999999904,
+      "firstDeletedMs": 97.66894799999864,
+      "maxLagMs": 0.3709789999993518
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 15,
+      "totalMs": 95.43951899999956,
+      "firstBeginMs": 7.559871999997995,
+      "firstDeletedMs": 95.01207099999738,
+      "maxLagMs": 0.08112099999925704
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 15,
+      "totalMs": 291.69419899999775,
+      "firstBeginMs": 203.91516000000047,
+      "firstDeletedMs": 291.5709749999987,
+      "maxLagMs": 1.025288000000728
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 16,
+      "totalMs": 291.5897750000004,
+      "firstBeginMs": 198.8657830000011,
+      "firstDeletedMs": 291.5034020000021,
+      "maxLagMs": 0.2032790000012028
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 16,
+      "totalMs": 97.855055,
+      "firstBeginMs": 7.412384999999631,
+      "firstDeletedMs": 97.27686000000176,
+      "maxLagMs": 0.17185199999948964
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 17,
+      "totalMs": 94.02213300000221,
+      "firstBeginMs": 7.217995000002702,
+      "firstDeletedMs": 93.44197500000155,
+      "maxLagMs": 0.12136200000168174
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 17,
+      "totalMs": 322.7413970000016,
+      "firstBeginMs": 229.1808060000003,
+      "firstDeletedMs": 322.6451249999991,
+      "maxLagMs": 0.1488309999986086
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 18,
+      "totalMs": 335.8703139999998,
+      "firstBeginMs": 245.79209600000104,
+      "firstDeletedMs": 335.79036199999973,
+      "maxLagMs": 1.1088359999994282
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 18,
+      "totalMs": 101.6004380000013,
+      "firstBeginMs": 8.748631000002206,
+      "firstDeletedMs": 101.21489600000132,
+      "maxLagMs": 3.7619200000008277
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 19,
+      "totalMs": 99.84024000000136,
+      "firstBeginMs": 7.564550999999483,
+      "firstDeletedMs": 99.37113300000055,
+      "maxLagMs": 0.6609610000014072
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 19,
+      "totalMs": 307.45784800000183,
+      "firstBeginMs": 218.19401300000027,
+      "firstDeletedMs": 307.3802539999997,
+      "maxLagMs": 1.2782179999994696
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 20,
+      "totalMs": 313.13054300000294,
+      "firstBeginMs": 225.0001340000017,
+      "firstDeletedMs": 313.0648000000001,
+      "maxLagMs": 0.8205109999980778
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 20,
+      "totalMs": 102.42119000000093,
+      "firstBeginMs": 7.54870899999878,
+      "firstDeletedMs": 101.88557600000058,
+      "maxLagMs": 1.2770920000002661
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 21,
+      "totalMs": 97.38080499999705,
+      "firstBeginMs": 8.224069999996573,
+      "firstDeletedMs": 97.01824799999667,
+      "maxLagMs": 0.16399699999965378
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 21,
+      "totalMs": 310.1623139999974,
+      "firstBeginMs": 216.4964779999973,
+      "firstDeletedMs": 310.07220400000006,
+      "maxLagMs": 0.7966430000014952
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 22,
+      "totalMs": 269.0825150000019,
+      "firstBeginMs": 184.8718630000003,
+      "firstDeletedMs": 269.01233400000274,
+      "maxLagMs": 1.7971920000018144
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 22,
+      "totalMs": 92.23711800000092,
+      "firstBeginMs": 9.337413000001106,
+      "firstDeletedMs": 91.67408500000238,
+      "maxLagMs": 0.09264600000096834
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 23,
+      "totalMs": 89.0781109999989,
+      "firstBeginMs": 7.28755799999999,
+      "firstDeletedMs": 88.7015250000004,
+      "maxLagMs": 0.0962230000004638
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 23,
+      "totalMs": 274.5899000000027,
+      "firstBeginMs": 194.42120700000305,
+      "firstDeletedMs": 274.506265,
+      "maxLagMs": 0.8139889999984007
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 24,
+      "totalMs": 268.3795859999991,
+      "firstBeginMs": 183.38845599999695,
+      "firstDeletedMs": 268.2983859999986,
+      "maxLagMs": 0.14882700000089244
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 24,
+      "totalMs": 92.53686699999889,
+      "firstBeginMs": 7.641840000000229,
+      "firstDeletedMs": 92.00967499999751,
+      "maxLagMs": 0.07740799999737646
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 25,
+      "totalMs": 90.79010099999869,
+      "firstBeginMs": 6.691040999998222,
+      "firstDeletedMs": 90.34529299999849,
+      "maxLagMs": 0.08012099999905331
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 25,
+      "totalMs": 269.26992699999755,
+      "firstBeginMs": 189.20482300000003,
+      "firstDeletedMs": 269.2100959999989,
+      "maxLagMs": 1.3593430000000808
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 26,
+      "totalMs": 295.7942010000006,
+      "firstBeginMs": 195.40212299999985,
+      "firstDeletedMs": 295.64496000000145,
+      "maxLagMs": 1.5561999999990803
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 26,
+      "totalMs": 103.37832900000285,
+      "firstBeginMs": 8.229772000002413,
+      "firstDeletedMs": 102.6715320000003,
+      "maxLagMs": 0.547828999999183
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 27,
+      "totalMs": 98.26659500000096,
+      "firstBeginMs": 8.653295999996772,
+      "firstDeletedMs": 97.81095500000083,
+      "maxLagMs": 0.14225699999951757
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 27,
+      "totalMs": 301.6521490000014,
+      "firstBeginMs": 214.42743900000642,
+      "firstDeletedMs": 301.569199000005,
+      "maxLagMs": 1.4199900000021444
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 28,
+      "totalMs": 280.21975199999724,
+      "firstBeginMs": 197.83943500000169,
+      "firstDeletedMs": 280.1299429999999,
+      "maxLagMs": 0.930318000006082
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 28,
+      "totalMs": 93.10731800000212,
+      "firstBeginMs": 9.32324399999925,
+      "firstDeletedMs": 92.55518699999811,
+      "maxLagMs": 0.08690499999647727
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 29,
+      "totalMs": 97.2397559999954,
+      "firstBeginMs": 7.180320999999822,
+      "firstDeletedMs": 96.73859200000152,
+      "maxLagMs": 0.1423609999983455
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 29,
+      "totalMs": 268.15579699999944,
+      "firstBeginMs": 182.79886799999804,
+      "firstDeletedMs": 268.06215599999996,
+      "maxLagMs": 3.3757780000014463
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 30,
+      "totalMs": 273.0281000000032,
+      "firstBeginMs": 184.92806700000074,
+      "firstDeletedMs": 272.9687279999998,
+      "maxLagMs": 0.5641269999978249
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 30,
+      "totalMs": 95.4334880000024,
+      "firstBeginMs": 7.323325000004843,
+      "firstDeletedMs": 95.08614400000079,
+      "maxLagMs": 2.1732599999959348
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 31,
+      "totalMs": 100.22067799999786,
+      "firstBeginMs": 8.92836299999908,
+      "firstDeletedMs": 99.69116300000314,
+      "maxLagMs": 0.14469800000370014
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 31,
+      "totalMs": 304.49354299999686,
+      "firstBeginMs": 214.40505899999698,
+      "firstDeletedMs": 304.3882450000019,
+      "maxLagMs": 1.4536770000049728
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 32,
+      "totalMs": 311.7152730000016,
+      "firstBeginMs": 222.92742700000235,
+      "firstDeletedMs": 311.64706200000364,
+      "maxLagMs": 1.6293319999967935
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 32,
+      "totalMs": 92.33758400000079,
+      "firstBeginMs": 7.370794000002206,
+      "firstDeletedMs": 91.81652300000133,
+      "maxLagMs": 0.07257200000458397
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 33,
+      "totalMs": 93.59824200000003,
+      "firstBeginMs": 7.333352000001469,
+      "firstDeletedMs": 93.17861900000571,
+      "maxLagMs": 0.09280700000090292
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 33,
+      "totalMs": 281.5578370000003,
+      "firstBeginMs": 193.76047000000108,
+      "firstDeletedMs": 281.48289099999965,
+      "maxLagMs": 2.053424999998242
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 34,
+      "totalMs": 284.0986980000016,
+      "firstBeginMs": 192.00474899999972,
+      "firstDeletedMs": 284.0169989999995,
+      "maxLagMs": 0.5784160000039265
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 34,
+      "totalMs": 92.43746100000135,
+      "firstBeginMs": 8.051853999997547,
+      "firstDeletedMs": 92.12096300000121,
+      "maxLagMs": 2.9259650000021793
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 35,
+      "totalMs": 94.3855160000021,
+      "firstBeginMs": 7.419853999999759,
+      "firstDeletedMs": 93.93762799999968,
+      "maxLagMs": 0.0824540000030538
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 35,
+      "totalMs": 277.1629759999996,
+      "firstBeginMs": 184.96022600000288,
+      "firstDeletedMs": 277.09146400000463,
+      "maxLagMs": 0.9605169999995269
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 36,
+      "totalMs": 275.77391299999726,
+      "firstBeginMs": 188.28535199999897,
+      "firstDeletedMs": 275.7055540000001,
+      "maxLagMs": 0.10292800000024727
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 36,
+      "totalMs": 94.22074399999838,
+      "firstBeginMs": 8.967562999998336,
+      "firstDeletedMs": 93.79202799999621,
+      "maxLagMs": 0.07775799999944866
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 37,
+      "totalMs": 95.81878000000142,
+      "firstBeginMs": 7.404654000005394,
+      "firstDeletedMs": 95.34152900000481,
+      "maxLagMs": 0.1151629999949364
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 37,
+      "totalMs": 304.2259239999985,
+      "firstBeginMs": 215.1926620000013,
+      "firstDeletedMs": 304.1571849999964,
+      "maxLagMs": 0.1787289999992936
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 38,
+      "totalMs": 264.833120999996,
+      "firstBeginMs": 178.2026429999969,
+      "firstDeletedMs": 264.7725399999981,
+      "maxLagMs": 1.625078000004578
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 38,
+      "totalMs": 89.9650549999933,
+      "firstBeginMs": 7.538009999996575,
+      "firstDeletedMs": 89.52588299999479,
+      "maxLagMs": 1.8448110000026645
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 39,
+      "totalMs": 91.32541400000628,
+      "firstBeginMs": 7.800800000004529,
+      "firstDeletedMs": 90.85967900000105,
+      "maxLagMs": 0.07780500000080792
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 39,
+      "totalMs": 279.71593399999983,
+      "firstBeginMs": 195.98267900000064,
+      "firstDeletedMs": 279.62024999999994,
+      "maxLagMs": 0.1554759999999078
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 40,
+      "totalMs": 281.6185820000028,
+      "firstBeginMs": 194.2750240000023,
+      "firstDeletedMs": 281.5432860000001,
+      "maxLagMs": 0.13867100000061328
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 40,
+      "totalMs": 95.97445100000186,
+      "firstBeginMs": 7.940832000000228,
+      "firstDeletedMs": 95.51423900000373,
+      "maxLagMs": 0.08138899999903515
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 41,
+      "totalMs": 99.65461200000573,
+      "firstBeginMs": 7.839434000001347,
+      "firstDeletedMs": 98.07676800000627,
+      "maxLagMs": 0.11762699999962933
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 41,
+      "totalMs": 323.8497490000009,
+      "firstBeginMs": 229.49827500000538,
+      "firstDeletedMs": 323.7878290000008,
+      "maxLagMs": 0.3661720000018249
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 42,
+      "totalMs": 334.57263099999545,
+      "firstBeginMs": 226.24781000000075,
+      "firstDeletedMs": 334.50605099999666,
+      "maxLagMs": 0.8779949999952805
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 42,
+      "totalMs": 104.30307800000446,
+      "firstBeginMs": 11.190212000001338,
+      "firstDeletedMs": 102.93702699999994,
+      "maxLagMs": 2.2970770000029006
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 43,
+      "totalMs": 94.13000800000009,
+      "firstBeginMs": 7.3755180000007385,
+      "firstDeletedMs": 93.59235600000102,
+      "maxLagMs": 0.08104099999764003
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 43,
+      "totalMs": 322.5523009999961,
+      "firstBeginMs": 226.07972899999731,
+      "firstDeletedMs": 322.44751299999916,
+      "maxLagMs": 1.9751860000033048
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 44,
+      "totalMs": 295.47671699999773,
+      "firstBeginMs": 203.9534979999953,
+      "firstDeletedMs": 295.41223100000207,
+      "maxLagMs": 0.0976169999994454
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 44,
+      "totalMs": 97.69263399999909,
+      "firstBeginMs": 7.810050000000047,
+      "firstDeletedMs": 96.9825920000003,
+      "maxLagMs": 0.10408299999835435
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 45,
+      "totalMs": 99.39232600000105,
+      "firstBeginMs": 8.418134999999893,
+      "firstDeletedMs": 98.78839799999696,
+      "maxLagMs": 0.08015999999770429
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 45,
+      "totalMs": 296.47531300000264,
+      "firstBeginMs": 204.95045300000493,
+      "firstDeletedMs": 296.3873840000015,
+      "maxLagMs": 0.3063980000006268
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 46,
+      "totalMs": 342.7770789999995,
+      "firstBeginMs": 247.5508289999998,
+      "firstDeletedMs": 342.71556899999996,
+      "maxLagMs": 2.2060029999993276
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 46,
+      "totalMs": 103.48448100000678,
+      "firstBeginMs": 10.03608499999973,
+      "firstDeletedMs": 103.03077699999994,
+      "maxLagMs": 5.04581500000495
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 47,
+      "totalMs": 97.25526399999944,
+      "firstBeginMs": 8.234590000000026,
+      "firstDeletedMs": 96.65448800000013,
+      "maxLagMs": 0.09266900000511669
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 47,
+      "totalMs": 326.6791330000051,
+      "firstBeginMs": 232.51485700000194,
+      "firstDeletedMs": 326.5875789999991,
+      "maxLagMs": 1.3412590000007185
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 48,
+      "totalMs": 285.03882400000293,
+      "firstBeginMs": 199.37818600000173,
+      "firstDeletedMs": 284.9465599999967,
+      "maxLagMs": 0.4574639999991632
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 48,
+      "totalMs": 92.65677000000142,
+      "firstBeginMs": 6.884227000002284,
+      "firstDeletedMs": 92.17616599999747,
+      "maxLagMs": 0.08780100000149105
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 49,
+      "totalMs": 91.1599769999957,
+      "firstBeginMs": 7.440373999997973,
+      "firstDeletedMs": 90.66027400000166,
+      "maxLagMs": 0.08875499999703607
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 49,
+      "totalMs": 299.694693999998,
+      "firstBeginMs": 208.81502900000487,
+      "firstDeletedMs": 299.6349960000007,
+      "maxLagMs": 0.8060679999980493
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 50,
+      "totalMs": 324.5726849999992,
+      "firstBeginMs": 232.4525100000028,
+      "firstDeletedMs": 324.47016299999814,
+      "maxLagMs": 1.7076730000044336
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 50,
+      "totalMs": 101.12747099999979,
+      "firstBeginMs": 8.384899000004225,
+      "firstDeletedMs": 100.58869299999787,
+      "maxLagMs": 1.6214289999988978
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 51,
+      "totalMs": 97.27121700000134,
+      "firstBeginMs": 7.9691880000027595,
+      "firstDeletedMs": 96.70280199999979,
+      "maxLagMs": 0.08550500000274042
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 51,
+      "totalMs": 365.4820219999965,
+      "firstBeginMs": 266.1911009999967,
+      "firstDeletedMs": 365.40233699999953,
+      "maxLagMs": 3.907830999996804
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 52,
+      "totalMs": 320.81707800000004,
+      "firstBeginMs": 227.071050999999,
+      "firstDeletedMs": 320.7318959999975,
+      "maxLagMs": 0.13784499999746913
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 52,
+      "totalMs": 101.93091300000378,
+      "firstBeginMs": 9.297660000003816,
+      "firstDeletedMs": 101.51988400000118,
+      "maxLagMs": 0.2603830000007292
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 53,
+      "totalMs": 95.88008499999705,
+      "firstBeginMs": 8.096363999997266,
+      "firstDeletedMs": 95.46364699999685,
+      "maxLagMs": 0.0951779999959399
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 53,
+      "totalMs": 327.80281800000375,
+      "firstBeginMs": 238.8790930000032,
+      "firstDeletedMs": 327.71607600000425,
+      "maxLagMs": 0.16935299999749986
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 54,
+      "totalMs": 291.0144250000012,
+      "firstBeginMs": 205.84588800000347,
+      "firstDeletedMs": 290.9385689999981,
+      "maxLagMs": 0.0897079999995185
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 54,
+      "totalMs": 106.12126899999566,
+      "firstBeginMs": 9.809111999995366,
+      "firstDeletedMs": 105.44889400000102,
+      "maxLagMs": 0.10041500000079395
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 55,
+      "totalMs": 98.9582389999996,
+      "firstBeginMs": 8.97474499999953,
+      "firstDeletedMs": 98.61241899999732,
+      "maxLagMs": 0.09586799999669893
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 55,
+      "totalMs": 317.1423240000004,
+      "firstBeginMs": 213.58147100000497,
+      "firstDeletedMs": 317.04893500000617,
+      "maxLagMs": 1.119565999993938
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 56,
+      "totalMs": 349.5122379999957,
+      "firstBeginMs": 250.08953399999882,
+      "firstDeletedMs": 349.42483199999697,
+      "maxLagMs": 1.2781380000014906
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 56,
+      "totalMs": 98.42536600000312,
+      "firstBeginMs": 8.21560500000487,
+      "firstDeletedMs": 97.92058700000052,
+      "maxLagMs": 1.278027000000293
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 57,
+      "totalMs": 102.10208100000455,
+      "firstBeginMs": 7.85366900000372,
+      "firstDeletedMs": 101.54263600000559,
+      "maxLagMs": 0.18480899999849498
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 57,
+      "totalMs": 361.9828720000005,
+      "firstBeginMs": 262.7736839999998,
+      "firstDeletedMs": 361.90244900000107,
+      "maxLagMs": 0.6349369999952614
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 58,
+      "totalMs": 324.56492199999775,
+      "firstBeginMs": 228.51753999999346,
+      "firstDeletedMs": 324.50480799999787,
+      "maxLagMs": 1.0019050000046263
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 58,
+      "totalMs": 99.46415400000114,
+      "firstBeginMs": 10.444640000001527,
+      "firstDeletedMs": 98.84548599999835,
+      "maxLagMs": 5.2260000000023865
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 59,
+      "totalMs": 97.93029699999897,
+      "firstBeginMs": 8.195982000004733,
+      "firstDeletedMs": 97.49408599999879,
+      "maxLagMs": 0.6024089999991702
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 59,
+      "totalMs": 309.98475700000563,
+      "firstBeginMs": 216.44744899999932,
+      "firstDeletedMs": 309.8987200000047,
+      "maxLagMs": 0.5074429999949643
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 60,
+      "totalMs": 314.0127730000022,
+      "firstBeginMs": 224.03271700000187,
+      "firstDeletedMs": 313.943428999999,
+      "maxLagMs": 0.19307900000421796
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 60,
+      "totalMs": 100.77928999999858,
+      "firstBeginMs": 7.699149000000034,
+      "firstDeletedMs": 99.95298200000252,
+      "maxLagMs": 1.7604520000022603
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 61,
+      "totalMs": 104.55508099999861,
+      "firstBeginMs": 8.202116000000387,
+      "firstDeletedMs": 103.68222999999853,
+      "maxLagMs": 0.07879500000126427
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 61,
+      "totalMs": 364.58361599999625,
+      "firstBeginMs": 268.44118499999604,
+      "firstDeletedMs": 364.5198210000017,
+      "maxLagMs": 0.1686360000021523
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 62,
+      "totalMs": 369.6288759999952,
+      "firstBeginMs": 272.06340899999486,
+      "firstDeletedMs": 369.52841199999966,
+      "maxLagMs": 1.7717329999941285
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 62,
+      "totalMs": 109.05414799999562,
+      "firstBeginMs": 11.733445999998366,
+      "firstDeletedMs": 108.398159999997,
+      "maxLagMs": 1.7029429999965942
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 63,
+      "totalMs": 101.74137599999813,
+      "firstBeginMs": 7.647550000001502,
+      "firstDeletedMs": 101.24859899999865,
+      "maxLagMs": 0.3764960000044084
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 63,
+      "totalMs": 391.84388000000035,
+      "firstBeginMs": 293.7720229999977,
+      "firstDeletedMs": 391.71952600000077,
+      "maxLagMs": 1.1300950000004377
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 64,
+      "totalMs": 338.7410660000023,
+      "firstBeginMs": 237.15693499999907,
+      "firstDeletedMs": 338.6466749999963,
+      "maxLagMs": 0.14166699999623233
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 64,
+      "totalMs": 108.88667899999564,
+      "firstBeginMs": 8.419663000000583,
+      "firstDeletedMs": 107.78582900000038,
+      "maxLagMs": 0.5707659999970929
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 65,
+      "totalMs": 104.13246000000072,
+      "firstBeginMs": 8.937651000000187,
+      "firstDeletedMs": 103.69246099999873,
+      "maxLagMs": 1.2580420000012964
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 65,
+      "totalMs": 327.3430759999974,
+      "firstBeginMs": 232.2271139999939,
+      "firstDeletedMs": 327.2439199999935,
+      "maxLagMs": 1.6431639999937033
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 66,
+      "totalMs": 347.707319000001,
+      "firstBeginMs": 253.70926999999938,
+      "firstDeletedMs": 347.6405840000007,
+      "maxLagMs": 0.8708279999991646
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 66,
+      "totalMs": 115.73362099999213,
+      "firstBeginMs": 8.2203770000051,
+      "firstDeletedMs": 115.35334699999657,
+      "maxLagMs": 0.08267700001306366
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 67,
+      "totalMs": 114.28728899999987,
+      "firstBeginMs": 8.709885000003851,
+      "firstDeletedMs": 113.59885799999756,
+      "maxLagMs": 0.5090340000024298
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 67,
+      "totalMs": 402.1192200000078,
+      "firstBeginMs": 292.05992200000037,
+      "firstDeletedMs": 402.01816799999506,
+      "maxLagMs": 1.4721950000093784
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 68,
+      "totalMs": 340.65780000000086,
+      "firstBeginMs": 247.20930899999803,
+      "firstDeletedMs": 340.58683700000984,
+      "maxLagMs": 0.16600100000505336
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 68,
+      "totalMs": 102.08393199999409,
+      "firstBeginMs": 8.839806999996654,
+      "firstDeletedMs": 101.54886699999042,
+      "maxLagMs": 0.8566849999915576
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 69,
+      "totalMs": 108.53712399999495,
+      "firstBeginMs": 9.163242999988142,
+      "firstDeletedMs": 107.93525399999635,
+      "maxLagMs": 0.09768700000131503
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 69,
+      "totalMs": 312.68344900000375,
+      "firstBeginMs": 218.49689600001147,
+      "firstDeletedMs": 312.6231289999996,
+      "maxLagMs": 2.0497489999979734
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 70,
+      "totalMs": 358.6853669999982,
+      "firstBeginMs": 252.8002059999999,
+      "firstDeletedMs": 358.5891530000081,
+      "maxLagMs": 0.4252990000095451
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 70,
+      "totalMs": 111.91841099999147,
+      "firstBeginMs": 8.308517999990727,
+      "firstDeletedMs": 111.21974999998929,
+      "maxLagMs": 1.4400150000001304
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 71,
+      "totalMs": 106.16944299999159,
+      "firstBeginMs": 8.382089999999152,
+      "firstDeletedMs": 105.721881999998,
+      "maxLagMs": 0.10745599999791011
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 71,
+      "totalMs": 349.8648799999937,
+      "firstBeginMs": 256.8510490000044,
+      "firstDeletedMs": 349.783334000007,
+      "maxLagMs": 0.14625200000591576
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 72,
+      "totalMs": 365.2714980000019,
+      "firstBeginMs": 271.43028099999356,
+      "firstDeletedMs": 365.19888299999,
+      "maxLagMs": 0.14806099999987055
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 72,
+      "totalMs": 103.33536700000695,
+      "firstBeginMs": 11.754446000006283,
+      "firstDeletedMs": 103.00888599999598,
+      "maxLagMs": 0.4055159999988973
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 73,
+      "totalMs": 118.2364799999923,
+      "firstBeginMs": 9.184347000002163,
+      "firstDeletedMs": 117.71578299999237,
+      "maxLagMs": 0.2293609999906039
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 73,
+      "totalMs": 334.3027740000107,
+      "firstBeginMs": 240.16104600000835,
+      "firstDeletedMs": 334.2205590000085,
+      "maxLagMs": 0.12853099999483675
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 74,
+      "totalMs": 321.39075199999206,
+      "firstBeginMs": 226.0901840000006,
+      "firstDeletedMs": 321.2687650000007,
+      "maxLagMs": 0.11835400000563823
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 74,
+      "totalMs": 97.98399900000368,
+      "firstBeginMs": 8.013673000008566,
+      "firstDeletedMs": 97.59733200000483,
+      "maxLagMs": 0.10268700000597164
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 75,
+      "totalMs": 100.69690100000298,
+      "firstBeginMs": 8.491955000004964,
+      "firstDeletedMs": 100.10070199999609,
+      "maxLagMs": 0.08472499999334104
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 75,
+      "totalMs": 302.6249839999946,
+      "firstBeginMs": 216.2964090000023,
+      "firstDeletedMs": 302.5478330000042,
+      "maxLagMs": 0.3931719999964116
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 76,
+      "totalMs": 334.9939529999974,
+      "firstBeginMs": 244.7247090000019,
+      "firstDeletedMs": 334.90383100000327,
+      "maxLagMs": 2.095516999994288
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 76,
+      "totalMs": 96.08213599999726,
+      "firstBeginMs": 9.796715999997105,
+      "firstDeletedMs": 95.64393399999244,
+      "maxLagMs": 0.08634199999505654
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 77,
+      "totalMs": 104.04810400000133,
+      "firstBeginMs": 8.055349999995087,
+      "firstDeletedMs": 103.6181099999958,
+      "maxLagMs": 0.09856199999921955
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 77,
+      "totalMs": 310.2140240000008,
+      "firstBeginMs": 220.3764710000105,
+      "firstDeletedMs": 310.13905800000066,
+      "maxLagMs": 0.6363419999979669
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 78,
+      "totalMs": 328.4047140000039,
+      "firstBeginMs": 234.59600499999942,
+      "firstDeletedMs": 328.3066720000061,
+      "maxLagMs": 0.19008400000166148
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 78,
+      "totalMs": 100.04774599999655,
+      "firstBeginMs": 8.269572999997763,
+      "firstDeletedMs": 99.22267599999032,
+      "maxLagMs": 0.08716200001072139
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 79,
+      "totalMs": 101.39646000000357,
+      "firstBeginMs": 8.592659000001731,
+      "firstDeletedMs": 100.94489300000714,
+      "maxLagMs": 0.08269000001018867
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 79,
+      "totalMs": 349.4010269999999,
+      "firstBeginMs": 256.42778199999884,
+      "firstDeletedMs": 349.2800920000009,
+      "maxLagMs": 1.7769479999988107
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 80,
+      "totalMs": 348.71529900000314,
+      "firstBeginMs": 254.38001999999688,
+      "firstDeletedMs": 348.636983999997,
+      "maxLagMs": 1.223147999990033
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 80,
+      "totalMs": 113.26488499999687,
+      "firstBeginMs": 11.804447000002256,
+      "firstDeletedMs": 111.04450400000496,
+      "maxLagMs": 1.0420520000043325
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 81,
+      "totalMs": 106.46452599999611,
+      "firstBeginMs": 7.759018999990076,
+      "firstDeletedMs": 105.8088679999928,
+      "maxLagMs": 0.08057900000130758
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 81,
+      "totalMs": 317.0220560000016,
+      "firstBeginMs": 225.73208799998974,
+      "firstDeletedMs": 316.96339199999056,
+      "maxLagMs": 0.1436329999996815
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 82,
+      "totalMs": 347.05288499999733,
+      "firstBeginMs": 254.1986259999976,
+      "firstDeletedMs": 346.93079800000123,
+      "maxLagMs": 0.4341180000046734
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 82,
+      "totalMs": 98.15739000000758,
+      "firstBeginMs": 9.35972700000275,
+      "firstDeletedMs": 97.58621300000232,
+      "maxLagMs": 0.06326999999873806
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 83,
+      "totalMs": 92.99047800000699,
+      "firstBeginMs": 7.680699000004097,
+      "firstDeletedMs": 92.4349130000046,
+      "maxLagMs": 0.08152700000209734
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 83,
+      "totalMs": 340.71759600000223,
+      "firstBeginMs": 240.17572099999234,
+      "firstDeletedMs": 340.65724800000316,
+      "maxLagMs": 1.6049150000035297
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 84,
+      "totalMs": 307.52004599999054,
+      "firstBeginMs": 215.588162,
+      "firstDeletedMs": 307.4116529999883,
+      "maxLagMs": 1.1388529999967432
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 84,
+      "totalMs": 106.92126400000416,
+      "firstBeginMs": 13.173584000003757,
+      "firstDeletedMs": 106.30149800000072,
+      "maxLagMs": 3.1475740000023507
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 85,
+      "totalMs": 97.35461500000383,
+      "firstBeginMs": 8.129256000000169,
+      "firstDeletedMs": 96.5273210000014,
+      "maxLagMs": 0.08443899999838322
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 85,
+      "totalMs": 324.9151620000048,
+      "firstBeginMs": 222.56060199999774,
+      "firstDeletedMs": 324.84296700000414,
+      "maxLagMs": 0.22272800000791904
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 86,
+      "totalMs": 300.0616270000028,
+      "firstBeginMs": 213.71166600000288,
+      "firstDeletedMs": 299.9751600000018,
+      "maxLagMs": 0.36631900000793394
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 86,
+      "totalMs": 97.4924949999986,
+      "firstBeginMs": 7.843280999994022,
+      "firstDeletedMs": 96.99291399998765,
+      "maxLagMs": 1.428064000006998
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 87,
+      "totalMs": 104.62069799999881,
+      "firstBeginMs": 6.862972000002628,
+      "firstDeletedMs": 104.17527500000142,
+      "maxLagMs": 0.11063899999135174
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 87,
+      "totalMs": 330.8437339999946,
+      "firstBeginMs": 244.3222220000025,
+      "firstDeletedMs": 330.7348309999943,
+      "maxLagMs": 0.24606199999107048
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 88,
+      "totalMs": 358.3894480000017,
+      "firstBeginMs": 261.17426300000807,
+      "firstDeletedMs": 358.2843770000036,
+      "maxLagMs": 1.3073889999941457
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 88,
+      "totalMs": 98.46288500000082,
+      "firstBeginMs": 9.97687600000063,
+      "firstDeletedMs": 97.9057240000111,
+      "maxLagMs": 0.14643100000103004
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 89,
+      "totalMs": 110.5477350000001,
+      "firstBeginMs": 7.8771600000036415,
+      "firstDeletedMs": 110.04889700000058,
+      "maxLagMs": 0.09155199999804609
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 89,
+      "totalMs": 338.1483200000075,
+      "firstBeginMs": 251.48003299999982,
+      "firstDeletedMs": 338.0629520000075,
+      "maxLagMs": 1.1520439999876544
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 90,
+      "totalMs": 324.91027499998745,
+      "firstBeginMs": 234.39923599999747,
+      "firstDeletedMs": 324.846372,
+      "maxLagMs": 0.9165539999958128
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 90,
+      "totalMs": 96.22181699999783,
+      "firstBeginMs": 7.249863999997615,
+      "firstDeletedMs": 94.76564399999916,
+      "maxLagMs": 0.06777300000248943
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 91,
+      "totalMs": 99.46791500000108,
+      "firstBeginMs": 8.316804999994929,
+      "firstDeletedMs": 98.93463999999221,
+      "maxLagMs": 0.846810999995796
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 91,
+      "totalMs": 323.7321640000009,
+      "firstBeginMs": 234.14623800000118,
+      "firstDeletedMs": 323.63124699999753,
+      "maxLagMs": 1.2979570000024978
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 92,
+      "totalMs": 337.240135,
+      "firstBeginMs": 245.41062599999714,
+      "firstDeletedMs": 337.15938900000765,
+      "maxLagMs": 2.532850999996299
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 92,
+      "totalMs": 101.64597500000673,
+      "firstBeginMs": 8.435532999996212,
+      "firstDeletedMs": 100.76771600000211,
+      "maxLagMs": 0.6326700000063283
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 93,
+      "totalMs": 96.68222400000377,
+      "firstBeginMs": 7.557836000007228,
+      "firstDeletedMs": 96.27880600000208,
+      "maxLagMs": 0.12846900000295136
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 93,
+      "totalMs": 297.9179889999941,
+      "firstBeginMs": 212.41283400000248,
+      "firstDeletedMs": 297.85460299999977,
+      "maxLagMs": 0.8602479999972275
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 94,
+      "totalMs": 314.4831400000112,
+      "firstBeginMs": 223.13534900000377,
+      "firstDeletedMs": 314.3841930000053,
+      "maxLagMs": 1.327261999991606
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 94,
+      "totalMs": 98.78233800000453,
+      "firstBeginMs": 7.231166000012308,
+      "firstDeletedMs": 98.2484400000103,
+      "maxLagMs": 0.08186400000704452
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 95,
+      "totalMs": 95.48345100000734,
+      "firstBeginMs": 7.101362000001245,
+      "firstDeletedMs": 95.03349800000433,
+      "maxLagMs": 0.07600400000228547
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 95,
+      "totalMs": 403.7329759999993,
+      "firstBeginMs": 304.08557300000393,
+      "firstDeletedMs": 403.66688400000567,
+      "maxLagMs": 1.7725930000015069
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 96,
+      "totalMs": 368.8078499999974,
+      "firstBeginMs": 279.13001500000246,
+      "firstDeletedMs": 368.7217870000022,
+      "maxLagMs": 0.9866100000072038
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 96,
+      "totalMs": 100.9894040000072,
+      "firstBeginMs": 8.275334000005387,
+      "firstDeletedMs": 100.52476700000989,
+      "maxLagMs": 0.08964299999934155
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 97,
+      "totalMs": 103.00744700001087,
+      "firstBeginMs": 9.363417000000481,
+      "firstDeletedMs": 102.5196169999981,
+      "maxLagMs": 0.9036430000123801
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 97,
+      "totalMs": 337.3120889999991,
+      "firstBeginMs": 243.0898739999975,
+      "firstDeletedMs": 337.22633900000073,
+      "maxLagMs": 3.5635670000046957
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 98,
+      "totalMs": 363.731375000003,
+      "firstBeginMs": 273.93134799999825,
+      "firstDeletedMs": 363.63106600000174,
+      "maxLagMs": 1.761266000001342
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 98,
+      "totalMs": 97.91195300000254,
+      "firstBeginMs": 7.563909999997122,
+      "firstDeletedMs": 97.3751329999941,
+      "maxLagMs": 0.07915499999944586
+    },
+    {
+      "scenario": "large",
+      "engine": "rust",
+      "iteration": 99,
+      "totalMs": 93.9625090000045,
+      "firstBeginMs": 7.888453000006848,
+      "firstDeletedMs": 93.42008199999691,
+      "maxLagMs": 0.1426119999960065
+    },
+    {
+      "scenario": "large",
+      "engine": "js",
+      "iteration": 99,
+      "totalMs": 364.76591700001154,
+      "firstBeginMs": 268.20078700000886,
+      "firstDeletedMs": 364.6347700000042,
+      "maxLagMs": 1.0920340000011493
+    }
+  ]
+}

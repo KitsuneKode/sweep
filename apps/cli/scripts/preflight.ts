@@ -72,6 +72,17 @@ check("dist/ contains only expected bundle files", () => {
   assert(unexpected.length === 0, `unexpected files in dist/: ${unexpected.join(", ")}`);
 });
 
+check("publish bundles stay within the 4 MiB distribution budget", () => {
+  const bytes = [...ALLOWED_DIST_FILES].reduce((total, file) => {
+    const path = join(CLI_ROOT, "dist", file);
+    return total + (existsSync(path) ? statSync(path).size : 0);
+  }, 0);
+  assert(
+    bytes <= 4 * 1024 * 1024,
+    `${bytes} bundle bytes exceed 4 MiB; review dependency/asset growth`,
+  );
+});
+
 check("sweep --version prints a version string", () => {
   if (!existsSync(DIST)) return;
   const out = execFileSync(NODE, [DIST, "--version"], { encoding: "utf8", timeout: 5000 });

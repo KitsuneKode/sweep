@@ -75,18 +75,22 @@ function rustAvailable(): boolean {
 }
 
 function assertMatchesGolden(actual: ScanPlan, fixtureRoot: string): void {
+  expect(actual.targetIdentity).toBeDefined();
+  for (const candidate of actual.candidates) expect(candidate.identity).toBeDefined();
   const expectedPath = join(fixtureRoot, "expected.plan.json");
   const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ScanPlan;
   expect(normalizePlan(actual, fixtureRoot)).toEqual(expected);
 }
 
 function assertByteParity(jsPlan: ScanPlan, rustPlan: ScanPlan): void {
+  expect(rustPlan.targetIdentity).toEqual(jsPlan.targetIdentity);
   const jsByPath = new Map(jsPlan.candidates.map((candidate) => [candidate.path, candidate]));
   expect(rustPlan.candidates.length).toBe(jsPlan.candidates.length);
 
   for (const rustCandidate of rustPlan.candidates) {
     const jsCandidate = jsByPath.get(rustCandidate.path);
     expect(jsCandidate).toBeDefined();
+    expect(rustCandidate.identity).toEqual(jsCandidate?.identity);
     const jsBytes = jsCandidate?.estimatedBytes ?? 0;
     const rustBytes = rustCandidate.estimatedBytes;
     const tolerance = Math.max(512, jsBytes * 0.15);

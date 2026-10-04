@@ -1,0 +1,57 @@
+{
+  "scenario": "2500 one-byte matching files; consumer pauses 250ms then reads 32KiB each 10ms; one exploratory run per combination; host RSS sampled every 10ms; no deletion",
+  "results": [
+    {
+      "runtime": "node",
+      "engine": "js",
+      "candidates": 2500,
+      "bytes": 2957209,
+      "elapsedMs": 1197.1,
+      "sampledHostPeakRssBytes": 81911808,
+      "exitCode": 0,
+      "complete": true
+    },
+    {
+      "runtime": "node",
+      "engine": "rust",
+      "candidates": 2500,
+      "bytes": 2951324,
+      "elapsedMs": 1194.0,
+      "sampledHostPeakRssBytes": 93409280,
+      "exitCode": 0,
+      "complete": true
+    },
+    {
+      "runtime": "bun",
+      "engine": "js",
+      "candidates": 2500,
+      "bytes": 2957120,
+      "elapsedMs": 1199.2,
+      "sampledHostPeakRssBytes": 73912320,
+      "exitCode": 0,
+      "complete": true
+    },
+    {
+      "runtime": "bun",
+      "engine": "rust",
+      "candidates": 2500,
+      "bytes": 2951426,
+      "elapsedMs": 1193.0,
+      "sampledHostPeakRssBytes": 77676544,
+      "exitCode": 0,
+      "complete": true
+    },
+    {
+      "runtime": "node",
+      "engine": "js",
+      "consumer": "closed after first line",
+      "exitCode": 4
+    },
+    {
+      "runtime": "node",
+      "engine": "rust",
+      "consumer": "closed after first line",
+      "exitCode": 4
+    }
+  ]
+}

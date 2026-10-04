@@ -7,7 +7,8 @@
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/ui/src/**",
         "$TURBO_ROOT$/packages/display/src/**",
-        "$TURBO_ROOT$/scripts/bundle.ts"
+        "$TURBO_ROOT$/scripts/bundle.ts",
+        "$TURBO_ROOT$/packages/ui/tsconfig.json"
       ],
       "outputs": ["dist/**"]
     },

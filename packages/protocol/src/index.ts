@@ -65,7 +65,16 @@ export interface SweepConfig {
 export { candidateKindFromName, KNOWN_ARTIFACT_NAMES } from "./candidate.js";
 export { sanitizeTerminalText, sanitizeMultilineTerminalText } from "./text.js";
 
+/** Exact decimal identifiers; JSON numbers would lose large inode precision. */
+export interface FilesystemIdentity {
+  platform: "unix" | "windows";
+  device: string;
+  inode: string;
+}
+
 export interface ScanEntry {
+  /** Captured at discovery. Missing identities cannot authorize an apply. */
+  identity?: FilesystemIdentity | undefined;
   path: string;
   name: string;
   estimatedBytes: number;
@@ -89,6 +98,7 @@ export interface ScanEntry {
 }
 
 export interface ScanResult {
+  targetIdentity?: FilesystemIdentity | undefined;
   entries: ScanEntry[];
   estimatedTotalBytes: number;
   scannedDirs: number;
@@ -185,6 +195,7 @@ export type ScanEventType = (typeof SCAN_EVENT_TYPES)[number];
 export interface ScanStartedEvent {
   type: "scan_started";
   targetDir: string;
+  targetIdentity?: FilesystemIdentity | undefined;
 }
 
 export interface CandidateFoundEvent {
@@ -268,6 +279,8 @@ export type ScanEvent =
 export interface ScanPlan {
   protocolVersion: typeof PROTOCOL_VERSION;
   targetDir: string;
+  /** Captured before traversal, never refreshed when loading a saved plan. */
+  targetIdentity?: FilesystemIdentity | undefined;
   selectionPolicy: SelectionPolicy;
   candidates: ScanCandidate[];
   summary: {

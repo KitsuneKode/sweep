@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { applyPlanWithBackend } from "../src/engine.js";
 import { buildPlan } from "../src/planner.js";
-import { resolveRustEngineBinary } from "../src/rust-engine.js";
+import { readFilesystemIdentity } from "../src/filesystem-identity.js";
 import type { ScanEntry } from "@kitsunekode/sweep-protocol";
 
 const { values } = parseArgs({
@@ -21,7 +21,17 @@ const { values } = parseArgs({
 const samples = Number(values.samples);
 if (!Number.isInteger(samples) || samples < 1 || samples > 100)
   throw new Error("samples must be 1–100");
-const nativeBinary = resolveRustEngineBinary();
+const nativeBinary = resolve(
+  process.env.SWEEP_ENGINE_PATH ||
+    join(
+      import.meta.dir,
+      "../../../target/release",
+      process.platform === "win32" ? "sweep-engine.exe" : "sweep-engine",
+    ),
+);
+if (!existsSync(nativeBinary))
+  throw new Error("Build the release engine first: bun run engine:build");
+process.env.SWEEP_ENGINE_PATH = nativeBinary;
 const fixtureParent = resolve(values["fixture-parent"] ?? tmpdir());
 const nativeSha256 = createHash("sha256").update(readFileSync(nativeBinary)).digest("hex");
 const rows: Array<Record<string, unknown>> = [];
@@ -44,6 +54,7 @@ for (const scenario of [
             writeFileSync(join(parent, `file-${j}`), "benchmark");
           }
           entries.push({
+            identity: readFilesystemIdentity(path),
             path,
             name: "node_modules",
             entryType: "directory",
@@ -53,6 +64,7 @@ for (const scenario of [
           });
         }
         const plan = buildPlan(root, {
+          targetIdentity: readFilesystemIdentity(root),
           entries,
           estimatedTotalBytes: entries.reduce((n, e) => n + e.estimatedBytes, 0),
           scannedDirs: scenario.candidates + 1,
@@ -134,7 +146,10 @@ const output =
       nativeBinary,
       nativeSha256,
       method:
-        "Owned temporary fixtures; alternating engines; current-size guard enabled. Includes validation, fresh sizing, native startup/control and deletion. Excludes fixture creation and cleanup. Seven samples are exploratory maxima, not p99 qualification.",
+        "Owned temporary fixtures; alternating engines; current-size guard enabled. Includes validation, fresh sizing, native startup/control and deletion. Excludes fixture creation and cleanup. " +
+        (samples >= 100
+          ? "Empirical nearest-rank p99 on this local workload; not a production SLO or physical-reclaim benchmark."
+          : "Fewer than 100 samples are exploratory maxima, not p99 qualification."),
       summary,
       rows,
     },

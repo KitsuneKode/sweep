@@ -1,0 +1,15 @@
+{
+  "title": "Users",
+  "pages": [
+    "index",
+    "getting-started",
+    "terminal-ui",
+    "commands",
+    "automation",
+    "configuration",
+    "safety",
+    "platforms",
+    "privacy",
+    "troubleshooting"
+  ]
+}

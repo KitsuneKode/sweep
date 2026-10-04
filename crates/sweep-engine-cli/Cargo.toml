@@ -17,6 +17,9 @@ sweep-errors = { path = "../sweep-errors" }
 sweep-fs = { path = "../sweep-fs" }
 sweep-types = { path = "../sweep-types" }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 

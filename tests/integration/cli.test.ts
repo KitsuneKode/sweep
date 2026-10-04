@@ -50,6 +50,88 @@ function runCli(
 }
 
 describe("CLI scan/apply", () => {
+  test("Bun keeps larger NDJSON intact when its consumer starts late", async () => {
+    const count = 400;
+    for (let i = 0; i < count; i++) writeFileSync(dir(`${i}-${"x".repeat(100)}.tmp`), "x");
+    const proc = Bun.spawn({
+      cmd: ["bun", SWEEP, "scan", tmpDir, "--json-stream", "--engine", "js", "--pattern", "*.tmp"],
+      cwd: REPO_ROOT,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, SWEEP_CONFIG_DIR: dir("test-config") },
+    });
+    const stderr = new Response(proc.stderr).text();
+    try {
+      // More than stdout's high-water mark accumulates before any consumer reads.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const reader = proc.stdout.getReader();
+      const chunks: Uint8Array[] = [];
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      const events = Buffer.concat(chunks)
+        .toString("utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as ScanEvent);
+      expect(await proc.exited).toBe(0);
+      expect(events.filter((e) => e.type === "candidate_found")).toHaveLength(count);
+      expect(events.filter((e) => e.type === "candidate_updated")).toHaveLength(count);
+      const completed = events.at(-1);
+      expect(completed?.type).toBe("scan_completed");
+      if (completed?.type === "scan_completed")
+        expect(completed.summary.candidateCount).toBe(count);
+      expect(await stderr).not.toContain("MaxListenersExceeded");
+    } finally {
+      if (proc.exitCode === null) proc.kill();
+    }
+  }, 15_000);
+  test("JSON clean and apply previews flush their full plan before exiting", async () => {
+    const count = 200;
+    for (let i = 0; i < count; i++) writeFileSync(dir(`${i}-${"x".repeat(100)}.tmp`), "x");
+    const scan = runCli([
+      "scan",
+      tmpDir,
+      "--json",
+      "--pattern",
+      "*.tmp",
+      "--select",
+      "all",
+      "--include-dangerous",
+    ]);
+    expect(scan.exitCode).toBe(0);
+    const planFile = dir("reviewed-plan.json");
+    writeFileSync(planFile, scan.stdout);
+    for (const args of [
+      [tmpDir, "--dry-run", "--json", "--engine", "js", "--pattern", "*.tmp"],
+      ["apply", "--plan", planFile, "--dry-run", "--json", "--engine", "js"],
+    ]) {
+      const proc = Bun.spawn({
+        cmd: ["bun", SWEEP, ...args],
+        cwd: REPO_ROOT,
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { ...process.env, SWEEP_CONFIG_DIR: dir("test-config") },
+      });
+      const stderr = new Response(proc.stderr).text();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const plan = JSON.parse(await new Response(proc.stdout).text()) as ScanPlan;
+        expect(await proc.exited).toBe(0);
+        expect(plan.candidates).toHaveLength(count);
+        expect(await stderr).not.toContain("output is incomplete");
+        expect(existsSync(dir(`${0}-${"x".repeat(100)}.tmp`))).toBe(true);
+      } finally {
+        if (proc.exitCode === null) proc.kill();
+      }
+    }
+  }, 15_000);
+
   test("scan --json emits a plan-shaped document with candidates", () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("target"));

@@ -41,6 +41,49 @@ export class ResourceBudget {
     maxRetainedBytes: 0,
   };
   private failure: ResourceLimitError | undefined;
+  private sizingIds = 0;
+  private sizingDirs = 0;
+  private sizingPaths = 0;
+  private sizingBytes = 0;
+
+  /** Live totals across all sizing jobs; saturation never poisons discovery. */
+  sizingIdentity(): boolean {
+    if (
+      this.sizingIds >= this.limits.maxIdentities ||
+      this.sizingBytes + 128 > this.limits.maxRetainedBytes
+    )
+      return false;
+    this.sizingIds++;
+    this.sizingBytes += 128;
+    return true;
+  }
+
+  releaseSizingIdentities(count: number): void {
+    this.sizingIds -= count;
+    this.sizingBytes -= count * 128;
+  }
+
+  sizingDirectory(path: string | Buffer): boolean {
+    const bytes = Buffer.isBuffer(path) ? path.length : Buffer.byteLength(path);
+    const retained = 128 + bytes * 4;
+    if (
+      this.sizingDirs >= this.limits.maxQueuedDirs ||
+      this.sizingPaths + bytes > this.limits.maxPathBytes ||
+      this.sizingBytes + retained > this.limits.maxRetainedBytes
+    )
+      return false;
+    this.sizingDirs++;
+    this.sizingPaths += bytes;
+    this.sizingBytes += retained;
+    return true;
+  }
+
+  releaseSizingDirectory(path: string | Buffer): void {
+    const bytes = Buffer.isBuffer(path) ? path.length : Buffer.byteLength(path);
+    this.sizingDirs--;
+    this.sizingPaths -= bytes;
+    this.sizingBytes -= 128 + bytes * 4;
+  }
 
   constructor(limits: Partial<ScanLimits> = {}) {
     this.limits = Object.freeze({ ...DEFAULT_SCAN_LIMITS, ...limits });
@@ -105,6 +148,11 @@ export function candidateFieldChars(candidate: ScanCandidate): number {
     candidate.id.length +
     candidate.name.length +
     candidate.kind.length +
+    (candidate.identity
+      ? candidate.identity.platform.length +
+        candidate.identity.device.length +
+        candidate.identity.inode.length
+      : 0) +
     candidate.reasons.reduce((sum, reason) => sum + reason.length, 0)
   );
 }

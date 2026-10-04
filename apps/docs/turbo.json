@@ -1,0 +1,21 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/**"],
+      "outputs": ["dist/**", ".tanstack/**", "src/routeTree.gen.ts"],
+      "env": ["DOCS_SITE_URL"]
+    },
+    "typecheck": {
+      "dependsOn": ["build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/**"]
+    },
+    "dev": {
+      "env": ["DOCS_SITE_URL"]
+    },
+    "test": {
+      "dependsOn": ["transit"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/**"]
+    }
+  }
+}

@@ -1,0 +1,216 @@
+{
+  "date": "2026-10-04T12:13:00.868687+00:00",
+  "status": "Local source qualification, recorded before the authorized checkpoint commit; no publication",
+  "sourceBaseline": "cc7dab6c4c0bf8accb9f18d87c1aed57bc194b9d",
+  "platform": "linux-x64",
+  "nativeSha256": "9783df3908466ec16c6feed492e1f70c767acfe4ac36fa5ff4ddb1c3a98b98f4",
+  "nativeBytes": 1031584,
+  "verification": {
+    "bunCheck": {
+      "exit": 0,
+      "tests": 674,
+      "tasks": 48
+    },
+    "rustCheck": {
+      "exit": 0,
+      "tests": 95,
+      "tasks": 8
+    },
+    "linuxAllTargetsClippy": {
+      "exit": 0
+    },
+    "windowsAllTargetsCrossClippy": {
+      "exit": 0,
+      "runtimeQualification": false
+    },
+    "fullChangedSourceLint": {
+      "files": 79,
+      "warnings": 0,
+      "errors": 0
+    },
+    "workflowsYamlSyntax": {
+      "files": 4,
+      "hostedActionlintRun": false
+    },
+    "gitDiffCheck": {
+      "exit": 0
+    },
+    "verificationLadder": [
+      {
+        "name": "fixtures:sync",
+        "status": "pass",
+        "ms": 49.169376
+      },
+      {
+        "name": "fixtures:validate-goldens",
+        "status": "pass",
+        "ms": 12.950108
+      },
+      {
+        "name": "check",
+        "status": "pass",
+        "ms": 40251.783142
+      },
+      {
+        "name": "rust:check",
+        "status": "pass",
+        "ms": 3632.0170999999973
+      },
+      {
+        "name": "engine:verify",
+        "status": "pass",
+        "ms": 39.03908500000398
+      },
+      {
+        "name": "preflight",
+        "status": "fail",
+        "ms": 319.0018280000004,
+        "detail": "exit 1",
+        "outputTail": "@kitsunekode/sweep:preflight:  M packages/protocol/schemas/scan-plan.schema.json\n@kitsunekode/sweep:preflight:  M packages/protocol/schemas/shared.schema.json\n@kitsunekode/sweep:preflight:  M packages/protocol/src/index.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/app.test.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/app.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/keymap.test.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/keymap.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/presentation.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/rows.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/runtime.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/scope-tree.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/state.test.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/state.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/state/store.ts\n@kitsunekode/sweep:preflight: ?? apps/cli/scripts/compress-standalone.test.ts\n@kitsunekode/sweep:preflight: ?? apps/cli/scripts/compress-standalone.ts\n@kitsunekode/sweep:preflight: ?? apps/cli/src/global-errors.test.ts\n@kitsunekode/sweep:preflight: ?? apps/cli/src/global-errors.ts\n@kitsunekode/sweep:preflight: ?? apps/cli/src/json-output.test.ts\n@kitsunekode/sweep:preflight: ?? apps/cli/src/json-output.ts\n@kitsunekode/sweep:preflight: ?? apps/docs/\n@kitsunekode/sweep:preflight: ?? packages/core/src/filesystem-identity.test.ts\n@kitsunekode/sweep:preflight: ?? packages/core/src/filesystem-identity.ts\n@kitsunekode/sweep:preflight: ?? packages/core/src/mount-boundary.test.ts\n@kitsunekode/sweep:preflight: ?? packages/core/src/mount-boundary.ts\n@kitsunekode/sweep:preflight: ?? packages/ui/benchmarks/long-session.ts\n@kitsunekode/sweep:preflight: \n@kitsunekode/sweep:preflight: preflight failed. Fix the errors above before publishing\n@kitsunekode/sweep:preflight: \n@kitsunekode/sweep:preflight: \n@kitsunekode/sweep:preflight: error: script \"preflight\" exited with code 1\n\n Tasks:    1 successful, 2 total\nCached:    1 cached, 2 total\n  Time:    274ms \nFailed:    @kitsunekode/sweep#preflight\n\n\n@kitsunekode/sweep#preflight:  ERROR  command (/home/kitsunekode/Projects/cli-tools/sweep/apps/cli) /home/kitsunekode/.bun/bin/bun run preflight exited (1)\n ERROR  run failed: command  exited (1)"
+      },
+      {
+        "name": "installed package smoke",
+        "status": "pass",
+        "ms": 1700.6831840000013
+      },
+      {
+        "name": "pack:preview",
+        "status": "pass",
+        "ms": 505.67534299999534
+      },
+      {
+        "name": "standalone smoke",
+        "status": "pass",
+        "ms": 566.493131999996
+      }
+    ],
+    "preflightBoundary": "The ladder preflight refused uncommitted apps/packages; all other ladder steps passed. Re-run on the checkpoint commit without disabling this safeguard."
+  },
+  "independentReview": {
+    "reviewers": 1,
+    "critical": 0,
+    "important": 2,
+    "fixed": 2,
+    "findings": [
+      {
+        "priority": "P1",
+        "issue": "Node exit-time stdout resume overlaps asynchronous decoder work",
+        "fix": "Serialize each chunk onto the prior promise; only the last task resumes input; close awaits the whole chain",
+        "regression": "Actual exiting Node child emits 18000 ordered scan events; RED then GREEN"
+      },
+      {
+        "priority": "P2",
+        "issue": "Drain can fire before the producer waits, causing a false stalled-output error",
+        "fix": "Lifetime drain observation clears blocked state and byte accounting",
+        "regression": "Writable completes its drain before wait/flush; RED then GREEN"
+      }
+    ]
+  },
+  "actualRuntime": {
+    "focusedTerminal": "ok: inspected bravo, confirmed only that artifact, preserved alpha",
+    "brokenApplyPipe": [
+      {
+        "engine": "js",
+        "candidates": 40,
+        "deleted": 5,
+        "remaining": 35,
+        "exitCode": 1,
+        "historyMatchesDisk": true
+      },
+      {
+        "engine": "rust",
+        "candidates": 40,
+        "deleted": 3,
+        "remaining": 37,
+        "exitCode": 1,
+        "historyMatchesDisk": true
+      }
+    ],
+    "privateLinuxMounts": {
+      "scope": "Private Linux namespace, owned nested same-device bind mounts, actual CLI scan/save/apply",
+      "results": [
+        {
+          "engine": "rust",
+          "exit": 4,
+          "failedCount": 1,
+          "outsideSentinelPreserved": true,
+          "sameDeviceBindMount": true
+        },
+        {
+          "engine": "js",
+          "exit": 4,
+          "failedCount": 1,
+          "outsideSentinelPreserved": true,
+          "sameDeviceBindMount": true
+        }
+      ],
+      "nativeSha256": "9783df3908466ec16c6feed492e1f70c767acfe4ac36fa5ff4ddb1c3a98b98f4"
+    },
+    "installedPackages": {
+      "platform": "linux",
+      "arch": "x64",
+      "installation": "Actual local npm CLI/native tarballs, offline, no scripts, native package resolved without SWEEP_ENGINE_PATH",
+      "outcomes": [
+        {
+          "engine": "js",
+          "deletedCount": 1,
+          "snapshotsPreserved": true
+        },
+        {
+          "engine": "rust",
+          "deletedCount": 1,
+          "snapshotsPreserved": true
+        }
+      ],
+      "nativeSha256": "9783df3908466ec16c6feed492e1f70c767acfe4ac36fa5ff4ddb1c3a98b98f4"
+    },
+    "standaloneSmoke": "Full verification ladder passed standalone empty-PATH scan and UI probe"
+  },
+  "distribution": {
+    "npmCompressedBytes": 510101,
+    "npmUnpackedBytes": 2241220,
+    "files": [
+      "LICENSE",
+      "README.md",
+      "dist/sweep-lib.js",
+      "dist/sweep-ui.js",
+      "dist/sweep.js",
+      "package.json"
+    ],
+    "bundledCommanderOmittedFromPublishedDependencies": true
+  },
+  "worktree": {
+    "path": ".worktrees/traversal-engine",
+    "head": "3e458e8e7b2ecf8b93114cd6b775bfe4d2bf97f5",
+    "dirtyPathsPreserved": [
+      " M bun.lock",
+      " M package.json",
+      " D tests/fixtures/monorepo/apps/docs/.next/.gitkeep",
+      " D tests/fixtures/workspace-matrix/apps/docs/.next/.gitkeep",
+      " M turbo.json"
+    ]
+  },
+  "benchmarkFiles": [
+    "engine-results-paced-decoding.json",
+    "apply-results-anchored-removal.json",
+    "resource-long-sessions.json",
+    "ui-long-session.json"
+  ],
+  "limits": [
+    "Warm local fixture quantiles, no production p99 guarantee.",
+    "Million-file and existing-project scans belong to older hash-bound records; no allocated-200-GB deletion qualification.",
+    "Logical memory budgets and bounded session observations do not guarantee no OOM or prove leak absence.",
+    "Linux descriptor removal still cannot authenticate saved plans or lock mutable contents/final unlink names. JS mount checks are snapshots.",
+    "Actual Windows/macOS/ARM64 packages/terminals, hosted CI, crash journal, concurrent filesystem mutation, trash restore/full-disk behavior and fresh advisories remain open.",
+    "Commit is authorized; push/tag/publish/deploy are not."
+  ],
+  "logPaths": [
+    "/tmp/sweep-production-final-check.log",
+    "/tmp/sweep-production-final-rust-check.log",
+    "/tmp/sweep-production-review-red.log",
+    "/tmp/sweep-production-review-green.log",
+    "/tmp/sweep-production-scan-final.log",
+    "/tmp/sweep-production-linux-all-targets.log",
+    "/tmp/sweep-production-windows-clippy.log"
+  ]
+}

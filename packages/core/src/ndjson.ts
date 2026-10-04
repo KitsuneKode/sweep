@@ -1,3 +1,5 @@
+import { setImmediate as yieldImmediate } from "node:timers/promises";
+
 /** Bound each UTF-8 line before buffering it, including newline-free output. */
 export class NdjsonDecoder {
   private pending = "";
@@ -10,6 +12,29 @@ export class NdjsonDecoder {
   ) {}
 
   push(chunk: string): void {
+    for (const _ of this.consume(chunk)) {
+      /* drain synchronously */
+    }
+  }
+
+  /** Yield to keyboard/timers while retaining one bounded pipe chunk. */
+  async pushAsync(
+    chunk: string,
+    yieldControl: () => Promise<void> = yieldImmediate,
+    maxLines = 128,
+  ): Promise<void> {
+    let count = 0;
+    let started = performance.now();
+    for (const _ of this.consume(chunk)) {
+      if (++count >= maxLines || performance.now() - started >= 4) {
+        await yieldControl();
+        count = 0;
+        started = performance.now();
+      }
+    }
+  }
+
+  private *consume(chunk: string): Generator<void> {
     let start = 0;
     while (start < chunk.length) {
       const newline = chunk.indexOf("\n", start);
@@ -23,6 +48,7 @@ export class NdjsonDecoder {
       if (newline === -1) return;
       this.emit();
       start = newline + 1;
+      yield;
     }
   }
 

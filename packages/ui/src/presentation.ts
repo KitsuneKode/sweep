@@ -558,7 +558,7 @@ export function buildFooterHints(
   }
 
   if (context.focus === "sidebar") {
-    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("open/close")}${sep}${key("enter")} ${hint("scope")}${sep}${key("space")} ${hint("queue")}${sep}${key("tab")} ${hint("panes")}${sep}${key("?")} ${hint("help")}`;
+    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("open/close")}${sep}${key("enter")} ${hint("scope")}${sep}${key("space")} ${hint("queue")}${sep}${key("u")} ${hint("clear queue")}${sep}${key("?")} ${hint("help")}`;
   }
 
   if (context.focus === "search") {

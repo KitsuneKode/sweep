@@ -90,6 +90,13 @@ bun run scripts/sync-fixture-trees.ts
 bun run scripts/generate-parity-fixture.ts -- tests/fixtures/node_modules-only
 ```
 
+Parity normalizers omit filesystem identities and timestamps, which vary with
+the checkout. Contract tests separately require identities and compare JS/Rust
+identities on the same fixture; saved-plan tests preserve replacements after
+serialization and load. TUI tests verify that a rescan's root identity survives
+queued and single-row plans. Missing snapshots and older engine capabilities
+must fail before destructive work.
+
 ## Scan engines
 
 | `--engine`       | Behavior                                                                                   |
@@ -320,7 +327,8 @@ rotation, Unicode globs and hard-link scopes have focused regressions too.
 
 ```bash
 bun run packages/core/benchmarks/edge-parity.ts
-bun run packages/core/benchmarks/apply-comparison.ts --samples 7 --output /tmp/sweep-apply.json
+bun run engine:build
+bun run packages/core/benchmarks/apply-comparison.ts --samples 100 --fixture-parent target/sweep-test-tmp --output /tmp/sweep-apply.json
 bun run packages/ui/benchmarks/state-pipeline.ts
 ```
 
@@ -328,6 +336,11 @@ Apply measurements include refreshed size guards, validation, native control
 startup and deletion; fixture creation/removal is excluded. Seven samples
 report exploratory medians/maxima, not qualified p99. UI state measurements
 exclude terminal rendering. See [remediation evidence](../.plans/codebase-audit-2026-10-01/remediation.md).
+The apply harness defaults to the release engine; `SWEEP_ENGINE_PATH` explicitly
+overrides it. Create the ignored fixture-parent directory before running. The
+[October 3 follow-up](../.plans/codebase-audit-2026-10-01/rust-followup-review.md)
+records 100-sample scan and deletion results with executable hashes. Local
+empirical p99 is not a production latency guarantee.
 
 ## Resource and standalone qualification
 
@@ -339,6 +352,10 @@ bun run engine:build
 python3 scripts/resource-stress.py --files 100000 --repeats 5 --fixture-parent .plans --output /tmp/sweep-resources.json
 # Opt-in: approximately 4 GiB of filesystem blocks and a million inodes
 python3 scripts/resource-stress.py --files 1000000 --repeats 2 --fixture-parent .plans --output /tmp/sweep-million.json
+# Large byte totals without allocating or reading 200 GiB of file contents:
+python3 scripts/resource-stress.py --files 100000 --sparse-gib 200 --repeats 2 --fixture-parent .plans --output /tmp/sweep-200gib.json
+# Optional existing-tree probe is read-only; the harness never cleans that tree:
+python3 scripts/resource-stress.py --files 100 --existing-tree /absolute/projects/path --fixture-parent .plans --output /tmp/sweep-existing.json
 bun run packages/core/benchmarks/engine-comparison.ts --scenarios small,wide,fat,flat --fat-files 20000 --fixture-parent .plans --samples 100 --warmups 3 --output /tmp/sweep-latency.json
 ```
 
@@ -348,7 +365,11 @@ slowly, and verifies explicit quota failure. The watchdog is test tooling, not
 a shipped memory cap. Tiny injected budget, cancellation, raw filename, deep
 scope and large ID group regressions also run in `bun run check` / `rust:check`.
 
-Dated evidence: [100k resource runs](../.plans/codebase-audit-2026-10-01/resource-stress-100k.json),
+Current combined qualification: [million entries, 200 GiB sparse totals and read-only Projects](../.plans/codebase-audit-2026-10-01/resource-200gib-and-projects.json).
+The existing-tree scan runs after owned fixtures are removed, preventing fixture
+contents from contaminating its totals.
+
+Historical evidence: [100k resource runs](../.plans/codebase-audit-2026-10-01/resource-stress-100k.json),
 [million-entry runs](../.plans/codebase-audit-2026-10-01/resource-stress-million.json),
 [latency samples](../.plans/codebase-audit-2026-10-01/engine-results-resource-bounds.json).
 The Bun JS measurement includes its Node enumeration worker startup/IPC.
@@ -367,3 +388,78 @@ comparison alternates 30 process launches after three warmups, measuring
 `--version` with the static UI import. It excludes native extraction and TTY
 rendering. [Local bytecode evidence](../.plans/codebase-audit-2026-10-01/standalone-bytecode.json)
 is an exploratory median/max comparison, not a portable speedup claim.
+
+### Focused deletion in a real terminal
+
+On Linux, the PTY smoke creates two disposable artifacts, inspects one, requests
+its confirmation with `x`, verifies both still exist before `y`, and verifies
+only the inspected artifact was removed. It never applies to an existing project.
+
+```bash
+bun run engine:build
+python3 scripts/smoke-focused-ui.py
+```
+
+The inspect-ID and confirmation tests also run under OpenTUI's test renderer in
+`bun run check`. The PTY result does not qualify Windows/macOS consoles.
+
+## Public docs app
+
+`bun run docs:dev` starts the private TanStack Start/Fumadocs workspace.
+`bun run docs:check` checks its formatting, lint, tests, types and production
+prerendering; `bun run check` also includes this workspace.
+`bun run --cwd apps/docs smoke` validates all prerendered/SSR content, mapped
+Markdown links, search, 404s, benchmark JSON and SEO against the built server.
+Run the smoke after `bun run docs:build`. Repeat with a test `DOCS_SITE_URL`
+build to qualify canonicals, public robots and sitemap; leave it unset for
+previews. A local HTTP smoke does not verify keyboard/mobile rendering.
+
+Docs build/dev commands need Node 22.12+ and root Turbo commands need Cargo for
+workspace discovery. Website builds are excluded from CLI publication filters.
+See [the app guide](../apps/docs/README.md) for hosting and styling boundaries.
+
+Broken apply output pipes: `python scripts/smoke-apply-pipe.py` qualifies the
+Bun CLI bundle; pass a compiled path as its argument to qualify standalone.
+It owns all temporary trees, closes the progress consumer after the first
+removal, and verifies remaining artifacts, failure exit and persisted history.
+The local standalone JS/Rust run passed. This is a small synthetic interruption
+probe, not a large allocated-storage deletion benchmark.
+
+### Rust follow-up review
+
+`bun run rust:check` covers filename collisions, cancelled sizing refunds,
+replacement identities, frozen alias coverage and direct native SIGINT/SIGTERM
+outcome partitions. To lint test code as well as library code, run
+`cargo clippy --workspace --all-targets --locked -- -D warnings`. The macOS/Windows
+CI legs now run that command before their native tests.
+
+Linux can check stable Windows APIs without claiming Windows execution:
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu --locked -- -D warnings
+```
+
+The [Rust follow-up review](../.plans/codebase-audit-2026-10-01/rust-followup-review.md)
+records remaining destructive-operation gates and fresh benchmark commands.
+
+## Installed packages, mounts and long sessions
+
+```sh
+bun run build
+bun run engine:build
+bun run scripts/smoke-package.ts
+python3 scripts/qualify-linux-mounts.py
+bun run packages/ui/benchmarks/long-session.ts
+```
+
+The package smoke packs and installs the local CLI/native tarballs offline into
+an owned temporary directory, resolves the installed native package without an
+engine-path override, and runs both engines' scan/save/apply. It restores the
+source native manifest and deletes its own fixture. This is headless proof,
+not OpenTUI peer installation, hosted registry installation or real TTY proof.
+The Linux mount harness launches its own private user/mount namespace and tests
+actual nested same-device bind mounts; refusal to create that namespace is a
+qualification failure, not a passing skip. Mounts and sentinels are all owned
+fixtures. The 30-cycle UI harness uses 10k synthetic candidates and no forced GC;
+it measures state/cache lifecycle, excluding terminal rendering and real scans.

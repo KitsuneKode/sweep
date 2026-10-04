@@ -31,6 +31,9 @@ import {
   toggleGroup,
   togglePattern,
   toggleScopeSelection,
+  collapseScopeFolder,
+  toggleScopeExpand,
+  moveSidebarCursor,
   toggleSidebarScopeSelection,
   toggleSelectionById,
   toggleSortBy,
@@ -48,6 +51,7 @@ import {
   sweeprcPayload,
   type SweepUiState,
 } from "./state.js";
+import { buildScopeTreeRows } from "./scope-tree.js";
 import { buildDisplayRows, firstItemRowIndex } from "./rows.js";
 
 function createPlan(): ScanPlan {
@@ -113,6 +117,20 @@ function createPlan(): ScanPlan {
     createdAt: new Date().toISOString(),
   };
 }
+
+test("a rescan's root identity survives queued and single-row plans", () => {
+  const base = createPlan();
+  base.targetIdentity = { platform: "unix", device: "1", inode: "10" };
+  const fresh: ScanPlan = {
+    ...base,
+    targetIdentity: { platform: "unix", device: "1", inode: "20" },
+  };
+  const state = finalizeScan(createUiState(base), fresh);
+  expect(applyUiSelection(base, state).targetIdentity).toEqual(fresh.targetIdentity);
+  const single = planForCandidateIds(base, state, fresh.selectedCandidateIds.slice(0, 1));
+  expect(single.targetIdentity).toEqual(fresh.targetIdentity);
+  expect(single.selectedCandidateIds).toEqual(fresh.selectedCandidateIds.slice(0, 1));
+});
 
 /**
  * Two scope groups: `pkg-a` (one big artifact, sorts first under size order)
@@ -1221,4 +1239,48 @@ describe("mergeApplyReport", () => {
     expect(failedOnly.removedIds).toEqual([]);
     expect(failedOnly.state.candidates.length).toBe(3);
   });
+});
+
+describe("folder navigation", () => {
+  test("left on a leaf returns to its visible parent without abandoning the sidebar", () => {
+    const plan = createPlan();
+    plan.candidates = [
+      { ...plan.candidates[0]!, id: "parent", path: "/tmp/sweep-ui/apps/node_modules" },
+      { ...plan.candidates[0]!, id: "child", path: "/tmp/sweep-ui/apps/web/node_modules" },
+    ];
+    let state = { ...createUiState(plan), focus: "sidebar" as const };
+    state = moveSidebarCursor(state, 1) as typeof state;
+    state = toggleScopeExpand(state) as typeof state;
+    state = moveSidebarCursor(state, 1) as typeof state;
+    const parent = collapseScopeFolder(state);
+    expect(parent.focus).toBe("sidebar");
+    expect(parent.sidebarIndex).toBe(1);
+  });
+});
+
+test("sizing updates preserve the focused folder when tree ordering changes", () => {
+  const plan = createPlan();
+  plan.candidates = [
+    {
+      ...plan.candidates[0]!,
+      id: "alpha",
+      path: "/tmp/sweep-ui/alpha/node_modules",
+      estimatedBytes: 100,
+    },
+    {
+      ...plan.candidates[0]!,
+      id: "bravo",
+      path: "/tmp/sweep-ui/bravo/node_modules",
+      estimatedBytes: 10,
+    },
+  ];
+  const state = { ...createUiState(plan), focus: "sidebar" as const, sidebarIndex: 1 };
+  const next = upsertCandidates(state, [{ ...plan.candidates[1]!, estimatedBytes: 1000 }]);
+  const rows = buildScopeTreeRows(
+    next.targetDir,
+    next.candidates,
+    next.selectedIds,
+    next.expandedScopes,
+  );
+  expect(rows[next.sidebarIndex]?.key).toBe("alpha");
 });

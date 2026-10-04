@@ -13,6 +13,9 @@
         },
         "targetDir": {
           "type": "string"
+        },
+        "targetIdentity": {
+          "$ref": "https://kitsunekode.dev/sweep/schemas/shared.schema.json#/$defs/filesystemIdentity"
         }
       }
     },

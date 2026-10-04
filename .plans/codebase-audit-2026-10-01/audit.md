@@ -131,7 +131,10 @@ doc gate to CI; A14 needs a written policy before changing apply behavior.
   on most platforms; that does not validate sweep's surrounding pathname checks.
   [Rust standard library documentation](https://doc.rust-lang.org/std/fs/fn.remove_dir_all.html).
 - Plans reject symlink/type drift, but same-kind replacements have no saved inode
-  identity. A directory's own `modifiedMs` is not recursive activity: editing a
+  identity in older plans. [Saved-plan identity work](../saved-plan-identity.md)
+  now captures root/leaf snapshots during scanning and preserves them through
+  save/load and UI selection; older plans require a rescan before applying.
+  Identities are not content hashes or atomic containment. A directory's own `modifiedMs` is not recursive activity: editing a
   nested file need not change its root mtime. Treat age as an own-entry timestamp,
   not proof an artifact is unused.
 - Scan benchmarks now cover 20k/100k nested and flat artifacts, Linux apparent
@@ -140,6 +143,8 @@ doc gate to CI; A14 needs a written policy before changing apply behavior.
   cancellation regressions cover the signal/channel/watchdog boundaries. These
   do not qualify production cancellation latency, aggregate peak RSS, leak
   absence, cold caches, network/FUSE or physical disk reclaim.
+  [October 3 follow-up measurements and remaining qualification](rust-followup-review.md)
+  supersede these earlier local measurements where explicitly described.
 - macOS/Windows/ARM64 runtime behavior and real terminal/SSH/multiplexer sessions
   were not exercised locally. Existing CI configuration is not a hosted run result.
 - npm advisories were not obtained: the sandbox attempt failed DNS, and automatic

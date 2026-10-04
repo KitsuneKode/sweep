@@ -6,7 +6,7 @@
 [![npm](https://img.shields.io/npm/v/@kitsunekode/sweep)](https://www.npmjs.com/package/@kitsunekode/sweep)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-`sweep` deletes build artifacts - `node_modules`, `dist`, `.next`, `target`, and more - recursively across monorepos, with hard safety guardrails so you never accidentally wipe the wrong directory.
+`sweep` deletes build artifacts - `node_modules`, `dist`, `.next`, `target`, and more - recursively across monorepos, with path validation, protected-root guardrails, and explicit review before cleanup.
 
 Think [`npkill`](https://github.com/voidcosmos/npkill), but monorepo-aware, risk-tiered, scriptable, and with a live TUI that boots instantly and streams results as it scans.
 
@@ -46,8 +46,8 @@ brew install kitsunekode/tap/sweep
 curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
 ```
 
-**Platforms:** Linux (x64, arm64), macOS (x64, arm64), Windows (x64) - Node.js ≥ 18
-or Bun. Standalone binaries are attached to GitHub releases.
+**Platforms:** Linux (x64, arm64), macOS (x64, arm64), Windows (x64) - Node.js ≥ 20.3
+for plain CLI commands; the full-screen UI needs Bun and OpenTUI (or the embedded standalone build). Standalone binaries are attached to GitHub releases.
 
 **Shell completions:**
 
@@ -58,6 +58,12 @@ sweep completions fish > ~/.config/fish/completions/sweep.fish
 ```
 
 ---
+
+## Documentation
+
+[User and developer guides](https://github.com/KitsuneKode/sweep/blob/main/docs/index.md) cover safe first use, terminal controls,
+configuration, troubleshooting, measured benchmarks and upcoming release gates.
+The docs describe the current source; your installed release may differ.
 
 ## Quick start
 
@@ -150,8 +156,8 @@ phase. Review, filter, and delete without leaving the terminal.
   has sat untouched for 30 days or more (shown when the terminal is tall enough)
 - **Statusline** - mode chip (`SCANNING`, `NORMAL`, …), contextual hints,
   active filters; dead keys report why they did nothing
-- **Scale** - the list is windowed: only visible rows render, so thousands of
-  artifacts stay at single-digit-ms per keystroke. While a scan runs, rows
+- **Scale** - the list is windowed: only visible rows render; cached row and scope indexes keep
+  cursor movement independent of the full candidate count. While a scan runs, rows
   hold discovery order so nothing moves under the cursor; the list re-sorts
   once when the scan completes
 
@@ -171,6 +177,7 @@ Arrows work everywhere; letter keys are speed aliases.
 | `w` / `e`                          | collapse all · expand all          |                                                             |
 | `o`                                | sort size · name · age             | size-desc default; age is stalest first                     |
 | `/` then type                      | filter artifacts                   | text or operators (below); `esc` clears                     |
+| `x` / `d`                          | confirm only the focused artifact  | also works inside inspect; never expands to the queue       |
 | `i`                                | inspect the row                    | kind, path, reasons                                         |
 | `v`                                | visual range                       | extend with `↑↓`, `Space` queues the span                   |
 | `y`                                | copy the row's path                | via OSC 52, works over SSH                                  |
@@ -217,8 +224,7 @@ selection to a mis-press.
 
 Wheel moves the cursor three rows per notch - the view follows it, so the
 selection is never pointed at a row you can't see. Click focuses a row, click
-again queues it, click a group header to fold it. The scrollbar lane is a
-position indicator, not a drag target.
+again queues it, click a group header to fold it. The scrollbar supports click-to-seek and dragging.
 
 ---
 
@@ -311,9 +317,10 @@ sweep clean . --trash -y      # same, non-interactive
 
 Instead of deleting, candidates are moved into `.sweep-trash-<timestamp>/`
 inside the target - atomic renames on the same filesystem, with each entry's
-original relative path preserved. Nothing is unrecoverable until you delete
-the trash dir yourself (or run `sweep` on it). Trash dirs are excluded from
-future scans automatically.
+original relative path preserved. Trash dirs are excluded from future scans
+automatically. This is local holding storage, not a backup or automatic restore
+system: deleting the trash directory, external edits or storage failure can
+lose its contents. Review the outcome report before relying on a completed move.
 
 **History:** every apply appends to `history.jsonl` in the sweep config dir
 (`~/.config/sweep`, `%APPDATA%\sweep` on Windows; `SWEEP_CONFIG_DIR` overrides).

@@ -54,6 +54,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
 
     if (result.entries.length === 0) {
       if (opts.json) writeJson(plan);
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
@@ -66,6 +67,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       } else {
         printDryRunNotice();
       }
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
@@ -75,6 +77,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       } else {
         console.log("Nothing selected by the current policy. Use --select or --include-dangerous.");
       }
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
@@ -98,6 +101,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     });
 
     if (applyResult.status !== "completed") {
+      await drainStdout();
       exitWith(EXIT.OK);
     }
 
