@@ -330,11 +330,12 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn canonical_system_aliases_are_protected() {
+    fn canonical_system_aliases_are_protected() -> std::io::Result<()> {
         for root in ["/bin", "/etc", "/var", "/tmp"] {
-            let canonical = std::fs::canonicalize(root).unwrap();
+            let canonical = std::fs::canonicalize(root)?;
             assert!(assert_safe_cwd(&canonical.to_string_lossy()).is_err());
         }
+        Ok(())
     }
 
     #[test]

@@ -32,7 +32,7 @@ bun run preflight      # turbo: publish smoke tests (after build)
 bun run rust:check     # fmt:check + strict clippy + test (run before merge)
 bun run rust:fmt       # cargo fmt --all (writes)
 bun run rust:fmt-check # cargo fmt --all --check
-bun run rust:lint      # cargo clippy --workspace --locked -- -D warnings
+bun run rust:lint      # cargo clippy --workspace --all-targets --locked -- -D warnings
 bun run rust:test      # cargo test --workspace --locked
 bun run engine:build:debug        # produces target/debug/sweep-engine
 bun run engine:build              # release binary
@@ -43,7 +43,7 @@ These route through Turborepo's **experimental Cargo workspace support**
 crate in `crates/` is a Turbo package named after its Cargo `[package] name`,
 and `[workspace.metadata] name = "sweep-rust"` in `Cargo.toml` creates the
 synthetic workspace package. `sweep-rust#test` is `cargo test --workspace
---locked`, `sweep-rust#lint` is the strict clippy override (`-D warnings`),
+--locked`, `sweep-rust#lint` checks every target with strict clippy (`-D warnings`),
 `sweep-rust#fmt:check` is `cargo fmt --all --check`, and
 `sweep-engine-cli#build` / `sweep-engine-cli#build:release` produce the debug
 and release `sweep-engine` binaries. Cargo dependency edges are real graph

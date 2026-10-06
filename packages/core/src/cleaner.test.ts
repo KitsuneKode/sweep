@@ -36,13 +36,19 @@ test.skipIf(process.platform === "win32")(
           isSymlink: false,
         });
       }
-      const result = await clean(entries, { trashDir, trashRoot: target });
       let canonicalizationWorks = true;
       try {
         realpathSync(join(target, "a\\b"));
       } catch {
         canonicalizationWorks = false;
       }
+      // Production apply always supplies containment. Without it, macOS
+      // trash moves need not canonicalize these literal parent names.
+      const result = await clean(entries, {
+        containmentRoot: target,
+        trashDir,
+        trashRoot: target,
+      });
       if (!canonicalizationWorks) {
         expect(result.deleted).toHaveLength(0);
         expect(result.failedPaths).toHaveLength(2);
