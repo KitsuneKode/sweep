@@ -75,3 +75,32 @@ Displayed bytes describe a metadata estimate of matched contents. Sparse files,
 hardlinks, filesystem compression, snapshots and concurrent changes can make
 physical storage reclaimed differ substantially. History reports estimated
 removed or moved bytes, not a measured before/after free-space guarantee.
+
+## Interrupted-process journals
+
+CLI apply records intent in the private config directory before removal starts,
+then commits outcomes when the engine returns a complete report. Inspect one
+with `sweep recover --journal /absolute/path/to/journal.jsonl` (or `--json`).
+The command reads receipts; it never restores, unlocks or retries deletion.
+An incomplete armed journal reports unknown outcomes. An unresolved apply lock
+blocks another CLI apply using that config directory, because a detached engine
+may still be active. This cooperative lock does not stop external filesystem
+writers or callers invoking the core engine API directly.
+
+A size-ceiling refusal or a lock conflict before removal preserves the TUI scan
+and queue. A fresh-size refusal commits an all-unattempted journal; an early
+estimate refusal creates no apply journal. Missing or inconsistent final reports
+still block another apply until rescan. `doctor --json` reports held apply locks,
+and recovery cross-references the journal with its recorded host PID. Neither
+command automatically unlocks a crashed session.
+
+Pause builds, package installs and sync tools inside artifacts being removed.
+Candidate and ancestor identities are rechecked; interior contents are not a
+frozen snapshot. Newly created files may be removed by the active directory walk.
+The per-config lock serializes Sweep CLI sessions sharing that config directory;
+other users, config directories, native-only invocations and external tools do
+not participate. Advisory locks cannot stop arbitrary filesystem writers.
+
+Trash slot identities are checked again before a move. Pathname checks on
+Windows/JS still have a check-to-syscall race; they are not a descriptor-pinned
+transaction against a hostile writer. Do not use shared writable trash roots.

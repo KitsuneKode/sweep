@@ -92,3 +92,23 @@ scan finishes. Esc closes one layer at a time and never quits. In the confirmati
 After a scan error, dismissing the dialog keeps the scan incomplete. Narrow the
 root and rescan. During apply, cancellation stops new candidates after the current
 operation settles; already deleted contents cannot be restored by cancellation.
+
+Queue and single-artifact deletion stay in the interactive session. The apply
+view shows an animated activity indicator, elapsed time, the current artifact,
+completed removal counts and estimated bytes removed or moved. Counts describe
+whole artifacts, not a percentage of files inside an active directory.
+
+Press Ctrl-C to stop admitting new removals. The view changes to **Stopping**
+and remains open until in-flight work settles and its report arrives. Completed
+deletions are not undone. The list removes confirmed deleted or covered rows,
+retains failed and unattempted rows, and shows the final outcome counts. If the
+backend returns no reliable report, rescan before another apply.
+
+Before applying, confirmation shows the configured GiB ceiling and previews
+high-risk items before smaller safe items, with risk labels and estimated sizes.
+Current size is checked again before removal unless an explicit launch override
+was authorized. Validation and sizing show their current path and item progress.
+A known size refusal or lock conflict removes nothing and keeps the queue; reduce
+the queue, adjust the reviewed ceiling, or inspect the held session. An unknown
+outcome still requires a rescan. Ctrl-C stops scheduling without rolling back
+completed deletions.

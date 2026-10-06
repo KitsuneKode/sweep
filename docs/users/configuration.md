@@ -28,7 +28,9 @@ Do not add broad patterns such as `*` unless you understand every possible match
 | `depth`            | Discovery depth; defaults to -1, unlimited               |
 
 `maxSizeGB` is a deletion guardrail, not a scan memory limit. Resource-budget
-settings are currently not CLI flags or `.sweeprc` fields.
+counters are not individual CLI flags or `.sweeprc` fields. Use
+`--resource-profile low-memory` for smaller discovery and sizing allowances.
+This controls logical admission; it does not cap the process RSS or UI memory.
 
 ## Resolution order
 
@@ -36,11 +38,14 @@ For scalar settings, highest priority wins:
 
 1. Command-line options.
 2. Explicit `--config` file, when supplied.
-3. Nearest project `.sweeprc` found by walking upward from the scan target.
+3. Nearest project `.sweeprc` found by walking upward from the scan target,
+   when no explicit `--config` file is supplied.
 4. Global config.
 5. Built-in defaults.
 
-Pattern and ignore arrays merge and deduplicate across applicable layers;
+An explicit `--config` replaces the project-file layer; it does not add another
+layer above the nearest `.sweeprc`. Global settings and built-in defaults still
+apply. Pattern and ignore arrays merge and deduplicate across applicable layers;
 disabled patterns are subtracted afterward. Scanning a nested project can inherit
 an ancestor's config. Use `sweep doctor .` to investigate unexpected behavior.
 

@@ -36,3 +36,11 @@ or slow filesystem; choose a small reproducer first.
 
 Report bugs at [GitHub issues](https://github.com/KitsuneKode/sweep/issues).
 Include expected behavior, actual behavior and whether any apply was attempted.
+
+## Legal POSIX backslash names under Bun
+
+Some Bun 1.4.2 `realpath` calls fail on a literal backslash in a POSIX name,
+even when the file is present. Sweep fails closed instead of substituting a
+path. Use the Node CLI with `--engine js` for trash moves in those trees, or the
+native engine for supported scan/permanent-delete workflows. The full-screen UI
+requires Bun; it does not bypass failed canonicalization.

@@ -56,8 +56,10 @@ Defaults bound discovery to 100,000 candidates, 250,000 admitted directories,
 reservations, released as work completes. Reaching a sizing limit marks sizes
 partial; reaching a discovery limit makes the scan incomplete.
 
-Discovery and sizing can each admit 128 MiB of logical charges; they are
-separate pools, not one combined memory cap. These are accounting limits, not an RSS cap. Runtime heaps, terminal
+Discovery and sizing can each admit 128 MiB of logical charges, with a combined
+256 MiB allowance. `--resource-profile low-memory` reduces those pools to 8 MiB
+each (16 MiB combined), with 5,000 candidates and smaller queue/identity bounds.
+These are accounting limits, not an RSS cap. Runtime heaps, terminal
 state, native libraries, buffers and thread stacks add memory. Sweep cannot
 promise immunity from OOM on an already constrained device.
 
@@ -67,8 +69,8 @@ or two-CPU allowances. JS also reduces directory and metadata concurrency on
 small allowances. Other runtime threads and filesystem caches still use resources;
 these limits do not reserve RAM or guarantee a maximum percentage of CPU use.
 
-If a resource error appears, scan a smaller project subtree. There are currently
-no public resource-limit CLI flags or `.sweeprc` fields. On a very large scope
+If a resource error appears, scan a smaller project subtree. Choose `--resource-profile low-memory` for a smaller admission envelope.
+There are no public flags for arbitrary per-counter limits or `.sweeprc` fields. On a very large scope
 tree, the sidebar may fall back to `all scopes (folder index limit)` while the
 full candidate list remains available.
 
@@ -78,3 +80,11 @@ name. Ordinary Unicode names, including `�`, are supported. Sizing inside an
 already selected artifact still handles raw filenames.
 
 For distribution sizes and measurement conditions, read [Benchmarks](../developer/benchmarks.md).
+
+The deletion size ceiling defaults to 10 GiB and is independent of resource
+admission. For an intentionally reviewed 200–600 GiB selection, set `maxSizeGB`
+in `.sweeprc` to the reviewed ceiling or launch with `--force-large --yes`.
+The TUI still asks for confirmation. A known size refusal preserves its scan and
+queue. A 600 GiB capacity claim requires measurements of representative file
+counts, layouts, storage and deletion behavior; sparse-file tests alone do not
+qualify that workload.

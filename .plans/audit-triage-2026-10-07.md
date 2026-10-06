@@ -2,7 +2,7 @@ Status: in_progress
 Scope: security, engine, ui, packaging, automation
 Created: 2026-10-07
 Updated: 2026-10-07
-Commit: uncommitted
+Commit: ba9741a (source checkpoint; release qualification continues)
 
 # Supplied audit triage and release boundaries
 
