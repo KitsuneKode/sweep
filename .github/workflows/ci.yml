@@ -13,6 +13,10 @@ concurrency:
 permissions:
   contents: read
 
+# A missing native test engine must fail qualification, not pass empty tests.
+env:
+  SWEEP_REQUIRE_RUST_TESTS: "1"
+
 jobs:
   workflows:
     name: workflow lint

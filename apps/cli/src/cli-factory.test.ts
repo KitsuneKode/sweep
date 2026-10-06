@@ -2,6 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { makeProgram } from "@kitsunekode/sweep";
 
 describe("CLI factory", () => {
+  test("resource profiles accept only the supported names", () => {
+    const program = makeProgram().exitOverride();
+    program.parseOptions(["--resource-profile", "low-memory"]);
+    expect(program.opts().resourceProfile).toBe("low-memory");
+    expect(() => program.parseOptions(["--resource-profile", "unlimited"])).toThrow();
+  });
   test("makeProgram() parses --help without side effects", () => {
     const program = makeProgram();
     program.exitOverride();

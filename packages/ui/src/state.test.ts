@@ -344,7 +344,7 @@ describe("sweep ui state", () => {
   });
 
   test("applyUiSelection syncs selected ids back into a plan", () => {
-    let state = selectVisible(createUiState(createPlan()), true);
+    const state = selectVisible(createUiState(createPlan()), true);
     const nextPlan = applyUiSelection(createPlan(), state);
 
     expect(nextPlan.selectedCandidateIds).toEqual(["cand_safe", "cand_dangerous"]);
@@ -1283,4 +1283,15 @@ test("sizing updates preserve the focused folder when tree ordering changes", ()
     next.expandedScopes,
   );
   expect(rows[next.sidebarIndex]?.key).toBe("alpha");
+});
+
+test("queued lower bounds remain visible after filtering their contributing row away", () => {
+  const plan = createPlan();
+  plan.candidates[0]!.bytesKnown = false;
+  const state = setFilter(createUiState(plan), "no-visible-results");
+  expect(getUiSummary(state)).toMatchObject({
+    selectedCount: 1,
+    selectedBytesPartial: true,
+    visibleCount: 0,
+  });
 });

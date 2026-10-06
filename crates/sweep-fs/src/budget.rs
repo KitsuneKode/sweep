@@ -11,6 +11,7 @@ pub struct ResourceBudget {
     identities: AtomicUsize,
     paths: AtomicUsize,
     retained: AtomicUsize,
+    combined: AtomicUsize,
     failed: AtomicBool,
     error: Mutex<Option<String>>,
     sizing: Mutex<(usize, usize, usize, usize)>, // identities, queue, paths, charges
@@ -26,6 +27,7 @@ impl ResourceBudget {
             identities: AtomicUsize::new(0),
             paths: AtomicUsize::new(0),
             retained: AtomicUsize::new(0),
+            combined: AtomicUsize::new(0),
             failed: AtomicBool::new(false),
             error: Mutex::new(None),
             sizing: Mutex::new((0, 0, 0, 0)),
@@ -37,6 +39,7 @@ impl ResourceBudget {
             limits.max_identities,
             limits.max_path_bytes,
             limits.max_retained_bytes,
+            limits.max_combined_bytes,
         ]
         .contains(&0)
         {
@@ -83,6 +86,43 @@ impl ResourceBudget {
         }
     }
 
+    fn reserve_combined(&self, amount: usize) -> bool {
+        let mut old = self.combined.load(Ordering::Acquire);
+        loop {
+            let Some(next) = old
+                .checked_add(amount)
+                .filter(|&n| n <= self.limits.max_combined_bytes as usize)
+            else {
+                return false;
+            };
+            match self.combined.compare_exchange_weak(
+                old,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(current) => old = current,
+            }
+        }
+    }
+
+    fn retained(&self, amount: usize) -> bool {
+        if !self.charge(
+            &self.retained,
+            amount,
+            self.limits.max_retained_bytes,
+            "maxRetainedBytes",
+        ) {
+            return false;
+        }
+        if !self.reserve_combined(amount) {
+            self.fail("maxCombinedBytes");
+            return false;
+        }
+        true
+    }
+
     fn path(&self, bytes: usize, overhead: usize) -> bool {
         let Some(retained) = bytes.checked_mul(4).and_then(|n| n.checked_add(overhead)) else {
             self.fail("path counter overflow");
@@ -93,12 +133,7 @@ impl ResourceBudget {
             bytes,
             self.limits.max_path_bytes,
             "maxPathBytes",
-        ) && self.charge(
-            &self.retained,
-            retained,
-            self.limits.max_retained_bytes,
-            "maxRetainedBytes",
-        )
+        ) && self.retained(retained)
     }
 
     /// `extra_bytes` covers the other retained string fields (id, name, kind,
@@ -154,12 +189,7 @@ impl ResourceBudget {
             1,
             self.limits.max_identities,
             "maxIdentities",
-        ) && self.charge(
-            &self.retained,
-            128,
-            self.limits.max_retained_bytes,
-            "maxRetainedBytes",
-        )
+        ) && self.retained(128)
     }
 
     /// Per-job caps for transient sizing structures. Sizing re-walks subtrees
@@ -184,6 +214,9 @@ impl ResourceBudget {
         {
             return false;
         }
+        if !self.reserve_combined(128) {
+            return false;
+        }
         used.0 += 1;
         used.3 += 128;
         true
@@ -193,6 +226,7 @@ impl ResourceBudget {
         let mut used = self.sizing.lock().unwrap_or_else(|p| p.into_inner());
         used.0 -= count;
         used.3 -= count * 128;
+        self.combined.fetch_sub(count * 128, Ordering::AcqRel);
     }
 
     pub fn sizing_directory(&self, bytes: usize) -> bool {
@@ -212,6 +246,9 @@ impl ResourceBudget {
         {
             return false;
         }
+        if !self.reserve_combined(retained) {
+            return false;
+        }
         used.1 += 1;
         used.2 += bytes;
         used.3 += retained;
@@ -223,6 +260,8 @@ impl ResourceBudget {
         used.1 -= count;
         used.2 -= bytes;
         used.3 -= count * 128 + bytes * 4;
+        self.combined
+            .fetch_sub(count * 128 + bytes * 4, Ordering::AcqRel);
     }
 }
 
@@ -235,6 +274,48 @@ impl Default for ResourceBudget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn discovery_and_sizing_share_combined_allowance() {
+        let budget = ResourceBudget::new(ScanLimits {
+            max_retained_bytes: 2048,
+            max_combined_bytes: 1156,
+            ..ScanLimits::default()
+        });
+        assert!(budget.candidate(1, 0));
+        assert!(budget.sizing_identity());
+        assert!(!budget.sizing_directory(1));
+        budget.release_sizing_identities(1);
+        assert!(!budget.sizing_directory(1));
+        assert!(budget.sizing_identity());
+        assert!(!budget.identity());
+        assert!(budget
+            .error()
+            .is_some_and(|s| s.contains("maxCombinedBytes")));
+    }
+
+    #[test]
+    fn concurrent_sizing_never_overbooks_combined_allowance() {
+        let budget = ResourceBudget::new(ScanLimits {
+            max_combined_bytes: 1024,
+            ..ScanLimits::default()
+        });
+        std::thread::scope(|scope| {
+            for _ in 0..16 {
+                let budget = &budget;
+                scope.spawn(move || {
+                    for _ in 0..1000 {
+                        if budget.sizing_identity() {
+                            assert!(budget.combined.load(Ordering::Acquire) <= 1024);
+                            budget.release_sizing_identities(1);
+                        }
+                    }
+                });
+            }
+        });
+        assert_eq!(budget.combined.load(Ordering::Acquire), 0);
+        assert!(!budget.failed());
+    }
+
     #[test]
     fn live_sizing_limits_are_shared_reusable_and_nonfatal() {
         let budget = ResourceBudget::new(ScanLimits {

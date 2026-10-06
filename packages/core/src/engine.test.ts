@@ -18,6 +18,11 @@ import { loadPlan } from "./plan.js";
 import { readFilesystemIdentity } from "./filesystem-identity.js";
 import { cleanupSeededFixtures, seedScenario } from "@kitsunekode/sweep-test-fixtures";
 
+const NATIVE_AVAILABLE = isRustEngineAvailable();
+if (process.env.SWEEP_REQUIRE_RUST_TESTS === "1" && !NATIVE_AVAILABLE) {
+  throw new Error("Native coverage is required, but no usable Rust test engine is available");
+}
+
 let tmpDir: string;
 
 beforeEach(() => {
@@ -311,14 +316,11 @@ describe("core engine", () => {
     expect(existsSync(dir("node_modules"))).toBe(false);
   });
 
-  test("applyPlanWithBackend rust reports outside-target paths per entry", async () => {
-    if (process.env.SWEEP_ENGINE_FROM_NPM === "1") {
-      return;
-    }
-    if (!isRustEngineAvailable() || !existsSync(resolveRustEngineBinary())) {
-      return;
-    }
-
+  test.skipIf(
+    process.env.SWEEP_ENGINE_FROM_NPM === "1" ||
+      !NATIVE_AVAILABLE ||
+      !existsSync(resolveRustEngineBinary()),
+  )("applyPlanWithBackend rust reports outside-target paths per entry", async () => {
     mkdirSync(dir("node_modules"));
     const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
     const outsidePath = join("/tmp", "sweep-rust-outside-target");
@@ -364,95 +366,105 @@ describe("core engine", () => {
 });
 
 for (const backend of ["js", "rust"] as const) {
-  test(`${backend}: duplicate paths report only actual deletion operations`, async () => {
-    if (backend === "rust" && !isRustEngineAvailable()) return;
-    mkdirSync(dir("node_modules"));
-    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
-    const original = plan.candidates[0]!;
-    plan.candidates.push({ ...original, id: "duplicate" });
-    plan.selectedCandidateIds.push("duplicate");
-    const callbacks: string[] = [];
-    const applied = await applyPlanWithBackend(plan, backend, {
-      onDeleted: (entry) => callbacks.push(entry.path),
-    });
-    expect(applied.report.deletedCount).toBe(1);
-    expect(applied.cleanResult.deleted).toHaveLength(1);
-    expect(callbacks).toHaveLength(1);
-  });
-  test(`${backend}: pre-aborted apply does not remove anything`, async () => {
-    if (backend === "rust" && !isRustEngineAvailable()) return;
-    mkdirSync(dir("node_modules"));
-    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
-    const applied = await applyPlanWithBackend(plan, backend, { signal: AbortSignal.abort() });
-    expect(existsSync(dir("node_modules"))).toBe(true);
-    expect(applied.report.deletedCount).toBe(0);
-    expect(applied.interrupted).toBe(true);
-  });
-}
-
-for (const backend of ["js", "rust"] as const) {
-  test(`${backend}: changed sizes cannot bypass the configured apply ceiling`, async () => {
-    if (backend === "rust" && !isRustEngineAvailable()) return;
-    mkdirSync(dir("node_modules"));
-    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
-    writeFileSync(dir("node_modules", "grown"), Buffer.alloc(2048));
-    await expect(
-      applyPlanWithBackend(plan, backend, { maxSizeGB: 1024 / 1024 ** 3 }),
-    ).rejects.toThrow();
-    expect(existsSync(dir("node_modules", "grown"))).toBe(true);
-    const applied = await applyPlanWithBackend(plan, backend, {
-      maxSizeGB: 1024 / 1024 ** 3,
-      forceLarge: true,
-    });
-    expect(applied.report.deletedCount).toBe(1);
-  });
-}
-
-test("rust: live cancellation drains actual outcomes and deletion callbacks", async () => {
-  if (!isRustEngineAvailable()) return;
-  for (const name of ["a", "b", "c", "d"]) {
-    mkdirSync(dir(name, "node_modules"), { recursive: true });
-    if (name === "b")
-      for (let i = 0; i < 4096; i++) writeFileSync(dir(name, "node_modules", `${i}`), "x");
-  }
-  const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
-  const cancel = new AbortController();
-  const deleted: string[] = [];
-  const applied = await applyPlanWithBackend(plan, "rust", {
-    signal: cancel.signal,
-    onDeleted: (entry) => {
-      deleted.push(entry.path);
-      cancel.abort();
+  test.skipIf(backend === "rust" && !NATIVE_AVAILABLE)(
+    `${backend}: duplicate paths report only actual deletion operations`,
+    async () => {
+      mkdirSync(dir("node_modules"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      const original = plan.candidates[0]!;
+      plan.candidates.push({ ...original, id: "duplicate" });
+      plan.selectedCandidateIds.push("duplicate");
+      const callbacks: string[] = [];
+      const applied = await applyPlanWithBackend(plan, backend, {
+        onDeleted: (entry) => callbacks.push(entry.path),
+      });
+      expect(applied.report.deletedCount).toBe(1);
+      expect(applied.cleanResult.deleted).toHaveLength(1);
+      expect(callbacks).toHaveLength(1);
     },
-  });
-  expect(applied.interrupted).toBe(true);
-  expect(applied.report.deletedCount).toBeGreaterThanOrEqual(1);
-  expect(applied.report.deletedCount).toBeLessThan(4);
-  expect(applied.report.deletedCount).toBe(deleted.length);
-  expect(applied.report.outcomes).toHaveLength(4);
-  for (const candidate of plan.candidates) {
-    const outcome = applied.report.outcomes!.find((item) => item.candidateId === candidate.id)!;
-    expect(existsSync(candidate.path)).toBe(outcome.status !== "deleted");
-  }
-});
+  );
+  test.skipIf(backend === "rust" && !NATIVE_AVAILABLE)(
+    `${backend}: pre-aborted apply does not remove anything`,
+    async () => {
+      mkdirSync(dir("node_modules"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      const applied = await applyPlanWithBackend(plan, backend, { signal: AbortSignal.abort() });
+      expect(existsSync(dir("node_modules"))).toBe(true);
+      expect(applied.report.deletedCount).toBe(0);
+      expect(applied.interrupted).toBe(true);
+    },
+  );
+}
 
 for (const backend of ["js", "rust"] as const) {
-  test(`${backend}: outcome IDs survive conflicting types on duplicate paths`, async () => {
-    if (backend === "rust" && !isRustEngineAvailable()) return;
-    mkdirSync(dir("node_modules"));
+  test.skipIf(backend === "rust" && !NATIVE_AVAILABLE)(
+    `${backend}: changed sizes cannot bypass the configured apply ceiling`,
+    async () => {
+      mkdirSync(dir("node_modules"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      writeFileSync(dir("node_modules", "grown"), Buffer.alloc(2048));
+      await expect(
+        applyPlanWithBackend(plan, backend, { maxSizeGB: 1024 / 1024 ** 3 }),
+      ).rejects.toThrow();
+      expect(existsSync(dir("node_modules", "grown"))).toBe(true);
+      const applied = await applyPlanWithBackend(plan, backend, {
+        maxSizeGB: 1024 / 1024 ** 3,
+        forceLarge: true,
+      });
+      expect(applied.report.deletedCount).toBe(1);
+    },
+  );
+}
+
+test.skipIf(!NATIVE_AVAILABLE)(
+  "rust: live cancellation drains actual outcomes and deletion callbacks",
+  async () => {
+    for (const name of ["a", "b", "c", "d"]) {
+      mkdirSync(dir(name, "node_modules"), { recursive: true });
+      if (name === "b")
+        for (let i = 0; i < 4096; i++) writeFileSync(dir(name, "node_modules", `${i}`), "x");
+    }
     const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
-    const original = plan.candidates[0]!;
-    plan.candidates.push({ ...original, id: "valid" });
-    plan.selectedCandidateIds.push("valid");
-    original.entryType = "file";
-    const applied = await applyPlanWithBackend(plan, backend);
-    expect(applied.report.deletedCount).toBe(1);
-    expect(applied.report.failedCount).toBe(1);
-    expect(applied.report.outcomes).toEqual([
-      { candidateId: original.id, status: "failed" },
-      { candidateId: "valid", status: "deleted" },
-    ]);
-  });
+    const cancel = new AbortController();
+    const deleted: string[] = [];
+    const applied = await applyPlanWithBackend(plan, "rust", {
+      signal: cancel.signal,
+      onDeleted: (entry) => {
+        deleted.push(entry.path);
+        cancel.abort();
+      },
+    });
+    expect(applied.interrupted).toBe(true);
+    expect(applied.report.deletedCount).toBeGreaterThanOrEqual(1);
+    expect(applied.report.deletedCount).toBeLessThan(4);
+    expect(applied.report.deletedCount).toBe(deleted.length);
+    expect(applied.report.outcomes).toHaveLength(4);
+    for (const candidate of plan.candidates) {
+      const outcome = applied.report.outcomes!.find((item) => item.candidateId === candidate.id)!;
+      expect(existsSync(candidate.path)).toBe(outcome.status !== "deleted");
+    }
+  },
+);
+
+for (const backend of ["js", "rust"] as const) {
+  test.skipIf(backend === "rust" && !NATIVE_AVAILABLE)(
+    `${backend}: outcome IDs survive conflicting types on duplicate paths`,
+    async () => {
+      mkdirSync(dir("node_modules"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      const original = plan.candidates[0]!;
+      plan.candidates.push({ ...original, id: "valid" });
+      plan.selectedCandidateIds.push("valid");
+      original.entryType = "file";
+      const applied = await applyPlanWithBackend(plan, backend);
+      expect(applied.report.deletedCount).toBe(1);
+      expect(applied.report.failedCount).toBe(1);
+      expect(applied.report.outcomes).toEqual([
+        { candidateId: original.id, status: "failed" },
+        { candidateId: "valid", status: "deleted" },
+      ]);
+    },
+  );
 }
 
 test.skipIf(process.platform === "win32")(
@@ -488,18 +500,20 @@ if (process.argv[2] === "--capabilities") {
   },
 );
 
-test("rust: closed initial control channel cannot start deletion", async () => {
-  if (!isRustEngineAvailable()) return;
-  const { spawnSync } = await import("node:child_process");
-  mkdirSync(dir("node_modules"));
-  const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
-  const result = spawnSync(resolveRustEngineBinary(), ["apply", "--json-control"], {
-    input: `${JSON.stringify({ plan })}\n`,
-    timeout: 5000,
-  });
-  expect(result.status).toBe(3);
-  expect(existsSync(dir("node_modules"))).toBe(true);
-});
+test.skipIf(!NATIVE_AVAILABLE)(
+  "rust: closed initial control channel cannot start deletion",
+  async () => {
+    const { spawnSync } = await import("node:child_process");
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const result = spawnSync(resolveRustEngineBinary(), ["apply", "--json-control"], {
+      input: `${JSON.stringify({ plan })}\n`,
+      timeout: 5000,
+    });
+    expect(result.status).toBe(3);
+    expect(existsSync(dir("node_modules"))).toBe(true);
+  },
+);
 
 for (const failure of ["exit", "bad-report"] as const) {
   test.skipIf(process.platform === "win32")(
@@ -660,3 +674,31 @@ describe("applyPlan input guards", () => {
     expect(existsSync(dir("node_modules"))).toBe(true);
   });
 });
+
+for (const backend of ["js", "rust"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `${backend}: a symlink plan target fails before callbacks or deletion`,
+    async () => {
+      mkdirSync(dir("project", "node_modules"), { recursive: true });
+      const { plan } = await scanToPlan(dir("project"), DEFAULT_CONFIG);
+      const link = dir("alias");
+      symlinkSync(dir("project"), link);
+      plan.targetDir = link;
+      plan.targetIdentity = readFilesystemIdentity(link);
+      plan.candidates = plan.candidates.map((candidate) => ({
+        ...candidate,
+        path: join(link, candidate.name),
+      }));
+      let begins = 0;
+      await expect(
+        applyPlanWithBackend(plan, backend, {
+          onBegin: () => {
+            begins++;
+          },
+        }),
+      ).rejects.toThrow();
+      expect(begins).toBe(0);
+      expect(existsSync(dir("project", "node_modules"))).toBe(true);
+    },
+  );
+}

@@ -2,6 +2,25 @@ import { describe, expect, test } from "bun:test";
 import { StreamBatcher } from "./stream-batcher.js";
 
 describe("stream batching", () => {
+  test("a delivered frame yields before admitting more backend work", async () => {
+    const frames: number[][] = [];
+    const batcher = new StreamBatcher<number, number>((items) => frames.push(items));
+    expect(batcher.waitForConsumer()).toBeUndefined();
+    batcher.record("first", 1);
+    const pending = batcher.waitForConsumer();
+    expect(pending).toBeInstanceOf(Promise);
+    expect(batcher.waitForConsumer()).toBe(pending);
+    let inputHandled = false;
+    setImmediate(() => {
+      inputHandled = true;
+    });
+    await pending;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(inputHandled).toBe(true);
+    expect(batcher.waitForConsumer()).toBeUndefined();
+    batcher.cancel();
+    expect(frames).toEqual([[1]]);
+  });
   test("reveals the first item immediately, then coalesces updates", () => {
     const frames: number[][] = [];
     const batcher = new StreamBatcher<number, number>((items) => frames.push(items), 60, 200);

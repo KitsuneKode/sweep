@@ -1,0 +1,6737 @@
+{
+  "date": "2026-10-06T19:49:53.444Z",
+  "runtime": "1.4.2",
+  "os": "linux",
+  "arch": "x64",
+  "cpu": "13th Gen Intel(R) Core(TM) i5-13450HX",
+  "binary": "target/release/sweep-engine",
+  "binarySha256": "d79aa45d20d14432342d45d148155cef94a697a1e94327d55ef478fbdc0d2e4b",
+  "fixtureParent": "/tmp",
+  "du": {
+    "fat": {
+      "bytes": 2560000,
+      "elapsedMs": 15.817081000001053
+    }
+  },
+  "resources": [
+    {
+      "scenario": "wide",
+      "exact": false,
+      "engine": "js",
+      "rssKiB": 91892,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun <repo>/packages/core/benchmarks/engine-resource-sample.ts js /tmp/sweep-benchmark-usKxEY/wide false <repo>/target/release/sweep-engine\"\n\tUser time (seconds): 0.35\n\tSystem time (seconds): 0.10\n\tPercent of CPU this job got: 250%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.18\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 91892\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 17529\n\tVoluntary context switches: 22104\n\tInvoluntary context switches: 122\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "wide",
+      "exact": false,
+      "engine": "rust",
+      "rssKiB": 57840,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun <repo>/packages/core/benchmarks/engine-resource-sample.ts rust /tmp/sweep-benchmark-usKxEY/wide false <repo>/target/release/sweep-engine\"\n\tUser time (seconds): 0.07\n\tSystem time (seconds): 0.03\n\tPercent of CPU this job got: 205%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 57840\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 6805\n\tVoluntary context switches: 1656\n\tInvoluntary context switches: 87\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "wide",
+      "exact": true,
+      "engine": "js",
+      "rssKiB": 92232,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun <repo>/packages/core/benchmarks/engine-resource-sample.ts js /tmp/sweep-benchmark-usKxEY/wide true <repo>/target/release/sweep-engine\"\n\tUser time (seconds): 0.31\n\tSystem time (seconds): 0.10\n\tPercent of CPU this job got: 256%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.16\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 92232\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 17962\n\tVoluntary context switches: 23998\n\tInvoluntary context switches: 100\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "wide",
+      "exact": true,
+      "engine": "rust",
+      "rssKiB": 57844,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun <repo>/packages/core/benchmarks/engine-resource-sample.ts rust /tmp/sweep-benchmark-usKxEY/wide true <repo>/target/release/sweep-engine\"\n\tUser time (seconds): 0.08\n\tSystem time (seconds): 0.03\n\tPercent of CPU this job got: 205%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.05\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 57844\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 6860\n\tVoluntary context switches: 1501\n\tInvoluntary context switches: 87\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "js",
+      "rssKiB": 81680,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun <repo>/packages/core/benchmarks/engine-resource-sample.ts js /tmp/sweep-benchmark-usKxEY/fat false <repo>/target/release/sweep-engine\"\n\tUser time (seconds): 0.35\n\tSystem time (seconds): 0.12\n\tPercent of CPU this job got: 190%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.25\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 81680\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 13825\n\tVoluntary context switches: 26736\n\tInvoluntary context switches: 155\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "rust",
+      "rssKiB": 45292,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun <repo>/packages/core/benchmarks/engine-resource-sample.ts rust /tmp/sweep-benchmark-usKxEY/fat false <repo>/target/release/sweep-engine\"\n\tUser time (seconds): 0.04\n\tSystem time (seconds): 0.02\n\tPercent of CPU this job got: 162%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 45292\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3562\n\tVoluntary context switches: 226\n\tInvoluntary context switches: 226\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "js",
+      "rssKiB": 82164,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun <repo>/packages/core/benchmarks/engine-resource-sample.ts js /tmp/sweep-benchmark-usKxEY/fat true <repo>/target/release/sweep-engine\"\n\tUser time (seconds): 0.31\n\tSystem time (seconds): 0.14\n\tPercent of CPU this job got: 193%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.24\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 82164\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 13968\n\tVoluntary context switches: 26859\n\tInvoluntary context switches: 135\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "rust",
+      "rssKiB": 45676,
+      "report": "\tCommand being timed: \"/home/kitsunekode/.bun/bin/bun <repo>/packages/core/benchmarks/engine-resource-sample.ts rust /tmp/sweep-benchmark-usKxEY/fat true <repo>/target/release/sweep-engine\"\n\tUser time (seconds): 0.03\n\tSystem time (seconds): 0.03\n\tPercent of CPU this job got: 161%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 45676\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3653\n\tVoluntary context switches: 223\n\tInvoluntary context switches: 5\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 0\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n"
+    }
+  ],
+  "resourceMethod": "Separate fresh Bun processes using the same streaming APIs, measured with GNU time -v. Max RSS is per-process high-water accounting, not the sum of simultaneous host, Rust and du RSS; includes startup. Does not prove absence of leaks.",
+  "samples": 100,
+  "warmups": 3,
+  "method": "Alternating engines; warm filesystem cache; API scan-to-plan including Rust spawn, NDJSON and JS planning; no CLI startup, rendering, apply, cold-cache or memory measurement. p99 is empirical nearest rank, not a production guarantee. maxLag uses a 5 ms heartbeat and misses stalls shorter than a scan.",
+  "scenarios": [
+    {
+      "name": "wide",
+      "candidates": 1024,
+      "files": 3
+    },
+    {
+      "name": "fat",
+      "candidates": 1,
+      "files": 20000
+    }
+  ],
+  "rows": [
+    {
+      "scenario": "wide",
+      "exact": false,
+      "engine": "js",
+      "candidates": 1024,
+      "estimatedBytes": 393216,
+      "total": {
+        "p50": 120.47,
+        "p95": 151.59,
+        "p99": 208.73
+      },
+      "first": {
+        "p50": 30.2,
+        "p95": 36.19,
+        "p99": 46.45
+      },
+      "sized": {
+        "p50": 34.81,
+        "p95": 41.26,
+        "p99": 58.39
+      },
+      "maxLag": {
+        "p50": 0.34,
+        "p95": 1.83,
+        "p99": 2.18
+      }
+    },
+    {
+      "scenario": "wide",
+      "exact": false,
+      "engine": "rust",
+      "candidates": 1024,
+      "estimatedBytes": 393216,
+      "total": {
+        "p50": 16.18,
+        "p95": 19.14,
+        "p99": 27.61
+      },
+      "first": {
+        "p50": 1.57,
+        "p95": 2.37,
+        "p99": 3.29
+      },
+      "sized": {
+        "p50": 2.19,
+        "p95": 3.78,
+        "p99": 4.92
+      },
+      "maxLag": {
+        "p50": 4.93,
+        "p95": 7.65,
+        "p99": 13.01
+      }
+    },
+    {
+      "scenario": "wide",
+      "exact": true,
+      "engine": "js",
+      "candidates": 1024,
+      "estimatedBytes": 393216,
+      "total": {
+        "p50": 144.6,
+        "p95": 385.86,
+        "p99": 505.75
+      },
+      "first": {
+        "p50": 33.44,
+        "p95": 51.63,
+        "p99": 58.55
+      },
+      "sized": {
+        "p50": 81.29,
+        "p95": 195.67,
+        "p99": 264.48
+      },
+      "maxLag": {
+        "p50": 0.57,
+        "p95": 2.6,
+        "p99": 3.62
+      }
+    },
+    {
+      "scenario": "wide",
+      "exact": true,
+      "engine": "rust",
+      "candidates": 1024,
+      "estimatedBytes": 393216,
+      "total": {
+        "p50": 17.76,
+        "p95": 33.26,
+        "p99": 43.73
+      },
+      "first": {
+        "p50": 1.6,
+        "p95": 2.91,
+        "p99": 3.91
+      },
+      "sized": {
+        "p50": 2.31,
+        "p95": 4.09,
+        "p99": 4.85
+      },
+      "maxLag": {
+        "p50": 4.93,
+        "p95": 9.32,
+        "p99": 11.33
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 173.49,
+        "p95": 847.28,
+        "p99": 936.32
+      },
+      "first": {
+        "p50": 22.3,
+        "p95": 64.72,
+        "p99": 80.44
+      },
+      "sized": {
+        "p50": 173.36,
+        "p95": 845.67,
+        "p99": 935.23
+      },
+      "maxLag": {
+        "p50": 0.71,
+        "p95": 3.92,
+        "p99": 6.15
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": false,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 4.58,
+        "p95": 27.04,
+        "p99": 32.65
+      },
+      "first": {
+        "p50": 1.51,
+        "p95": 4.04,
+        "p99": 5.44
+      },
+      "sized": {
+        "p50": 4.41,
+        "p95": 26.45,
+        "p99": 30.12
+      },
+      "maxLag": {
+        "p50": 0,
+        "p95": 1.1,
+        "p99": 2.49
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "js",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 196.41,
+        "p95": 271.62,
+        "p99": 298.1
+      },
+      "first": {
+        "p50": 23.84,
+        "p95": 27.81,
+        "p99": 29.9
+      },
+      "sized": {
+        "p50": 196.27,
+        "p95": 271.46,
+        "p99": 297.95
+      },
+      "maxLag": {
+        "p50": 0.57,
+        "p95": 2.23,
+        "p99": 3.1
+      }
+    },
+    {
+      "scenario": "fat",
+      "exact": true,
+      "engine": "rust",
+      "candidates": 1,
+      "estimatedBytes": 2560000,
+      "total": {
+        "p50": 4.79,
+        "p95": 6.04,
+        "p99": 6.7
+      },
+      "first": {
+        "p50": 1.46,
+        "p95": 1.81,
+        "p99": 3.07
+      },
+      "sized": {
+        "p50": 4.55,
+        "p95": 5.84,
+        "p99": 6.42
+      },
+      "maxLag": {
+        "p50": 0,
+        "p95": 0.09,
+        "p99": 0.16
+      }
+    }
+  ],
+  "raw": {
+    "wide-estimated": {
+      "js": [
+        {
+          "total": 217.64002200000004,
+          "first": 46.00556700000004,
+          "sized": 58.39232000000004,
+          "maxLag": 2.1789649999999483,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 202.628778,
+          "first": 49.82767899999999,
+          "sized": 59.15063599999985,
+          "maxLag": 1.5957879999998568,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 208.7291520000001,
+          "first": 46.45394400000009,
+          "sized": 58.33619399999998,
+          "maxLag": 2.2084330000000136,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 127.25753600000007,
+          "first": 30.96146500000009,
+          "sized": 35.893555000000106,
+          "maxLag": 0.37254200000006676,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 159.31132500000012,
+          "first": 32.22061900000017,
+          "sized": 38.539122000000134,
+          "maxLag": 0.19095400000014706,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 128.3857210000001,
+          "first": 28.79366700000014,
+          "sized": 33.243400000000065,
+          "maxLag": 0.15188000000011925,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 126.00592600000027,
+          "first": 31.60355400000026,
+          "sized": 35.67859700000008,
+          "maxLag": 0.2981019999997443,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 131.76952299999994,
+          "first": 29.4258719999998,
+          "sized": 35.54972899999984,
+          "maxLag": 0.3758100000000013,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 115.63526599999977,
+          "first": 32.09437399999979,
+          "sized": 36.37271799999962,
+          "maxLag": 1.8175830000000133,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 127.88828000000012,
+          "first": 31.263821000000007,
+          "sized": 41.314960000000156,
+          "maxLag": 0.7243549999998322,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.78801499999963,
+          "first": 33.45145199999979,
+          "sized": 38.35808999999972,
+          "maxLag": 0.29584899999963454,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 108.59520100000009,
+          "first": 30.443927000000258,
+          "sized": 35.51163399999996,
+          "maxLag": 0.15405999999984488,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 111.61571099999992,
+          "first": 31.176528999999846,
+          "sized": 35.45973599999979,
+          "maxLag": 0.09858200000007855,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 118.71938499999987,
+          "first": 28.8174640000002,
+          "sized": 32.748845000000074,
+          "maxLag": 0.1285649999999805,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 109.0007300000002,
+          "first": 26.366182000000208,
+          "sized": 31.062824999999975,
+          "maxLag": 0.7057629999999335,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 131.9229110000001,
+          "first": 31.258264999999938,
+          "sized": 34.94944899999973,
+          "maxLag": 0.12529700000004595,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.10353099999975,
+          "first": 27.08827599999995,
+          "sized": 35.651658999999654,
+          "maxLag": 0.08098800000016126,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 125.75575299999991,
+          "first": 26.550580000000082,
+          "sized": 31.103428999999778,
+          "maxLag": 0.34303200000022116,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 124.09894000000031,
+          "first": 29.573743000000377,
+          "sized": 33.537037000000055,
+          "maxLag": 0.17531099999996513,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 130.2600480000001,
+          "first": 27.634058000000095,
+          "sized": 33.54357600000003,
+          "maxLag": 1.9562289999998939,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.01867900000025,
+          "first": 29.871939999999995,
+          "sized": 36.74428099999977,
+          "maxLag": 1.0217419999999038,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 123.07418899999993,
+          "first": 27.95984799999951,
+          "sized": 35.09637399999974,
+          "maxLag": 0.831756999999925,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 113.77951899999971,
+          "first": 29.342913999999837,
+          "sized": 34.70944099999997,
+          "maxLag": 0.06966800000009243,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 127.27951200000007,
+          "first": 32.04588500000045,
+          "sized": 36.33292299999994,
+          "maxLag": 0.07483400000000984,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 121.14683400000013,
+          "first": 31.42397600000004,
+          "sized": 36.81804099999954,
+          "maxLag": 0.4606049999993047,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 120.59319400000004,
+          "first": 29.341707000000497,
+          "sized": 34.412351000000854,
+          "maxLag": 0.25741000000016356,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 118.20912400000088,
+          "first": 30.201772000000346,
+          "sized": 33.64988900000026,
+          "maxLag": 0.10570900000038819,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 136.46693999999934,
+          "first": 34.22823699999935,
+          "sized": 36.8146999999999,
+          "maxLag": 0.9768050000002404,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 125.31112200000007,
+          "first": 32.39064100000087,
+          "sized": 37.28571700000066,
+          "maxLag": 0.9702750000005835,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 114.90621200000078,
+          "first": 29.500174000000698,
+          "sized": 32.87573400000019,
+          "maxLag": 0.4598470000000816,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.54051700000036,
+          "first": 29.813121999999566,
+          "sized": 34.080353999999716,
+          "maxLag": 1.0281789999999091,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 114.26417599999968,
+          "first": 31.929038999999648,
+          "sized": 34.08415199999945,
+          "maxLag": 0.8368259999997463,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 113.25616899999932,
+          "first": 26.803054999999404,
+          "sized": 31.25367399999959,
+          "maxLag": 1.3750740000004953,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.6351709999999,
+          "first": 30.48806699999932,
+          "sized": 34.41561999999976,
+          "maxLag": 0.08919799999966926,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 120.47484499999973,
+          "first": 34.35402900000008,
+          "sized": 37.01328099999955,
+          "maxLag": 2.008292999999867,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 114.22117999999955,
+          "first": 28.68290700000034,
+          "sized": 31.558780999999726,
+          "maxLag": 0.07684299999982613,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 131.6752059999999,
+          "first": 30.713268000000426,
+          "sized": 34.24061900000015,
+          "maxLag": 0.9261310000001686,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.82743500000015,
+          "first": 29.091654999999264,
+          "sized": 34.31618100000014,
+          "maxLag": 0.6744760000001406,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 115.87833099999989,
+          "first": 32.002652000000126,
+          "sized": 34.74037500000031,
+          "maxLag": 0.873899000000165,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 115.9856890000001,
+          "first": 29.924901000000318,
+          "sized": 34.93233599999985,
+          "maxLag": 0.11044399999991583,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 109.65789799999948,
+          "first": 29.00354900000002,
+          "sized": 31.88625299999967,
+          "maxLag": 0.14898600000014994,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.21720000000005,
+          "first": 29.65797300000031,
+          "sized": 35.03431399999954,
+          "maxLag": 0.3818860000001223,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 121.67649699999947,
+          "first": 30.356277999999293,
+          "sized": 34.55926299999919,
+          "maxLag": 0.3375660000001517,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 118.63822900000014,
+          "first": 28.962508000000525,
+          "sized": 32.249125999999706,
+          "maxLag": 0.1259119999995164,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 123.90044900000066,
+          "first": 31.939047000000755,
+          "sized": 37.078011000000515,
+          "maxLag": 0.4645909999999276,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 113.42181900000014,
+          "first": 29.888535000000047,
+          "sized": 33.27111800000057,
+          "maxLag": 0.1615719999999783,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 114.63270699999975,
+          "first": 27.14861000000019,
+          "sized": 31.33911900000021,
+          "maxLag": 0.13640099999975064,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 160.61937800000032,
+          "first": 37.46270800000002,
+          "sized": 43.4540590000006,
+          "maxLag": 1.0887069999998857,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 126.91457100000025,
+          "first": 29.410211000000345,
+          "sized": 34.675930000000335,
+          "maxLag": 0.22071799999957875,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 127.279673,
+          "first": 28.55691300000035,
+          "sized": 32.6551500000005,
+          "maxLag": 0.14849000000049273,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 118.7806099999998,
+          "first": 27.10743899999943,
+          "sized": 31.365634999998292,
+          "maxLag": 1.1873099999993428,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 125.13898899999913,
+          "first": 35.83634499999971,
+          "sized": 39.01963199999955,
+          "maxLag": 0.8225760000004811,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 111.20967700000074,
+          "first": 28.286291000000347,
+          "sized": 32.43139700000029,
+          "maxLag": 0.06828800000039337,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 106.97019800000089,
+          "first": 27.369689000001017,
+          "sized": 31.809877000001507,
+          "maxLag": 0.1506920000010723,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 108.0675310000006,
+          "first": 27.608439999999973,
+          "sized": 32.9693900000002,
+          "maxLag": 0.19447200000104203,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 112.4607419999993,
+          "first": 27.325557000000117,
+          "sized": 31.35577000000012,
+          "maxLag": 2.1145889999988867,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 110.18946400000095,
+          "first": 28.418883000000278,
+          "sized": 33.66539499999999,
+          "maxLag": 1.1350509999992937,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 109.08993300000111,
+          "first": 27.3709400000007,
+          "sized": 31.343736000000717,
+          "maxLag": 0.14886899999874004,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 115.94153399999959,
+          "first": 24.95519400000012,
+          "sized": 29.29175899999973,
+          "maxLag": 1.5011359999989509,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 129.65272800000093,
+          "first": 28.971723000000566,
+          "sized": 33.67694699999993,
+          "maxLag": 0.32217599999967206,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 131.609461,
+          "first": 33.240420000000086,
+          "sized": 36.20597199999975,
+          "maxLag": 0.9474870000012743,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 127.48065000000133,
+          "first": 30.33846799999992,
+          "sized": 34.76028700000097,
+          "maxLag": 0.30469799999991665,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.02668699999958,
+          "first": 27.653607000000193,
+          "sized": 31.227786999999807,
+          "maxLag": 1.0475750000005064,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 115.28435200000058,
+          "first": 30.728635999999824,
+          "sized": 35.29720100000122,
+          "maxLag": 0.32222399999955087,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 123.02379400000063,
+          "first": 31.86302799999976,
+          "sized": 38.049049999999625,
+          "maxLag": 0.8851050000012037,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 115.96563700000115,
+          "first": 30.11519000000044,
+          "sized": 35.043242000001555,
+          "maxLag": 1.5393390000008367,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 116.45645200000035,
+          "first": 31.987785999999687,
+          "sized": 34.84589699999924,
+          "maxLag": 0.18818800000008196,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 126.23531899999944,
+          "first": 36.18512399999963,
+          "sized": 38.675687999999354,
+          "maxLag": 0.5162189999991824,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 133.66927000000032,
+          "first": 32.72975100000076,
+          "sized": 38.13924399999996,
+          "maxLag": 0.09848799999963376,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.28615900000113,
+          "first": 29.725698000000193,
+          "sized": 34.08362699999998,
+          "maxLag": 0.14747499999975844,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 117.54609100000016,
+          "first": 28.759862999999314,
+          "sized": 32.53693399999975,
+          "maxLag": 0.10695400000076916,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 114.19079500000043,
+          "first": 29.4990600000001,
+          "sized": 34.882433000000674,
+          "maxLag": 0.3357500000001892,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 118.32937800000036,
+          "first": 31.082055999999284,
+          "sized": 34.296824999999444,
+          "maxLag": 0.274239000000307,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 115.55959499999881,
+          "first": 27.662947999999233,
+          "sized": 31.276840999998967,
+          "maxLag": 0.09478499999931955,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 113.58670399999937,
+          "first": 31.780844000000798,
+          "sized": 35.451036000000386,
+          "maxLag": 0.36571399999957066,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 115.67014700000072,
+          "first": 32.621336000000156,
+          "sized": 35.817519000000175,
+          "maxLag": 1.1334090000000288,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 118.37980500000049,
+          "first": 30.98547099999996,
+          "sized": 35.62310100000104,
+          "maxLag": 0.9221459999989747,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 114.87322500000118,
+          "first": 29.58441800000037,
+          "sized": 34.33954199999971,
+          "maxLag": 0.17768600000090373,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 124.94156599999951,
+          "first": 30.571976999999606,
+          "sized": 36.44937899999968,
+          "maxLag": 0.23367599999983213,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 110.68685399999958,
+          "first": 29.442001999999775,
+          "sized": 33.73996499999885,
+          "maxLag": 0.15561700000034762,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 124.71270799999911,
+          "first": 31.917067999998835,
+          "sized": 34.80564499999855,
+          "maxLag": 0.28308599999945727,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.03700200000094,
+          "first": 30.762932000001456,
+          "sized": 37.6561070000007,
+          "maxLag": 1.3114180000011402,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 131.49592099999973,
+          "first": 30.401773999999932,
+          "sized": 38.00716399999874,
+          "maxLag": 0.24034100000062608,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 106.81806700000016,
+          "first": 26.22882700000082,
+          "sized": 30.301876999999877,
+          "maxLag": 0.36076800000046205,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 120.08304600000156,
+          "first": 36.01503000000048,
+          "sized": 38.667930000001434,
+          "maxLag": 0.07591500000125961,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 116.02627800000118,
+          "first": 27.99416100000053,
+          "sized": 32.732670000001235,
+          "maxLag": 0.731710000000021,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 116.46811100000014,
+          "first": 31.21429900000112,
+          "sized": 34.95180700000128,
+          "maxLag": 1.4790549999997893,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 111.54909999999836,
+          "first": 27.64292199999909,
+          "sized": 32.53696499999933,
+          "maxLag": 0.1530480000001262,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 124.53809999999976,
+          "first": 36.3483410000008,
+          "sized": 41.26329900000019,
+          "maxLag": 0.584684000001289,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 120.40818399999989,
+          "first": 29.07460799999899,
+          "sized": 32.60899000000063,
+          "maxLag": 0.9911859999992885,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 151.5881470000004,
+          "first": 28.664466000000175,
+          "sized": 32.19887100000051,
+          "maxLag": 0.23561399999925925,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 146.27418200000102,
+          "first": 30.10078600000088,
+          "sized": 37.75645600000098,
+          "maxLag": 0.2555479999991803,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 148.20130100000097,
+          "first": 33.98394200000075,
+          "sized": 40.1753860000008,
+          "maxLag": 0.6774420000001555,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.38968600000044,
+          "first": 31.43173399999978,
+          "sized": 40.183375000000524,
+          "maxLag": 0.32384300000012445,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.91273499999988,
+          "first": 33.707650999998805,
+          "sized": 38.21992799999862,
+          "maxLag": 1.8291270000008808,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 117.478618000001,
+          "first": 28.86044000000038,
+          "sized": 33.47150900000088,
+          "maxLag": 1.3283009999995556,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 128.75425199999881,
+          "first": 32.61375500000031,
+          "sized": 36.2076560000005,
+          "maxLag": 0.16674500000044645,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 146.29383899999993,
+          "first": 30.355341000000408,
+          "sized": 33.96803700000055,
+          "maxLag": 0.49186399999962305,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 131.5302269999993,
+          "first": 30.865684999998848,
+          "sized": 37.672528999999486,
+          "maxLag": 0.17055900000013935,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 125.37564300000122,
+          "first": 30.306070000000545,
+          "sized": 35.239738000000216,
+          "maxLag": 0.3613900000000285,
+          "count": 1024,
+          "bytes": 393216
+        }
+      ],
+      "rust": [
+        {
+          "total": 27.485468000000083,
+          "first": 2.29907500000013,
+          "sized": 3.0696869999999308,
+          "maxLag": 13.010974000000033,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 28.231899999999996,
+          "first": 2.7154250000000957,
+          "sized": 3.777858000000151,
+          "maxLag": 13.632602000000134,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 24.257999000000154,
+          "first": 2.371450999999979,
+          "sized": 3.5953870000000734,
+          "maxLag": 10.383887000000186,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 27.61459100000002,
+          "first": 2.395101000000068,
+          "sized": 4.921652999999878,
+          "maxLag": 8.626199000000042,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 19.139813000000004,
+          "first": 1.73117000000002,
+          "sized": 2.5919910000000073,
+          "maxLag": 4.426202999999987,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.36459500000001,
+          "first": 1.8751769999998942,
+          "sized": 2.371323000000075,
+          "maxLag": 5.763731000000007,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.50374099999999,
+          "first": 1.5140430000001288,
+          "sized": 1.905898999999863,
+          "maxLag": 6.068732000000182,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.64131400000042,
+          "first": 1.6801760000003014,
+          "sized": 2.1284670000000006,
+          "maxLag": 3.9324730000003,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.003752000000077,
+          "first": 1.7206639999999425,
+          "sized": 2.212913999999728,
+          "maxLag": 4.09529799999973,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.839583000000403,
+          "first": 1.680297000000337,
+          "sized": 2.213076000000001,
+          "maxLag": 4.240132000000358,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.754428000000189,
+          "first": 1.4329149999998663,
+          "sized": 1.9092319999999745,
+          "maxLag": 3.8877760000000308,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.760199000000284,
+          "first": 1.6103990000001431,
+          "sized": 2.313466999999946,
+          "maxLag": 4.681350000000293,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 13.973438999999871,
+          "first": 1.5241519999999582,
+          "sized": 2.2293109999995977,
+          "maxLag": 4.10411699999986,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.592933999999786,
+          "first": 2.4534810000000107,
+          "sized": 2.9018120000000636,
+          "maxLag": 5.303789000000052,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.205790999999863,
+          "first": 1.6662470000001122,
+          "sized": 2.1925790000000234,
+          "maxLag": 4.787597999999889,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.667651000000205,
+          "first": 1.5142009999999573,
+          "sized": 1.9644309999998768,
+          "maxLag": 4.7439760000002025,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.397509999999784,
+          "first": 1.5934159999997064,
+          "sized": 2.2457100000001446,
+          "maxLag": 5.706030999999712,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.848379999999906,
+          "first": 1.5743560000000798,
+          "sized": 2.082170000000133,
+          "maxLag": 4.279206000000158,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.96939999999995,
+          "first": 1.476339999999709,
+          "sized": 2.178194000000076,
+          "maxLag": 4.11672499999986,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.843032000000221,
+          "first": 1.631894000000102,
+          "sized": 2.145198000000164,
+          "maxLag": 4.4087540000000445,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.589089000000058,
+          "first": 1.5573770000000877,
+          "sized": 2.126277999999729,
+          "maxLag": 5.107461999999941,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.03952499999923,
+          "first": 1.490962999999283,
+          "sized": 1.9360389999992549,
+          "maxLag": 5.438287999999375,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.421280999999908,
+          "first": 1.5248050000000148,
+          "sized": 2.216121000000385,
+          "maxLag": 4.3273159999998825,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.758686999999554,
+          "first": 1.6680529999994178,
+          "sized": 2.222725999999966,
+          "maxLag": 4.669681999999739,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.67822100000012,
+          "first": 1.4158760000000257,
+          "sized": 1.9732249999997293,
+          "maxLag": 5.5587759999998525,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.6871000000001,
+          "first": 1.3523070000001098,
+          "sized": 1.8531670000002123,
+          "maxLag": 6.466701999999714,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 21.193961999999374,
+          "first": 1.6888979999994262,
+          "sized": 2.204421999999795,
+          "maxLag": 7.425700999999208,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.286608999999771,
+          "first": 1.5395809999999983,
+          "sized": 2.3053909999998723,
+          "maxLag": 4.467416999999841,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.624905000000581,
+          "first": 1.4989949999999226,
+          "sized": 2.205459000000701,
+          "maxLag": 3.8704750000006243,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.260583999999653,
+          "first": 1.5753709999999046,
+          "sized": 2.022852000000057,
+          "maxLag": 5.646270000000186,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.14804699999968,
+          "first": 1.4919740000004822,
+          "sized": 1.9375410000002375,
+          "maxLag": 6.689223000000311,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.731960000000072,
+          "first": 1.6033099999995102,
+          "sized": 2.148033000000396,
+          "maxLag": 5.575042000000394,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.684640999999829,
+          "first": 1.443898999999874,
+          "sized": 2.0384809999995923,
+          "maxLag": 3.3821319999997286,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.446421000000555,
+          "first": 1.3450819999998203,
+          "sized": 1.731104000000414,
+          "maxLag": 4.37251600000036,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.554874000000382,
+          "first": 1.610116000000744,
+          "sized": 2.082809000000452,
+          "maxLag": 4.05916200000047,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.992820000000393,
+          "first": 1.3535879999999452,
+          "sized": 2.038854999999785,
+          "maxLag": 4.655013000000508,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.465707000000293,
+          "first": 1.365259000000151,
+          "sized": 2.042907000000014,
+          "maxLag": 4.151590000000397,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.559774999999718,
+          "first": 1.381891999999425,
+          "sized": 1.8980419999998048,
+          "maxLag": 4.096926000000167,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.055029000000104,
+          "first": 1.3875260000004346,
+          "sized": 3.1446500000001834,
+          "maxLag": 6.058346000000711,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.752340000000004,
+          "first": 1.5506530000002385,
+          "sized": 2.39850000000024,
+          "maxLag": 4.948905000000195,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.179549999999836,
+          "first": 1.576375999999982,
+          "sized": 3.093713999999636,
+          "maxLag": 5.397501000000375,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.53614600000037,
+          "first": 1.7345040000000154,
+          "sized": 2.1419550000000527,
+          "maxLag": 5.584208000000217,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.924095999999736,
+          "first": 3.2859730000000127,
+          "sized": 3.8388139999997293,
+          "maxLag": 3.52490299999954,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.179046999999628,
+          "first": 1.6098869999996168,
+          "sized": 2.398011999999653,
+          "maxLag": 5.628211999999621,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.628521999999975,
+          "first": 1.759450999999899,
+          "sized": 2.316353000000163,
+          "maxLag": 4.931684000000132,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.96962800000074,
+          "first": 1.0313249999999243,
+          "sized": 1.4162360000000263,
+          "maxLag": 6.5696170000001075,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.579651000000013,
+          "first": 1.5724380000001474,
+          "sized": 2.0589630000004036,
+          "maxLag": 6.883678000000145,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.301916999999776,
+          "first": 1.7833780000000843,
+          "sized": 2.215473000000202,
+          "maxLag": 5.3131350000003295,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.584821999999804,
+          "first": 1.3712830000004033,
+          "sized": 2.2583190000004834,
+          "maxLag": 4.881174000000101,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.54294000000027,
+          "first": 1.5495460000001913,
+          "sized": 2.0285000000003492,
+          "maxLag": 5.640594000000419,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.085638000000472,
+          "first": 1.4930070000009437,
+          "sized": 2.1497010000002774,
+          "maxLag": 5.976479000000836,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 13.964039000000412,
+          "first": 1.4015310000013415,
+          "sized": 2.0605480000012903,
+          "maxLag": 3.993921000001137,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.430716999999277,
+          "first": 1.5393509999994421,
+          "sized": 2.2236809999994875,
+          "maxLag": 4.3421070000003965,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.027219999999943,
+          "first": 1.49240699999973,
+          "sized": 3.998412000000826,
+          "maxLag": 5.502249000001029,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.041134999999485,
+          "first": 1.1495130000002973,
+          "sized": 1.7636320000001433,
+          "maxLag": 5.9873979999993026,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.34109300000091,
+          "first": 1.1831710000005842,
+          "sized": 1.9132120000012947,
+          "maxLag": 3.9617200000011508,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.750035999999454,
+          "first": 1.5462189999998373,
+          "sized": 2.0414009999985865,
+          "maxLag": 3.960363000000143,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.456244999999399,
+          "first": 1.5147010000000591,
+          "sized": 2.3960520000000542,
+          "maxLag": 4.98724299999958,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.108838000000105,
+          "first": 1.5623840000007476,
+          "sized": 1.9334920000001148,
+          "maxLag": 3.848433000001023,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.42648299999928,
+          "first": 1.4546410000002652,
+          "sized": 1.9478550000003452,
+          "maxLag": 4.037760999999591,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.03718200000003,
+          "first": 1.6329879999993864,
+          "sized": 2.149859999999535,
+          "maxLag": 4.40545899999961,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.314770000000863,
+          "first": 1.4634530000002997,
+          "sized": 1.9019289999996545,
+          "maxLag": 5.304012000000512,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.194057000000612,
+          "first": 1.4426110000003973,
+          "sized": 2.134877000000415,
+          "maxLag": 4.203392999999778,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.78023199999916,
+          "first": 1.9284329999991314,
+          "sized": 2.400985000000219,
+          "maxLag": 5.413520000000062,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.466714000000138,
+          "first": 1.628725000000486,
+          "sized": 2.5914210000009916,
+          "maxLag": 7.647775000001275,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.484619000000748,
+          "first": 1.5601510000014969,
+          "sized": 2.0393890000013926,
+          "maxLag": 4.084369000000152,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.19764000000032,
+          "first": 1.6739880000004632,
+          "sized": 2.2012720000002446,
+          "maxLag": 5.320698999999877,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.65452499999992,
+          "first": 1.5703539999994973,
+          "sized": 2.7949509999998554,
+          "maxLag": 5.640165999999226,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.955102999998417,
+          "first": 1.684369999999035,
+          "sized": 2.4146179999988817,
+          "maxLag": 5.974307999998928,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.244151000000784,
+          "first": 1.5694939999993949,
+          "sized": 2.1999030000006314,
+          "maxLag": 6.6542499999995925,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.52828999999838,
+          "first": 1.6815399999995861,
+          "sized": 2.222530999999435,
+          "maxLag": 6.06532100000004,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.829584999999497,
+          "first": 1.6064519999999902,
+          "sized": 2.1166229999998905,
+          "maxLag": 4.654037000000244,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.190855000000738,
+          "first": 1.494328000000678,
+          "sized": 1.9296159999994416,
+          "maxLag": 3.877276000001075,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.714021000001594,
+          "first": 1.403239000001122,
+          "sized": 2.9950430000008055,
+          "maxLag": 0.8899140000012267,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.36055900000065,
+          "first": 1.1159850000003644,
+          "sized": 1.7587230000008276,
+          "maxLag": 0.6290000000008149,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.919613000000027,
+          "first": 1.2633630000000267,
+          "sized": 2.066330999999991,
+          "maxLag": 4.393957000000228,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.419275000000198,
+          "first": 1.4162500000002183,
+          "sized": 2.066042999998899,
+          "maxLag": 3.5870779999986553,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.711197999999058,
+          "first": 1.5689449999990757,
+          "sized": 2.3993249999984982,
+          "maxLag": 5.333048999998937,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.976071999999476,
+          "first": 1.7140589999999065,
+          "sized": 2.1893230000005133,
+          "maxLag": 4.311085999999705,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.137721000000965,
+          "first": 1.5592240000005404,
+          "sized": 2.315371000000596,
+          "maxLag": 5.373133000000962,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.44965299999967,
+          "first": 1.5123170000006212,
+          "sized": 2.447211000000607,
+          "maxLag": 4.7282000000013795,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.720048000001043,
+          "first": 1.5928720000010799,
+          "sized": 2.420975000000908,
+          "maxLag": 4.783919999999853,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 19.016148000000612,
+          "first": 1.4645710000004328,
+          "sized": 2.300803000000087,
+          "maxLag": 7.823347999999896,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.356120000000374,
+          "first": 1.6484780000009778,
+          "sized": 2.110595000000103,
+          "maxLag": 5.135204000000158,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.5834990000003,
+          "first": 1.7836429999988468,
+          "sized": 2.2430769999991753,
+          "maxLag": 6.89958900000056,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.448927999999796,
+          "first": 1.5707080000011047,
+          "sized": 2.1428090000008524,
+          "maxLag": 4.747725000001083,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.039440999998988,
+          "first": 1.6331239999999525,
+          "sized": 5.446862999999212,
+          "maxLag": 1.079464000000371,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.14791999999943,
+          "first": 1.7674729999998817,
+          "sized": 2.479658999998719,
+          "maxLag": 4.190063000000009,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.721374000000651,
+          "first": 1.5413540000008652,
+          "sized": 2.3798810000007506,
+          "maxLag": 4.524774999999863,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.505220999999437,
+          "first": 1.6136509999996633,
+          "sized": 2.103632000000289,
+          "maxLag": 6.156311999999161,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.16023000000132,
+          "first": 1.4685850000005303,
+          "sized": 1.9636540000010427,
+          "maxLag": 5.113887000001341,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.1984220000013,
+          "first": 1.8094570000012027,
+          "sized": 2.2510130000009667,
+          "maxLag": 5.654158999999709,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.236032999999225,
+          "first": 1.594069999999192,
+          "sized": 2.155678999999509,
+          "maxLag": 7.199415999999474,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.264595000000554,
+          "first": 1.5335780000004888,
+          "sized": 1.9286520000005112,
+          "maxLag": 4.687728000000789,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.8608320000003,
+          "first": 1.5777600000001257,
+          "sized": 2.428066000000399,
+          "maxLag": 6.854979000001549,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.15853900000002,
+          "first": 1.505036000000473,
+          "sized": 1.9449000000004162,
+          "maxLag": 4.387126999999964,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.810669000000416,
+          "first": 1.6759559999991325,
+          "sized": 2.798041000000012,
+          "maxLag": 4.745113999999376,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.095359999999346,
+          "first": 1.6397450000004028,
+          "sized": 2.161645000000135,
+          "maxLag": 5.337763999999879,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.269686999999976,
+          "first": 1.8458140000002459,
+          "sized": 2.261083999999755,
+          "maxLag": 5.538970999999947,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.929677000000083,
+          "first": 3.334509000000253,
+          "sized": 3.845115000000078,
+          "maxLag": 5.724385999999868,
+          "count": 1024,
+          "bytes": 393216
+        }
+      ]
+    },
+    "wide-exact": {
+      "js": [
+        {
+          "total": 158.5505520000006,
+          "first": 36.27182500000163,
+          "sized": 93.43567900000016,
+          "maxLag": 0.9543329999996786,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 135.91643899999872,
+          "first": 32.66969900000004,
+          "sized": 73.99123999999938,
+          "maxLag": 0.8917500000006839,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 145.97478500000034,
+          "first": 33.43822999999975,
+          "sized": 85.31443500000023,
+          "maxLag": 0.12483000000065658,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 363.98085300000093,
+          "first": 36.380858000000444,
+          "sized": 98.6628320000018,
+          "maxLag": 3.6185460000015155,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 489.9896970000009,
+          "first": 55.44219900000098,
+          "sized": 264.47664599999916,
+          "maxLag": 2.9781980000007025,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 442.02279100000305,
+          "first": 46.831325000002835,
+          "sized": 234.96694399999978,
+          "maxLag": 3.759724000003189,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 398.74636499999906,
+          "first": 51.73819699999876,
+          "sized": 213.5714990000015,
+          "maxLag": 3.0172209999982442,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 332.22720599999957,
+          "first": 43.238179999996646,
+          "sized": 182.11750299999767,
+          "maxLag": 0.4814760000008391,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 264.8884199999993,
+          "first": 42.43193500000052,
+          "sized": 149.43831599999976,
+          "maxLag": 1.1371890000009444,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 505.747803000002,
+          "first": 58.55345000000307,
+          "sized": 280.1199450000022,
+          "maxLag": 1.9064710000020568,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 508.25526900000114,
+          "first": 65.2424740000024,
+          "sized": 260.6169169999994,
+          "maxLag": 2.5226220000004105,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 385.8618839999981,
+          "first": 38.32599199999822,
+          "sized": 190.41673399999854,
+          "maxLag": 1.4081440000009025,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 370.2642599999999,
+          "first": 45.83020000000033,
+          "sized": 195.674586000001,
+          "maxLag": 1.3041599999996834,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 280.0804629999984,
+          "first": 42.98034700000062,
+          "sized": 139.82830900000044,
+          "maxLag": 0.4591660000005504,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 282.61787299999924,
+          "first": 49.83788099999947,
+          "sized": 143.49226400000043,
+          "maxLag": 0.6024369999977353,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 246.9458999999988,
+          "first": 39.96052799999961,
+          "sized": 132.44224699999904,
+          "maxLag": 1.2824330000003101,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 250.56750999999713,
+          "first": 36.52302999999665,
+          "sized": 132.61630799999693,
+          "maxLag": 2.0763570000017353,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 200.73472799999945,
+          "first": 48.097710999998526,
+          "sized": 121.66868899999827,
+          "maxLag": 0.5956200000000536,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 160.335959,
+          "first": 35.31113499999992,
+          "sized": 84.53830999999991,
+          "maxLag": 0.44697500000256696,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 191.44846999999936,
+          "first": 34.75619600000209,
+          "sized": 96.53996199999892,
+          "maxLag": 2.5560130000012578,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 238.35023899999942,
+          "first": 39.21334900000147,
+          "sized": 130.77200699999958,
+          "maxLag": 1.314299999998184,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 214.0444520000019,
+          "first": 38.83979499999987,
+          "sized": 114.31719599999997,
+          "maxLag": 0.5688259999988077,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 212.29200199999832,
+          "first": 45.102593999999954,
+          "sized": 113.71350800000073,
+          "maxLag": 0.8237260000023525,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 269.8308560000005,
+          "first": 41.105963999998494,
+          "sized": 154.0459469999987,
+          "maxLag": 2.176586999998108,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 225.44551599999977,
+          "first": 40.475727999997616,
+          "sized": 115.90570299999672,
+          "maxLag": 0.2764549999992596,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 245.32624399999986,
+          "first": 50.81705399999919,
+          "sized": 137.95494599999802,
+          "maxLag": 0.6107259999989765,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 237.3249880000003,
+          "first": 35.471785000001546,
+          "sized": 124.9506500000025,
+          "maxLag": 0.5716019999999844,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 235.78913000000102,
+          "first": 41.381593000001885,
+          "sized": 120.17138800000248,
+          "maxLag": 0.6030600000012782,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 232.7175640000023,
+          "first": 47.81034400000135,
+          "sized": 136.28302800000165,
+          "maxLag": 0.7081010000001697,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 234.46248600000035,
+          "first": 51.63119799999913,
+          "sized": 136.1475849999988,
+          "maxLag": 0.3550409999988915,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 223.99969599999895,
+          "first": 45.21519900000203,
+          "sized": 128.4944429999996,
+          "maxLag": 0.5467580000004091,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 227.966038999999,
+          "first": 45.98653600000034,
+          "sized": 124.74694900000031,
+          "maxLag": 2.603651000001264,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 231.0350529999996,
+          "first": 39.08938399999897,
+          "sized": 126.59209399999963,
+          "maxLag": 0.329913999998098,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 239.2601790000008,
+          "first": 38.81024800000159,
+          "sized": 133.11838799999896,
+          "maxLag": 3.4502119999997376,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 241.0983019999985,
+          "first": 42.008599000000686,
+          "sized": 131.18969099999958,
+          "maxLag": 1.1828449999993609,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 242.92814400000134,
+          "first": 38.459696999998414,
+          "sized": 125.92801999999938,
+          "maxLag": 0.3377829999990354,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 247.54346299999816,
+          "first": 52.74808000000121,
+          "sized": 141.57969500000036,
+          "maxLag": 1.3955749999986438,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 233.95179300000018,
+          "first": 41.94687799999883,
+          "sized": 137.20338400000037,
+          "maxLag": 1.448993000001792,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 137.59418699999878,
+          "first": 32.334578999998485,
+          "sized": 81.24217099999805,
+          "maxLag": 0.9138639999982843,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 160.2418319999997,
+          "first": 30.90913300000102,
+          "sized": 81.28771799999959,
+          "maxLag": 0.11738899999909336,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 154.01936299999943,
+          "first": 30.19791400000031,
+          "sized": 74.73711600000024,
+          "maxLag": 0.5762990000002901,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 150.11403900000005,
+          "first": 37.94262499999968,
+          "sized": 82.71535800000129,
+          "maxLag": 0.11750699999902281,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 150.39475200000015,
+          "first": 30.93748300000152,
+          "sized": 81.44486099999995,
+          "maxLag": 0.6863489999996091,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 136.10889000000316,
+          "first": 29.84508000000278,
+          "sized": 75.36804800000027,
+          "maxLag": 0.30855200000223704,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 134.6547410000021,
+          "first": 34.952618000002985,
+          "sized": 77.95520400000169,
+          "maxLag": 0.09179799999765237,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 150.24473399999988,
+          "first": 29.739826000000903,
+          "sized": 87.94982000000164,
+          "maxLag": 0.19580400000268128,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 182.00936000000002,
+          "first": 36.356102000001556,
+          "sized": 79.33012400000007,
+          "maxLag": 0.27885800000149175,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 215.41555099999823,
+          "first": 48.72289099999762,
+          "sized": 152.15433999999732,
+          "maxLag": 0.9377620000013849,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 141.33290500000294,
+          "first": 31.6809170000015,
+          "sized": 79.32149000000209,
+          "maxLag": 0.1595660000020871,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 126.46115400000053,
+          "first": 33.53613200000109,
+          "sized": 70.34586399999898,
+          "maxLag": 0.5099689999988186,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 121.10359000000244,
+          "first": 32.500959000000876,
+          "sized": 67.1019410000008,
+          "maxLag": 0.07840800000121817,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.81205599999885,
+          "first": 28.286903000000166,
+          "sized": 71.72475800000029,
+          "maxLag": 1.169633999998041,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 125.81121199999689,
+          "first": 28.973857999997563,
+          "sized": 75.660778999998,
+          "maxLag": 0.12439099999755854,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 121.85963199999969,
+          "first": 28.35334800000055,
+          "sized": 72.45595200000025,
+          "maxLag": 1.401307000000088,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 135.32036099999823,
+          "first": 37.16698700000052,
+          "sized": 78.95967999999993,
+          "maxLag": 1.178194000000076,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 149.8551179999995,
+          "first": 30.62904300000082,
+          "sized": 79.77092899999843,
+          "maxLag": 0.22445900000093388,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 147.82017300000007,
+          "first": 31.141437000002043,
+          "sized": 75.05028500000117,
+          "maxLag": 0.5133500000010827,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.71480499999961,
+          "first": 30.70462899999984,
+          "sized": 72.45032599999831,
+          "maxLag": 1.2599689999988186,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 152.31271299999935,
+          "first": 30.89234199999919,
+          "sized": 71.43576200000098,
+          "maxLag": 0.5441390000014508,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 147.96837799999776,
+          "first": 33.35634399999981,
+          "sized": 84.95677499999874,
+          "maxLag": 0.6013280000006489,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 140.17999300000156,
+          "first": 32.046987000001536,
+          "sized": 85.29691100000127,
+          "maxLag": 0.28744499999811524,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 155.34423999999854,
+          "first": 32.46058500000072,
+          "sized": 82.83846900000208,
+          "maxLag": 1.1967250000016065,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 135.43170800000007,
+          "first": 37.433875999999145,
+          "sized": 78.54389599999922,
+          "maxLag": 0.4720400000005611,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 142.80065999999715,
+          "first": 33.34241800000018,
+          "sized": 86.25838999999905,
+          "maxLag": 0.6568760000009206,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 144.59558800000013,
+          "first": 30.611807999997836,
+          "sized": 86.25158499999816,
+          "maxLag": 0.17781399999876157,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 136.21732799999882,
+          "first": 36.10344800000166,
+          "sized": 76.9200090000013,
+          "maxLag": 0.40227900000172667,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 127.61276400000133,
+          "first": 33.82698399999936,
+          "sized": 72.90987300000052,
+          "maxLag": 0.14499500000238186,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 138.36755300000004,
+          "first": 33.299277999998594,
+          "sized": 76.26816099999996,
+          "maxLag": 0.16852300000027753,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 124.16996999999901,
+          "first": 31.691570999999385,
+          "sized": 69.61189599999852,
+          "maxLag": 0.3043199999992794,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 123.56541799999832,
+          "first": 27.92414799999824,
+          "sized": 66.68334599999798,
+          "maxLag": 0.14628300000185845,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 127.9899669999977,
+          "first": 32.92565299999842,
+          "sized": 73.32480699999724,
+          "maxLag": 0.2387090000011085,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.97309300000052,
+          "first": 28.63994200000161,
+          "sized": 73.61679100000038,
+          "maxLag": 0.514578000002075,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 132.10514899999907,
+          "first": 31.089000999996642,
+          "sized": 82.23038900000029,
+          "maxLag": 0.6939289999972971,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 130.62337200000184,
+          "first": 39.052167000001646,
+          "sized": 80.56913699999859,
+          "maxLag": 1.5221049999963725,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 124.8406479999976,
+          "first": 29.1288729999942,
+          "sized": 69.53559399999358,
+          "maxLag": 0.23472900000342634,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 139.41671399999905,
+          "first": 37.33374399999593,
+          "sized": 88.9869039999976,
+          "maxLag": 0.1980559999938123,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 127.93505699999514,
+          "first": 30.865130999998655,
+          "sized": 76.91835799999535,
+          "maxLag": 2.4781130000046687,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 130.8803179999959,
+          "first": 33.67646099999547,
+          "sized": 77.30331999999908,
+          "maxLag": 0.25073800000245683,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 126.66677399999753,
+          "first": 37.48724499999662,
+          "sized": 73.50938199999655,
+          "maxLag": 0.6049459999994724,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 118.65980500000296,
+          "first": 29.289559999997437,
+          "sized": 68.15349699999933,
+          "maxLag": 0.5980979999949341,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 131.94889400000102,
+          "first": 33.22321699999884,
+          "sized": 77.17572400000063,
+          "maxLag": 0.2584930000011809,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 136.0179960000023,
+          "first": 33.18578500000149,
+          "sized": 77.58171299999958,
+          "maxLag": 0.13158100000146078,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 139.2908510000052,
+          "first": 30.875930000001972,
+          "sized": 84.64653100000578,
+          "maxLag": 1.4707300000009127,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 136.86442100000568,
+          "first": 30.86220100000355,
+          "sized": 78.7890550000011,
+          "maxLag": 0.20382499999686843,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 130.24172299999918,
+          "first": 26.440521999997145,
+          "sized": 75.9169219999967,
+          "maxLag": 0.07578600000124425,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 126.35383100000035,
+          "first": 31.519649000001664,
+          "sized": 67.87650900000153,
+          "maxLag": 0.6087229999975534,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 130.35643999999593,
+          "first": 30.228574000000663,
+          "sized": 81.2679649999991,
+          "maxLag": 2.069502000005741,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 124.5524030000015,
+          "first": 29.85657199999696,
+          "sized": 72.16989299999841,
+          "maxLag": 0.06832700000086334,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.06383600000117,
+          "first": 31.957033999999112,
+          "sized": 69.842015000002,
+          "maxLag": 1.3183160000044154,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 140.32521299999644,
+          "first": 31.855133999997634,
+          "sized": 91.04759399999602,
+          "maxLag": 0.5211330000020098,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 123.24698599999829,
+          "first": 29.383239000002504,
+          "sized": 73.39725600000384,
+          "maxLag": 1.5345720000041183,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 122.7356940000027,
+          "first": 32.27541100000235,
+          "sized": 68.3091740000018,
+          "maxLag": 0.6111810000002151,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.7644020000007,
+          "first": 27.656634000006306,
+          "sized": 68.47010800000135,
+          "maxLag": 0.47070700000040233,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 137.8455099999992,
+          "first": 34.27627300000313,
+          "sized": 75.8303950000045,
+          "maxLag": 1.4268540000048233,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 149.7100619999983,
+          "first": 28.837830999997095,
+          "sized": 74.27537099999608,
+          "maxLag": 0.18223099999886472,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 121.81815700000152,
+          "first": 29.347413000003144,
+          "sized": 66.18317799999932,
+          "maxLag": 0.3186130000030971,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 139.36347999999998,
+          "first": 30.90615799999796,
+          "sized": 69.14421500000026,
+          "maxLag": 0.1146870000011404,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 120.83542500000476,
+          "first": 30.93099500000244,
+          "sized": 69.84286600000632,
+          "maxLag": 0.19818500000110362,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 119.78215300000011,
+          "first": 31.63567299999704,
+          "sized": 71.44489500000054,
+          "maxLag": 0.12993000000278698,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 118.0127899999934,
+          "first": 30.847170999993978,
+          "sized": 71.68625499999325,
+          "maxLag": 0.2398109999994631,
+          "count": 1024,
+          "bytes": 393216
+        }
+      ],
+      "rust": [
+        {
+          "total": 17.345608999999968,
+          "first": 1.568753999999899,
+          "sized": 2.7618120000006456,
+          "maxLag": 5.489846000000398,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.988808000000063,
+          "first": 1.1855310000009922,
+          "sized": 1.9634170000008453,
+          "maxLag": 6.120860000000903,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.195933000000878,
+          "first": 1.4845190000014554,
+          "sized": 2.1724490000015066,
+          "maxLag": 4.369468000000779,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.13911999999982,
+          "first": 1.7023169999993115,
+          "sized": 2.3141579999992246,
+          "maxLag": 5.289142999999967,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 32.93487699999969,
+          "first": 2.1011560000006284,
+          "sized": 3.4122370000004594,
+          "maxLag": 2.7129769999992277,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 27.643331999999646,
+          "first": 2.196546999999555,
+          "sized": 3.2878859999982524,
+          "maxLag": 1.2193289999995613,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 35.14466600000014,
+          "first": 1.6548779999975523,
+          "sized": 3.039906999998493,
+          "maxLag": 11.228508000000147,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 56.34305700000186,
+          "first": 2.1588530000008177,
+          "sized": 2.849036999999953,
+          "maxLag": 3.2551949999979115,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 37.66511900000114,
+          "first": 1.975856000000931,
+          "sized": 3.6448319999981322,
+          "maxLag": 2.2469510000009905,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 43.73480800000107,
+          "first": 3.783543000001373,
+          "sized": 4.542301999998017,
+          "maxLag": 5.429874999997992,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 27.86804199999824,
+          "first": 2.906976999998733,
+          "sized": 3.9993829999984882,
+          "maxLag": 1.6401299999997718,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 29.071359999998094,
+          "first": 3.911316000001534,
+          "sized": 5.05895899999814,
+          "maxLag": 0.9702769999967131,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 22.757157000000007,
+          "first": 1.9278869999980088,
+          "sized": 2.5146899999999732,
+          "maxLag": 11.334383999997954,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 28.200386000000435,
+          "first": 1.597235000001092,
+          "sized": 2.163736999998946,
+          "maxLag": 0.12215400000059162,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 35.90363300000172,
+          "first": 1.60945300000094,
+          "sized": 2.9566150000027847,
+          "maxLag": 2.5330460000004678,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 25.33237299999746,
+          "first": 1.6986219999998866,
+          "sized": 2.1707339999993565,
+          "maxLag": 4.748375999999553,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 29.108108000000357,
+          "first": 1.7373880000013742,
+          "sized": 2.590448999999353,
+          "maxLag": 4.248359000001074,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 25.060691999999108,
+          "first": 2.072073999999702,
+          "sized": 4.089584000001196,
+          "maxLag": 10.715342999999848,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.531952000001183,
+          "first": 1.7011530000017956,
+          "sized": 2.413914000000659,
+          "maxLag": 5.418609000000288,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 19.145824999999604,
+          "first": 1.5626550000015413,
+          "sized": 2.1861380000009376,
+          "maxLag": 7.3158519999997225,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 25.598038000000088,
+          "first": 1.6652400000020862,
+          "sized": 2.528272999999899,
+          "maxLag": 0.09548500000164495,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 21.812535999997635,
+          "first": 1.4778069999993022,
+          "sized": 2.324663999999757,
+          "maxLag": 1.9527319999979227,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 23.466347999998106,
+          "first": 1.6453110000002198,
+          "sized": 2.111010000000533,
+          "maxLag": 4.928877999998804,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 25.732038999998622,
+          "first": 1.7917689999994764,
+          "sized": 2.768529999997554,
+          "maxLag": 1.7841189999999187,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 23.424512000001414,
+          "first": 2.039020000000164,
+          "sized": 2.5353109999996377,
+          "maxLag": 0.07233600000108709,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 20.660111999997753,
+          "first": 1.8192669999989448,
+          "sized": 2.306996999999683,
+          "maxLag": 1.5234510000009323,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 20.065199999997276,
+          "first": 1.715924999996787,
+          "sized": 2.4604199999994307,
+          "maxLag": 1.1115909999971336,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 28.152938999999606,
+          "first": 1.5381510000006529,
+          "sized": 2.40961199999947,
+          "maxLag": 6.166736999999557,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 26.789510000002338,
+          "first": 1.920575000000099,
+          "sized": 2.392343000003166,
+          "maxLag": 11.346341000000393,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 24.673538000002736,
+          "first": 2.491912000001321,
+          "sized": 3.9481160000032105,
+          "maxLag": 2.993536000001768,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 25.872424000001047,
+          "first": 1.705829000002268,
+          "sized": 2.6464489999998477,
+          "maxLag": 6.368107999998756,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 22.69975400000112,
+          "first": 1.567949000000226,
+          "sized": 2.2146170000014536,
+          "maxLag": 1.5070799999994051,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 27.63434100000086,
+          "first": 2.0722619999978633,
+          "sized": 2.7744800000000396,
+          "maxLag": 1.5317600000016682,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 24.88845399999991,
+          "first": 1.8427480000027572,
+          "sized": 2.588206000000355,
+          "maxLag": 2.0872920000001614,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 26.657271000000037,
+          "first": 1.5227879999983998,
+          "sized": 2.207695999997668,
+          "maxLag": 11.297688999999082,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 24.194540000000416,
+          "first": 1.7424159999973199,
+          "sized": 2.4078799999988405,
+          "maxLag": 0.312856999997166,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 21.43058999999994,
+          "first": 1.9820120000003953,
+          "sized": 2.3712169999998878,
+          "maxLag": 2.7575400000023365,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 23.70082099999854,
+          "first": 1.8209889999998268,
+          "sized": 2.8613939999995637,
+          "maxLag": 4.1982739999984915,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.09834899999987,
+          "first": 1.4445679999989807,
+          "sized": 2.2312910000000556,
+          "maxLag": 7.304777999997896,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.844206999998278,
+          "first": 1.5989090000002761,
+          "sized": 1.952925999998115,
+          "maxLag": 6.0058769999996,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 19.220538000001397,
+          "first": 1.54187599999932,
+          "sized": 2.408296000001428,
+          "maxLag": 5.466292000000976,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.21672799999942,
+          "first": 1.730691000000661,
+          "sized": 2.5008019999986573,
+          "maxLag": 5.7090619999980845,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.185777999999118,
+          "first": 1.4571130000003905,
+          "sized": 2.528202000001329,
+          "maxLag": 6.110453000001144,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.51106400000208,
+          "first": 1.6426360000004934,
+          "sized": 2.2601290000020526,
+          "maxLag": 6.796946999998909,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.408511000001454,
+          "first": 1.7626520000012533,
+          "sized": 2.164905000001454,
+          "maxLag": 5.085888999998133,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.865649999999732,
+          "first": 1.3814339999989897,
+          "sized": 2.0438300000023446,
+          "maxLag": 4.124818000000232,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 33.25826000000234,
+          "first": 2.9104760000009264,
+          "sized": 3.523015000002488,
+          "maxLag": 2.0616210000007413,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 24.968121999998402,
+          "first": 4.263640000001033,
+          "sized": 4.847893999998632,
+          "maxLag": 7.8595470000000205,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.00876199999766,
+          "first": 1.6405149999991409,
+          "sized": 2.364475999998831,
+          "maxLag": 6.435599999997066,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.147329999999783,
+          "first": 1.4309350000003178,
+          "sized": 2.021370999998908,
+          "maxLag": 5.3079020000004675,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 13.468064000000595,
+          "first": 1.2487609999989218,
+          "sized": 1.8487639999984822,
+          "maxLag": 3.0000879999970493,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.260313999999198,
+          "first": 1.180184000000736,
+          "sized": 2.038900999999896,
+          "maxLag": 6.054103999998915,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.24290199999814,
+          "first": 1.379081999999471,
+          "sized": 2.132568999997602,
+          "maxLag": 3.959979999999632,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.09621800000241,
+          "first": 1.4400580000001355,
+          "sized": 4.796862000002875,
+          "maxLag": 6.6894870000032824,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.960667999999714,
+          "first": 1.5342560000026424,
+          "sized": 2.028110999999626,
+          "maxLag": 6.348133999999845,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.799996999998257,
+          "first": 1.5925390000011248,
+          "sized": 2.43771199999901,
+          "maxLag": 5.088616000000911,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.961269999999786,
+          "first": 1.6615749999982654,
+          "sized": 2.0963819999997213,
+          "maxLag": 5.47202599999946,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.639942999998311,
+          "first": 1.5923189999994065,
+          "sized": 2.023994999999559,
+          "maxLag": 4.895045999997819,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 20.868115000001126,
+          "first": 3.3867109999991953,
+          "sized": 4.0942670000004,
+          "maxLag": 6.801317999997991,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.650236999998015,
+          "first": 1.756424999999581,
+          "sized": 2.3771669999987353,
+          "maxLag": 7.056518999997934,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.894827000000078,
+          "first": 1.2559460000011313,
+          "sized": 1.9966329999988375,
+          "maxLag": 6.275256000000809,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.599887000000308,
+          "first": 1.4382259999983944,
+          "sized": 1.9047199999986333,
+          "maxLag": 5.057511999999406,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 19.74919900000168,
+          "first": 2.808919999999489,
+          "sized": 3.518094999999448,
+          "maxLag": 8.204035999999178,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.085477000000537,
+          "first": 1.4796649999989313,
+          "sized": 2.477977999998984,
+          "maxLag": 6.838324000000284,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.376476999997976,
+          "first": 1.6231479999987641,
+          "sized": 2.1833609999994223,
+          "maxLag": 5.260701999999583,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.24533700000029,
+          "first": 1.4963769999994838,
+          "sized": 2.5791360000002896,
+          "maxLag": 1.5591510000012931,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.814240000003338,
+          "first": 1.3645070000020496,
+          "sized": 2.0976490000030026,
+          "maxLag": 4.060660000002827,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.790528000001359,
+          "first": 1.3976519999996526,
+          "sized": 2.1261539999977686,
+          "maxLag": 4.517673999998806,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.135800000000017,
+          "first": 1.3945980000025884,
+          "sized": 2.008518999999069,
+          "maxLag": 4.303067000000738,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.601289000001998,
+          "first": 1.6553100000019185,
+          "sized": 2.1132330000000366,
+          "maxLag": 4.444594000000507,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.344892000000982,
+          "first": 1.4942669999982172,
+          "sized": 1.9531719999977213,
+          "maxLag": 3.9796449999994365,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.024248000001535,
+          "first": 1.4353810000029625,
+          "sized": 1.875082000002294,
+          "maxLag": 5.354347000000416,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 21.145759999999427,
+          "first": 1.7131720000033965,
+          "sized": 2.2336120000036317,
+          "maxLag": 9.316293000003498,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.098759000000427,
+          "first": 1.48723500000051,
+          "sized": 2.398585999995703,
+          "maxLag": 4.75605799999903,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.83173999999417,
+          "first": 1.5389909999939846,
+          "sized": 1.986403999995673,
+          "maxLag": 4.875247999996645,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.330912999997963,
+          "first": 1.4799539999949047,
+          "sized": 2.3771530000012717,
+          "maxLag": 6.555012999997416,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.358783000003314,
+          "first": 1.6525719999990542,
+          "sized": 2.485631999996258,
+          "maxLag": 4.380263999999443,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.289554999995744,
+          "first": 1.6446969999960857,
+          "sized": 2.2666799999933573,
+          "maxLag": 5.869229999996605,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.255911000000197,
+          "first": 1.7445819999993546,
+          "sized": 3.2246999999988475,
+          "maxLag": 5.441806000002543,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.52631200000178,
+          "first": 1.539849000000686,
+          "sized": 2.2898690000001807,
+          "maxLag": 6.706878999997571,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.756880999993882,
+          "first": 1.6222039999993285,
+          "sized": 2.236042999997153,
+          "maxLag": 4.858647999993991,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.075691999998526,
+          "first": 1.7727769999983138,
+          "sized": 2.2088130000047386,
+          "maxLag": 4.489574999999604,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.017299999999523,
+          "first": 1.4807530000034603,
+          "sized": 2.174445000004198,
+          "maxLag": 7.218266000003496,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.013068000000203,
+          "first": 1.4123489999983576,
+          "sized": 2.117709999998624,
+          "maxLag": 5.091491999999562,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.485059999999066,
+          "first": 1.4424919999946724,
+          "sized": 2.414632999993046,
+          "maxLag": 4.64071399999375,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.460735000000568,
+          "first": 1.3784599999999045,
+          "sized": 2.0676779999994324,
+          "maxLag": 5.491801999996824,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.174623999999312,
+          "first": 1.4980069999946863,
+          "sized": 2.102428999998665,
+          "maxLag": 6.68254199999501,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.905841999992845,
+          "first": 1.5659809999997378,
+          "sized": 2.1823139999978594,
+          "maxLag": 4.6111629999941215,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.43017300000065,
+          "first": 1.2418950000064797,
+          "sized": 1.829674000000523,
+          "maxLag": 4.29134100000374,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.440448000001197,
+          "first": 1.2655389999999898,
+          "sized": 1.9274810000060825,
+          "maxLag": 5.72695200000453,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.891474000003655,
+          "first": 1.473218999999517,
+          "sized": 2.1418899999989662,
+          "maxLag": 0.838939000001119,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.61452399999689,
+          "first": 1.5320339999962016,
+          "sized": 2.3252949999950943,
+          "maxLag": 4.0062809999944875,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.442147000001569,
+          "first": 1.294981999999436,
+          "sized": 2.044101999999839,
+          "maxLag": 4.128731999997399,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 18.222719999997935,
+          "first": 1.3364179999989574,
+          "sized": 1.8647100000016508,
+          "maxLag": 5.978002000003471,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.59222199999931,
+          "first": 1.5402839999951539,
+          "sized": 2.350800000000163,
+          "maxLag": 6.84623499999725,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 17.281967000002624,
+          "first": 1.650435000003199,
+          "sized": 2.5478710000024876,
+          "maxLag": 5.123798000000534,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 15.13380099999631,
+          "first": 1.670297999997274,
+          "sized": 2.2309559999994235,
+          "maxLag": 4.817207000000053,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.830740999997943,
+          "first": 1.455232000000251,
+          "sized": 1.9782330000016373,
+          "maxLag": 5.95950399999856,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 16.45618800000375,
+          "first": 1.4918529999995371,
+          "sized": 2.3343410000015865,
+          "maxLag": 4.00021199999901,
+          "count": 1024,
+          "bytes": 393216
+        },
+        {
+          "total": 14.293425999996543,
+          "first": 1.6401960000002873,
+          "sized": 2.0714000000007218,
+          "maxLag": 3.973941999996896,
+          "count": 1024,
+          "bytes": 393216
+        }
+      ]
+    },
+    "fat-estimated": {
+      "js": [
+        {
+          "total": 165.20633200000157,
+          "first": 22.28306700000394,
+          "sized": 165.0691880000013,
+          "maxLag": 1.0980400000044028,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 158.2141100000008,
+          "first": 18.98067099999753,
+          "sized": 158.08006400000158,
+          "maxLag": 0.18914999999833526,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 156.07007100000192,
+          "first": 19.92972700000246,
+          "sized": 155.90279600000213,
+          "maxLag": 0.4842480000006617,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 151.56350000000384,
+          "first": 22.635260000002745,
+          "sized": 151.4358609999981,
+          "maxLag": 2.0241800000003423,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 160.09117600000172,
+          "first": 21.600540999999794,
+          "sized": 159.96790100000362,
+          "maxLag": 0.08445100000244565,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 156.8809029999975,
+          "first": 19.523734999995213,
+          "sized": 156.71328199999698,
+          "maxLag": 1.227840000006836,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 160.022950999999,
+          "first": 21.257982999995875,
+          "sized": 159.8568779999987,
+          "maxLag": 0.17822700000397163,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 163.4349729999958,
+          "first": 21.12477499999659,
+          "sized": 163.3080439999976,
+          "maxLag": 0.1076829999947222,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 151.94542699999874,
+          "first": 20.476291999999376,
+          "sized": 151.78792699999758,
+          "maxLag": 0.7150860000037937,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 165.21877599999425,
+          "first": 23.656528999999864,
+          "sized": 165.0747179999962,
+          "maxLag": 0.15579900000011548,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 145.36487599999964,
+          "first": 21.47970300000452,
+          "sized": 145.2269379999998,
+          "maxLag": 0.394986000006611,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 177.69472099999984,
+          "first": 21.148867999996583,
+          "sized": 177.51599200000055,
+          "maxLag": 1.4303910000016913,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 169.9334880000024,
+          "first": 20.976380000000063,
+          "sized": 169.7621450000006,
+          "maxLag": 0.13197000000218395,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 195.63669200000004,
+          "first": 21.705085000001418,
+          "sized": 195.4606449999992,
+          "maxLag": 0.4546459999983199,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 194.89565700000094,
+          "first": 22.577162000001408,
+          "sized": 194.69873999999982,
+          "maxLag": 0.44895399999950314,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 179.57581399999617,
+          "first": 24.3264349999954,
+          "sized": 179.43270199999824,
+          "maxLag": 0.10754900000029011,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 178.90428700000484,
+          "first": 26.432114000002912,
+          "sized": 178.7467950000064,
+          "maxLag": 0.879320000000007,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 173.49258199999895,
+          "first": 24.254031999997096,
+          "sized": 173.3563159999976,
+          "maxLag": 0.6094440000015311,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 170.54234300000098,
+          "first": 21.879371999995783,
+          "sized": 170.34319200000027,
+          "maxLag": 0.9851899999994203,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 175.42258800000127,
+          "first": 22.839499000001524,
+          "sized": 175.28097900000284,
+          "maxLag": 0.12996600000042235,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 154.93571300000622,
+          "first": 23.070377000003646,
+          "sized": 154.81101800000033,
+          "maxLag": 0.3573550000000978,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 158.07432600000175,
+          "first": 19.67223300000478,
+          "sized": 157.9481470000028,
+          "maxLag": 0.850851999995939,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 153.37296899999637,
+          "first": 20.770144000001892,
+          "sized": 153.24988199999643,
+          "maxLag": 0.8419280000016443,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 169.28501899999537,
+          "first": 20.12522099999478,
+          "sized": 169.1480789999987,
+          "maxLag": 0.7106000000057975,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 149.50176399999327,
+          "first": 19.857348999998067,
+          "sized": 149.38096199999563,
+          "maxLag": 0.09081000000151107,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 172.08571399999346,
+          "first": 21.28196499999467,
+          "sized": 171.9273139999932,
+          "maxLag": 2.066736000000674,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 155.42778199999884,
+          "first": 20.189065999999002,
+          "sized": 155.31552699999884,
+          "maxLag": 0.08145199999853503,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 163.89199799999915,
+          "first": 20.45212200000242,
+          "sized": 163.74670999999944,
+          "maxLag": 1.9291430000012042,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 154.17560400000366,
+          "first": 21.241706000000704,
+          "sized": 154.04923899999994,
+          "maxLag": 1.0629600000029313,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 162.98865800000203,
+          "first": 21.04529200000252,
+          "sized": 162.83108400000492,
+          "maxLag": 0.08866100000159349,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 167.623563000001,
+          "first": 21.05857699999615,
+          "sized": 167.46512200000143,
+          "maxLag": 0.20545700000366196,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 185.8884820000021,
+          "first": 23.06186500000331,
+          "sized": 185.7078529999999,
+          "maxLag": 0.7948980000001029,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 169.16815700000006,
+          "first": 20.403676000001724,
+          "sized": 169.0218160000004,
+          "maxLag": 0.856591000003391,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 158.3260819999996,
+          "first": 21.3870689999967,
+          "sized": 158.19453700000304,
+          "maxLag": 0.0927769999980228,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 158.90503199999512,
+          "first": 20.927089999997406,
+          "sized": 158.74798200000077,
+          "maxLag": 0.16075000000273576,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 157.59509499999695,
+          "first": 22.271833999999217,
+          "sized": 157.43098199999804,
+          "maxLag": 0.11880299999756971,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 185.23855499999627,
+          "first": 21.399860999998054,
+          "sized": 185.068256999999,
+          "maxLag": 0.7619809999960125,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 160.6244910000023,
+          "first": 22.302965000002587,
+          "sized": 160.47124800000165,
+          "maxLag": 0.12111700000241399,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 166.34027200000128,
+          "first": 20.272924999997485,
+          "sized": 166.19945000000007,
+          "maxLag": 0.14446299999690382,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 157.10421400000632,
+          "first": 22.03495600000315,
+          "sized": 156.97612500000105,
+          "maxLag": 0.10809100000187755,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 150.08420900000056,
+          "first": 21.247756999997364,
+          "sized": 149.9519519999958,
+          "maxLag": 0.0861880000011297,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 157.80566199999885,
+          "first": 20.52768599999399,
+          "sized": 157.6706320000012,
+          "maxLag": 1.4356429999970715,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 168.95486099999835,
+          "first": 21.007189000003564,
+          "sized": 168.7999340000024,
+          "maxLag": 0.114237999994657,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 169.9037970000063,
+          "first": 22.161183000003803,
+          "sized": 169.74134500000218,
+          "maxLag": 1.271944000000076,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 161.3159519999972,
+          "first": 23.356118999996397,
+          "sized": 161.20119599999452,
+          "maxLag": 0.29118000000016764,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 163.50974600000336,
+          "first": 21.632626999999047,
+          "sized": 163.3813250000021,
+          "maxLag": 1.0023109999965527,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 160.6784669999979,
+          "first": 21.104583000000275,
+          "sized": 160.55593899999803,
+          "maxLag": 0.15164600000571227,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 152.79372400000284,
+          "first": 19.068586000001233,
+          "sized": 152.65809799999988,
+          "maxLag": 0.09829700000409503,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 165.8645680000045,
+          "first": 20.70954700000584,
+          "sized": 165.72580800000287,
+          "maxLag": 0.12448099999892293,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 148.08952800000407,
+          "first": 20.244071000000986,
+          "sized": 147.9576900000029,
+          "maxLag": 0.9816389999978128,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 152.23621999999887,
+          "first": 21.95421399999759,
+          "sized": 152.10572199999297,
+          "maxLag": 0.975561999999627,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 148.56346399999893,
+          "first": 22.552800000004936,
+          "sized": 148.42651900000055,
+          "maxLag": 0.2583180000001448,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 141.06041800000094,
+          "first": 20.01699699999881,
+          "sized": 140.9318590000039,
+          "maxLag": 1.0747599999958766,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 156.4383999999991,
+          "first": 21.36435899999924,
+          "sized": 156.31683899999916,
+          "maxLag": 0.11896600000181934,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 140.19378800000413,
+          "first": 19.525516000001517,
+          "sized": 140.04149399999733,
+          "maxLag": 0.8639670000047772,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 227.86172799999622,
+          "first": 20.094577999996545,
+          "sized": 227.65996099999757,
+          "maxLag": 0.8395129999989877,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 816.2572360000049,
+          "first": 43.94525300000532,
+          "sized": 815.2855130000025,
+          "maxLag": 6.444277999995393,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 728.4452010000023,
+          "first": 71.10981799999718,
+          "sized": 728.2284020000006,
+          "maxLag": 5.370603999996092,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 596.3841210000028,
+          "first": 37.64681299999938,
+          "sized": 596.077022999998,
+          "maxLag": 2.220048000002862,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 488.4379950000002,
+          "first": 37.79940899999929,
+          "sized": 488.2327309999964,
+          "maxLag": 1.2550180000034743,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 346.32250999999815,
+          "first": 40.64009700000315,
+          "sized": 346.1246539999993,
+          "maxLag": 0.9369129999977304,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 327.392703000005,
+          "first": 27.848481000000902,
+          "sized": 327.1565800000026,
+          "maxLag": 1.8196590000006836,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 251.70039700000052,
+          "first": 32.27683799999795,
+          "sized": 251.54906499999925,
+          "maxLag": 0.11284400000295136,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 204.26158600000053,
+          "first": 23.79238400000031,
+          "sized": 204.07883500000025,
+          "maxLag": 0.8408510000008391,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 209.7184799999959,
+          "first": 27.681774999997288,
+          "sized": 209.5885599999965,
+          "maxLag": 0.911032999996678,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 244.74249400000554,
+          "first": 23.597888000003877,
+          "sized": 244.59633100000065,
+          "maxLag": 0.12788500000169734,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 225.371481999995,
+          "first": 24.56496899999911,
+          "sized": 225.17833199999586,
+          "maxLag": 0.41501900000002934,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 197.9857969999939,
+          "first": 25.30834699999832,
+          "sized": 197.85274399999616,
+          "maxLag": 0.2968929999988177,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 450.75368300000264,
+          "first": 21.686486999999033,
+          "sized": 450.5371460000024,
+          "maxLag": 3.6526879999946686,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 523.2048989999967,
+          "first": 25.31611599999451,
+          "sized": 522.2582219999967,
+          "maxLag": 1.7075200000035693,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 807.3009640000018,
+          "first": 73.60151300000143,
+          "sized": 805.2527880000052,
+          "maxLag": 3.011545000001206,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 355.19097899999906,
+          "first": 50.22210600000108,
+          "sized": 355.0499439999985,
+          "maxLag": 1.833057000003464,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 437.215105999996,
+          "first": 30.837318999998388,
+          "sized": 436.8488819999984,
+          "maxLag": 3.9154469999994035,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 847.2832260000068,
+          "first": 64.7203770000051,
+          "sized": 845.6730000000025,
+          "maxLag": 2.975246000001789,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 799.3979120000004,
+          "first": 51.295655000001716,
+          "sized": 799.1087950000001,
+          "maxLag": 4.307080999999016,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 845.194958,
+          "first": 87.8838670000041,
+          "sized": 843.1227999999974,
+          "maxLag": 6.148653000003833,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 751.5048509999979,
+          "first": 50.39378099999885,
+          "sized": 751.172464000003,
+          "maxLag": 2.8727040000012494,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 936.3247530000008,
+          "first": 48.37919400000101,
+          "sized": 935.2342339999959,
+          "maxLag": 2.7616500000003725,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 850.9398989999972,
+          "first": 80.44213699999818,
+          "sized": 850.143247,
+          "maxLag": 1.9764349999968545,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 904.5381730000008,
+          "first": 66.87839900000108,
+          "sized": 904.279125999994,
+          "maxLag": 3.4467230000009295,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 953.722851999999,
+          "first": 62.37561199999618,
+          "sized": 952.3938930000004,
+          "maxLag": 2.348743000002287,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 870.3365630000044,
+          "first": 62.6482890000043,
+          "sized": 869.9533190000002,
+          "maxLag": 5.607475000004342,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 340.8876789999995,
+          "first": 36.93082100000174,
+          "sized": 340.68687800000043,
+          "maxLag": 1.1130239999984042,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 247.7624949999954,
+          "first": 28.931900999996287,
+          "sized": 247.60336999999708,
+          "maxLag": 0.7327740000037011,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 221.85383900000306,
+          "first": 22.320996000002197,
+          "sized": 221.647278000004,
+          "maxLag": 1.023894999998447,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 184.4623819999979,
+          "first": 26.044785999998567,
+          "sized": 184.29989800000476,
+          "maxLag": 1.153096000001824,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 200.38637200000085,
+          "first": 24.0426260000022,
+          "sized": 200.2450250000038,
+          "maxLag": 0.12048399999912363,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 167.9239379999999,
+          "first": 22.634935999994923,
+          "sized": 167.76622700000007,
+          "maxLag": 0.09875499999907333,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 196.28418699999747,
+          "first": 26.140024000000267,
+          "sized": 196.14775699999882,
+          "maxLag": 0.41670900000463007,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 176.31696200000442,
+          "first": 21.59883300000365,
+          "sized": 176.19497499999852,
+          "maxLag": 0.10820699999749195,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 166.2596890000059,
+          "first": 21.06235800000286,
+          "sized": 166.11382400000002,
+          "maxLag": 0.11700399999972433,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 161.1290100000042,
+          "first": 22.51998000000458,
+          "sized": 160.9804890000014,
+          "maxLag": 0.30941299999540206,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 174.19631200000003,
+          "first": 18.67339499999798,
+          "sized": 174.02516900000046,
+          "maxLag": 0.13195899999846006,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 173.7570410000044,
+          "first": 28.4365289999987,
+          "sized": 173.63067600000068,
+          "maxLag": 0.18160599999828264,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 193.61593699999503,
+          "first": 23.30582599999616,
+          "sized": 193.44736399999965,
+          "maxLag": 0.7050060000037774,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 175.14703600000212,
+          "first": 20.47652999999991,
+          "sized": 174.99799599999824,
+          "maxLag": 0.1353869999948074,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 216.3195459999988,
+          "first": 24.095893999998225,
+          "sized": 213.02095499999996,
+          "maxLag": 0.884968000005756,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 175.96961600000213,
+          "first": 25.375004000001354,
+          "sized": 175.80845399999816,
+          "maxLag": 0.33116300000983756,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 181.5672179999965,
+          "first": 25.025004000010085,
+          "sized": 181.41856000000553,
+          "maxLag": 0.2126469999930123,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 193.09708400000818,
+          "first": 22.797981000010623,
+          "sized": 192.92974000000686,
+          "maxLag": 0.14567700000770856,
+          "count": 1,
+          "bytes": 2560000
+        }
+      ],
+      "rust": [
+        {
+          "total": 4.41029300000082,
+          "first": 1.3727680000010878,
+          "sized": 4.225988999998663,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.548101000000315,
+          "first": 1.3213990000003832,
+          "sized": 4.37565899999754,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.3466410000037285,
+          "first": 1.4619890000030864,
+          "sized": 4.17366800000309,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.696555000002263,
+          "first": 1.137008000005153,
+          "sized": 3.509375000001455,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.079506999994919,
+          "first": 1.2634569999936502,
+          "sized": 3.852947999999742,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.472889999997278,
+          "first": 1.4673899999979767,
+          "sized": 4.290973999995913,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.703899000000092,
+          "first": 1.6330720000041765,
+          "sized": 4.4831560000020545,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.3394700000062585,
+          "first": 1.2942180000027292,
+          "sized": 4.144962000005762,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.506036999999196,
+          "first": 1.5505139999950188,
+          "sized": 4.323140000000421,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.546517999995558,
+          "first": 1.117921999997634,
+          "sized": 3.387361000000965,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.580633999998099,
+          "first": 1.4737690000038128,
+          "sized": 4.433723000001919,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.698280999997223,
+          "first": 1.5638600000020233,
+          "sized": 4.497712000003958,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.3674709999977495,
+          "first": 1.6405620000005001,
+          "sized": 4.170289000001503,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.599190000000817,
+          "first": 2.51249000000098,
+          "sized": 4.4048729999994976,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.121565000001283,
+          "first": 1.6087919999990845,
+          "sized": 4.923083000001498,
+          "maxLag": 0.008944000001065433,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.36003399999754,
+          "first": 1.3843939999933355,
+          "sized": 4.191494999999122,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.733672000002116,
+          "first": 1.3451740000018617,
+          "sized": 4.5496169999969425,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.713778999997885,
+          "first": 1.3061749999978929,
+          "sized": 4.545820999999705,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.926197000000684,
+          "first": 2.077662000003329,
+          "sized": 4.737057999998797,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.688104999993811,
+          "first": 1.507198999999673,
+          "sized": 4.47786599999381,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.2133710000052815,
+          "first": 1.3546620000051917,
+          "sized": 4.068095000002359,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.877762000003713,
+          "first": 1.118586000004143,
+          "sized": 3.6544490000014775,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.044395999997505,
+          "first": 1.0838470000016969,
+          "sized": 3.875743999997212,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.17940699999599,
+          "first": 1.2819889999955194,
+          "sized": 3.984399000000849,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.284472999999707,
+          "first": 1.125753000000259,
+          "sized": 4.112275999999838,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.822048000001814,
+          "first": 1.4554970000026515,
+          "sized": 4.594536000004155,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.652814999994007,
+          "first": 1.5428259999971488,
+          "sized": 4.454862999999023,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.378164000001561,
+          "first": 1.4503780000013649,
+          "sized": 4.227812999997695,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.220433000002231,
+          "first": 1.469611000000441,
+          "sized": 4.026660000003176,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.345562000002246,
+          "first": 1.5441460000001825,
+          "sized": 4.162821000005351,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.779225999998744,
+          "first": 1.6654290000005858,
+          "sized": 4.4932020000051125,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.151805000001332,
+          "first": 1.2747900000031223,
+          "sized": 3.936013999998977,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.5203030000047875,
+          "first": 1.5236140000051819,
+          "sized": 4.344547000000603,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.0562970000028145,
+          "first": 1.5336979999992764,
+          "sized": 3.8677670000033686,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.564682999996876,
+          "first": 1.6464869999981602,
+          "sized": 4.414113999999245,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.272855000002892,
+          "first": 2.26994299999933,
+          "sized": 5.0906099999992875,
+          "maxLag": 0.12431600000127219,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.533698999999615,
+          "first": 1.4366210000007413,
+          "sized": 4.360733000001346,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.9872789999935776,
+          "first": 1.3383629999952973,
+          "sized": 3.8178439999974216,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.530334000002767,
+          "first": 1.5062790000010864,
+          "sized": 4.339448000006087,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.5384740000008605,
+          "first": 1.5267610000009881,
+          "sized": 4.304925000004005,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.771576999999525,
+          "first": 1.7290949999951408,
+          "sized": 4.582563999996637,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.3298739999954705,
+          "first": 1.157467999997607,
+          "sized": 4.18376499999431,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.425291999999899,
+          "first": 1.5811299999986659,
+          "sized": 4.281561999996484,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.754676999997173,
+          "first": 1.254849999997532,
+          "sized": 3.617575999996916,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.50242900000012,
+          "first": 1.4775359999985085,
+          "sized": 4.3186619999978575,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.800413999997545,
+          "first": 1.4941379999945639,
+          "sized": 4.598899999997229,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.652177999996638,
+          "first": 1.541638000002422,
+          "sized": 4.423291999999492,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.1796290000056615,
+          "first": 1.2287120000037248,
+          "sized": 3.9976349999997183,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.499179999998887,
+          "first": 1.4304290000000037,
+          "sized": 4.327479999999923,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.891998999999487,
+          "first": 1.1410040000046138,
+          "sized": 3.449995000002673,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.9412430000011227,
+          "first": 1.3727779999971972,
+          "sized": 3.7530380000025616,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.176227000003564,
+          "first": 1.0270000000018626,
+          "sized": 3.967624999997497,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.204309000000649,
+          "first": 3.1192749999972875,
+          "sized": 4.048788000000059,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.8829530000002705,
+          "first": 1.4307260000059614,
+          "sized": 3.7210360000026412,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.110250999998243,
+          "first": 1.3017200000031153,
+          "sized": 3.954360000003362,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.571577000002435,
+          "first": 1.0507500000021537,
+          "sized": 3.4243249999999534,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 32.645564999998896,
+          "first": 5.4354200000016135,
+          "sized": 30.124934999999823,
+          "maxLag": 0.46946899999602465,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 39.26064499999484,
+          "first": 4.532822000001033,
+          "sized": 37.07158799999888,
+          "maxLag": 7.776455999999598,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 18.777211999993597,
+          "first": 4.0908479999998235,
+          "sized": 18.22887300000002,
+          "maxLag": 0.7139609999940149,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 18.479836999998952,
+          "first": 5.270510000002105,
+          "sized": 17.85786100000405,
+          "maxLag": 1.6238260000027367,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.056295000002137,
+          "first": 2.231182000003173,
+          "sized": 5.775125000000116,
+          "maxLag": 0.07052600000315579,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.4588910000020405,
+          "first": 1.4166849999965052,
+          "sized": 5.3682409999964875,
+          "maxLag": 0.08516499999677762,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.423475999996299,
+          "first": 1.8041149999990012,
+          "sized": 5.204892999994627,
+          "maxLag": 0.07770499999605818,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.750797000000603,
+          "first": 1.5286199999973178,
+          "sized": 5.466033000004245,
+          "maxLag": 0.08517399999982445,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.527534000000742,
+          "first": 1.1556229999987409,
+          "sized": 4.2923680000021704,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.391646999996738,
+          "first": 1.8776569999972708,
+          "sized": 5.169992999995884,
+          "maxLag": 0.21727999999711756,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.3645830000023125,
+          "first": 1.3403539999999339,
+          "sized": 4.197124999998778,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.659295000004931,
+          "first": 1.2066670000058366,
+          "sized": 4.459388000002946,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.667391999995743,
+          "first": 1.4570019999955548,
+          "sized": 5.373138999995717,
+          "maxLag": 0.07642800000030547,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 10.763973000000988,
+          "first": 2.22240199999942,
+          "sized": 10.227705999997852,
+          "maxLag": 0.17990500000450993,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 29.43944100000226,
+          "first": 2.609887999999046,
+          "sized": 28.7629120000056,
+          "maxLag": 2.4927430000025197,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 15.568377000003238,
+          "first": 2.1213490000009187,
+          "sized": 14.947522000002209,
+          "maxLag": 1.8615050000007614,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 21.191735000000335,
+          "first": 4.035896999994293,
+          "sized": 19.996823999994376,
+          "maxLag": 1.4682489999977406,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 12.996903999999631,
+          "first": 2.8981429999985266,
+          "sized": 12.715033000000403,
+          "maxLag": 0.1899859999975888,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 25.202106000004278,
+          "first": 3.041168000003381,
+          "sized": 24.185197999999218,
+          "maxLag": 0.0917219999973895,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 25.444734000004246,
+          "first": 2.949926000001142,
+          "sized": 24.00992000000406,
+          "maxLag": 0.9427179999984219,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 27.04011800000444,
+          "first": 3.3347520000024815,
+          "sized": 26.446239000004425,
+          "maxLag": 0.27500500000314787,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 21.08182900000247,
+          "first": 5.495248999999603,
+          "sized": 19.843856999999844,
+          "maxLag": 0.5422749999997905,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 18.096425999996427,
+          "first": 3.1322700000018813,
+          "sized": 16.109722000001057,
+          "maxLag": 0.6169850000005681,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 17.604181000002427,
+          "first": 2.002593999997771,
+          "sized": 17.072325000001,
+          "maxLag": 0.37489800000184914,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 28.288613999997324,
+          "first": 3.9827450000011595,
+          "sized": 27.303743999997096,
+          "maxLag": 0.9126289999985602,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 28.563169000000926,
+          "first": 3.755673999999999,
+          "sized": 27.924788999996963,
+          "maxLag": 1.1043729999946663,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.47685900000215,
+          "first": 2.0355120000022,
+          "sized": 6.259837000005064,
+          "maxLag": 0.06702100000256905,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.186217000002216,
+          "first": 1.5855680000022403,
+          "sized": 5.856895999997505,
+          "maxLag": 0.10864600000058999,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.612486999998509,
+          "first": 1.640741999995953,
+          "sized": 5.372843999997713,
+          "maxLag": 0.07371899999998277,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 7.20932499999617,
+          "first": 1.5078529999955208,
+          "sized": 6.934371999996074,
+          "maxLag": 0.07804999999643769,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.328458999996656,
+          "first": 1.5055559999964316,
+          "sized": 5.091770999999426,
+          "maxLag": 0.13509799999883398,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.574235000000044,
+          "first": 1.5360660000005737,
+          "sized": 4.366826999998011,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.665966000000481,
+          "first": 1.1936209999985294,
+          "sized": 4.4854090000008,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.852296999997634,
+          "first": 1.2646390000008978,
+          "sized": 3.684592999998131,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.15595200000098,
+          "first": 1.2058090000064112,
+          "sized": 4.038310000003548,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.943534999998519,
+          "first": 1.2376280000025872,
+          "sized": 3.776535999997577,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.560163999994984,
+          "first": 2.2869529999952647,
+          "sized": 5.352469999997993,
+          "maxLag": 0.06987500000104774,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.433147000003373,
+          "first": 1.4555010000040056,
+          "sized": 4.256835000000137,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.328056999998807,
+          "first": 1.099672999996983,
+          "sized": 4.163745999998355,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.9475470000033965,
+          "first": 1.0077799999999115,
+          "sized": 3.745018000001437,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.302151999996568,
+          "first": 1.6990159999986645,
+          "sized": 6.088014999993902,
+          "maxLag": 0.07694500000070548,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.999332999999751,
+          "first": 1.42737199999101,
+          "sized": 4.74421999999322,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.187984999996843,
+          "first": 1.679160999992746,
+          "sized": 4.945009999995818,
+          "maxLag": 0.0414559999917401,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.719386999990093,
+          "first": 1.6549439999944298,
+          "sized": 4.536729999992531,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        }
+      ]
+    },
+    "fat-exact": {
+      "js": [
+        {
+          "total": 196.5641259999975,
+          "first": 23.9433149999968,
+          "sized": 196.42288899999403,
+          "maxLag": 1.676988999999594,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 226.23122899999726,
+          "first": 23.88308099999267,
+          "sized": 226.0639450000017,
+          "maxLag": 0.7160339999973075,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 237.56519299998763,
+          "first": 24.0355750000017,
+          "sized": 237.39841799999704,
+          "maxLag": 0.2751520000019809,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 233.0045539999992,
+          "first": 24.235379000005196,
+          "sized": 232.85362000000896,
+          "maxLag": 1.311438000004273,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 183.31340900000941,
+          "first": 23.836012000014307,
+          "sized": 183.17929200000071,
+          "maxLag": 0.09815800000797026,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 186.05270600000222,
+          "first": 23.25472300000547,
+          "sized": 185.90899999999965,
+          "maxLag": 0.09671899999375455,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 190.0292860000045,
+          "first": 27.726976999998442,
+          "sized": 189.9025890000048,
+          "maxLag": 0.1482910000049742,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 196.01485300000058,
+          "first": 24.46986700000707,
+          "sized": 195.90518200000224,
+          "maxLag": 0.9691420000017388,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 170.13916799999424,
+          "first": 23.5735480000003,
+          "sized": 170.02117700000235,
+          "maxLag": 0.9561320000066189,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 174.18246999999974,
+          "first": 21.344412999998895,
+          "sized": 174.0762320000067,
+          "maxLag": 1.5193619999918155,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 174.0319920000038,
+          "first": 24.554136999999173,
+          "sized": 173.9351650000026,
+          "maxLag": 0.6406090000091353,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 187.49778200000583,
+          "first": 24.521407000007457,
+          "sized": 187.36340100000962,
+          "maxLag": 1.4298580000031507,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 202.27659700000368,
+          "first": 22.72902499999327,
+          "sized": 202.15586299999268,
+          "maxLag": 0.16542699999990873,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 187.54873899999075,
+          "first": 23.789790999988327,
+          "sized": 187.41007999998692,
+          "maxLag": 0.13201299999491312,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 192.24495300000126,
+          "first": 25.376218999997946,
+          "sized": 192.08067300000403,
+          "maxLag": 1.5916100000031292,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 206.29302800000005,
+          "first": 24.02877200000512,
+          "sized": 206.17330200001015,
+          "maxLag": 0.35699500000919215,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 174.54348599999503,
+          "first": 20.710905999992974,
+          "sized": 174.385958999992,
+          "maxLag": 0.4366370000061579,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 190.8107730000047,
+          "first": 20.37550100000226,
+          "sized": 190.67530799999076,
+          "maxLag": 0.0907630000001518,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 155.93709799999488,
+          "first": 22.39750799999456,
+          "sized": 155.81700899999123,
+          "maxLag": 0.31206499999098014,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 166.00276499999745,
+          "first": 20.28509399999166,
+          "sized": 165.88430799999333,
+          "maxLag": 0.11420300000463612,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 170.32385300000897,
+          "first": 20.02018200000748,
+          "sized": 170.21859600000607,
+          "maxLag": 0.8831409999984317,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 153.45983200000774,
+          "first": 20.30990500000189,
+          "sized": 153.3515550000011,
+          "maxLag": 0.20356699998956174,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 160.77601899999718,
+          "first": 18.91354200000933,
+          "sized": 160.65676700000768,
+          "maxLag": 0.33383400000457186,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 155.7716039999941,
+          "first": 22.06150599999819,
+          "sized": 155.65098599999328,
+          "maxLag": 0.7706039999902714,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 171.94823500000348,
+          "first": 19.836900000009337,
+          "sized": 171.81818100000964,
+          "maxLag": 0.12622299999929965,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 231.9851950000011,
+          "first": 23.114328000010573,
+          "sized": 231.85489000000234,
+          "maxLag": 0.5650450000102865,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 158.08373099999153,
+          "first": 22.67759199999273,
+          "sized": 157.97008800000185,
+          "maxLag": 0.7879529999918304,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 149.77611599999364,
+          "first": 21.655603999999585,
+          "sized": 149.63812099999632,
+          "maxLag": 0.11062099999981001,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 158.81977400000324,
+          "first": 22.33526000000711,
+          "sized": 158.6923950000055,
+          "maxLag": 0.07576500000141095,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 160.89347299998917,
+          "first": 20.19700099999318,
+          "sized": 160.7780700000003,
+          "maxLag": 0.09410600000410341,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 152.79694700000982,
+          "first": 20.602935000002617,
+          "sized": 152.6576330000098,
+          "maxLag": 0.09005299999262206,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 175.9110409999994,
+          "first": 22.21400999999605,
+          "sized": 175.77711100000306,
+          "maxLag": 1.0401140000030864,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 175.02507199998945,
+          "first": 21.905438999994658,
+          "sized": 174.92862500000047,
+          "maxLag": 0.6461010000057286,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 154.73776099999668,
+          "first": 22.360305000009248,
+          "sized": 154.63998200000788,
+          "maxLag": 0.4231279999949038,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 154.32913500000723,
+          "first": 21.751224000006914,
+          "sized": 154.20712400000775,
+          "maxLag": 0.10600899999553803,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 144.24942100000044,
+          "first": 19.75722400000086,
+          "sized": 144.14590400000452,
+          "maxLag": 0.07480400000349618,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 161.88393799999903,
+          "first": 19.978124000001117,
+          "sized": 161.76811999999336,
+          "maxLag": 0.4628839999932097,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 169.11637699999847,
+          "first": 19.315094000005047,
+          "sized": 169.01402200000302,
+          "maxLag": 0.1539399999892339,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 155.09319600000163,
+          "first": 20.992958999995608,
+          "sized": 154.97020099998917,
+          "maxLag": 0.08685500000137836,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 169.50002800000948,
+          "first": 21.997134999997797,
+          "sized": 169.39617500000168,
+          "maxLag": 0.8139599999994971,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 147.60965899999428,
+          "first": 19.91038299999491,
+          "sized": 147.51224999999977,
+          "maxLag": 1.0378350000100909,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 155.82616700000654,
+          "first": 19.194522000005236,
+          "sized": 155.69690799999807,
+          "maxLag": 0.09390199999324977,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 176.41729500000656,
+          "first": 23.952344000004814,
+          "sized": 176.30008600000292,
+          "maxLag": 0.15168299998913426,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 264.7066899999918,
+          "first": 23.93928799999412,
+          "sized": 264.56623599999875,
+          "maxLag": 1.0073450000054436,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 224.76635999999417,
+          "first": 24.24952700000722,
+          "sized": 224.62967700000445,
+          "maxLag": 0.23673000000417233,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 218.07267400001,
+          "first": 24.399969000005512,
+          "sized": 217.94694999999774,
+          "maxLag": 0.33872700000938494,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 204.27754999999888,
+          "first": 25.732846999992034,
+          "sized": 204.1672580000013,
+          "maxLag": 0.14897799999744166,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 195.07850699999835,
+          "first": 21.574747000006028,
+          "sized": 194.9436410000053,
+          "maxLag": 1.1520480000035604,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 234.47190899999987,
+          "first": 26.567414000004646,
+          "sized": 234.32564300000377,
+          "maxLag": 0.1902600000030361,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 196.41408600000432,
+          "first": 23.942911999998614,
+          "sized": 196.26928799999587,
+          "maxLag": 0.6389639999979408,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 241.62474500000826,
+          "first": 25.50316800001019,
+          "sized": 241.47617400001036,
+          "maxLag": 1.16686500000651,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 298.0991500000091,
+          "first": 25.62686200000462,
+          "sized": 297.9464600000065,
+          "maxLag": 2.779410999995889,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 242.7073689999961,
+          "first": 29.903523999993922,
+          "sized": 242.56681599999138,
+          "maxLag": 1.8474779999960447,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 244.6487219999981,
+          "first": 23.91066999999748,
+          "sized": 244.4684949999937,
+          "maxLag": 1.3673090000083903,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 261.0762109999923,
+          "first": 29.054404999988037,
+          "sized": 260.92650799998955,
+          "maxLag": 0.16436900000553578,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 263.1303529999859,
+          "first": 22.532901999991736,
+          "sized": 262.96769700000004,
+          "maxLag": 0.5228319999878295,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 211.21901200000138,
+          "first": 26.40508499999123,
+          "sized": 211.07121099998767,
+          "maxLag": 0.19170399999711663,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 288.85917199999676,
+          "first": 25.300921999994898,
+          "sized": 288.6981539999979,
+          "maxLag": 2.4605799999990268,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 283.5580619999964,
+          "first": 32.010682000007364,
+          "sized": 283.3919610000012,
+          "maxLag": 1.1309690000052797,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 265.9957470000081,
+          "first": 25.500263000009,
+          "sized": 265.87943200000154,
+          "maxLag": 0.22767100000055507,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 224.8177260000084,
+          "first": 25.354715000008582,
+          "sized": 224.68511099999887,
+          "maxLag": 0.14511399999901187,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 264.6826710000023,
+          "first": 24.40434500000265,
+          "sized": 264.54778599999554,
+          "maxLag": 1.4891349999961676,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 230.3918229999981,
+          "first": 25.728722999992897,
+          "sized": 230.25172099999327,
+          "maxLag": 1.8587850000039907,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 220.33871999999974,
+          "first": 23.399241999999504,
+          "sized": 220.20970400000806,
+          "maxLag": 0.2738390000013169,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 202.78562899999088,
+          "first": 25.398055999990902,
+          "sized": 202.63899899998796,
+          "maxLag": 2.226514000009047,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 271.6229020000028,
+          "first": 23.905150999999023,
+          "sized": 271.4598760000081,
+          "maxLag": 0.7623729999904754,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 271.2836559999996,
+          "first": 28.36925100001099,
+          "sized": 271.1187790000113,
+          "maxLag": 1.9904460000107065,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 247.29403000000457,
+          "first": 27.3462070000096,
+          "sized": 247.11499000000185,
+          "maxLag": 0.9815680000028806,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 229.5395589999971,
+          "first": 24.280136999994284,
+          "sized": 229.39976299999398,
+          "maxLag": 0.8501140000007581,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 259.6151469999895,
+          "first": 24.30139499998768,
+          "sized": 259.45034699999087,
+          "maxLag": 0.23231700000178535,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 223.23680499999318,
+          "first": 25.976138999991235,
+          "sized": 223.11479799999506,
+          "maxLag": 0.15249999999650754,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 255.16763300000457,
+          "first": 25.480294000008143,
+          "sized": 255.014267999999,
+          "maxLag": 3.100276000011945,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 298.9960229999997,
+          "first": 26.89813800000411,
+          "sized": 298.8253720000066,
+          "maxLag": 0.18892600000253879,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 264.6592729999975,
+          "first": 26.18575299999793,
+          "sized": 264.5070730000007,
+          "maxLag": 2.388072000001557,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 226.56960700001218,
+          "first": 27.808536000011372,
+          "sized": 226.42602700000862,
+          "maxLag": 1.168863999992027,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 293.7225729999918,
+          "first": 25.464179999995395,
+          "sized": 293.56633699999657,
+          "maxLag": 1.6124910000071395,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 243.776761000001,
+          "first": 25.69184299999324,
+          "sized": 243.53764499998942,
+          "maxLag": 0.23728699999628589,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 246.52916499999992,
+          "first": 26.328318999992916,
+          "sized": 246.376522999999,
+          "maxLag": 0.7558510000089882,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 264.8442420000065,
+          "first": 23.00886800000444,
+          "sized": 264.68748400000914,
+          "maxLag": 0.14347700000507757,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 240.69486599999072,
+          "first": 23.989812999992864,
+          "sized": 240.5704379999952,
+          "maxLag": 0.16468600000371225,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 182.67807400001038,
+          "first": 23.415836000000127,
+          "sized": 182.57622100001026,
+          "maxLag": 0.09555199999886099,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 184.9846239999897,
+          "first": 20.510364999994636,
+          "sized": 184.84869999998773,
+          "maxLag": 1.095973999996204,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 205.12672400000156,
+          "first": 20.863175000005867,
+          "sized": 204.98011400000541,
+          "maxLag": 0.11375499999849126,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 212.7263479999965,
+          "first": 28.333950000000186,
+          "sized": 212.5670909999899,
+          "maxLag": 0.5157670000044163,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 174.85319800001162,
+          "first": 24.54574900001171,
+          "sized": 174.6522510000068,
+          "maxLag": 0.5616330000048038,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 180.4215009999898,
+          "first": 23.550590999991982,
+          "sized": 180.2505339999916,
+          "maxLag": 0.6252800000074785,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 191.42180199999711,
+          "first": 19.880852999995113,
+          "sized": 191.25072199999704,
+          "maxLag": 1.0435960000031628,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 217.07035900000483,
+          "first": 25.24409600000945,
+          "sized": 216.92556000000332,
+          "maxLag": 1.0539240000071004,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 190.40578200000164,
+          "first": 22.992205000002286,
+          "sized": 190.22481499999412,
+          "maxLag": 2.2216350000089733,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 187.5738260000071,
+          "first": 21.825360000002547,
+          "sized": 187.42170700000133,
+          "maxLag": 0.7049440000118921,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 197.421914999999,
+          "first": 23.219194999997853,
+          "sized": 197.21303299999272,
+          "maxLag": 1.0746080000099028,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 202.8724399999919,
+          "first": 23.400047999995877,
+          "sized": 202.73346999999194,
+          "maxLag": 0.7808700000023236,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 166.15978800000448,
+          "first": 22.060224000000744,
+          "sized": 166.04998799999885,
+          "maxLag": 1.7045170000055805,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 187.7139279999974,
+          "first": 21.640509999997448,
+          "sized": 187.59408500000427,
+          "maxLag": 0.5586920000059763,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 217.52108900000167,
+          "first": 23.2834550000116,
+          "sized": 217.39398800001072,
+          "maxLag": 3.1205900000059046,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 188.55504599999404,
+          "first": 27.338286999991396,
+          "sized": 188.38996499999485,
+          "maxLag": 1.1731110000109766,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 180.28309399999853,
+          "first": 26.62146500000381,
+          "sized": 180.15888200000336,
+          "maxLag": 0.0891399999964051,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 174.19637999999395,
+          "first": 22.273975000003702,
+          "sized": 174.0599499999953,
+          "maxLag": 1.5977249999996275,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 213.31390700000338,
+          "first": 21.912953999999445,
+          "sized": 213.17248500000278,
+          "maxLag": 0.2183330000116257,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 201.41694399999687,
+          "first": 27.27307199999632,
+          "sized": 201.2499749999988,
+          "maxLag": 1.4552750000002561,
+          "count": 1,
+          "bytes": 2560000
+        }
+      ],
+      "rust": [
+        {
+          "total": 4.911863000001176,
+          "first": 1.6240359999937937,
+          "sized": 4.694438000005903,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.210237999999663,
+          "first": 1.686240999988513,
+          "sized": 4.991076999998768,
+          "maxLag": 0.033135999998194166,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.0464369999972405,
+          "first": 1.445755000007921,
+          "sized": 4.815752000009525,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.785042000003159,
+          "first": 1.408542999997735,
+          "sized": 4.549987000005785,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.719129999997676,
+          "first": 1.577795999997761,
+          "sized": 4.516276000009384,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.417381000006571,
+          "first": 1.5208940000011353,
+          "sized": 4.2402360000123736,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.557175999987521,
+          "first": 1.4897739999869373,
+          "sized": 4.271328999995603,
+          "maxLag": 0.058064999990165234,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.596804000000702,
+          "first": 1.3733550000033574,
+          "sized": 4.420211000004201,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.605814000009559,
+          "first": 1.4095280000037747,
+          "sized": 5.367120000009891,
+          "maxLag": 0.07398700001067482,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.157974000001559,
+          "first": 1.5438390000053914,
+          "sized": 4.975285000007716,
+          "maxLag": 0.012471000009099953,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.526520999992499,
+          "first": 1.4700420000008307,
+          "sized": 4.3519950000045355,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.550067000003764,
+          "first": 1.454624000005424,
+          "sized": 4.35248300000967,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.8491030000004685,
+          "first": 1.4098200000007637,
+          "sized": 4.640369000000646,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.605251000000862,
+          "first": 1.4712129999970784,
+          "sized": 4.3738069999963045,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.450522999992245,
+          "first": 1.7369630000030156,
+          "sized": 5.2768619999988005,
+          "maxLag": 0.07233999999880325,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.49008399999002,
+          "first": 1.4075440000015078,
+          "sized": 4.346661999996286,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.452966000011656,
+          "first": 1.523935999997775,
+          "sized": 4.3040840000030585,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.5177309999999125,
+          "first": 1.0476589999889256,
+          "sized": 4.317793999987771,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.68392500000482,
+          "first": 1.3008960000006482,
+          "sized": 4.501571000000695,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.26285800000187,
+          "first": 1.3806509999994887,
+          "sized": 3.969428999989759,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.557666999986395,
+          "first": 1.4391099999920698,
+          "sized": 4.339048999987426,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.652469000007841,
+          "first": 1.4857730000076117,
+          "sized": 4.402346000002581,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.318213999998989,
+          "first": 1.4220029999996768,
+          "sized": 4.115729999990435,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.184613999997964,
+          "first": 1.1820969999971567,
+          "sized": 3.9932520000002114,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.8538209999969695,
+          "first": 1.4403590000001714,
+          "sized": 4.695468999998411,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.143389999997453,
+          "first": 1.2495230000058655,
+          "sized": 4.9442439999984344,
+          "maxLag": 0.012625999996089377,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.62011600000551,
+          "first": 1.3750660000077914,
+          "sized": 4.445936000003712,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.606715999994776,
+          "first": 1.5314159999979893,
+          "sized": 6.418299999990268,
+          "maxLag": 0.09419099999649916,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.998957000003429,
+          "first": 1.171334000013303,
+          "sized": 3.7295090000116033,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.309614999991027,
+          "first": 1.24170199999935,
+          "sized": 4.168527000001632,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.503364000003785,
+          "first": 1.2269360000063898,
+          "sized": 4.283445000008214,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.7720419999968726,
+          "first": 1.1082499999902211,
+          "sized": 3.555313999997452,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.427049000005354,
+          "first": 1.5919299999950454,
+          "sized": 4.229949000000488,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.502791000006255,
+          "first": 1.3829399999958696,
+          "sized": 4.280559000006178,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.302395999999135,
+          "first": 1.479497000007541,
+          "sized": 4.125538000007509,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.9465970000019297,
+          "first": 1.3251670000026934,
+          "sized": 3.740655000001425,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.187052000008407,
+          "first": 1.3006680000107735,
+          "sized": 4.002966000000015,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.2502499999973224,
+          "first": 1.1534609999944223,
+          "sized": 4.058625000005122,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.492754999999306,
+          "first": 1.4656440000107978,
+          "sized": 4.294722000006004,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.9091129999869736,
+          "first": 1.253417999992962,
+          "sized": 3.7594629999948665,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 3.9682810000085738,
+          "first": 1.1240410000027623,
+          "sized": 3.7919289999990724,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.09748799999943,
+          "first": 1.1072839999978896,
+          "sized": 3.884336000002804,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.566656000009971,
+          "first": 1.4794170000095619,
+          "sized": 4.33536599999934,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.547417000008863,
+          "first": 1.4252100000012433,
+          "sized": 4.2926730000035604,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.399107999997796,
+          "first": 1.2660550000000512,
+          "sized": 5.2194650000019465,
+          "maxLag": 0.0709729999944102,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.225756999992882,
+          "first": 1.4992779999884078,
+          "sized": 4.033135999998194,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.919567000004463,
+          "first": 1.4575239999976475,
+          "sized": 4.692414999997709,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.749068000004627,
+          "first": 1.4255899999989197,
+          "sized": 4.531795000002603,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.033246999999392,
+          "first": 1.709447999994154,
+          "sized": 4.830461000005016,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.3556379999936325,
+          "first": 1.363642999989679,
+          "sized": 4.131289999990258,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.2444220000033965,
+          "first": 1.4796250000072177,
+          "sized": 5.033293000000413,
+          "maxLag": 0.0697130000044126,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.231305000008433,
+          "first": 1.503444000001764,
+          "sized": 5.009216999998898,
+          "maxLag": 0.048393000004580244,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.4397400000016205,
+          "first": 1.3811949999944773,
+          "sized": 5.11317599999893,
+          "maxLag": 0.15397699999448378,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.636792999997851,
+          "first": 1.3188689999951748,
+          "sized": 5.374160999999731,
+          "maxLag": 0.09417199999734294,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.291939000002458,
+          "first": 1.7130719999986468,
+          "sized": 5.094403000010061,
+          "maxLag": 0.12558500000159256,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.472680999999284,
+          "first": 1.5992649999971036,
+          "sized": 5.228742000006605,
+          "maxLag": 0.07571600000665057,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.7707010000012815,
+          "first": 1.5182730000087759,
+          "sized": 4.5520050000050105,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.085678000003099,
+          "first": 1.437158000000636,
+          "sized": 4.893974999999045,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.92358200000308,
+          "first": 1.4229720000002999,
+          "sized": 4.7018260000040755,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.908909000005224,
+          "first": 1.385299000001396,
+          "sized": 4.641057999993791,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.170452000005753,
+          "first": 1.449227000004612,
+          "sized": 4.8957680000021355,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.913558999993256,
+          "first": 1.5726489999942714,
+          "sized": 4.676295999990543,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.295664999997825,
+          "first": 2.3200159999978496,
+          "sized": 6.008325999995577,
+          "maxLag": 0.08424599999852944,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.080945999987307,
+          "first": 1.6772189999901457,
+          "sized": 4.851888999997755,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.71607199999562,
+          "first": 1.4715809999906924,
+          "sized": 4.494749999998021,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.703871000005165,
+          "first": 3.2052919999987353,
+          "sized": 6.420635000002221,
+          "maxLag": 0.07695500001136679,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.041425999996136,
+          "first": 1.7857899999944493,
+          "sized": 5.836826999991899,
+          "maxLag": 0.0723769999895012,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.9141099999978906,
+          "first": 1.5265339999896241,
+          "sized": 5.639486999993096,
+          "maxLag": 0.07275599999411497,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.547148000012385,
+          "first": 1.3063050000055227,
+          "sized": 4.335636000003433,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.129595999998855,
+          "first": 1.4871759999950882,
+          "sized": 4.895032999993418,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.6194220000033965,
+          "first": 1.3630320000083884,
+          "sized": 4.410063999996055,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.977702000003774,
+          "first": 1.5723529999959283,
+          "sized": 4.779838000002201,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.937333000008948,
+          "first": 1.854311000002781,
+          "sized": 5.689695000008214,
+          "maxLag": 0.0290380000078585,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.605975999991642,
+          "first": 1.8101619999943068,
+          "sized": 5.335896000004141,
+          "maxLag": 0.08754300000146031,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.82753799999773,
+          "first": 1.5518669999873964,
+          "sized": 4.540010999990045,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.077664999989793,
+          "first": 1.5458899999939604,
+          "sized": 4.8630189999967115,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.451264000002993,
+          "first": 1.915471999993315,
+          "sized": 5.197404000005918,
+          "maxLag": 0.06999200000427663,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.3379600000043865,
+          "first": 1.5143949999910546,
+          "sized": 5.113171999997576,
+          "maxLag": 0.15638200000103097,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.7220240000024205,
+          "first": 1.3233259999979055,
+          "sized": 5.5335960000084015,
+          "maxLag": 0.07924099999945611,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.851729999994859,
+          "first": 1.3061319999978878,
+          "sized": 4.650374999997439,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.1773620000021765,
+          "first": 1.2195389999978943,
+          "sized": 3.9926570000097854,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.676199999987148,
+          "first": 1.4592219999904046,
+          "sized": 4.5067049999925075,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 7.357050999999046,
+          "first": 3.06900499999756,
+          "sized": 7.138710999992327,
+          "maxLag": 0.17540500000177417,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.434236000000965,
+          "first": 1.3299489999917569,
+          "sized": 5.2287669999932405,
+          "maxLag": 0.08030800000415184,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.510190000000875,
+          "first": 1.5617380000039702,
+          "sized": 4.259504999994533,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.826285000002827,
+          "first": 1.4913680000026943,
+          "sized": 4.605750000002445,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.797354999987874,
+          "first": 1.2402009999932488,
+          "sized": 4.5646059999999125,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.62774100000388,
+          "first": 1.2005770000105258,
+          "sized": 4.409378000011202,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.789434999998775,
+          "first": 1.6737819999980275,
+          "sized": 4.612592999998014,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.366525000004913,
+          "first": 1.4931660000002012,
+          "sized": 4.167639999999665,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.956827000001795,
+          "first": 1.6372709999996005,
+          "sized": 4.725116000001435,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.322933000003104,
+          "first": 1.2386189999961061,
+          "sized": 4.129222999996273,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 6.11127999999735,
+          "first": 1.41837499999383,
+          "sized": 5.893381000001682,
+          "maxLag": 0.09044899999571498,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.483789000005345,
+          "first": 1.5251490000082413,
+          "sized": 4.322960999998031,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.5940970000083325,
+          "first": 1.493731000009575,
+          "sized": 4.360284000009415,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.959757999997237,
+          "first": 1.4717660000023898,
+          "sized": 4.718275999999605,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 4.764364000002388,
+          "first": 1.4208680000010645,
+          "sized": 4.566355000002659,
+          "maxLag": 0,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.529761000012513,
+          "first": 1.5311130000045523,
+          "sized": 5.242310000001453,
+          "maxLag": 0.08290600001055282,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.553827999989153,
+          "first": 1.6325839999917662,
+          "sized": 5.336219999997411,
+          "maxLag": 0.07498900000064168,
+          "count": 1,
+          "bytes": 2560000
+        },
+        {
+          "total": 5.3245739999983925,
+          "first": 1.537782999992487,
+          "sized": 5.103758999990532,
+          "maxLag": 0.14723999999114312,
+          "count": 1,
+          "bytes": 2560000
+        }
+      ]
+    }
+  },
+  "fixtureFilesystem": "tmpfs; synthetic 128-byte files; warm page cache",
+  "sourceBaseCommit": "1af4d2dcbc034655f78edd6018d73ed47b5f131f",
+  "sourceState": "uncommitted checkpoint; engine identified by binarySha256"
+}

@@ -5,6 +5,8 @@ export class StreamBatcher<T, P> {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private revealed = false;
   private closed = false;
+  private yieldNeeded = false;
+  private yielding: Promise<void> | undefined;
 
   constructor(
     private readonly onFrame: (items: T[], progress: P | null) => void,
@@ -27,6 +29,18 @@ export class StreamBatcher<T, P> {
     if (this.closed) return;
     this.pendingProgress = progress;
     this.schedule();
+  }
+
+  /** Let React and terminal input run after a delivered frame. Both engines
+   * consult this hook before taking further input; no unbounded frame queue. */
+  waitForConsumer(): Promise<void> | undefined {
+    if (this.yielding) return this.yielding;
+    if (!this.yieldNeeded || this.closed) return undefined;
+    this.yieldNeeded = false;
+    this.yielding = new Promise<void>((resolve) => setImmediate(resolve)).then(() => {
+      this.yielding = undefined;
+    });
+    return this.yielding;
   }
 
   finish(): void {
@@ -59,5 +73,6 @@ export class StreamBatcher<T, P> {
     this.pending.clear();
     this.pendingProgress = null;
     this.onFrame(items, progress);
+    this.yieldNeeded = true;
   }
 }

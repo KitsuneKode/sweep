@@ -1,3 +1,4 @@
+import { SCAN_RESOURCE_PROFILES } from "@kitsunekode/sweep-protocol";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
@@ -11,7 +12,7 @@ import type {
 } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { isColdRequested } from "./cold.js";
-import { GuardrailError } from "./guardrails.js";
+import { ApplyRefusedError, GuardrailError } from "./guardrails.js";
 import { applyPlanInsights, buildPlan } from "./planner.js";
 import {
   PlanValidationError,
@@ -434,7 +435,7 @@ export async function scanToPlanViaRust(
     config: options.config,
     selectionPolicy: options.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
     exact: options.exact ?? false,
-    limits: options.limits,
+    limits: { ...SCAN_RESOURCE_PROFILES[options.resourceProfile ?? "balanced"], ...options.limits },
     // No live hooks means nobody is watching candidates arrive - the engine
     // emits the whole plan in one write instead of serializing an event per
     // candidate. On big trees per-entry JSON was the dominant cost, not the
@@ -486,7 +487,10 @@ export async function applyPlanViaRust(
   onDeleted?: (id: string) => void,
   maxSizeBytes?: number,
   onBegin?: (id: string) => void,
+  onPreparing?: (id: string, completed: number, total: number) => void,
 ): Promise<ApplyReport> {
+  if (maxSizeBytes !== undefined && (!Number.isSafeInteger(maxSizeBytes) || maxSizeBytes < 0))
+    throw new GuardrailError("Invalid native size ceiling; expected a nonnegative safe integer");
   const selected = new Set(plan.selectedCandidateIds);
   if (signal?.aborted) {
     return {
@@ -518,10 +522,12 @@ export async function applyPlanViaRust(
   }
   let controlled = false;
   let identityChecked = false;
+  let preflightProgress = false;
   try {
     const supported = JSON.parse(capabilities.stdout);
     controlled = capabilities.status === 0 && supported.applyControl === true;
     identityChecked = capabilities.status === 0 && supported.planIdentity === true;
+    preflightProgress = capabilities.status === 0 && supported.applyPreparation === true;
   } catch {
     /* older engine */
   }
@@ -534,21 +540,61 @@ export async function applyPlanViaRust(
       "This Rust engine lacks saved-plan identity checks. Update the native package or use --engine js with a fresh scan.",
     );
   let report: ApplyReport | undefined;
+  let refusal: ApplyRefusedError | undefined;
+  let preparedCount = 0;
   const progress = new Set<string>();
   const began = new Set<string>();
   try {
     await runEngineAsync(
       ["apply", "--json-control"],
-      `${JSON.stringify({ plan, maxSizeBytes })}\n{"type":"start"}\n`,
+      `${JSON.stringify({ plan, maxSizeBytes, ...(preflightProgress ? { preflightProgress: true } : {}) })}\n{"type":"start"}\n`,
       (line) => {
-        let event: { type?: string; candidateId?: string; report?: unknown };
+        let event: {
+          type?: string;
+          candidateId?: string;
+          report?: unknown;
+          code?: unknown;
+          message?: unknown;
+          completed?: unknown;
+          total?: unknown;
+        };
         try {
           event = JSON.parse(line) as typeof event;
         } catch {
           throw new PlanValidationError("Invalid apply event JSON from engine");
         }
-        if (report) throw new PlanValidationError("Apply event after completion");
-        if (event.type === "apply_begin") {
+        if (report || refusal) throw new PlanValidationError("Apply event after completion");
+        if (event.type === "apply_refused") {
+          if (
+            began.size !== 0 ||
+            typeof event.message !== "string" ||
+            event.message.length > 4096 ||
+            (event.code !== "size_limit_exceeded" && event.code !== "current_size_unavailable")
+          )
+            throw new PlanValidationError("Invalid apply refusal");
+          const detail =
+            event.code === "size_limit_exceeded"
+              ? `Current selection exceeds the configured ${((maxSizeBytes ?? 0) / 1024 ** 3).toFixed(1)} GiB limit. Reduce the queue, raise maxSizeGB in .sweeprc, or restart with --force-large --yes. Nothing removed.`
+              : "Cannot verify current size; rescan or restart with --force-large --yes. Nothing removed.";
+          refusal = new ApplyRefusedError(detail, event.code);
+          return;
+        }
+        if (event.type === "apply_preparing") {
+          if (
+            began.size > 0 ||
+            typeof event.candidateId !== "string" ||
+            !selected.has(event.candidateId) ||
+            !Number.isSafeInteger(event.completed) ||
+            !Number.isSafeInteger(event.total) ||
+            (event.completed as number) < preparedCount ||
+            (event.completed as number) > (event.total as number) ||
+            (event.total as number) > selected.size ||
+            (event.total as number) <= 0
+          )
+            throw new PlanValidationError("Invalid apply preparation progress");
+          preparedCount = event.completed as number;
+          onPreparing?.(event.candidateId, preparedCount, event.total as number);
+        } else if (event.type === "apply_begin") {
           if (
             typeof event.candidateId !== "string" ||
             !selected.has(event.candidateId) ||
@@ -573,6 +619,7 @@ export async function applyPlanViaRust(
       },
       { signal, cooperativeApply: true },
     );
+    if (refusal) throw refusal;
     if (!report?.outcomes || report.targetDir !== plan.targetDir)
       throw new PlanValidationError("Missing authoritative apply report");
     const ids = new Set(report.outcomes.map((outcome) => outcome.candidateId));
@@ -610,6 +657,7 @@ export async function applyPlanViaRust(
     }
     return report;
   } catch (error) {
+    if (refusal && !(error instanceof PlanValidationError) && began.size === 0) throw refusal;
     if (began.size > 0) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new GuardrailError(

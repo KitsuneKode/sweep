@@ -1,4 +1,4 @@
-import type { ApplyReport, ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { ApplyProgress, ApplyReport, ScanPlan } from "@kitsunekode/sweep-protocol";
 
 export type SweepUiOutcome =
   /** `trash`: the user chose "move to trash" in the confirm dialog. */
@@ -7,7 +7,7 @@ export type SweepUiOutcome =
   | { type: "abort" };
 
 /**
- * A scoped apply the app runs without leaving the session (single-row `x`).
+ * A scoped apply the app runs without leaving the session (queued or single-row `x`).
  * The plan carries exactly the ids being removed; the engine's revalidation,
  * containment and outcome reporting apply identically to a queued apply.
  */
@@ -17,6 +17,7 @@ export interface UiApplyRequest {
   trash: boolean;
   /** Abort stops scheduling new deletions; in-flight work still finishes. */
   signal: AbortSignal;
+  onProgress?: (progress: ApplyProgress) => void;
 }
 
 export interface UiApplyResult {

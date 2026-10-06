@@ -14,6 +14,7 @@
     "./scanner": "./src/scanner.ts",
     "./cleaner": "./src/cleaner.ts",
     "./rust-engine": "./src/rust-engine.ts",
+    "./apply-session": "./src/apply-session.ts",
     "./history": "./src/history.ts",
     "./native-platforms": "./src/native-platforms.ts"
   },

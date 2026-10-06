@@ -268,6 +268,21 @@ describe("buildHeaderStats queue counts", () => {
     ...over,
   });
 
+  test("marks an aggregate lower bound in both wide and narrow headers", () => {
+    for (const width of [60, 120]) {
+      const line = plain(
+        buildHeaderStats(
+          planFixture(),
+          summary({ selectedBytesPartial: true }),
+          darkTheme,
+          false,
+          width,
+        ),
+      );
+      expect(line).toContain("~3.0 KB");
+    }
+  });
+
   test("reports the queue plainly when all of it is on screen", () => {
     const line = plain(buildHeaderStats(planFixture(), summary(), darkTheme));
     expect(line).toContain("3 queued");

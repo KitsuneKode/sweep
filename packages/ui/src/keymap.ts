@@ -265,12 +265,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     }
     if (key.name === "y") {
       if (confirmUnarmed) return;
-      actions.setPendingApply(false);
       if (ctx.pendingSingle) {
         actions.confirmSingle?.();
       } else {
         actions.applyPlan();
       }
+      actions.setPendingApply(false);
     } else if (key.name === "n" || key.name === "escape" || key.name === "q") {
       // q dismisses like every other modal - quitting while a destructive
       // confirm is up would be one keystroke from intent to exit. Clearing

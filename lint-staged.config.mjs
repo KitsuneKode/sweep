@@ -1,5 +1,5 @@
 export default {
-  "*.{ts,mts,cts}": ["oxfmt --write", "oxlint --fix"],
-  "*.{json,md}": ["oxfmt --write"],
+  "*.{ts,tsx,mts,cts,js,mjs,cjs}": ["oxfmt --write", "oxlint --fix"],
+  "*.{json,md,mdx}": ["oxfmt --write"],
   "*.rs": () => "cargo fmt --all",
 };

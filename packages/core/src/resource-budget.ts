@@ -39,6 +39,7 @@ export class ResourceBudget {
     maxIdentities: 0,
     maxPathBytes: 0,
     maxRetainedBytes: 0,
+    maxCombinedBytes: 0,
   };
   private failure: ResourceLimitError | undefined;
   private sizingIds = 0;
@@ -50,7 +51,8 @@ export class ResourceBudget {
   sizingIdentity(): boolean {
     if (
       this.sizingIds >= this.limits.maxIdentities ||
-      this.sizingBytes + 128 > this.limits.maxRetainedBytes
+      this.sizingBytes + 128 > this.limits.maxRetainedBytes ||
+      this.used.maxRetainedBytes + this.sizingBytes + 128 > this.limits.maxCombinedBytes
     )
       return false;
     this.sizingIds++;
@@ -69,7 +71,8 @@ export class ResourceBudget {
     if (
       this.sizingDirs >= this.limits.maxQueuedDirs ||
       this.sizingPaths + bytes > this.limits.maxPathBytes ||
-      this.sizingBytes + retained > this.limits.maxRetainedBytes
+      this.sizingBytes + retained > this.limits.maxRetainedBytes ||
+      this.used.maxRetainedBytes + this.sizingBytes + retained > this.limits.maxCombinedBytes
     )
       return false;
     this.sizingDirs++;
@@ -105,6 +108,13 @@ export class ResourceBudget {
   private charge(resource: keyof ScanLimits, amount: number): void {
     this.check();
     const total = checkedBytes(this.used[resource], amount);
+    if (
+      resource === "maxRetainedBytes" &&
+      total + this.sizingBytes > this.limits.maxCombinedBytes
+    ) {
+      this.failure = new ResourceLimitError("maxCombinedBytes");
+      throw this.failure;
+    }
     if (total > this.limits[resource]) {
       this.failure = new ResourceLimitError(resource);
       throw this.failure;

@@ -472,3 +472,31 @@ it measures state/cache lifecycle, excluding terminal rendering and real scans.
 The resource harness records CPU affinity and samples descendants spawned by
 any runtime thread. Its RSS watchdog terminates only its owned process group;
 it is qualification tooling, not a production RAM limiter.
+
+### Rendered UI latency
+
+```sh
+bun run packages/ui/benchmarks/render-session.tsx --candidates 5000 --cycles 5 --samples 100
+```
+
+This harness paints real OpenTUI native in-memory frames and records first-frame
+time, input-to-paint p50/p95/p99 and sampled memory across repeated sessions.
+It uses synthetic candidates and no forced GC; it does not scan, delete, measure
+a physical terminal or establish a hard RSS ceiling. The apply lifecycle tests
+use the production `exitOnCtrlC: false` setting so cancellation leaves the screen
+alive, and cover same-drain confirm/dismiss, trash mode and stop requests.
+
+### Recorded fat/wide engine comparison
+
+```sh
+bun run engine:build
+bun run packages/core/benchmarks/engine-comparison.ts --samples 100 --warmups 3 --scenarios wide,fat --fat-files 20000 --resource-samples 1 --output /tmp/sweep-fat-wide.json
+```
+
+The [October 7 evidence](benchmarks/fat-wide-2026-10-07.json) records 100 warm
+samples per engine, exactness and shape, with the native binary SHA-256. Its
+fixtures lived on tmpfs; this is evidence of record, not a portable CI latency
+gate or allocated 200–600 GiB workload qualification. `du` is benchmark context,
+not an active scanner backend. The [50k rendered UI probe](benchmarks/ui-render-50k-2026-10-07.json)
+measures navigation/painting across three synthetic sessions; live streaming,
+filtering and expanded large sidebars require separate qualification.

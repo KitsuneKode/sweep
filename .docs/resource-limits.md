@@ -3,14 +3,15 @@
 Discovery runs under one cumulative operation budget. Defaults are identical
 in the JS protocol package and Rust `ScanLimits`:
 
-| Resource                         | Default |
-| -------------------------------- | ------- |
-| Candidates                       | 100,000 |
-| Directory admissions (walk)      | 250,000 |
-| Queued directory paths (walk)    | 32,768  |
-| Retained inode identities (walk) | 500,000 |
-| Cumulative admitted path bytes   | 64 MiB  |
-| Estimated retained byte charges  | 128 MiB |
+| Resource                                   | Default |
+| ------------------------------------------ | ------- |
+| Candidates                                 | 100,000 |
+| Directory admissions (walk)                | 250,000 |
+| Queued directory paths (walk)              | 32,768  |
+| Retained inode identities (walk)           | 500,000 |
+| Cumulative admitted path bytes             | 64 MiB  |
+| Estimated retained byte charges per pool   | 128 MiB |
+| Combined discovery and live sizing charges | 256 MiB |
 
 Admission is checked before insertion. Directory queue slots are returned when
 work starts. Other charges are cumulative: candidates cost 1,024 bytes plus
@@ -26,7 +27,8 @@ of artifacts. Instead, concurrent sizing jobs share live identity, queued-path,
 path-byte and estimated-memory limits with the same default values. Reservations
 are returned when paths are popped and jobs end, including on error or abort.
 The discovery and sizing pools can each admit up to 128 MiB of logical charges;
-they are separate pools, not a combined 128 MiB RSS limit. The directory and
+a shared 256 MiB combined allowance now also bounds discovery charges plus live
+sizing reservations. None of these values is an RSS ceiling. The directory and
 hardlink sets together share one sizing identity limit across all jobs; per-job caps remain as additional bounds. Reaching a sizing cap never kills the
 scan: an over-cap hardlink is counted again (the estimate becomes an upper
 bound) and an over-cap directory is skipped (an under bound) - both mark the
@@ -130,3 +132,27 @@ through every destructive operation. Concurrent mounts/path changes, real
 platform consoles, installers and terminal emulators remain release gates.
 The deferred syscall-based sizing optimization is separate from any future
 security work on deletion containment.
+
+## Public profiles and long UI sessions
+
+`--resource-profile balanced` is the default. `--resource-profile low-memory`
+uses 5,000 candidates, 50,000 directory admissions, 2,048 queued directories,
+65,536 identities, 8 MiB path charges, 8 MiB retained charges per pool and
+16 MiB combined charges. These values apply to JS/Rust scans and the UI host.
+The per-pool allowances also fit the combined limit on older engines that
+understand the existing individual limits. Custom combined limits require an
+updated native engine.
+
+The UI renderer, React heap, plan serialization and engine process overhead
+remain additional allocations. The rendered 5,000-candidate session probe
+sampled about 287 MiB RSS on this machine; the low-memory profile is not a
+promise that the whole app fits in 16 MiB or even 128 MiB. Narrow the scan scope
+on constrained machines. See the dated rendered benchmark evidence and
+[testing](testing.md) for a reproducible command.
+
+CLI apply journals are private, individually capped at 64 MiB, and preserve
+unknown intents after interruption. Their aggregate on-disk retention is not
+yet bounded. Do not automatically discard uncertain receipts or infer that a
+stale host PID means a native child has stopped. `sweep recover --journal PATH`
+is read-only; stale-lock release and automatic restoration remain separate
+qualification work.

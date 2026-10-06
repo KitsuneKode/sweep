@@ -9,7 +9,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { rename, rm, rmdir, unlink } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import type {
   CleanResult,
   PathFailure,
@@ -170,12 +170,11 @@ async function moveToTrash(
   trashDir: string,
   trashRoot: string,
   trashPin: TrashRootPin | undefined,
-): Promise<void> {
+): Promise<string> {
   const rel = relative(trashRoot, entry.path);
   // `..foo` is a legal directory name - only an actual `..` first segment
   // means escape, not a leading-dots spelling.
-  const escapes =
-    !rel || isAbsolute(rel) || rel === ".." || rel.startsWith("../") || rel.startsWith("..\\");
+  const escapes = !rel || isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`);
   if (escapes) {
     throw new Error(`trash destination escapes root for ${entry.path}`);
   }
@@ -197,7 +196,7 @@ async function moveToTrash(
     if (process.platform === "win32") {
       try {
         await moveIntoTrashSlot(entry.path, destination);
-        return;
+        return join(destination, "payload");
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
         throw error;
@@ -218,7 +217,7 @@ async function moveToTrash(
       // holds the real entry. A failed rename removes the claim so the slot
       // doesn't leak.
       await rename(entry.path, destination);
-      return;
+      return destination;
     } catch (error) {
       try {
         if (wantDirSlot) rmdirSync(destination);
@@ -256,7 +255,7 @@ function ensureTrashParent(
     throw new Error(`trash parent escapes ${trashDir}`);
   }
   let cursor = trashDir;
-  for (const segment of relParent.split(/[\\/]+/).filter(Boolean)) {
+  for (const segment of relParent.split(sep).filter(Boolean)) {
     cursor = join(cursor, segment);
     try {
       const stat = lstatSync(cursor);
@@ -307,6 +306,7 @@ export async function clean(
   const startTime = Date.now();
   const deleted: ScanEntry[] = [];
   const failedPaths: PathFailure[] = [];
+  const trashMoves: NonNullable<CleanResult["trashMoves"]> = [];
 
   if ((options.trashDir === undefined) !== (options.trashRoot === undefined)) {
     throw new Error("clean(): trashDir and trashRoot must be set together");
@@ -449,7 +449,13 @@ export async function clean(
           assertNoMountsWithin(realpathSync(entry.path), readLinuxMountPoints());
         }
         if (options.trashDir && options.trashRoot) {
-          await moveToTrash(entry, options.trashDir, options.trashRoot, trashPin);
+          const destination = await moveToTrash(
+            entry,
+            options.trashDir,
+            options.trashRoot,
+            trashPin,
+          );
+          trashMoves.push({ path: entry.path, destination });
         } else if (
           entry.isSymlink ||
           (process.platform === "win32" && isReparsePointOrSymlink(entry.path))
@@ -512,6 +518,7 @@ export async function clean(
     failedPaths,
     totalBytesFreed: deleted.reduce((sum, e) => checkedBytes(sum, e.estimatedBytes), 0),
     durationMs: Date.now() - startTime,
+    ...(options.trashDir ? { trashMoves } : {}),
   };
 }
 

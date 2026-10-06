@@ -1,6 +1,7 @@
-import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
+import { GuardrailError, isApplyRefusedError } from "@kitsunekode/sweep-core/guardrails";
 import { ConfigParseError } from "@kitsunekode/sweep-core/config";
 import { PlanValidationError } from "@kitsunekode/sweep-core/plan";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { printError } from "@kitsunekode/sweep-display";
 
 export const EXIT = {
@@ -32,7 +33,31 @@ export function exitWith(code: ExitCode): never {
   process.exit(code);
 }
 
-export function handleFatalError(err: unknown): never {
-  printError(err instanceof Error ? err.message : String(err));
+export function fatalErrorDocument(err: unknown, applyOutcome?: "not_started" | "unknown") {
+  const refused = isApplyRefusedError(err);
+  return {
+    type: "error",
+    protocolVersion: "1",
+    exitCode: resolveExitCode(err),
+    code: refused
+      ? err.refusalCode
+      : resolveExitCode(err) === EXIT.GUARDRAIL
+        ? "guardrail"
+        : resolveExitCode(err) === EXIT.CONFIG_PARSE
+          ? "invalid_input"
+          : "failure",
+    ...(refused || applyOutcome ? { applyOutcome: refused ? "not_started" : applyOutcome } : {}),
+    message: sanitizeTerminalText(
+      (err instanceof Error ? err.message : String(err)).slice(0, 4096),
+    ),
+  };
+}
+
+export function handleFatalError(
+  err: unknown,
+  options: { json?: boolean | undefined; applyOutcome?: "not_started" | "unknown" } = {},
+): never {
+  if (options.json) console.error(JSON.stringify(fatalErrorDocument(err, options.applyOutcome)));
+  else printError(err instanceof Error ? err.message : String(err));
   exitWith(resolveExitCode(err));
 }

@@ -37,3 +37,39 @@ test("failed trash moves release only their empty reserved slot", async () => {
     rmSync(owned, { recursive: true, force: true });
   }
 });
+
+test.skipIf(process.platform === "win32")(
+  "a replaced trash reservation cannot redirect the move",
+  async () => {
+    const fs = await import("node:fs");
+    const { spyOn } = await import("bun:test");
+    const owned = mkdtempSync(join(tmpdir(), "sweep-trash-slot-swap-"));
+    const source = join(owned, "source");
+    const slot = join(owned, "slot");
+    const outside = join(owned, "outside");
+    const originalStat = fs.statSync;
+    let parentChecks = 0;
+    const spy = spyOn(fs, "statSync");
+    try {
+      mkdirSync(source);
+      mkdirSync(outside);
+      writeFileSync(join(source, "keep"), "source data");
+      spy.mockImplementation(((
+        path: Parameters<typeof fs.statSync>[0],
+        options: Parameters<typeof fs.statSync>[1],
+      ) => {
+        if (path === owned && ++parentChecks === 2) {
+          fs.renameSync(slot, join(owned, "reserved"));
+          fs.symlinkSync(outside, slot);
+        }
+        return originalStat(path, options);
+      }) as typeof fs.statSync);
+      await expect(moveIntoTrashSlot(source, slot)).rejects.toThrow("changed");
+      expect(readFileSync(join(source, "keep"), "utf8")).toBe("source data");
+      expect(existsSync(join(outside, "payload"))).toBe(false);
+    } finally {
+      spy.mockRestore();
+      rmSync(owned, { recursive: true, force: true });
+    }
+  },
+);

@@ -44,8 +44,8 @@ When tradeoffs conflict, prefer in this order:
 - **Display** owns formatting helpers; no Commander or OpenTUI.
 - **UI** owns interactive selection; compiles back to explicit candidate IDs.
 - **CLI app** wires flags, handlers, and stdout; delegates engine work to core.
-- **Rust crates** experiment behind the same external contract; JS remains the
-  reference engine until parity is proven.
+- **Rust crates** implement the native backend behind the shared contract;
+  JS/Rust parity and platform qualification gate release claims.
 
 ## Quality gate
 

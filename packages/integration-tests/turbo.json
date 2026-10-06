@@ -11,16 +11,36 @@
       ]
     },
     "lint": {
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tests/**", "$TURBO_ROOT$/tests/support/**"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/tests/support/**",
+        "$TURBO_ROOT$/scripts/**"
+      ]
     },
     "fmt": {
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tests/**", "$TURBO_ROOT$/tests/support/**"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/tests/support/**",
+        "$TURBO_ROOT$/scripts/**"
+      ]
     },
     "fmt:check": {
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tests/**", "$TURBO_ROOT$/tests/support/**"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/tests/support/**",
+        "$TURBO_ROOT$/scripts/**"
+      ]
     },
     "typecheck": {
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/tests/**", "$TURBO_ROOT$/tsconfig.json"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tests/**",
+        "$TURBO_ROOT$/tsconfig.json",
+        "$TURBO_ROOT$/scripts/**"
+      ]
     }
   }
 }

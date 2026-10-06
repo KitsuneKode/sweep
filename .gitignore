@@ -20,3 +20,6 @@ apps/cli/LICENSE
 # TanStack docs build output and generated router
 apps/docs/.tanstack/
 apps/docs/src/routeTree.gen.ts
+
+# Target-local cleanup holding directories
+.sweep-trash-*/

@@ -12,6 +12,7 @@ pub struct ScanLimits {
     pub max_identities: u32,
     pub max_path_bytes: u32,
     pub max_retained_bytes: u32,
+    pub max_combined_bytes: u32,
 }
 
 impl Default for ScanLimits {
@@ -23,6 +24,7 @@ impl Default for ScanLimits {
             max_identities: 500_000,
             max_path_bytes: 64 * 1024 * 1024,
             max_retained_bytes: 128 * 1024 * 1024,
+            max_combined_bytes: 256 * 1024 * 1024,
         }
     }
 }

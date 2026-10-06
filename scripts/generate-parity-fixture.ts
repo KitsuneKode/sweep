@@ -29,13 +29,20 @@ async function main(): Promise<void> {
 
   const fixtureRoot = resolve(fixtureArg);
   const requestPath = join(fixtureRoot, "request.json");
-  const request: { exact?: boolean; extraPatterns?: string[] } = existsSync(requestPath)
-    ? JSON.parse(readFileSync(requestPath, "utf8"))
-    : {};
+  const request: {
+    exact?: boolean;
+    extraPatterns?: string[];
+    selectionPolicy?: import("@kitsunekode/sweep-protocol").SelectionPolicy;
+  } = existsSync(requestPath) ? JSON.parse(readFileSync(requestPath, "utf8")) : {};
   const config = request.extraPatterns?.length
     ? { ...DEFAULT_CONFIG, patterns: [...DEFAULT_CONFIG.patterns, ...request.extraPatterns] }
     : DEFAULT_CONFIG;
-  const { plan } = await scanToPlan(fixtureRoot, config, { exact: request.exact ?? false });
+  const { plan } = await scanToPlan(fixtureRoot, config, {
+    exact: request.exact ?? false,
+    selectionPolicy:
+      request.selectionPolicy ??
+      (DEFAULT_REQUEST.selectionPolicy as import("@kitsunekode/sweep-protocol").SelectionPolicy),
+  });
   const normalized = normalizePlan(plan, fixtureRoot);
   const outPath = join(fixtureRoot, "expected.plan.json");
 

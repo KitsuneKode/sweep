@@ -7,7 +7,9 @@ import type {
   SweepConfig,
   ScanLimits,
   FilesystemIdentity,
+  ResourceProfile,
 } from "@kitsunekode/sweep-protocol";
+import { SCAN_RESOURCE_PROFILES } from "@kitsunekode/sweep-protocol";
 import { ResourceBudget, ResourceLimitError, checkedBytes } from "./resource-budget.js";
 import { directoryEntries, disposeDirectoryReader } from "./directory-reader.js";
 import { mapPool } from "./async-pool.js";
@@ -39,6 +41,7 @@ export interface ScanHooks {
   signal?: AbortSignal;
   /** Optional resource bounds; defaults protect ordinary scans. */
   limits?: Partial<ScanLimits>;
+  resourceProfile?: ResourceProfile | undefined;
 }
 
 /** VCS/metadata dirs - never descend (major win on large trees). */
@@ -338,7 +341,10 @@ export class ProgressiveSizer {
   constructor(
     private readonly hooks: ScanHooks,
     signal?: AbortSignal,
-    private readonly budget = new ResourceBudget(hooks.limits),
+    private readonly budget = new ResourceBudget({
+      ...SCAN_RESOURCE_PROFILES[hooks.resourceProfile ?? "balanced"],
+      ...hooks.limits,
+    }),
   ) {
     this.signal = signal
       ? AbortSignal.any([signal, this.controller.signal])
@@ -505,7 +511,10 @@ export async function scan(
   const signal = hooks.signal
     ? AbortSignal.any([hooks.signal, controller.signal])
     : controller.signal;
-  const budget = new ResourceBudget(hooks.limits);
+  const budget = new ResourceBudget({
+    ...SCAN_RESOURCE_PROFILES[hooks.resourceProfile ?? "balanced"],
+    ...hooks.limits,
+  });
   // Reparse-point/junction detection is a Windows-only concern; Dirent already
   // reports symlinks authoritatively on POSIX platforms.
   const needsReparseCheck = platform === "win32";

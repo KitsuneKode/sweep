@@ -7,7 +7,8 @@ use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use sweep_engine::{
-    apply_plan_controlled_with_limit, scan_to_plan_with_sweep_config, ScanHooks, ScanOptions,
+    apply_plan_controlled_with_limit, apply_plan_controlled_with_progress,
+    scan_to_plan_with_sweep_config, ScanHooks, ScanOptions,
 };
 use sweep_errors::EngineError;
 use sweep_types::{ApplyReport, ScanCandidate, ScanPlan, SelectionPolicy, SweepConfig};
@@ -63,9 +64,25 @@ impl From<EngineError> for CliFailure {
     }
 }
 
+/// Error messages can include arbitrary filesystem names. Escape terminal
+/// controls and bidi overrides before direct engine invocation prints them.
+fn terminal_safe(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control()
+            || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        {
+            output.extend(character.escape_default());
+        } else {
+            output.push(character);
+        }
+    }
+    output
+}
+
 fn main() {
     if let Err(err) = run() {
-        eprintln!("error: {}", err.message);
+        eprintln!("error: {}", terminal_safe(&err.message));
         std::process::exit(err.code);
     }
 }
@@ -88,9 +105,9 @@ fn run() -> Result<(), CliFailure> {
     match arg(1)?.as_deref() {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
-        Some("--capabilities") => {
-            write_json_stdout(&serde_json::json!({"applyControl": true, "planIdentity": true}))
-        }
+        Some("--capabilities") => write_json_stdout(
+            &serde_json::json!({"applyControl": true, "planIdentity": true, "applyPreparation": true}),
+        ),
         Some("--version" | "-V") => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -730,6 +747,8 @@ fn run_apply_controlled() -> Result<(), CliFailure> {
     struct Request {
         plan: ScanPlan,
         max_size_bytes: Option<u64>,
+        #[serde(default)]
+        preflight_progress: bool,
     }
     let request: Request = serde_json::from_slice(&line)
         .map_err(|e| CliFailure::invalid_input(format!("invalid plan: {e}")))?;
@@ -758,7 +777,7 @@ fn run_apply_controlled() -> Result<(), CliFailure> {
         let _ = reader.take(1025).read_until(b'\n', &mut request);
         control.store(true, Ordering::Release);
     });
-    let report = apply_plan_controlled_with_limit(
+    let report = apply_plan_controlled_with_progress(
         &request.plan,
         cancelled,
         &mut |id| {
@@ -776,8 +795,36 @@ fn run_apply_controlled() -> Result<(), CliFailure> {
             }
         },
         request.max_size_bytes,
-    )
-    .map_err(CliFailure::from)?;
+        &mut |id, completed, total| {
+            if request.preflight_progress && write_json_line(&serde_json::json!({"type":"apply_preparing", "candidateId": id, "completed": completed, "total": total})).is_err() {
+                cancelled.store(true, Ordering::Release);
+            }
+        },
+    );
+    let report = match report {
+        Ok(report) => report,
+        Err(error) => {
+            // These errors are returned only by fresh-size preflight, before
+            // any apply_begin or removal. This explicit refusal is not a
+            // substitute for a final report after an interrupted mutation.
+            let code = match &error {
+                EngineError::Guardrail(sweep_errors::GuardrailError::SizeLimitExceeded {
+                    ..
+                }) => Some("size_limit_exceeded"),
+                EngineError::Guardrail(sweep_errors::GuardrailError::CurrentSizeUnavailable {
+                    ..
+                }) => Some("current_size_unavailable"),
+                _ => None,
+            };
+            if let Some(code) = code {
+                write_json_line(&serde_json::json!({
+                    "type": "apply_refused", "code": code, "message": error.to_string(),
+                }))
+                .map_err(CliFailure::failure)?;
+            }
+            return Err(CliFailure::from(error));
+        }
+    };
     write_json_line(&serde_json::json!({"type":"apply_completed", "report": report}))
         .map_err(CliFailure::failure)
 }

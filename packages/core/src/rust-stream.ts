@@ -1,3 +1,4 @@
+import { SCAN_RESOURCE_PROFILES } from "@kitsunekode/sweep-protocol";
 import type {
   ScanCandidate,
   ScanCompletedEvent,
@@ -46,7 +47,10 @@ export class RustScanStream {
     private readonly hooks: ScanHooks = {},
     private readonly exact = false,
   ) {
-    this.budget = new ResourceBudget(hooks.limits);
+    this.budget = new ResourceBudget({
+      ...SCAN_RESOURCE_PROFILES[hooks.resourceProfile ?? "balanced"],
+      ...hooks.limits,
+    });
   }
 
   push(line: string): void {

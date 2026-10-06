@@ -103,6 +103,11 @@ function assertValidCreatedAt(plan: ScanPlan): void {
   expect(Number.isNaN(Date.parse(plan.createdAt))).toBe(false);
 }
 
+const NATIVE_AVAILABLE = rustAvailable();
+if (process.env.SWEEP_REQUIRE_RUST_TESTS === "1" && !NATIVE_AVAILABLE) {
+  throw new Error("Native coverage is required, but no usable Rust test engine is available");
+}
+
 describe("engine contract fixtures", () => {
   const fixtures = loadFixtureCases();
 
@@ -123,11 +128,7 @@ describe("engine contract fixtures", () => {
       assertMatchesGolden(plan, fixture.root);
     });
 
-    test(`rust engine: ${fixture.name}`, async () => {
-      if (!rustAvailable()) {
-        return;
-      }
-
+    test.skipIf(!NATIVE_AVAILABLE)(`rust engine: ${fixture.name}`, async () => {
       expect(isRustEngineAvailable()).toBe(true);
       // rustAvailable() guarantees a local build exists.
       expect(resolveRustEngineBinary()).toBe(LOCAL_BINARY!);
@@ -143,35 +144,30 @@ describe("engine contract fixtures", () => {
   }
 
   for (const fixture of fixtures) {
-    test(`js and rust byte estimates stay within tolerance: ${fixture.name}`, async () => {
-      if (!rustAvailable()) {
-        return;
-      }
+    test.skipIf(!NATIVE_AVAILABLE)(
+      `js and rust byte estimates stay within tolerance: ${fixture.name}`,
+      async () => {
+        const options = {
+          exact: fixture.request.exact ?? false,
+          selectionPolicy: fixture.request.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
+        };
 
-      const options = {
-        exact: fixture.request.exact ?? false,
-        selectionPolicy: fixture.request.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
-      };
+        const { plan: jsPlan } = await scanToPlan(
+          fixture.root,
+          fixtureConfig(fixture.request),
+          options,
+        );
+        const rustPlan = await scanToPlanViaRust(fixture.root, {
+          config: fixtureConfig(fixture.request),
+          ...options,
+        });
 
-      const { plan: jsPlan } = await scanToPlan(
-        fixture.root,
-        fixtureConfig(fixture.request),
-        options,
-      );
-      const rustPlan = await scanToPlanViaRust(fixture.root, {
-        config: fixtureConfig(fixture.request),
-        ...options,
-      });
-
-      assertByteParity(jsPlan, rustPlan);
-    });
+        assertByteParity(jsPlan, rustPlan);
+      },
+    );
   }
 
-  test("rust engine rejects shallow guardrail targets", async () => {
-    if (!rustAvailable()) {
-      return;
-    }
-
+  test.skipIf(!NATIVE_AVAILABLE)("rust engine rejects shallow guardrail targets", async () => {
     await expect(
       scanToPlanViaRust("/tmp", {
         config: DEFAULT_CONFIG,
@@ -180,41 +176,32 @@ describe("engine contract fixtures", () => {
     ).rejects.toThrow();
   });
 
-  test("rust progressive hooks emit candidates before sizing completes", async () => {
-    if (!rustAvailable()) {
-      return;
-    }
+  test.skipIf(!NATIVE_AVAILABLE)(
+    "rust progressive hooks emit candidates before sizing completes",
+    async () => {
+      const basicFixture = fixtures.find((fixture) => fixture.name === "basic");
+      if (!basicFixture) throw new Error("required basic parity fixture is missing");
 
+      const order: string[] = [];
+      await scanToPlanViaRust(basicFixture.root, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+        onEntry: () => {
+          order.push("entry");
+        },
+        onEntrySized: () => {
+          order.push("sized");
+        },
+      });
+
+      expect(order.length).toBeGreaterThan(0);
+      expect(order.indexOf("entry")).toBeLessThan(order.indexOf("sized"));
+    },
+  );
+
+  test.skipIf(!NATIVE_AVAILABLE)("rust exact sizing marks plan summary as exact", async () => {
     const basicFixture = fixtures.find((fixture) => fixture.name === "basic");
-    if (!basicFixture) {
-      return;
-    }
-
-    const order: string[] = [];
-    await scanToPlanViaRust(basicFixture.root, {
-      config: DEFAULT_CONFIG,
-      selectionPolicy: DEFAULT_SELECTION_POLICY,
-      onEntry: () => {
-        order.push("entry");
-      },
-      onEntrySized: () => {
-        order.push("sized");
-      },
-    });
-
-    expect(order.length).toBeGreaterThan(0);
-    expect(order.indexOf("entry")).toBeLessThan(order.indexOf("sized"));
-  });
-
-  test("rust exact sizing marks plan summary as exact", async () => {
-    if (!rustAvailable()) {
-      return;
-    }
-
-    const basicFixture = fixtures.find((fixture) => fixture.name === "basic");
-    if (!basicFixture) {
-      return;
-    }
+    if (!basicFixture) throw new Error("required basic parity fixture is missing");
 
     const plan = await scanToPlanViaRust(basicFixture.root, {
       config: DEFAULT_CONFIG,
@@ -225,36 +212,35 @@ describe("engine contract fixtures", () => {
     expect(plan.summary.exact).toBe(true);
   });
 
-  test("non-streamed rust plan applies workspace-stub enrichment like js", async () => {
-    if (!rustAvailable()) {
-      return;
-    }
+  test.skipIf(!NATIVE_AVAILABLE)(
+    "non-streamed rust plan applies workspace-stub enrichment like js",
+    async () => {
+      // One-shot (no hooks) rust plans used to skip enrichCandidates entirely:
+      // a tiny peer node_modules next to a real install must demote to
+      // caution and leave the default selection on both engines.
+      const root = mkdtempSync(join(tmpdir(), "sweep-stub-parity-"));
+      try {
+        mkdirSync(join(root, "a", "node_modules"), { recursive: true });
+        writeFileSync(join(root, "a", "node_modules", "fat.bin"), Buffer.alloc(2 * 1024 * 1024));
+        mkdirSync(join(root, "b", "node_modules"), { recursive: true });
+        writeFileSync(join(root, "b", "node_modules", "tiny.bin"), Buffer.alloc(128));
 
-    // One-shot (no hooks) rust plans used to skip enrichCandidates entirely:
-    // a tiny peer node_modules next to a real install must demote to
-    // caution and leave the default selection on both engines.
-    const root = mkdtempSync(join(tmpdir(), "sweep-stub-parity-"));
-    try {
-      mkdirSync(join(root, "a", "node_modules"), { recursive: true });
-      writeFileSync(join(root, "a", "node_modules", "fat.bin"), Buffer.alloc(2 * 1024 * 1024));
-      mkdirSync(join(root, "b", "node_modules"), { recursive: true });
-      writeFileSync(join(root, "b", "node_modules", "tiny.bin"), Buffer.alloc(128));
+        const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG, { exact: false });
+        const rustPlan = await scanToPlanViaRust(root, {
+          config: DEFAULT_CONFIG,
+          selectionPolicy: DEFAULT_SELECTION_POLICY,
+        });
+        const jsStub = jsPlan.candidates.find((c) => c.path.includes("/b/"));
+        const rustStub = rustPlan.candidates.find((c) => c.path.includes("/b/"));
 
-      const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG, { exact: false });
-      const rustPlan = await scanToPlanViaRust(root, {
-        config: DEFAULT_CONFIG,
-        selectionPolicy: DEFAULT_SELECTION_POLICY,
-      });
-      const jsStub = jsPlan.candidates.find((c) => c.path.includes("/b/"));
-      const rustStub = rustPlan.candidates.find((c) => c.path.includes("/b/"));
-
-      expect(rustStub?.riskTier).toBe(jsStub?.riskTier);
-      expect(rustStub?.reasons).toEqual(jsStub?.reasons);
-      expect(rustPlan.selectedCandidateIds.sort()).toEqual(jsPlan.selectedCandidateIds.sort());
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+        expect(rustStub?.riskTier).toBe(jsStub?.riskTier);
+        expect(rustStub?.reasons).toEqual(jsStub?.reasons);
+        expect(rustPlan.selectedCandidateIds.sort()).toEqual(jsPlan.selectedCandidateIds.sort());
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("rust SweepConfig forwarding", () => {
@@ -267,69 +253,101 @@ describe("rust SweepConfig forwarding", () => {
     }
   });
 
-  test("rust honors --pattern, --ignore, and --depth parity with JS", async () => {
-    if (!rustAvailable()) {
-      return;
-    }
+  test.skipIf(!NATIVE_AVAILABLE)(
+    "rust honors --pattern, --ignore, and --depth parity with JS",
+    async () => {
+      tempRoot = mkdtempSync(join(tmpdir(), "sweep-config-parity-"));
+      mkdirSync(join(tempRoot, "node_modules"));
+      mkdirSync(join(tempRoot, "custom-artifact"));
+      mkdirSync(join(tempRoot, "a", "nested-dist"), { recursive: true });
+      mkdirSync(join(tempRoot, "packages", "vendor", "dist"), { recursive: true });
 
-    tempRoot = mkdtempSync(join(tmpdir(), "sweep-config-parity-"));
-    mkdirSync(join(tempRoot, "node_modules"));
-    mkdirSync(join(tempRoot, "custom-artifact"));
-    mkdirSync(join(tempRoot, "a", "nested-dist"), { recursive: true });
-    mkdirSync(join(tempRoot, "packages", "vendor", "dist"), { recursive: true });
+      const config = {
+        ...DEFAULT_CONFIG,
+        patterns: [...DEFAULT_CONFIG.patterns, "custom-artifact"],
+        ignore: ["packages/vendor"],
+        depth: 0,
+      };
 
-    const config = {
-      ...DEFAULT_CONFIG,
-      patterns: [...DEFAULT_CONFIG.patterns, "custom-artifact"],
-      ignore: ["packages/vendor"],
-      depth: 0,
-    };
+      const options = {
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+        exact: false,
+      };
 
-    const options = {
-      selectionPolicy: DEFAULT_SELECTION_POLICY,
-      exact: false,
-    };
+      const { plan: jsPlan } = await scanToPlan(tempRoot, config, options);
+      const rustPlan = await scanToPlanViaRust(tempRoot, { config, ...options });
 
-    const { plan: jsPlan } = await scanToPlan(tempRoot, config, options);
-    const rustPlan = await scanToPlanViaRust(tempRoot, { config, ...options });
-
-    const jsNames = jsPlan.candidates.map((candidate) => candidate.name).sort();
-    const rustNames = rustPlan.candidates.map((candidate) => candidate.name).sort();
-    expect(rustNames).toEqual(jsNames);
-    expect(rustNames).toContain("custom-artifact");
-    expect(rustNames).toContain("node_modules");
-    expect(rustNames).not.toContain("dist");
-  });
+      const jsNames = jsPlan.candidates.map((candidate) => candidate.name).sort();
+      const rustNames = rustPlan.candidates.map((candidate) => candidate.name).sort();
+      expect(rustNames).toEqual(jsNames);
+      expect(rustNames).toContain("custom-artifact");
+      expect(rustNames).toContain("node_modules");
+      expect(rustNames).not.toContain("dist");
+    },
+  );
 
   // Windows names are UTF-16 - raw invalid bytes only exist on unix filesystems.
-  test("non-UTF8 dir names: both engines count the undescendable dir as skipped", async () => {
-    if (process.platform === "win32" || !rustAvailable()) {
-      return;
-    }
+  test.skipIf(process.platform === "win32" || !NATIVE_AVAILABLE)(
+    "non-UTF8 dir names: both engines count the undescendable dir as skipped",
+    async () => {
+      tempRoot = mkdtempSync(join(tmpdir(), "sweep-utf8-parity-"));
+      // mkdirSync accepts Buffer paths; the U+FFFD-mangled name readdir returns
+      // cannot address this dir, so both levels are created from raw bytes.
+      const weird = Buffer.concat([Buffer.from(`${tempRoot}/`), Buffer.from([0xff, 0xfe])]);
+      mkdirSync(weird);
+      mkdirSync(Buffer.concat([weird, Buffer.from("/node_modules")]));
 
-    tempRoot = mkdtempSync(join(tmpdir(), "sweep-utf8-parity-"));
-    // mkdirSync accepts Buffer paths; the U+FFFD-mangled name readdir returns
-    // cannot address this dir, so both levels are created from raw bytes.
-    const weird = Buffer.concat([Buffer.from(`${tempRoot}/`), Buffer.from([0xff, 0xfe])]);
-    mkdirSync(weird);
-    mkdirSync(Buffer.concat([weird, Buffer.from("/node_modules")]));
+      const { plan: jsPlan } = await scanToPlan(tempRoot, DEFAULT_CONFIG, {
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+        exact: false,
+      });
+      const rustPlan = await scanToPlanViaRust(tempRoot, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+        exact: false,
+      });
 
-    const { plan: jsPlan } = await scanToPlan(tempRoot, DEFAULT_CONFIG, {
-      selectionPolicy: DEFAULT_SELECTION_POLICY,
-      exact: false,
-    });
-    const rustPlan = await scanToPlanViaRust(tempRoot, {
-      config: DEFAULT_CONFIG,
-      selectionPolicy: DEFAULT_SELECTION_POLICY,
-      exact: false,
-    });
-
-    // The mangled name cannot be lstat'd, so neither engine descends - the
-    // parity contract is that both report it the same way: zero candidates,
-    // one skipped dir.
-    expect(jsPlan.candidates).toHaveLength(0);
-    expect(rustPlan.candidates).toHaveLength(0);
-    expect(rustPlan.summary.skippedDirs).toBe(jsPlan.summary.skippedDirs);
-    expect(jsPlan.summary.skippedDirs).toBe(1);
-  });
+      // The mangled name cannot be lstat'd, so neither engine descends - the
+      // parity contract is that both report it the same way: zero candidates,
+      // one skipped dir.
+      expect(jsPlan.candidates).toHaveLength(0);
+      expect(rustPlan.candidates).toHaveLength(0);
+      expect(rustPlan.summary.skippedDirs).toBe(jsPlan.summary.skippedDirs);
+      expect(jsPlan.summary.skippedDirs).toBe(1);
+    },
+  );
 });
+
+test.skipIf(!NATIVE_AVAILABLE)("direct native errors escape terminal control sequences", () => {
+  const proc = Bun.spawnSync({
+    cmd: [LOCAL_BINARY!, "scan", "/tmp/native\x1b]52;c;payload\x07/.git"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(proc.exitCode).not.toBe(0);
+  const stderr = Buffer.from(proc.stderr).toString("utf8");
+  expect(stderr).not.toContain("\x1b");
+  expect(stderr).not.toContain("\x07");
+  expect(stderr).toContain("payload");
+});
+
+test.skipIf(!rustAvailable())(
+  "native refreshed-size refusal is explicit and leaves all files untouched",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-native-refusal-"));
+    try {
+      const target = join(root, "project");
+      mkdirSync(join(target, "node_modules"), { recursive: true });
+      writeFileSync(join(target, "node_modules", "keep"), "preserve");
+      const { plan } = await scanToPlan(target, DEFAULT_CONFIG);
+      const { applyPlanViaRust } = await import("@kitsunekode/sweep-core/rust-engine");
+      await expect(applyPlanViaRust(plan, undefined, undefined, 0)).rejects.toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "size_limit_exceeded",
+      });
+      expect(readFileSync(join(target, "node_modules", "keep"), "utf8")).toBe("preserve");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

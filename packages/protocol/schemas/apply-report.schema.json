@@ -68,6 +68,22 @@
           }
         }
       }
+    },
+    "trashMoves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "destination"],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "$defs": {

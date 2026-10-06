@@ -85,10 +85,6 @@
     "oxlint": "catalog:",
     "turbo": "catalog:"
   },
-  "lint-staged": {
-    "*.{ts,tsx,js,mjs,cjs,json,md,mdx}": "oxfmt --write",
-    "*.{ts,tsx,js,mjs,cjs}": "oxlint --fix"
-  },
   "devEngines": {
     "packageManager": {
       "name": "bun",

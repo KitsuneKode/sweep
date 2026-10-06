@@ -41,6 +41,7 @@ export interface UiScanHooks {
 
 /** Live-scan control handed to the app; every call starts a new generation. */
 export interface UiScanControl {
+  applyPolicy?: { maxSizeGB: number; forceLarge: boolean };
   /**
    * Runs one scan generation to completion (or abort). Errors funnel to
    * `hooks.onError` rather than rejecting, but it is async all the same -
@@ -57,7 +58,7 @@ export interface UiScanControl {
    */
   setEngine(engine: "js" | "rust"): boolean;
   /**
-   * Apply a scoped plan without leaving the session (single-row `x`). Runs
+   * Apply a scoped plan without leaving the session (queued or single-row `x`). Runs
    * on the engine `E` last selected; absent when the host provides no apply
    * channel (static plans, tests) - the app falls back to an exit-apply.
    */
@@ -65,6 +66,7 @@ export interface UiScanControl {
     plan: ScanPlan;
     trash: boolean;
     signal: AbortSignal;
+    onProgress?: (progress: import("@kitsunekode/sweep-protocol").ApplyProgress) => void;
   }) => Promise<UiApplyResult>;
 }
 
@@ -74,6 +76,8 @@ export interface SweepUiStreamingOptions {
   config: SweepConfig;
   selectionPolicy: SelectionPolicy;
   engine: "js" | "rust";
+  forceLarge?: boolean;
+  resourceProfile?: import("@kitsunekode/sweep-protocol").ResourceProfile | undefined;
   dryRun?: boolean;
   /** Trash mode - the apply dialog says "move" and a TRASH chip shows. */
   trash?: boolean;
@@ -87,6 +91,7 @@ export interface SweepUiStreamingOptions {
     engine: "js" | "rust";
     trash: boolean;
     signal: AbortSignal;
+    onProgress?: (progress: import("@kitsunekode/sweep-protocol").ApplyProgress) => void;
   }) => Promise<UiApplyResult>;
   init?: SweepUiInitOptions;
 }
@@ -133,6 +138,7 @@ export async function runSweepUiStreaming(
   let activeEngine = options.engine;
 
   const makeControl = (): UiScanControl => ({
+    applyPolicy: { maxSizeGB: currentConfig.maxSizeGB, forceLarge: options.forceLarge ?? false },
     async start(hooks, signal) {
       // SWEEP_COLD: every scan - including `r` rescans - pays the cold costs
       // a fresh user pays (probe respawns at resolve; page cache drops when
@@ -186,6 +192,8 @@ export async function runSweepUiStreaming(
           const { scanToPlanViaRust } = await import("@kitsunekode/sweep-core/rust-engine");
           const plan = await scanToPlanViaRust(options.targetDir, {
             config: currentConfig,
+            resourceProfile: options.resourceProfile,
+            waitForConsumer: () => batcher.waitForConsumer(),
             selectionPolicy: options.selectionPolicy,
             exact: false,
             onEntry: record,
@@ -199,6 +207,8 @@ export async function runSweepUiStreaming(
           finalPlan = plan;
         } else {
           const result = await scan(options.targetDir, currentConfig, false, {
+            resourceProfile: options.resourceProfile,
+            waitForConsumer: () => batcher.waitForConsumer(),
             onEntry: record,
             onEntrySized: recordSized,
             onProgress: ({ scannedDirs: dirs, skippedDirs: skipped, currentDir }) =>
@@ -234,7 +244,7 @@ export async function runSweepUiStreaming(
     },
     ...(options.apply
       ? {
-          apply: (request: { plan: ScanPlan; trash: boolean; signal: AbortSignal }) =>
+          apply: (request: Parameters<NonNullable<UiScanControl["apply"]>>[0]) =>
             options.apply!({ ...request, engine: activeEngine }),
         }
       : {}),

@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { testRender } from "@opentui/react/test-utils";
+import { testRender as nativeTestRender } from "@opentui/react/test-utils";
 import { act } from "react";
 import { SweepApp, type SweepUiOutcome } from "./app.js";
 import type { UiScanControl, UiScanHooks } from "./streaming.js";
+
+// Match production signal ownership: renderer teardown must follow an app
+// outcome, not a key or process signal handled by the cancellation bridge.
+const testRender: typeof nativeTestRender = (node, options) =>
+  nativeTestRender(node, {
+    exitOnCtrlC: false,
+    exitSignals: [],
+    ...options,
+  });
 
 function createPlan(): ScanPlan {
   return {
@@ -51,9 +60,11 @@ function createPlan(): ScanPlan {
 
 let teardown: (() => void) | null = null;
 
-afterEach(() => {
-  teardown?.();
-  teardown = null;
+afterEach(async () => {
+  await act(async () => {
+    teardown?.();
+    teardown = null;
+  });
 });
 
 async function mount(onDone: (outcome: SweepUiOutcome) => void) {
@@ -529,12 +540,11 @@ describe("sweep TUI render", () => {
       await setup.flush();
     });
 
-    let threw = false;
+    // Any rejected act or renderer exception fails this test directly.
     await act(async () => {
       hooksRef?.onBatch([{ ...candidate, estimatedBytes: 4096 }]);
       await setup.flush();
     });
-    expect(threw).toBe(false);
 
     await act(async () => {
       hooksRef?.onDone({ scannedDirs: 7, skippedDirs: 0 });

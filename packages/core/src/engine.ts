@@ -10,6 +10,8 @@ import type {
   SelectionPolicy,
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
+import { setImmediate } from "node:timers/promises";
+import { lstatSync } from "node:fs";
 import { dirname } from "node:path";
 import { assertPlanResources, checkedBytes, ResourceBudget } from "./resource-budget.js";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
@@ -18,9 +20,26 @@ import type { ScanHooks } from "./scanner.js";
 import { scan, apparentSizeDetailed, exactSizeDetailed } from "./scanner.js";
 import { mapPool } from "./async-pool.js";
 import { buildPlan, resolveSelectedCandidates, revalidateCandidates } from "./planner.js";
-import { GuardrailError, assertSafeCwd, assertSizeLimit } from "./guardrails.js";
+import {
+  GuardrailError,
+  ApplyRefusedError,
+  assertSafeCwd,
+  assertSizeLimit,
+  pathUsesProcessRelativeRoot,
+} from "./guardrails.js";
 import { applyPlanViaRust, type EngineBackend } from "./rust-engine.js";
 import { readFilesystemIdentity, sameFilesystemIdentity } from "./filesystem-identity.js";
+
+function assertApplyTarget(target: string): void {
+  assertSafeCwd(target);
+  if (pathUsesProcessRelativeRoot(target)) {
+    throw new GuardrailError("plan target resolves through a process-relative path");
+  }
+  const meta = lstatSync(target);
+  if (meta.isSymbolicLink() || !meta.isDirectory()) {
+    throw new GuardrailError("plan target is not a real directory");
+  }
+}
 
 function assertPlanRootIdentity(plan: ScanPlan): void {
   if (!sameFilesystemIdentity(plan.targetIdentity, readFilesystemIdentity(plan.targetDir))) {
@@ -55,16 +74,22 @@ export function scanToPlan(
   config: SweepConfig,
   options: ScanToPlanOptions = {},
 ): Promise<ScanToPlanResult> {
-  return scan(targetDir, config, options.exact ?? false, options).then((result) => ({
-    result,
-    plan: buildPlan(targetDir, result, options.selectionPolicy),
-  }));
+  return scan(targetDir, config, options.exact ?? false, options).then((result) => {
+    if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
+    return { result, plan: buildPlan(targetDir, result, options.selectionPolicy) };
+  });
 }
 
 export interface ApplyPlanOptions {
   /** Refreshed observation ceiling, checked before the first removal. */
   maxSizeGB?: number;
   forceLarge?: boolean;
+  onPrepare?: (
+    entry: ScanEntry,
+    completed: number,
+    total: number,
+    phase: "validating" | "sizing",
+  ) => void;
   /** Path about to be removed or moved, before the slow call. */
   onBegin?: (entry: ScanEntry) => void;
   onDeleted?: (entry: ScanEntry) => void;
@@ -90,11 +115,16 @@ export async function applyPlan(
       `unsupported plan protocol version "${plan.protocolVersion}" (expected "${PROTOCOL_VERSION}")`,
     );
   }
-  assertSafeCwd(plan.targetDir);
+  assertApplyTarget(plan.targetDir);
   assertPlanResources(plan);
   // A NaN/Infinity ceiling would silently disable the size preflight
   // entirely (JSON.stringify turns it into null) - reject it loudly.
-  if (options.maxSizeGB !== undefined && !Number.isFinite(options.maxSizeGB)) {
+  if (
+    options.maxSizeGB !== undefined &&
+    (!Number.isFinite(options.maxSizeGB) ||
+      options.maxSizeGB < 0 ||
+      options.maxSizeGB > Number.MAX_SAFE_INTEGER / 1024 ** 3)
+  ) {
     throw new GuardrailError(`invalid maxSizeGB: ${options.maxSizeGB}`);
   }
   const selected = resolveSelectedCandidates(plan);
@@ -110,39 +140,59 @@ export async function applyPlan(
   // report instead of aborting the whole apply.
   const isCancelled = () =>
     (options.signal?.aborted ?? false) || (options.isCancelled?.() ?? false);
-  const { ready, failedPaths: revalidationFailures } = revalidateCandidates(
-    selected,
-    plan.targetDir,
-    isCancelled,
-  );
+  // Bound synchronous validation work between event-loop yields. Recheck the
+  // root in each batch; never reuse a preflight check at the removal boundary.
+  const ready: ScanEntry[] = [];
+  const revalidationFailures: PathFailure[] = [];
+  for (let offset = 0; offset < selected.length && !isCancelled(); offset += 128) {
+    await setImmediate();
+    if (isCancelled()) break;
+    options.onPrepare?.(selected[offset]!, offset, selected.length, "validating");
+    const batch = revalidateCandidates(
+      selected.slice(offset, offset + 128),
+      plan.targetDir,
+      isCancelled,
+    );
+    ready.push(...batch.ready);
+    revalidationFailures.push(...batch.failedPaths);
+  }
   // Canonical aliases can stop resolving after their parent is removed.
   // Freeze receipt keys before any sizing callback or destructive operation.
-  const receiptKeys = new Map(
-    selected.map((candidate) => [candidate.path, dedupeKey(candidate.path)]),
-  );
+  const receiptKeys = new Map<string, string>();
+  for (let i = 0; i < selected.length; i++) {
+    if (i % 128 === 0) await setImmediate();
+    const candidate = selected[i]!;
+    receiptKeys.set(candidate.path, dedupeKey(candidate.path));
+  }
   const frozenKey = (path: string) => receiptKeys.get(path) ?? dedupeKey(path);
   // Dedupe up front so `interrupted` compares against the real work set -
   // entries deduped away are never attempted and must not read as skipped.
   const workSet = deduplicateNestedEntries(ready);
   if (options.maxSizeGB !== undefined && !options.forceLarge && !options.signal?.aborted) {
     const budget = new ResourceBudget();
+    let prepared = 0;
     const sizes = await mapPool(workSet, 8, async (entry) => {
+      options.onPrepare?.(entry, prepared, workSet.length, "sizing");
       const size = await (plan.summary.exact ? exactSizeDetailed : apparentSizeDetailed)(
         entry.path,
         options.signal,
         budget,
       );
       if (!size.complete && !options.signal?.aborted)
-        throw new GuardrailError(
-          "Cannot verify current size; rescan or explicitly use --force-large",
+        throw new ApplyRefusedError(
+          "Cannot verify current size; rescan or explicitly use --force-large --yes. Nothing removed.",
+          "current_size_unavailable",
         );
+      prepared++;
+      options.onPrepare?.(entry, prepared, workSet.length, "sizing");
       return size.bytes;
     });
-    assertSizeLimit(
-      sizes.reduce((sum, size) => checkedBytes(sum, size), 0),
-      options.maxSizeGB,
-      false,
-    );
+    if (!isCancelled())
+      assertSizeLimit(
+        sizes.reduce((sum, size) => checkedBytes(sum, size), 0),
+        options.maxSizeGB,
+        false,
+      );
   }
   const cleanResult = await clean(workSet, {
     onBegin: (entry) => {
@@ -225,6 +275,7 @@ export async function applyPlan(
       failedPaths: allFailures,
       outcomes,
       interrupted,
+      ...(cleanResult.trashMoves ? { trashMoves: cleanResult.trashMoves } : {}),
     },
     cleanResult,
     selected,
@@ -275,9 +326,14 @@ export async function applyPlanWithBackend(
     throw new GuardrailError("trash mode is not supported by the Rust engine");
   }
 
-  assertSafeCwd(plan.targetDir);
+  assertApplyTarget(plan.targetDir);
   assertPlanResources(plan);
-  if (options.maxSizeGB !== undefined && !Number.isFinite(options.maxSizeGB)) {
+  if (
+    options.maxSizeGB !== undefined &&
+    (!Number.isFinite(options.maxSizeGB) ||
+      options.maxSizeGB < 0 ||
+      options.maxSizeGB > Number.MAX_SAFE_INTEGER / 1024 ** 3)
+  ) {
     throw new GuardrailError(`invalid maxSizeGB: ${options.maxSizeGB}`);
   }
   const selected = resolveSelectedCandidates(plan);
@@ -303,6 +359,10 @@ export async function applyPlanWithBackend(
     (id) => {
       const candidate = byId.get(id);
       if (candidate) options.onBegin?.(candidate);
+    },
+    (id, completed, total) => {
+      const candidate = byId.get(id);
+      if (candidate) options.onPrepare?.(candidate, completed, total, "sizing");
     },
   );
   const deletedIds = new Set(

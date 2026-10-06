@@ -22,6 +22,24 @@ with tempfile.TemporaryDirectory(prefix='sweep-mounts-', dir=repo / 'target') as
     owned = Path(owned)
     for engine in ['rust', 'js']:
         root = owned / engine
+        protected = owned / (engine + '-protected-home')
+        alias = root / 'alias-of-home'
+        (protected / 'node_modules').mkdir(parents=True)
+        alias.mkdir(parents=True)
+        sentinel = protected / 'node_modules' / 'keep'
+        sentinel.write_text('protected root alias sentinel')
+        subprocess.run(['mount', '--bind', str(protected), str(alias)], check=True)
+        try:
+            alias_env = {**os.environ, 'HOME': str(protected), 'SWEEP_CONFIG_DIR': str(owned / 'config'),
+                         'SWEEP_ENGINE_PATH': str(repo / 'target/release/sweep-engine')}
+            alias_scan = subprocess.run(['node', str(repo / 'apps/cli/dist/sweep.js'), 'scan', str(alias),
+                                         '--engine', engine, '--json'], env=alias_env, capture_output=True, text=True)
+            if alias_scan.returncode != 2 or sentinel.read_text() != 'protected root alias sentinel':
+                raise RuntimeError(engine + ' accepted a bind alias of its protected home: ' + alias_scan.stderr)
+            results.append({'engine': engine, 'protectedRootBindAliasRefused': True,
+                            'exit': alias_scan.returncode, 'protectedSentinelPreserved': True})
+        finally:
+            subprocess.run(['umount', str(alias)], check=True)
         artifact = root / 'node_modules'
         destination = artifact / 'volume'
         outside = owned / (engine + '-outside')

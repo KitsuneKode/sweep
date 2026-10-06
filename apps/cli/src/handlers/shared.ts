@@ -1,9 +1,12 @@
-import { existsSync, lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
+import { beginApplySession, type ApplySession } from "@kitsunekode/sweep-core/apply-session";
+import { randomUUID } from "node:crypto";
+import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import type {
+  ApplyProgress,
   ApplyReport,
   CliOptions,
   ScanPlan,
@@ -22,6 +25,8 @@ import {
 import {
   GuardrailError,
   assertSafeCwd,
+  assertSizeLimit,
+  isApplyRefusedError,
   assertSafePattern,
   assertTargetDirectory,
   isSameResolvedPath,
@@ -127,6 +132,7 @@ export function warnIgnoredOptions(
 ): void {
   const ignored = new Set<string>();
   if (!shape.scans) {
+    if (opts.config) ignored.add("--config");
     if ((opts.pattern ?? []).length > 0) ignored.add("--pattern");
     if ((opts.ignore ?? []).length > 0) ignored.add("--ignore");
     if ((opts.disabledPattern ?? []).length > 0) ignored.add("--disabled-pattern");
@@ -134,7 +140,11 @@ export function warnIgnoredOptions(
     if (opts.select !== undefined && opts.select !== "default") ignored.add("--select");
     if (opts.includeDangerous) ignored.add("--include-dangerous");
     if (opts.cold) ignored.add("--cold");
+    if (opts.resourceProfile && opts.resourceProfile !== "balanced")
+      ignored.add("--resource-profile");
   }
+  if (!shape.scans && !shape.applies && opts.engine && opts.engine !== "auto")
+    ignored.add("--engine");
   if (!shape.applies) {
     if (opts.yes) ignored.add("--yes");
     if (opts.trash) ignored.add("--trash");
@@ -437,11 +447,17 @@ export async function confirmPlanDeletion(
  */
 function freshTrashDir(targetDir: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  let trashDir = join(targetDir, `.sweep-trash-${stamp}`);
-  for (let suffix = 2; existsSync(trashDir); suffix++) {
-    trashDir = join(targetDir, `.sweep-trash-${stamp}-${suffix}`);
+  // Atomic mkdir is the reservation: a UUID avoids the exists-then-mkdir race.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const trashDir = join(targetDir, `.sweep-trash-${stamp}-${randomUUID()}`);
+    try {
+      mkdirSync(trashDir, { mode: 0o700 });
+      return trashDir;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
   }
-  return trashDir;
+  throw new GuardrailError("Unable to reserve a unique trash directory; nothing removed");
 }
 
 export async function executePlanDeletion(
@@ -454,6 +470,7 @@ export async function executePlanDeletion(
     forceLarge?: boolean;
     /** External cancel (in-session TUI apply): stops scheduling like SIGINT. */
     signal?: AbortSignal;
+    onProgress?: (progress: ApplyProgress) => void;
   } = {},
 ): Promise<{
   report: ApplyReport;
@@ -481,11 +498,22 @@ export async function executePlanDeletion(
   }
   // Validate identity before creating trash directories or painting progress.
   const selected = resolveSelectedCandidates(plan);
+  // Refuse an obviously over-limit selection before creating trash or arming
+  // a journal. The backend still re-measures before the first removal.
+  if (options.maxSizeGB !== undefined) {
+    assertSizeLimit(
+      selected.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
+      options.maxSizeGB,
+      options.forceLarge ?? false,
+    );
+  }
   const total = selected.length;
   let current = 0;
   let freedBytes = 0;
   let activePath: string | undefined;
   let activeBytes = 0;
+  let preparation: Pick<ApplyProgress, "preparedCount" | "preparingCount" | "preparationPhase"> =
+    {};
   const startedAt = Date.now();
 
   const { clearDeletionProgress, printDeletionProgress } =
@@ -502,7 +530,7 @@ export async function executePlanDeletion(
     // Non-recursive on purpose: the parent IS the targetDir we just
     // revalidated. `recursive: true` would silently resurrect a targetDir
     // that vanished between plan validation and here.
-    mkdirSync(trashDir);
+    // freshTrashDir reserved the directory atomically.
     // Pin the trash root's identity before any move touches it: a watcher
     // could have swapped the fresh directory for a symlink between existsSync
     // and mkdir - every rename would then land outside the target.
@@ -539,7 +567,30 @@ export async function executePlanDeletion(
   if (options.signal?.aborted) onTerminating();
 
   const verb = trashDir ? "moving" : "deleting";
-  const paintDeletion = () => {
+  let applyStarted = false;
+  let lastProgressAt = -Infinity;
+  let lastStage: ApplyProgress["stage"] | undefined;
+  const paintDeletion = (paintTerminal = true) => {
+    const now = Date.now();
+    const stage = controller.signal.aborted ? "stopping" : applyStarted ? "applying" : "preparing";
+    try {
+      if (now - lastProgressAt >= 60 || stage !== lastStage) {
+        lastProgressAt = now;
+        lastStage = stage;
+        options.onProgress?.({
+          stage,
+          selectedCount: total,
+          deletedCount: current,
+          estimatedBytesFreed: freedBytes,
+          elapsedMs: Date.now() - startedAt,
+          ...preparation,
+          ...(activePath ? { activePath } : {}),
+        });
+      }
+    } catch {
+      // Feedback is best effort; a display callback must not change outcomes.
+    }
+    if (options.quiet || !paintTerminal) return;
     try {
       printDeletionProgress(current, total, activePath, activeBytes, freedBytes, {
         verb,
@@ -554,7 +605,9 @@ export async function executePlanDeletion(
   // Repaint on a short interval so the elapsed time moves while that one
   // path is in flight. Non-TTY logs stay one line per finished item.
   const progressTimer =
-    options.quiet || !process.stdout.isTTY ? undefined : setInterval(paintDeletion, 400);
+    options.onProgress || (!options.quiet && process.stdout.isTTY)
+      ? setInterval(paintDeletion, 400)
+      : undefined;
   progressTimer?.unref();
 
   const applyOptions = {
@@ -563,35 +616,52 @@ export async function executePlanDeletion(
     isCancelled: () => controller.signal.aborted,
     signal: controller.signal,
     ...(trashDir ? { trashDir, trashRoot: plan.targetDir } : {}),
-    ...(options.quiet
-      ? {}
-      : {
-          onBegin: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
-            activePath = entry.path;
-            activeBytes = entry.estimatedBytes;
-            if (process.stdout.isTTY) paintDeletion();
-          },
-          onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
-            current++;
-            freedBytes += entry.estimatedBytes;
-            activePath = entry.path;
-            activeBytes = entry.estimatedBytes;
-            paintDeletion();
-          },
-        }),
+    onPrepare: (
+      entry: import("@kitsunekode/sweep-protocol").ScanEntry,
+      completed: number,
+      total: number,
+      phase: "validating" | "sizing",
+    ) => {
+      activePath = entry.path;
+      if (preparation.preparationPhase !== phase) lastProgressAt = -Infinity;
+      preparation = { preparedCount: completed, preparingCount: total, preparationPhase: phase };
+      paintDeletion(Boolean(process.stdout.isTTY));
+    },
+    onBegin: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
+      applyStarted = true;
+      activePath = entry.path;
+      activeBytes = entry.estimatedBytes;
+      paintDeletion(Boolean(process.stdout.isTTY));
+    },
+    onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
+      current++;
+      freedBytes += entry.estimatedBytes;
+      activePath = undefined;
+      activeBytes = 0;
+      paintDeletion();
+    },
   };
 
-  if (!options.quiet && total > 0 && process.stdout.isTTY) paintDeletion();
+  if (options.onProgress || process.stdout.isTTY) paintDeletion();
 
   // Register the in-flight apply so bin.ts's EPIPE handler aborts it instead
   // of exiting 0 on a dead stdout.
   setActiveApply(controller);
+  let session: ApplySession | undefined;
   try {
+    session = beginApplySession(plan, effectiveEngine, trashDir);
     const { report, cleanResult, interrupted } = await applyPlanWithBackend(
       plan,
       effectiveEngine,
       applyOptions,
     );
+    try {
+      session.finish(report);
+    } catch (error) {
+      console.error(
+        `warning: Apply finished but its journal could not be committed: ${session.journalPath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     // Best-effort - a stats write must never fail an apply.
     appendHistory({
       ts: new Date().toISOString(),
@@ -609,12 +679,37 @@ export async function executePlanDeletion(
       interrupted: interrupted || controller.signal.aborted,
       ...(trashDir ? { trashDir } : {}),
     };
+  } catch (error) {
+    if (session && isApplyRefusedError(error)) {
+      try {
+        session.finish({
+          protocolVersion: plan.protocolVersion,
+          targetDir: plan.targetDir,
+          selectedCandidateIds: selected.map((candidate) => candidate.id),
+          deletedCount: 0,
+          failedCount: 0,
+          totalBytesFreed: 0,
+          failedPaths: [],
+          outcomes: selected.map((candidate) => ({
+            candidateId: candidate.id,
+            status: "unattempted" as const,
+          })),
+          interrupted: false,
+        });
+      } catch (journalError) {
+        console.error(
+          `warning: Could not record apply refusal: ${session.journalPath}: ${String(journalError)}`,
+        );
+      }
+    }
+    throw error;
   } finally {
+    session?.close();
     setActiveApply(undefined);
     if (progressTimer) clearInterval(progressTimer);
     for (const signal of TERMINATING) process.removeListener(signal, onTerminating);
     options.signal?.removeEventListener("abort", onTerminating);
-    clearDeletionProgress();
+    if (!options.quiet) clearDeletionProgress();
     if (trashDir) {
       // rmdir only removes an empty dir - when every move failed the trash
       // root is a bare husk; when moves landed it stays.

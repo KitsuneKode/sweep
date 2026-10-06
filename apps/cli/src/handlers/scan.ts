@@ -49,6 +49,7 @@ export async function handleScan(
         selectionPolicy,
         engine,
         projectConfig,
+        resourceProfile: opts.resourceProfile,
         onStarted: (targetIdentity) => {
           writeJsonLine({
             type: "scan_started",
@@ -91,6 +92,7 @@ export async function handleScan(
         selectionPolicy,
         engine,
         projectConfig,
+        resourceProfile: opts.resourceProfile,
       });
       writeJson(plan);
       await drainStdout();
@@ -101,6 +103,7 @@ export async function handleScan(
       selectionPolicy,
       engine,
       projectConfig,
+      resourceProfile: opts.resourceProfile,
       output: {
         ...(opts.quiet ? { quiet: true } : {}),
         ...(opts.verbose ? { verbose: true } : {}),

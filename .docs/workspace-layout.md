@@ -18,6 +18,8 @@ sweep/
 │   └── typescript-config/ # Shared tsconfig
 ├── native-packages/       # Platform npm package templates (not a workspace)
 ├── crates/sweep-*/        # Rust native engine (Cargo workspace)
+├── apps/docs/             # TanStack Start / Fumadocs documentation site
+├── native-packages/       # Published platform engine package manifests
 ├── tests/                 # Bun test suite (run via packages/integration-tests)
 ├── scripts/               # bundle, release, fixtures
 ├── turbo.json             # Task graph
@@ -30,7 +32,7 @@ sweep/
 
 - `src/cli.ts` - Commander `makeProgram()` and global options.
 - `src/bin.ts` - Node shebang entry (bundled to `apps/cli/dist/sweep.js`).
-- `src/handlers/` - `scan`, `apply`, `clean`, `plan`, `ui`, `doctor`.
+- `src/handlers/` - `scan`, `apply`, `clean`, `plan`, `ui`, `doctor`, `recover`, `schema`.
 - `scripts/build.ts` - produces `apps/cli/dist/sweep.js` and `apps/cli/dist/sweep-ui.js`.
 - `scripts/preflight.ts` - publish guardrails for this package.
 - Depends on `core`, `display`, `protocol`, and `ui`.

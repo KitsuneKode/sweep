@@ -11,9 +11,9 @@
     "transit": "exit 0",
     "test": "bun test src",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint -c ../../.oxlintrc.json src",
-    "fmt": "oxfmt src",
-    "fmt:check": "oxfmt --check src"
+    "lint": "oxlint -c ../../.oxlintrc.json src benchmarks",
+    "fmt": "oxfmt src benchmarks",
+    "fmt:check": "oxfmt --check src benchmarks"
   },
   "dependencies": {
     "@kitsunekode/sweep-core": "workspace:*",

@@ -45,6 +45,24 @@ pub fn apply_plan_controlled_with_limit(
     on_deleted: &mut dyn FnMut(&str),
     max_bytes: Option<u64>,
 ) -> Result<ApplyReport, EngineError> {
+    apply_plan_controlled_with_progress(
+        plan,
+        cancelled,
+        on_begin,
+        on_deleted,
+        max_bytes,
+        &mut |_, _, _| {},
+    )
+}
+
+pub fn apply_plan_controlled_with_progress(
+    plan: &ScanPlan,
+    cancelled: &AtomicBool,
+    on_begin: &mut dyn FnMut(&str),
+    on_deleted: &mut dyn FnMut(&str),
+    max_bytes: Option<u64>,
+    on_preparing: &mut dyn FnMut(&str, usize, usize),
+) -> Result<ApplyReport, EngineError> {
     if plan.protocol_version != PROTOCOL_VERSION {
         return Err(EngineError::Guardrail(
             GuardrailError::UnsupportedProtocolVersion {
@@ -264,7 +282,16 @@ pub fn apply_plan_controlled_with_limit(
     let ready = deduplicate_nested_entries(ready);
     if let Some(limit) = max_bytes.filter(|_| !cancelled.load(Ordering::Acquire)) {
         let mut sizes = std::collections::HashMap::new();
-        for entry in &ready {
+        let ids_by_path: std::collections::HashMap<&str, &str> = selected
+            .iter()
+            .map(|c| (c.entry.path.as_str(), c.id.as_str()))
+            .collect();
+        for (completed, entry) in ready.iter().enumerate() {
+            if cancelled.load(Ordering::Acquire) {
+                break;
+            }
+            let id = ids_by_path[entry.path.as_str()];
+            on_preparing(id, completed, ready.len());
             if cancelled.load(Ordering::Acquire) {
                 break;
             }
@@ -278,6 +305,7 @@ pub fn apply_plan_controlled_with_limit(
                 return Err(EngineError::ResourceLimit { message });
             }
             sizes.insert(entry.path.clone(), size);
+            on_preparing(id, completed + 1, ready.len());
         }
         let mut total = 0u64;
         for entry in &ready {
@@ -563,11 +591,18 @@ fn path_uses_process_relative_root(path: &str) -> bool {
         return true;
     }
     if first == Some("proc")
-        && second.is_some_and(|pid| pid.bytes().all(|b| b.is_ascii_digit()))
-        && matches!(
+        && second.is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()))
+        && (matches!(
             third,
             Some("cwd") | Some("root") | Some("fd") | Some("fdinfo")
-        )
+        ) || (third == Some("task")
+            && segments
+                .get(3)
+                .is_some_and(|tid| !tid.is_empty() && tid.bytes().all(|b| b.is_ascii_digit()))
+            && matches!(
+                segments.get(4).map(String::as_str),
+                Some("cwd") | Some("root") | Some("fd") | Some("fdinfo")
+            )))
     {
         return true;
     }
@@ -955,6 +990,22 @@ mod tests {
     use super::*;
     use sweep_types::{RiskTier, ScanCandidate, ScanPlanSummary, SelectionPolicy};
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[test]
+    fn proc_task_magic_roots_are_process_relative() {
+        for leaf in ["cwd", "root", "fd", "fdinfo"] {
+            assert!(path_uses_process_relative_root(&format!(
+                "/proc/123/task/456/{leaf}/project"
+            )));
+            assert!(path_uses_process_relative_root(&format!(
+                "/proc//123//task//456//{leaf}/project"
+            )));
+        }
+        assert!(!path_uses_process_relative_root(
+            "/proc/123/task/456/status"
+        ));
+    }
 
     #[test]
     fn saved_snapshots_refuse_replaced_candidates_and_roots() {

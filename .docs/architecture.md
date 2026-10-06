@@ -8,14 +8,14 @@ workspaces compile into `apps/cli/dist/` via the centralized bundler.
 
 ### Layering
 
-| Layer           | Location             | Responsibility                             |
-| --------------- | -------------------- | ------------------------------------------ |
-| Protocol        | `packages/protocol/` | Shared types, JSON Schema artifacts        |
-| Core engine     | `packages/core/`     | Config, guardrails, scan, plan, apply      |
-| Display         | `packages/display/`  | Terminal formatting and progressive output |
-| UI              | `packages/ui/`       | OpenTUI selection flow and state           |
-| CLI             | `apps/cli/`          | Commander program, handlers, entrypoint    |
-| Rust experiment | `crates/sweep-*/`    | Alternate engine behind the same contract  |
+| Layer        | Location             | Responsibility                             |
+| ------------ | -------------------- | ------------------------------------------ |
+| Protocol     | `packages/protocol/` | Shared types, JSON Schema artifacts        |
+| Core engine  | `packages/core/`     | Config, guardrails, scan, plan, apply      |
+| Display      | `packages/display/`  | Terminal formatting and progressive output |
+| UI           | `packages/ui/`       | OpenTUI selection flow and state           |
+| CLI          | `apps/cli/`          | Commander program, handlers, entrypoint    |
+| Rust backend | `crates/sweep-*/`    | Alternate engine behind the same contract  |
 
 ### Data flow
 
@@ -29,7 +29,7 @@ CLI flags / config
   packages/display (stdout)  or  packages/ui (interactive)
 ```
 
-- `apps/cli/src/handlers/` maps subcommands (`scan`, `apply`, `ui`, default
+- `apps/cli/src/handlers/` maps subcommands (`scan`, `plan`, `clean`, `apply`, `recover`, `schema`, `ui`, default
   clean) to core engine calls.
 - `sweep ui` scans via core, then hands plan editing to `packages/ui`; final
   selection compiles back to explicit candidate IDs.
@@ -40,6 +40,10 @@ CLI flags / config
 
 - `sweep` - default cleanup flow with prompt and guardrails
 - `sweep scan` - scan only; `--json` and `--json-stream` for automation
+- `sweep plan` - save a read-only reviewed scan plan
+- `sweep clean` - explicit cleanup entrypoint
+- `sweep recover --journal` - read-only intent and outcome inspection
+- `sweep schema` - export the installed protocol schemas
 - `sweep apply --plan` - apply a saved plan with revalidation
 - `sweep ui` - OpenTUI interactive selection (TTY required)
 - `sweep inspect --plan` - read-only plan provenance and totals
@@ -232,7 +236,11 @@ Both engines re-validate before deleting:
   non-symlink candidate and require real containment. Every candidate also has
   its canonical parent checked for containment and VCS metadata. A symlink
   leaf is unlinked without canonicalizing or following its target.
-- **Size ceiling** - `sweep apply --plan` enforces `maxSizeGB` just like the
+- **Size ceiling** - `sweep plan` - save a read-only reviewed scan plan
+- `sweep clean` - explicit cleanup entrypoint
+- `sweep recover --journal` - read-only intent and outcome inspection
+- `sweep schema` - export the installed protocol schemas
+- `sweep apply --plan` enforces `maxSizeGB` just like the
   interactive flows; a saved plan is not a trusted lane around the cap
   (`--force-large --yes` to bypass, matching `clean`). Before destructive apply,
   both engines refresh selected, revalidated, deduplicated entries using the

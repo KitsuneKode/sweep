@@ -8,22 +8,52 @@ const PROTECTED_VCS_DIR_NAMES: &[&str] = &[
     ".git", ".svn", ".hg", ".bzr", ".jj", ".sl", "_darcs", ".pijul",
 ];
 
+/// Fresh identities catch canonical system aliases and same-device bind
+/// aliases. Mounts may change during a long UI session, so do not cache these.
+fn aliases_protected_root(resolved: &Path, roots: &HashSet<PathBuf>) -> bool {
+    let Ok(target_path) = std::fs::canonicalize(resolved) else {
+        return false;
+    };
+    let Ok(target_meta) = std::fs::metadata(&target_path) else {
+        return false;
+    };
+    let Ok(Some(target_id)) = sweep_fs::file_identity(&target_path, &target_meta) else {
+        return false;
+    };
+    roots.iter().any(|root| {
+        let Ok(path) = std::fs::canonicalize(root) else {
+            return false;
+        };
+        let Ok(meta) = std::fs::metadata(&path) else {
+            return false;
+        };
+        let Ok(Some(id)) = sweep_fs::file_identity(&path, &meta) else {
+            return false;
+        };
+        target_id.device == id.device && target_id.inode == id.inode
+    })
+}
+
 /// Blocked-root + depth policy on one normalized absolute path.
 fn assert_resolved_safe(resolved: &Path) -> Result<(), EngineError> {
-    let is_blocked = if blocked_roots().contains(resolved) {
+    let roots = blocked_roots();
+    let is_blocked = if roots.contains(resolved) {
         true
     } else if cfg!(windows) || cfg!(target_os = "macos") {
         // Case-insensitive filesystems make /USERS/name the same directory as
         // /Users/name - fold both sides or the case-variant walks past.
         let folded = resolved.to_string_lossy().to_lowercase();
-        blocked_roots()
+        roots
             .iter()
             .any(|root| root.to_string_lossy().to_lowercase() == folded)
     } else {
         false
     };
 
-    if is_blocked {
+    if is_blocked
+        || path_has_protected_vcs_segment(&resolved.to_string_lossy())
+        || aliases_protected_root(resolved, &roots)
+    {
         return Err(GuardrailError::ProtectedPath {
             path: format!(
                 "Refusing to operate on protected path: {}\n  \
@@ -196,6 +226,7 @@ fn blocked_roots() -> HashSet<PathBuf> {
         PathBuf::from("/sys"),
         PathBuf::from("/proc"),
         PathBuf::from("/dev"),
+        PathBuf::from("/tmp"),
     ]);
 
     if let Some(home) = home_dir() {
@@ -295,6 +326,21 @@ mod tests {
             Err(EngineError::Guardrail(_)) => {}
             other => panic!("expected guardrail error, got {other:?}"),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_system_aliases_are_protected() {
+        for root in ["/bin", "/etc", "/var", "/tmp"] {
+            let canonical = std::fs::canonicalize(root).unwrap();
+            assert!(assert_safe_cwd(&canonical.to_string_lossy()).is_err());
+        }
+    }
+
+    #[test]
+    fn vcs_target_segments_are_protected() {
+        let target = std::env::temp_dir().join("sweep-project/.git/objects");
+        assert!(assert_safe_cwd(&target.to_string_lossy()).is_err());
     }
 
     #[test]

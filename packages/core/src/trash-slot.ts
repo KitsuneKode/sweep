@@ -12,11 +12,14 @@ export async function moveIntoTrashSlot(source: string, slot: string): Promise<v
   const owned = lstatSync(slot, { bigint: true });
   try {
     const currentParent = statSync(dirname(slot), { bigint: true });
+    const currentSlot = lstatSync(slot, { bigint: true });
     if (
       currentParent.dev !== parent.dev ||
       currentParent.ino !== parent.ino ||
-      !owned.isDirectory() ||
-      owned.isSymbolicLink()
+      currentSlot.dev !== owned.dev ||
+      currentSlot.ino !== owned.ino ||
+      !currentSlot.isDirectory() ||
+      currentSlot.isSymbolicLink()
     ) {
       throw new Error("trash slot or its parent changed during reservation");
     }

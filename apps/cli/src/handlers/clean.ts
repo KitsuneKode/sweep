@@ -25,6 +25,7 @@ import {
 export async function handleClean(pathArg: string, opts: CliOptions): Promise<void> {
   applyNoColor(opts.color);
 
+  let operationEntered = false;
   try {
     const targetDir = resolveScanTarget(pathArg);
 
@@ -44,6 +45,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       selectionPolicy,
       engine,
       projectConfig,
+      resourceProfile: opts.resourceProfile,
       spinnerLabel: opts.dryRun ? "Scanning (dry-run)..." : "Scanning...",
       output: {
         // --json output must stay machine-readable - no banner/plan text on stdout.
@@ -92,6 +94,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       exitWith(EXIT.ABORTED);
     }
 
+    operationEntered = true;
     const applyResult = await applyReviewedPlan(plan, {
       maxSizeGB: config.maxSizeGB,
       forceLarge: opts.forceLarge,
@@ -130,6 +133,9 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     await drainStdout();
     exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
-    handleFatalError(err);
+    handleFatalError(err, {
+      json: opts.json,
+      applyOutcome: operationEntered ? "unknown" : "not_started",
+    });
   }
 }

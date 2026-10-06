@@ -374,10 +374,15 @@ export function buildHeaderStats(
     // Under 84 cols the sidebar and statusline tally are both gone - fold the
     // reclaimable bytes into the queue chip so the number a destructive
     // keystroke acts on is never invisible.
-    const queuedLabel = w >= 84 ? queued : `${queued} · ${formatBytes(summary.selectedBytes)}`;
+    const queuedLabel =
+      w >= 84
+        ? queued
+        : `${queued} · ${summary.selectedBytesPartial ? "~" : ""}${formatBytes(summary.selectedBytes)}`;
     parts.push(t`${fg(tokens.accent)(queuedLabel)}`);
     if (w >= 84) {
-      parts.push(t`${bold(fg(tokens.positive)(formatBytes(summary.selectedBytes)))}`);
+      parts.push(
+        t`${bold(fg(tokens.positive)(`${summary.selectedBytesPartial ? "~" : ""}${formatBytes(summary.selectedBytes)}`))}`,
+      );
     }
   }
 

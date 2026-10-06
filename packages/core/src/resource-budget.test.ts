@@ -1,6 +1,17 @@
 import { expect, test } from "bun:test";
 import { ResourceBudget, checkedBytes } from "./resource-budget.js";
 
+test("discovery and live sizing cannot each consume the combined allowance", () => {
+  const budget = new ResourceBudget({ maxRetainedBytes: 2048, maxCombinedBytes: 1156 });
+  budget.candidate("a"); // 1028 discovery bytes
+  expect(budget.sizingIdentity()).toBe(true); // 128 live sizing bytes
+  expect(budget.sizingDirectory("b")).toBe(false);
+  budget.releaseSizingIdentities(1);
+  expect(budget.sizingDirectory("b")).toBe(false); // 132 would exceed 1156
+  expect(budget.sizingIdentity()).toBe(true);
+  expect(() => budget.identity()).toThrow("maxCombinedBytes");
+});
+
 test("live sizing reservations are shared, returned, and never poison discovery", () => {
   const budget = new ResourceBudget({
     maxIdentities: 1,

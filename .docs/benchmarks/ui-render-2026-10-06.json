@@ -1,0 +1,39 @@
+{
+  "candidates": 5000,
+  "cycles": 3,
+  "samplesPerCycle": 100,
+  "forcedGc": false,
+  "paintingIncluded": true,
+  "renderer": "OpenTUI native in-memory output",
+  "physicalTerminalIncluded": false,
+  "inputPaintP50Ms": 7.076025999999956,
+  "inputPaintP95Ms": 11.051228000000037,
+  "inputPaintP99Ms": 12.370994999999994,
+  "sampledPeakRssMiB": 287.39453125,
+  "rows": [
+    {
+      "cycle": 0,
+      "firstFrameMs": 87.41632499999999,
+      "rss": 258363392,
+      "heapUsed": 72818699
+    },
+    {
+      "cycle": 1,
+      "firstFrameMs": 33.30161200000009,
+      "rss": 286097408,
+      "heapUsed": 102577982
+    },
+    {
+      "cycle": 2,
+      "firstFrameMs": 32.493582999999944,
+      "rss": 301355008,
+      "heapUsed": 70174418
+    }
+  ],
+  "measuredAt": "2026-10-06T15:09:14.397654+00:00",
+  "bunVersion": "1.4.2",
+  "platform": "Linux-7.2.8-zen1-2-zen-x86_64-with-glibc2.44",
+  "scope": "Synthetic candidates, real native in-memory frames; no deletion or physical terminal",
+  "source": "uncommitted resource-and-recovery implementation, before final review",
+  "command": "bun run packages/ui/benchmarks/render-session.tsx --candidates 5000 --cycles 3 --samples 100"
+}

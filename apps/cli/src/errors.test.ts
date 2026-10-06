@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
+import { ApplyRefusedError, GuardrailError } from "@kitsunekode/sweep-core/guardrails";
 import { ConfigParseError } from "@kitsunekode/sweep-core/config";
 import { PlanValidationError } from "@kitsunekode/sweep-core/plan";
-import { EXIT, resolveExitCode } from "./errors.js";
+import { EXIT, resolveExitCode, fatalErrorDocument } from "./errors.js";
 
 describe("exit code mapping", () => {
   test("maps guardrail errors to GUARDRAIL", () => {
@@ -29,5 +29,23 @@ describe("exit code mapping", () => {
     expect(EXIT.CONFIG_PARSE).toBe(3);
     expect(EXIT.WARN).toBe(5);
     expect(EXIT.ABORTED).not.toBe(EXIT.WARN);
+  });
+});
+
+test("automation errors distinguish a proven refusal from uncertain mutation", () => {
+  expect(
+    fatalErrorDocument(new ApplyRefusedError("over limit", "size_limit_exceeded"), "unknown"),
+  ).toMatchObject({
+    type: "error",
+    code: "size_limit_exceeded",
+    exitCode: 2,
+    applyOutcome: "not_started",
+  });
+  expect(fatalErrorDocument(new Error("broken native pipe"), "unknown")).toMatchObject({
+    code: "failure",
+    applyOutcome: "unknown",
+  });
+  expect(fatalErrorDocument(new Error("bad input"), "not_started")).toMatchObject({
+    applyOutcome: "not_started",
   });
 });

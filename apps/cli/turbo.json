@@ -2,7 +2,7 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["transit", "^build"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/ui/src/**",

@@ -122,6 +122,7 @@ export interface SweepUiSummary {
    */
   selectedCount: number;
   selectedBytes: number;
+  selectedBytesPartial?: boolean;
   /** Queued artifacts that also pass the current filter/scope. */
   visibleSelectedCount: number;
   dangerousVisibleCount: number;
@@ -572,13 +573,19 @@ export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[])
   const anchoredId = getCurrentCandidate(state)?.id;
   const anchoredScope =
     state.focus === "sidebar" ? sidebarRowsFor(state)[state.sidebarIndex]?.key : undefined;
-  const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
+  const positions = candidatePositions(state.candidates);
+  const candidates = state.candidates.slice();
+  const added = new Map<string, number>();
   const selectedIds = new Set(state.selectedIds);
   for (const candidate of incoming) {
-    const existing = byId.get(candidate.id);
+    const position = positions.get(candidate.id) ?? added.get(candidate.id);
+    const existing = position === undefined ? undefined : candidates[position];
     // Never let a sized update clobber a user selection decision - ids are
     // deterministic so sized entries arrive with identical fields except bytes.
-    byId.set(candidate.id, existing ? { ...existing, ...candidate } : candidate);
+    if (position === undefined) {
+      added.set(candidate.id, candidates.length);
+      candidates.push(candidate);
+    } else candidates[position] = { ...existing, ...candidate };
     if (
       !existing &&
       candidate.selectedByDefault &&
@@ -590,11 +597,7 @@ export function upsertCandidates(state: SweepUiState, incoming: ScanCandidate[])
     }
   }
 
-  const next = reanchor(
-    { ...state, candidates: [...byId.values()], selectedIds },
-    undefined,
-    anchoredId,
-  );
+  const next = reanchor({ ...state, candidates, selectedIds }, undefined, anchoredId);
   if (anchoredScope !== undefined) {
     next.sidebarIndex = scopeFilterToSidebarIndex(anchoredScope, sidebarRowsFor(next));
   }
@@ -871,12 +874,24 @@ export function toggleCurrentSelection(state: SweepUiState): SweepUiState {
  * replaced only when the scan upserts, so cursor/keypress dispatches reuse
  * one map instead of rebuilding it per lookup. O(n) build, then O(1) hits.
  */
+const candidatePositionCache = new WeakMap<ScanCandidate[], Map<string, number>>();
+function candidatePositions(candidates: ScanCandidate[]): Map<string, number> {
+  let positions = candidatePositionCache.get(candidates);
+  if (!positions) {
+    positions = new Map();
+    for (let i = 0; i < candidates.length; i++) positions.set(candidates[i]!.id, i);
+    candidatePositionCache.set(candidates, positions);
+  }
+  return positions;
+}
+
 const candidateIndexCache = new WeakMap<ScanCandidate[], Map<string, ScanCandidate>>();
 
 function candidateIndex(candidates: ScanCandidate[]): Map<string, ScanCandidate> {
   let index = candidateIndexCache.get(candidates);
   if (!index) {
-    index = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+    index = new Map();
+    for (const candidate of candidates) index.set(candidate.id, candidate);
     candidateIndexCache.set(candidates, index);
   }
   return index;
@@ -1139,12 +1154,14 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
   // Filtering the view must never change what apply is about to delete.
   let selectedCount = 0;
   let selectedBytes = 0;
+  let selectedBytesPartial = false;
   const selectedRiskCounts = { safe: 0, caution: 0, dangerous: 0 };
   for (const candidate of state.candidates) {
     if (candidate.riskTier === "blocked") continue; // apply drops these too
     if (!state.selectedIds.has(candidate.id)) continue;
     selectedCount++;
     selectedBytes += candidate.estimatedBytes;
+    selectedBytesPartial ||= candidate.bytesKnown === false;
     selectedRiskCounts[candidate.riskTier]++;
   }
 
@@ -1152,6 +1169,7 @@ export function getUiSummary(state: SweepUiState): SweepUiSummary {
     visibleCount: visible.length,
     selectedCount,
     selectedBytes,
+    ...(selectedBytesPartial ? { selectedBytesPartial: true } : {}),
     visibleSelectedCount,
     dangerousVisibleCount,
     selectedRiskCounts,

@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -14,6 +15,89 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clean, deduplicateNestedEntries } from "./cleaner.js";
 import type { ScanEntry } from "@kitsunekode/sweep-protocol";
+
+test.skipIf(process.platform === "win32")(
+  "literal POSIX trash paths move or remain untouched when runtime canonicalization fails",
+  async () => {
+    const owned = mkdtempSync(join(tmpdir(), "sweep-trash-literal-names-"));
+    try {
+      const target = join(owned, "project");
+      const trashDir = join(target, ".sweep-trash-test");
+      const entries: ScanEntry[] = [];
+      for (const parent of ["..\\x", "a\\b"]) {
+        const path = join(target, parent, "node_modules");
+        mkdirSync(path, { recursive: true });
+        writeFileSync(join(path, "keep"), parent);
+        entries.push({
+          path,
+          name: "node_modules",
+          estimatedBytes: 1,
+          entryType: "directory",
+          isSymlink: false,
+        });
+      }
+      const result = await clean(entries, { trashDir, trashRoot: target });
+      let canonicalizationWorks = true;
+      try {
+        realpathSync(join(target, "a\\b"));
+      } catch {
+        canonicalizationWorks = false;
+      }
+      if (!canonicalizationWorks) {
+        expect(result.deleted).toHaveLength(0);
+        expect(result.failedPaths).toHaveLength(2);
+        for (const entry of entries)
+          expect(readFileSync(join(entry.path, "keep"), "utf8")).toBeTruthy();
+        return;
+      }
+      expect(result.failedPaths).toEqual([]);
+      expect(result.deleted).toHaveLength(2);
+      for (const parent of ["..\\x", "a\\b"]) {
+        expect(readFileSync(join(trashDir, parent, "node_modules", "keep"), "utf8")).toBe(parent);
+      }
+    } finally {
+      rmSync(owned, { recursive: true, force: true });
+    }
+  },
+);
+
+test("trash receipts identify the actual collision-free payload destination", async () => {
+  const owned = mkdtempSync(join(tmpdir(), "sweep-trash-receipt-"));
+  try {
+    const artifact = join(owned, "node_modules");
+    const trash = join(owned, ".sweep-trash-test");
+    mkdirSync(artifact);
+    mkdirSync(trash);
+    writeFileSync(join(artifact, "keep"), "payload");
+    mkdirSync(join(trash, "node_modules"));
+    writeFileSync(join(trash, "node_modules", "keep"), "previous");
+    const result = await clean(
+      [
+        {
+          path: artifact,
+          name: "node_modules",
+          entryType: "directory",
+          isSymlink: false,
+          estimatedBytes: 7,
+        },
+      ],
+      {
+        containmentRoot: owned,
+        trashDir: trash,
+        trashRoot: owned,
+      },
+    );
+    const destination =
+      process.platform === "win32"
+        ? join(trash, "node_modules-2", "payload")
+        : join(trash, "node_modules-2");
+    expect(result.trashMoves).toEqual([{ path: artifact, destination }]);
+    expect(readFileSync(join(destination, "keep"), "utf8")).toBe("payload");
+    expect(readFileSync(join(trash, "node_modules", "keep"), "utf8")).toBe("previous");
+  } finally {
+    rmSync(owned, { recursive: true, force: true });
+  }
+});
 
 test("recursive deletion preserves the contents of an external hardlink", async () => {
   const owned = mkdtempSync(join(tmpdir(), "sweep-interior-hardlink-"));

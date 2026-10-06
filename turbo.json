@@ -66,6 +66,7 @@
       "tags": ["quality"]
     },
     "test": {
+      "env": ["SWEEP_REQUIRE_RUST_TESTS"],
       "dependsOn": ["transit", "^build"],
       "outputLogs": "new-only",
       "cache": false,

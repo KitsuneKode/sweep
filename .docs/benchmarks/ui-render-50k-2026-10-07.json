@@ -1,0 +1,39 @@
+{
+  "candidates": 50000,
+  "cycles": 3,
+  "samplesPerCycle": 100,
+  "forcedGc": false,
+  "paintingIncluded": true,
+  "renderer": "OpenTUI native in-memory output",
+  "physicalTerminalIncluded": false,
+  "inputPaintP50Ms": 9.07513999999992,
+  "inputPaintP95Ms": 17.934312999999975,
+  "inputPaintP99Ms": 20.94184699999994,
+  "sampledPeakRssMiB": 410.1328125,
+  "rows": [
+    {
+      "cycle": 0,
+      "firstFrameMs": 346.376769,
+      "rss": 320311296,
+      "heapUsed": 95788063
+    },
+    {
+      "cycle": 1,
+      "firstFrameMs": 276.4211469999998,
+      "rss": 424316928,
+      "heapUsed": 150788364
+    },
+    {
+      "cycle": 2,
+      "firstFrameMs": 159.833126,
+      "rss": 430055424,
+      "heapUsed": 134942037
+    }
+  ],
+  "measuredAt": "2026-10-06T19:55:53.416916+00:00",
+  "bunVersion": "1.4.2",
+  "command": "bun run packages/ui/benchmarks/render-session.tsx --candidates 50000 --cycles 3 --samples 100",
+  "sourceBaseCommit": "1af4d2dcbc034655f78edd6018d73ed47b5f131f",
+  "sourceState": "uncommitted checkpoint; measured before the optional aggregate lower-bound marker",
+  "method": "Synthetic candidates; native in-memory terminal frames; sampled RSS after each cycle; no forced GC; no scan, live streaming, apply, physical TTY or hard RSS guarantee."
+}

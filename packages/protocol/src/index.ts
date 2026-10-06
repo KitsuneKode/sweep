@@ -13,6 +13,8 @@ export interface ScanLimits {
   maxIdentities: number;
   maxPathBytes: number;
   maxRetainedBytes: number;
+  /** Combined discovery charges and live sizing reservations. Not RSS. */
+  maxCombinedBytes: number;
 }
 
 export const DEFAULT_SCAN_LIMITS: Readonly<ScanLimits> = Object.freeze({
@@ -22,7 +24,23 @@ export const DEFAULT_SCAN_LIMITS: Readonly<ScanLimits> = Object.freeze({
   maxIdentities: 500_000,
   maxPathBytes: 64 * 1024 * 1024,
   maxRetainedBytes: 128 * 1024 * 1024,
+  maxCombinedBytes: 256 * 1024 * 1024,
 });
+
+export type ResourceProfile = "balanced" | "low-memory";
+export const SCAN_RESOURCE_PROFILES: Readonly<Record<ResourceProfile, Readonly<ScanLimits>>> =
+  Object.freeze({
+    balanced: DEFAULT_SCAN_LIMITS,
+    "low-memory": Object.freeze({
+      maxCandidates: 5_000,
+      maxDirectories: 50_000,
+      maxQueuedDirs: 2_048,
+      maxIdentities: 65_536,
+      maxPathBytes: 8 * 1024 * 1024,
+      maxRetainedBytes: 8 * 1024 * 1024,
+      maxCombinedBytes: 16 * 1024 * 1024,
+    }),
+  });
 
 export type RiskTier = "safe" | "caution" | "dangerous" | "blocked";
 export type SelectionMode = "default" | "safe" | "all" | "none";
@@ -113,7 +131,13 @@ export interface PathFailure {
   error: string;
 }
 
+export interface TrashMove {
+  path: string;
+  destination: string;
+}
+
 export interface CleanResult {
+  trashMoves?: TrashMove[];
   deleted: ScanEntry[];
   failedPaths: PathFailure[];
   totalBytesFreed: number;
@@ -138,6 +162,7 @@ export interface CliOptions {
   engine: EngineBackend;
   /** Dev flag: fresh engine probe + page-cache drop attempt before scanning. */
   cold?: boolean;
+  resourceProfile?: "balanced" | "low-memory";
   quiet?: boolean;
   verbose?: boolean;
   json?: boolean;
@@ -303,7 +328,21 @@ export interface ApplyOutcome {
   coveredBy?: string;
 }
 
+/** Live feedback counts completed removals, not files inside an active directory. */
+export interface ApplyProgress {
+  stage: "preparing" | "applying" | "stopping";
+  selectedCount: number;
+  deletedCount: number;
+  estimatedBytesFreed: number;
+  elapsedMs: number;
+  activePath?: string;
+  preparationPhase?: "validating" | "sizing";
+  preparedCount?: number;
+  preparingCount?: number;
+}
+
 export interface ApplyReport {
+  trashMoves?: TrashMove[];
   protocolVersion: typeof PROTOCOL_VERSION;
   targetDir: string;
   selectedCandidateIds: string[];

@@ -6,10 +6,10 @@
   "scripts": {
     "transit": "exit 0",
     "test": "bun run ./scripts/run-at-repo-root.ts bun test tests/integration",
-    "lint": "bun run ./scripts/run-at-repo-root.ts oxlint tests/integration tests/support",
-    "fmt": "bun run ./scripts/run-at-repo-root.ts oxfmt tests/integration tests/support",
+    "lint": "bun run ./scripts/run-at-repo-root.ts oxlint tests/integration tests/support scripts",
+    "fmt": "bun run ./scripts/run-at-repo-root.ts oxfmt tests/integration tests/support scripts",
     "typecheck": "bun run ./scripts/run-at-repo-root.ts tsc --noEmit",
-    "fmt:check": "bun run ./scripts/run-at-repo-root.ts oxfmt --check tests/integration tests/support"
+    "fmt:check": "bun run ./scripts/run-at-repo-root.ts oxfmt --check tests/integration tests/support scripts"
   },
   "devDependencies": {
     "@kitsunekode/sweep": "workspace:*",

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
@@ -361,11 +361,7 @@ describe("CLI scan/apply", () => {
     expect(result.stderr).toContain("requires an interactive TTY");
   });
 
-  test("rust engine honors --pattern on scan --json", () => {
-    if (!rustCliAvailable()) {
-      return;
-    }
-
+  test.skipIf(!rustCliAvailable())("rust engine honors --pattern on scan --json", () => {
     mkdirSync(dir("custom-cache"));
     mkdirSync(dir("node_modules"));
 
@@ -380,4 +376,73 @@ describe("CLI scan/apply", () => {
     expect(names).toContain("custom-cache");
     expect(names).toContain("node_modules");
   });
+});
+
+test.skipIf(process.platform === "win32")(
+  "installed Node CLI trashes legal POSIX backslash names with exact receipts",
+  () => {
+    const target = dir("project");
+    for (const parent of ["..\\x", "a\\b"]) {
+      mkdirSync(join(target, parent, "node_modules"), { recursive: true });
+      writeFileSync(join(target, parent, "node_modules", "keep"), parent);
+    }
+    const proc = Bun.spawnSync({
+      cmd: ["node", SWEEP, "clean", target, "--engine", "js", "--trash", "--yes", "--json"],
+      cwd: REPO_ROOT,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, SWEEP_CONFIG_DIR: dir("config") },
+    });
+    expect({
+      exitCode: proc.exitCode,
+      stdout: Buffer.from(proc.stdout).toString(),
+      stderr: Buffer.from(proc.stderr).toString(),
+    }).toMatchObject({ exitCode: 0 });
+    const report = JSON.parse(Buffer.from(proc.stdout).toString());
+    expect(report.deletedCount).toBe(2);
+    expect(report.failedCount).toBe(0);
+    expect(report.trashMoves).toHaveLength(2);
+    for (const move of report.trashMoves) {
+      expect(existsSync(move.path)).toBe(false);
+      expect(readFileSync(join(move.destination, "keep"), "utf8")).toBe(
+        move.path.includes("..\\x") ? "..\\x" : "a\\b",
+      );
+    }
+  },
+);
+
+test("JSON apply size refusal has a machine-readable stderr error and no journal", () => {
+  mkdirSync(dir("node_modules"));
+  writeFileSync(dir("node_modules", "keep"), "preserve");
+  writeFileSync(dir(".sweeprc"), JSON.stringify({ maxSizeGB: 0.000000001 }));
+  const scan = runCli(["scan", tmpDir, "--json"]);
+  expect(scan.exitCode).toBe(0);
+  writeFileSync(dir("plan.json"), scan.stdout);
+  const result = runCli(["apply", "--plan", dir("plan.json"), "--yes", "--json"]);
+  expect(result.exitCode).toBe(2);
+  expect(result.stdout).toBe("");
+  const error = JSON.parse(result.stderr.trim().split("\n").at(-1)!);
+  expect(error).toMatchObject({
+    type: "error",
+    code: "size_limit_exceeded",
+    applyOutcome: "not_started",
+  });
+  expect(readFileSync(dir("node_modules", "keep"), "utf8")).toBe("preserve");
+  expect(existsSync(dir("test-config", "journals"))).toBe(false);
+});
+
+test("schema export provides the complete protocol vocabulary without scanning", () => {
+  const result = runCli(["schema"]);
+  expect(result.exitCode).toBe(0);
+  const exported = JSON.parse(result.stdout);
+  expect(exported.protocolVersion).toBe("1");
+  expect(Object.keys(exported.schemas).sort()).toEqual([
+    "applyReport",
+    "scanEvent",
+    "scanPlan",
+    "shared",
+  ]);
+  expect(exported.schemas.scanPlan.$id).toBeDefined();
+  expect(exported.schemas.applyReport.properties.outcomes).toBeDefined();
+  expect(existsSync(dir("test-config"))).toBe(false);
 });

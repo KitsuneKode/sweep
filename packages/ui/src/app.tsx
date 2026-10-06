@@ -6,13 +6,13 @@ import {
   useRenderer,
   useTerminalDimensions,
 } from "@opentui/react";
-import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { ApplyProgress, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { basename, join } from "node:path";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { isColdRequested } from "@kitsunekode/sweep-core/cold";
 import { writeProjectSweeprc } from "@kitsunekode/sweep-core/config";
-import { assertSafePattern } from "@kitsunekode/sweep-core/guardrails";
+import { assertSafePattern, isApplyRefusedError } from "@kitsunekode/sweep-core/guardrails";
 import {
   Component,
   type ReactNode,
@@ -28,7 +28,7 @@ import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
 import { writePlanExport } from "./plan-export.js";
-import { noteCtrlCHandled, openUiSession } from "./runtime.js";
+import { noteCtrlCHandled, openUiSession, registerUiApplyCancellation } from "./runtime.js";
 import {
   buildBrandLine,
   buildContextLine,
@@ -71,7 +71,7 @@ import {
 } from "./state.js";
 import { getVisibleCandidates } from "./state/selectors.js";
 import { resolveTheme, type ThemeTokens } from "./theme.js";
-import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
+import { ModeChip, ScanModeChip, DotStrip, Modal } from "./widgets.js";
 import type { UiScanControl } from "./streaming.js";
 
 export { runSweepUiStreaming } from "./streaming.js";
@@ -337,6 +337,8 @@ function ConfirmOverlay({
   previewPaths,
   dryRun,
   trash,
+  applyPolicy,
+  lowerBound,
 }: {
   tokens: ThemeTokens;
   selectedCount: number;
@@ -344,6 +346,8 @@ function ConfirmOverlay({
   dangerousCount: number;
   /** Largest queued candidates by bytes - the last gate should name names. */
   previewPaths: string[];
+  applyPolicy?: { maxSizeGB: number; forceLarge: boolean } | undefined;
+  lowerBound?: boolean;
   dryRun?: boolean;
   trash?: boolean;
 }) {
@@ -354,7 +358,7 @@ function ConfirmOverlay({
   const dangerous = dangerousCount > 0;
   const accent = dangerous && !trash ? tokens.danger : tokens.accent;
   const shown = previewPaths.slice(0, 3);
-  const hidden = previewPaths.length - shown.length;
+  const hidden = selectedCount - shown.length;
 
   return (
     <Modal
@@ -367,9 +371,30 @@ function ConfirmOverlay({
         content={t`${bold(fg(accent)(`${action} ${selectedCount} item${selectedCount === 1 ? "" : "s"}`))}`}
       />
       <text
-        content={t`${fg(tokens.positive)(formatBytes(selectedBytes))} ${fg(tokens.textMuted)("estimated size")}`}
+        content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "lower bound; current size checked before removal" : "estimated size")}`}
       />
       <text content="" />
+      {applyPolicy ? (
+        <text
+          fg={tokens.warning}
+          content={
+            applyPolicy.forceLarge
+              ? "Size ceiling bypass enabled (--force-large)."
+              : `Size ceiling: ${applyPolicy.maxSizeGB} GiB; checked again before removal.`
+          }
+        />
+      ) : null}
+      {applyPolicy &&
+      !applyPolicy.forceLarge &&
+      selectedBytes > applyPolicy.maxSizeGB * 1024 ** 3 ? (
+        <box flexDirection="column">
+          <text
+            fg={tokens.warning}
+            content="Over the limit. Reduce the queue or raise maxSizeGB in .sweeprc."
+          />
+          <text fg={tokens.warning} content="Restart override: --force-large --yes" />
+        </box>
+      ) : null}
       {shown.map((path) => (
         <text
           key={path}
@@ -513,6 +538,7 @@ export function SweepApp({
   // report merges back into the list instead of ending the session.
   const [applying, setApplyingState] = useState<string | null>(null);
   const applyAbortRef = useRef<AbortController | null>(null);
+  const [applyProgress, setApplyProgress] = useState<ApplyProgress | null>(null);
   const [showInspect, setShowInspectState] = useState(false);
   const [scanError, setScanErrorState] = useState<string | null>(null);
   // One-line feedback for keys that deliberately do nothing (esc with nothing
@@ -538,6 +564,7 @@ export function SweepApp({
   };
   const closeModal = (kind: ModalKind): void => {
     openModalsRef.current.delete(kind);
+    if (kind === "confirm") confirmArmedAtRef.current = Number.POSITIVE_INFINITY;
   };
   // A consequential confirm key must outlive the burst that opened the
   // dialog. Arming happens on first paint (the effect below): a pasted or
@@ -795,8 +822,11 @@ export function SweepApp({
     [state.candidates],
   );
 
+  const finalizedRef = useRef(false);
   const finalize = useCallback(
     (outcome: SweepUiOutcome) => {
+      if (finalizedRef.current) return;
+      finalizedRef.current = true;
       abortRef.current?.abort();
       onDone(outcome);
     },
@@ -838,17 +868,90 @@ export function SweepApp({
   // Starts from `--trash`, but the confirm dialog can flip it: the last
   // moment before deleting is exactly when someone wants the reversible option.
   const [trashMode, setTrashMode] = useState(Boolean(trash));
-  const toggleTrash = useCallback(() => setTrashMode((current) => !current), []);
+  const trashModeRef = useRef(Boolean(trash));
+  const toggleTrash = useCallback(() => {
+    trashModeRef.current = !trashModeRef.current;
+    setTrashMode(trashModeRef.current);
+  }, []);
+
+  const runInSessionApply = useCallback(
+    (scopedPlan: ScanPlan, name: string) => {
+      // This ref closes the scheduling gate synchronously, before another key
+      // in this stdin drain can confirm, quit, rescan or mutate the queue.
+      if (applyAbortRef.current) return;
+      const requestedTrash = trashModeRef.current;
+      const applyFn = scan?.apply;
+      if (!applyFn) {
+        finalize({ type: "apply", plan: scopedPlan, ...(requestedTrash ? { trash: true } : {}) });
+        return;
+      }
+      if (dryRun) {
+        setNotice(`dry run - would ${requestedTrash ? "move" : "delete"} ${name}`);
+        return;
+      }
+      const controller = new AbortController();
+      applyAbortRef.current = controller;
+      setApplyProgress({
+        stage: "preparing",
+        selectedCount: scopedPlan.selectedCandidateIds.length,
+        deletedCount: 0,
+        estimatedBytesFreed: 0,
+        elapsedMs: 0,
+      });
+      setApplying(name);
+      void (async () => {
+        try {
+          const result = await applyFn({
+            plan: scopedPlan,
+            trash: requestedTrash,
+            signal: controller.signal,
+            onProgress: (progress) => {
+              if (applyAbortRef.current !== controller) return;
+              setApplyProgress({
+                ...progress,
+                stage: controller.signal.aborted ? "stopping" : progress.stage,
+              });
+            },
+          });
+          if (applyAbortRef.current !== controller) return;
+          const merged = mergeApplyReport(stateRef.current, result.report);
+          dispatch({ type: "replace", state: merged.state });
+          const stopped = result.interrupted || merged.interrupted || merged.unattempted > 0;
+          const verb = result.trashDir ? "moved to trash" : "deleted";
+          setNotice(
+            `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
+          );
+        } catch (error) {
+          if (applyAbortRef.current !== controller) return;
+          if (isApplyRefusedError(error)) {
+            setNotice(`Nothing removed · ${sanitizeTerminalText(error.message)} · queue preserved`);
+            return;
+          }
+          // With no authoritative report, retained rows may already be gone.
+          // Require a rescan rather than allowing an automatic destructive retry.
+          dispatch({ type: "replace", state: { ...stateRef.current, scanIncomplete: true } });
+          setNotice(
+            `apply outcome unavailable: ${sanitizeTerminalText(error instanceof Error ? error.message : String(error))} · rescan before applying again`,
+          );
+        } finally {
+          if (applyAbortRef.current === controller) {
+            applyAbortRef.current = null;
+            setApplying(null);
+            setApplyProgress(null);
+          }
+        }
+      })();
+    },
+    [scan, finalize, dryRun],
+  );
 
   const applyPlan = useCallback(() => {
-    // The plan payload carries the committed queue - applying the stale
-    // snapshot could delete rows queued/unqueued in the same burst as y.
-    finalize({
-      type: "apply",
-      plan: applyUiSelection(plan, readFreshState()),
-      ...(trashMode ? { trash: true } : {}),
-    });
-  }, [finalize, plan, trashMode]);
+    const fresh = readFreshState();
+    if (fresh.scanning || fresh.scanIncomplete) return;
+    const selectedPlan = applyUiSelection(plan, fresh);
+    if (selectedPlan.selectedCandidateIds.length === 0) return;
+    runInSessionApply(selectedPlan, `${selectedPlan.selectedCandidateIds.length} queued artifacts`);
+  }, [plan, runInSessionApply]);
 
   /**
    * `x`/`d` on a row: confirm an apply scoped to exactly that candidate.
@@ -899,76 +1002,32 @@ export function SweepApp({
       return;
     }
     const singlePlan = planForCandidateIds(plan, stateRef.current, [id]);
-    const applyFn = scan?.apply;
-    if (!applyFn) {
-      // Static-plan mode has no in-session channel: exit through the same
-      // apply outcome a queued apply takes - identical safety pipeline.
-      finalize({ type: "apply", plan: singlePlan, ...(trashMode ? { trash: true } : {}) });
-      return;
-    }
-    if (dryRun) {
-      setNotice(
-        `dry run - would ${trashMode ? "move" : "delete"} ${sanitizeTerminalText(relativePath(stateRef.current.targetDir, candidate.path))} (${formatBytes(candidate.estimatedBytes)})`,
-      );
-      return;
-    }
-
-    const controller = new AbortController();
-    applyAbortRef.current = controller;
     const name = sanitizeTerminalText(
       relativePath(stateRef.current.targetDir, candidate.path) || candidate.name,
     );
-    setApplying(name);
-    void (async () => {
-      try {
-        const result = await applyFn({
-          plan: singlePlan,
-          trash: trashMode,
-          signal: controller.signal,
-        });
-        const merged = mergeApplyReport(stateRef.current, result.report);
-        dispatch({ type: "replace", state: merged.state });
-        const verb = result.trashDir ? "moved to trash" : "deleted";
-        if (merged.removedIds.length === 0) {
-          // Zero rows left the list: claiming "deleted" would be a lie -
-          // say what actually happened (failure, or an early stop).
-          const why =
-            merged.failed > 0
-              ? `: ${sanitizeTerminalText(merged.firstFailure ?? "revalidation failed")}`
-              : merged.interrupted || merged.unattempted > 0
-                ? " - stopped before it was attempted"
-                : "";
-          setNotice(`couldn't ${trashMode ? "move" : "delete"} ${name}${why}`);
-        } else {
-          const extra =
-            merged.removedIds.length > 1 ? ` (+${merged.removedIds.length - 1} nested)` : "";
-          const stopped =
-            merged.interrupted || merged.unattempted > 0
-              ? ` - stopped early, ${merged.unattempted} left`
-              : "";
-          const failures = merged.failed > 0 ? ` · ${merged.failed} failed` : "";
-          setNotice(
-            `${verb} ${name}${extra} · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${failures}${stopped}`,
-          );
-        }
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        setNotice(
-          `couldn't ${trashMode ? "move" : "delete"} ${name}: ${sanitizeTerminalText(reason)}`,
-        );
-      } finally {
-        applyAbortRef.current = null;
-        setApplying(null);
-      }
-    })();
-  }, [pendingSingleId, plan, scan, finalize, trashMode, dryRun]);
+    runInSessionApply(singlePlan, name);
+  }, [pendingSingleId, plan, runInSessionApply]);
 
   const abortApply = useCallback(() => {
     // The runtime's raw-stdin deadman saw the same ETX byte and scheduled a
     // last-resort kill - the keymap owns this chord, so cancel it first.
     noteCtrlCHandled();
     applyAbortRef.current?.abort();
+    setApplyProgress((progress) => (progress ? { ...progress, stage: "stopping" } : null));
   }, []);
+
+  useEffect(() => {
+    const unregister = registerUiApplyCancellation(() => {
+      if (!applyAbortRef.current) return false;
+      abortApply();
+      return true;
+    });
+    return () => {
+      unregister();
+      applyAbortRef.current?.abort();
+      applyAbortRef.current = null;
+    };
+  }, [abortApply]);
 
   const renderer = useRenderer();
 
@@ -1105,13 +1164,13 @@ export function SweepApp({
       {
         key,
         state,
-        showHelp,
-        pendingApply,
+        showHelp: openModalsRef.current.has("help"),
+        pendingApply: openModalsRef.current.has("confirm"),
         showSidebar,
-        scanError,
-        inspectOpen: showInspect,
+        scanError: openModalsRef.current.has("scanError") ? scanError : null,
+        inspectOpen: openModalsRef.current.has("inspect"),
         pendingSingle: pendingSingleId !== null,
-        applying: applying !== null,
+        applying: applyAbortRef.current !== null,
         // Measured list rows once the pane has laid out; the height-minus-
         // chrome estimate only seeds the first frame before a size event.
         pageRows: viewportRowsRef.current ?? Math.max(6, dimensions.height - 10),
@@ -1147,7 +1206,9 @@ export function SweepApp({
         abortApply,
         notify: setNotice,
         readState: readFreshState,
-        isConfirmArmed: () => performance.now() - confirmArmedAtRef.current >= CONFIRM_ARM_MS,
+        isConfirmArmed: () =>
+          openModalsRef.current.has("confirm") &&
+          performance.now() - confirmArmedAtRef.current >= CONFIRM_ARM_MS,
       },
     );
   });
@@ -1184,19 +1245,28 @@ export function SweepApp({
     if (!showSidebar && state.focus === "sidebar") focusPanel("list");
   }, [showSidebar, state.focus, focusPanel]);
 
-  const confirmPreview = useMemo(
-    () =>
-      state.candidates
-        .filter(
-          (candidate) => state.selectedIds.has(candidate.id) && candidate.riskTier !== "blocked",
-        )
-        .sort((a, b) => b.estimatedBytes - a.estimatedBytes)
-        .slice(0, 3)
-        .map((candidate) =>
-          sanitizeTerminalText(relativePath(state.targetDir, candidate.path).replaceAll("\\", "/")),
-        ),
-    [state.candidates, state.selectedIds, state.targetDir],
-  );
+  const confirmPreview = useMemo(() => {
+    if (!pendingApply || pendingSingleId) return [];
+    // Only build a preview while it is visible. Keep three entries instead
+    // of sorting the entire queue on every stream batch or keypress.
+    const priority = { dangerous: 3, caution: 2, safe: 1, blocked: 0 };
+    const top: ScanCandidate[] = [];
+    for (const candidate of state.candidates) {
+      if (!state.selectedIds.has(candidate.id) || candidate.riskTier === "blocked") continue;
+      const index = top.findIndex(
+        (other) =>
+          priority[candidate.riskTier] > priority[other.riskTier] ||
+          (priority[candidate.riskTier] === priority[other.riskTier] &&
+            candidate.estimatedBytes > other.estimatedBytes),
+      );
+      top.splice(index < 0 ? top.length : index, 0, candidate);
+      if (top.length > 3) top.pop();
+    }
+    return top.map(
+      (candidate) =>
+        `${candidate.riskTier} · ${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidate.estimatedBytes)} · ${sanitizeTerminalText(relativePath(state.targetDir, candidate.path))}`,
+    );
+  }, [pendingApply, pendingSingleId, state.candidates, state.selectedIds, state.targetDir]);
 
   const headerStats = buildHeaderStats(
     plan,
@@ -1381,6 +1451,8 @@ export function SweepApp({
           <ConfirmOverlay
             tokens={tokens}
             selectedCount={1}
+            applyPolicy={scan?.applyPolicy}
+            lowerBound={pendingSingleCandidate.bytesKnown === false}
             selectedBytes={pendingSingleCandidate.estimatedBytes}
             dangerousCount={pendingSingleCandidate.riskTier === "dangerous" ? 1 : 0}
             previewPaths={[
@@ -1389,17 +1461,19 @@ export function SweepApp({
               ),
             ]}
             {...(dryRun ? { dryRun: true } : {})}
-            {...(trashMode ? { trash: true } : {})}
+            {...(trashModeRef.current ? { trash: true } : {})}
           />
         ) : (
           <ConfirmOverlay
             tokens={tokens}
             selectedCount={summary.selectedCount}
+            applyPolicy={scan?.applyPolicy}
+            lowerBound={Boolean(summary.selectedBytesPartial)}
             selectedBytes={summary.selectedBytes}
             dangerousCount={dangerousSelected}
             previewPaths={confirmPreview}
             {...(dryRun ? { dryRun: true } : {})}
-            {...(trashMode ? { trash: true } : {})}
+            {...(trashModeRef.current ? { trash: true } : {})}
           />
         )
       ) : null}
@@ -1418,18 +1492,48 @@ export function SweepApp({
         </Modal>
       ) : null}
       {applying !== null ? (
-        <Modal tokens={tokens} title=" applying " titleColor={tokens.info} width={52}>
+        <Modal tokens={tokens} title=" applying " titleColor={tokens.info} width={68}>
+          <DotStrip tokens={tokens} width={12} />
           <text
-            content={t`${fg(tokens.text)("Removing ")}${bold(fg(tokens.text)(applying))}`}
+            content={`${applyProgress?.stage === "stopping" ? "Stopping" : applyProgress?.stage === "preparing" ? "Preparing" : "Removing"} ${applying}`}
+            fg={tokens.text}
             wrapMode="none"
           />
+          {applyProgress?.stage === "preparing" && applyProgress.preparingCount !== undefined ? (
+            <text
+              content={`${applyProgress.preparationPhase === "validating" ? "Validating paths" : "Checking current size"}: ${applyProgress.preparedCount ?? 0} / ${applyProgress.preparingCount}`}
+              fg={tokens.textMuted}
+            />
+          ) : null}
+          <text
+            content={`${applyProgress?.deletedCount ?? 0} / ${applyProgress?.selectedCount ?? 0} removals completed · ${((applyProgress?.elapsedMs ?? 0) / 1000).toFixed(1)}s`}
+            fg={tokens.text}
+          />
+          <text
+            content={`~${formatBytes(applyProgress?.estimatedBytesFreed ?? 0)} estimated bytes ${trashMode ? "moved" : "removed"}`}
+            fg={tokens.textMuted}
+          />
+          {applyProgress?.activePath ? (
+            <text
+              content={sanitizeTerminalText(
+                relativePath(state.targetDir, applyProgress.activePath),
+              )}
+              fg={tokens.textMuted}
+              wrapMode="none"
+            />
+          ) : null}
           <text content="" />
           <text
-            content={t`${fg(tokens.textMuted)("in-flight work finishes; no new deletes schedule")}`}
-            wrapMode="none"
+            content={
+              applyProgress?.stage === "stopping"
+                ? "Stopping new removals; waiting for in-flight work."
+                : "ctrl-c stops new removals; in-flight work may finish."
+            }
+            fg={tokens.textMuted}
           />
           <text
-            content={t`${bold(fg(tokens.text)("ctrl-c"))} ${fg(tokens.textMuted)("stop now - the report still lands")}`}
+            content="Completed deletions are not undone. The report stays here."
+            fg={tokens.textMuted}
           />
         </Modal>
       ) : null}

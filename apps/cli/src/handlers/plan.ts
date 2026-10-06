@@ -25,6 +25,7 @@ export async function handlePlan(pathArg: string, opts: CliOptions): Promise<voi
       selectionPolicy,
       engine,
       projectConfig,
+      resourceProfile: opts.resourceProfile,
     });
 
     writeJson(plan);

@@ -1,3 +1,4 @@
+import { readApplyLockStatus } from "@kitsunekode/sweep-core/apply-session";
 import { statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -9,7 +10,6 @@ import {
   isRustEngineAvailable,
   resolveRustEngineBinary,
 } from "@kitsunekode/sweep-core/rust-engine";
-import { scan } from "@kitsunekode/sweep-core/scanner";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { formatBytes, sanitizeTerminalText } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
@@ -17,6 +17,8 @@ import {
   applyNoColor,
   isOpenTuiAvailable,
   resolveScanConfig,
+  resolveEngineBackend,
+  runScanToPlan,
   warnIgnoredOptions,
   writeJson,
 } from "./shared.js";
@@ -31,18 +33,6 @@ export type DoctorCheck = {
   ok: boolean;
   detail: string;
 };
-
-function duAvailable(): boolean {
-  if (process.platform !== "linux" && process.platform !== "darwin") {
-    return false;
-  }
-  try {
-    execFileSync("du", ["-sk", "."], { stdio: "ignore", timeout: 2000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function targetIsDirectory(targetDir: string): boolean {
   try {
@@ -60,7 +50,23 @@ export async function collectDoctorChecks(
   const configPath = findProjectConfigPath(targetDir);
   const rustBinary = resolveRustEngineBinary();
   const rustOk = isRustEngineAvailable();
-  const duOk = duAvailable();
+  let rustSafetyOk = false;
+  if (rustOk) {
+    try {
+      const capabilities = JSON.parse(
+        execFileSync(rustBinary, ["--capabilities"], {
+          encoding: "utf8",
+          timeout: 1000,
+          killSignal: "SIGKILL",
+          maxBuffer: 4096,
+        }),
+      );
+      rustSafetyOk = capabilities?.applyControl === true && capabilities?.planIdentity === true;
+    } catch {
+      /* Report an incompatible or broken engine rather than certifying it. */
+    }
+  }
+  const engine = resolveEngineBackend(opts);
   const openTuiOk = isOpenTuiAvailable();
   const hasConfigFile = configPath !== null;
   const configValidity = hasConfigFile
@@ -84,9 +90,13 @@ export async function collectDoctorChecks(
     scanDetail = `skipped (config error: ${configLoadError})`;
   } else {
     try {
-      const result = await scan(targetDir, config, false);
+      const { result } = await runScanToPlan(targetDir, config, {
+        engine,
+        exact: false,
+        resourceProfile: opts.resourceProfile,
+      });
       scanDetail =
-        `${result.entries.length} candidates · ${formatBytes(result.estimatedTotalBytes)} · ` +
+        `${engine} · ${result.entries.length} candidates · ${formatBytes(result.estimatedTotalBytes)} · ` +
         `${result.scannedDirs} dirs` +
         (result.skippedDirs > 0 ? ` (${result.skippedDirs} skipped)` : "");
     } catch (error) {
@@ -95,7 +105,15 @@ export async function collectDoctorChecks(
     }
   }
 
+  const lock = readApplyLockStatus();
   return [
+    {
+      name: "apply_lock",
+      ok: !lock.held,
+      detail: !lock.held
+        ? "available"
+        : `${lock.lockPath} · ${lock.owner ? `host PID ${lock.owner.pid}: ${lock.processStatus}; journal ${lock.owner.journalPath}` : (lock.detail ?? "owner unknown")}. Inspect recovery before manual cleanup; a child may outlive the host.`,
+    },
     { name: "protocol", ok: true, detail: PROTOCOL_VERSION },
     {
       name: "target",
@@ -125,13 +143,20 @@ export async function collectDoctorChecks(
       ok: true,
       detail: String(config?.disabledPatterns?.length ?? 0),
     },
-    { name: "du", ok: duOk, detail: duOk ? "available" : "walk fallback" },
+
     {
       name: "opentui",
       ok: openTuiOk,
       detail: openTuiOk ? "available" : "install @opentui/core for sweep ui",
     },
     { name: "rust_engine", ok: rustOk, detail: rustOk ? rustBinary : "not found" },
+    {
+      name: "rust_apply_safety",
+      ok: rustSafetyOk,
+      detail: rustSafetyOk
+        ? "controlled cancellation and plan identity supported"
+        : "missing or incompatible native capabilities",
+    },
     { name: "dry_scan", ok: scanOk, detail: scanDetail },
   ];
 }

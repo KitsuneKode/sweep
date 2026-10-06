@@ -293,7 +293,9 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
     apply::apply_plan(plan)
 }
 
-pub use apply::{apply_plan_controlled, apply_plan_controlled_with_limit};
+pub use apply::{
+    apply_plan_controlled, apply_plan_controlled_with_limit, apply_plan_controlled_with_progress,
+};
 
 fn build_plan(
     target_dir: &str,

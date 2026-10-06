@@ -13,6 +13,9 @@
 
 ## Next
 
+- [ ] Finish the [supplied audit triage and release boundaries](audit-triage-2026-10-07.md),
+      including macOS mounts, resource-charge parity, live UI streaming and installer faults.
+
 - [x] Implement local [production qualification and long-session UX](production-qualification.md):
       native Linux descriptor removal, private bind mounts, installed packages,
       serialized paced decoding, queue/tree gestures, cache release and one final review.

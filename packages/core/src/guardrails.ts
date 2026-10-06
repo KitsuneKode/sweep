@@ -49,6 +49,7 @@ function buildBlockedRoots(): Set<string> {
     "/sys",
     "/proc",
     "/dev",
+    "/tmp",
     homedir(),
   ]);
 
@@ -91,13 +92,63 @@ export class GuardrailError extends Error {
   }
 }
 
+/** A refusal with authoritative evidence that no removal began. Never infer
+ * this from an empty progress set after a process crash or broken stream. */
+export type ApplyRefusalCode = "size_limit_exceeded" | "current_size_unavailable" | "apply_busy";
+export class ApplyRefusedError extends GuardrailError {
+  readonly applyOutcome = "not_started" as const;
+  constructor(
+    message: string,
+    readonly refusalCode: ApplyRefusalCode,
+  ) {
+    super(message);
+    this.name = "ApplyRefusedError";
+  }
+}
+
+// Structural check survives the separately bundled UI/core module boundary.
+export function isApplyRefusedError(error: unknown): error is ApplyRefusedError {
+  if (!(error instanceof Error)) return false;
+  const value = error as Partial<ApplyRefusedError>;
+  return (
+    value.applyOutcome === "not_started" &&
+    ["size_limit_exceeded", "current_size_unavailable", "apply_busy"].includes(
+      value.refusalCode ?? "",
+    )
+  );
+}
+
 // ─── Checks ───────────────────────────────────────────────────────────────────
+
+/** Fresh identity checks also catch same-device bind aliases of a protected
+ * root. Do not cache these across operations: mounts and directory identities
+ * can change during a long-lived UI session. */
+function aliasesProtectedRoot(resolved: string): boolean {
+  let target;
+  try {
+    target = statSync(resolved, { bigint: true });
+  } catch {
+    return false;
+  }
+  if (!target.isDirectory() || target.ino === 0n) return false;
+  for (const root of BLOCKED_ROOTS) {
+    try {
+      const protectedMeta = statSync(root, { bigint: true });
+      if (target.dev === protectedMeta.dev && target.ino === protectedMeta.ino) return true;
+    } catch {
+      // Missing system directories are platform-dependent, not scan failures.
+    }
+  }
+  return false;
+}
 
 /** Blocked-root + depth policy on one already-resolved absolute path. */
 function assertResolvedSafe(resolved: string): void {
   const isBlocked =
     BLOCKED_ROOTS.has(resolved) ||
-    (CASE_FOLD_BLOCKED && BLOCKED_ROOTS_LOWER.has(resolved.toLowerCase()));
+    (CASE_FOLD_BLOCKED && BLOCKED_ROOTS_LOWER.has(resolved.toLowerCase())) ||
+    aliasesProtectedRoot(resolved) ||
+    pathHasProtectedVcsSegment(resolved);
 
   if (isBlocked) {
     throw new GuardrailError(
@@ -217,11 +268,22 @@ export function assertSizeLimit(
   maxSizeGB: number,
   forceLarge: boolean,
 ): void {
+  if (
+    !Number.isSafeInteger(estimatedBytes) ||
+    estimatedBytes < 0 ||
+    !Number.isFinite(maxSizeGB) ||
+    maxSizeGB < 0 ||
+    maxSizeGB > Number.MAX_SAFE_INTEGER / 1024 ** 3
+  )
+    throw new GuardrailError(
+      "Invalid size ceiling or byte total; cannot safely verify removal size",
+    );
   const estimatedGB = estimatedBytes / 1024 ** 3;
   if (estimatedGB > maxSizeGB && !forceLarge) {
-    throw new GuardrailError(
-      `Estimated size (${estimatedGB.toFixed(1)} GB) exceeds limit (${maxSizeGB} GB).\n` +
-        `  Use --force-large --yes to proceed anyway.`,
+    throw new ApplyRefusedError(
+      `Selection (${estimatedGB.toFixed(1)} GiB) exceeds the configured ${maxSizeGB} GiB limit. ` +
+        `Reduce the queue, raise maxSizeGB in .sweeprc, or restart with --force-large --yes. Nothing removed.`,
+      "size_limit_exceeded",
     );
   }
 }
@@ -286,7 +348,7 @@ export function isPathWithinRoot(candidatePath: string, rootPath: string): boole
   }
   // Only an actual `..` first segment means escape - `..foo` is a legal
   // directory name that lives INSIDE the root and must not be refused.
-  if (rel === ".." || rel.startsWith("../") || rel.startsWith("..\\") || isAbsolute(rel)) {
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
     return false;
   }
   return true;
@@ -343,7 +405,7 @@ export function pathUsesProcessRelativeRoot(candidatePath: string): boolean {
   const segments = normalize(candidatePath)
     .split(sep)
     .filter((segment) => segment.length > 0);
-  const [first, second, third] = segments;
+  const [first, second, third, fourth, fifth] = segments;
   if (
     first === "dev" &&
     (second === "fd" || second === "stdin" || second === "stdout" || second === "stderr")
@@ -357,7 +419,14 @@ export function pathUsesProcessRelativeRoot(candidatePath: string): boolean {
     first === "proc" &&
     second !== undefined &&
     /^\d+$/.test(second) &&
-    (third === "cwd" || third === "root" || third === "fd" || third === "fdinfo")
+    (third === "cwd" ||
+      third === "root" ||
+      third === "fd" ||
+      third === "fdinfo" ||
+      (third === "task" &&
+        fourth !== undefined &&
+        /^\d+$/.test(fourth) &&
+        (fifth === "cwd" || fifth === "root" || fifth === "fd" || fifth === "fdinfo")))
   ) {
     return true;
   }

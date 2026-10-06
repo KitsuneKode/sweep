@@ -24,6 +24,21 @@ export function noteCtrlCHandled(): void {
   }
 }
 
+// A signal/deadman must cooperate with an active apply before tearing down
+// the renderer. Returns false when there is no apply to drain.
+let cancelActiveUiApply: (() => boolean) | undefined;
+
+export function registerUiApplyCancellation(cancel: () => boolean): () => void {
+  cancelActiveUiApply = cancel;
+  return () => {
+    if (cancelActiveUiApply === cancel) cancelActiveUiApply = undefined;
+  };
+}
+
+export function requestUiApplyCancellation(): boolean {
+  return cancelActiveUiApply?.() ?? false;
+}
+
 /**
  * Own Ctrl+C / SIGTERM ourselves. OpenTUI's default `exitOnCtrlC` destroys the
  * renderer without aborting the scan subprocess, which leaves `sweep ui` hung.
@@ -70,7 +85,9 @@ export async function openUiSession(): Promise<UiSession> {
     resolveDone(outcome);
   };
 
-  const onSignal = () => finish({ type: "abort" });
+  const onSignal = () => {
+    if (!requestUiApplyCancellation()) finish({ type: "abort" });
+  };
 
   /**
    * Last-resort quit path.
@@ -130,7 +147,7 @@ export async function openUiSession(): Promise<UiSession> {
     // sever the apply mid-syscall with no report and no history entry.
     pendingDeadman ??= setTimeout(() => {
       pendingDeadman = undefined;
-      finish({ type: "abort" });
+      onSignal();
     }, 750);
     pendingDeadman.unref?.();
   };

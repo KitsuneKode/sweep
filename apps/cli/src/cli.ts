@@ -1,4 +1,13 @@
 import { Command, InvalidArgumentError, Option } from "commander";
+import {
+  PROTOCOL_VERSION,
+  SCAN_PLAN_SCHEMA,
+  SCAN_EVENT_SCHEMA,
+  APPLY_REPORT_SCHEMA,
+  PROTOCOL_SHARED_SCHEMA,
+} from "@kitsunekode/sweep-protocol";
+import { writeJson, drainStdout } from "./handlers/shared.js";
+import { EXIT, exitWith, handleFatalError } from "./errors.js";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { handleApply } from "./handlers/apply.js";
 import { handleClean } from "./handlers/clean.js";
@@ -9,6 +18,7 @@ import { handleInspect } from "./handlers/inspect.js";
 import { handlePlan } from "./handlers/plan.js";
 import { handleScan } from "./handlers/scan.js";
 import { handleStats } from "./handlers/stats.js";
+import { handleRecover } from "./handlers/recover.js";
 import { handleUi } from "./handlers/ui.js";
 
 // Injected at build time by apps/cli/scripts/build.ts via Bun.build define.
@@ -83,6 +93,14 @@ function addScanOptions<T extends Command>(command: T): T {
         )
           .choices(["auto", "rust", "js"])
           .default("auto"),
+      )
+      .addOption(
+        new Option(
+          "--resource-profile <profile>",
+          "Scan resource allowance (logical memory, not RSS)",
+        )
+          .choices(["balanced", "low-memory"])
+          .default("balanced"),
       )
       .option(
         "--cold",
@@ -188,6 +206,36 @@ export function makeProgram(): Command {
         }
       >();
       void handleApply(opts);
+    });
+
+  program
+    .command("schema")
+    .description("Export versioned plan, event and report JSON Schemas without scanning")
+    .action(async () => {
+      try {
+        writeJson({
+          protocolVersion: PROTOCOL_VERSION,
+          schemas: {
+            scanPlan: SCAN_PLAN_SCHEMA,
+            scanEvent: SCAN_EVENT_SCHEMA,
+            applyReport: APPLY_REPORT_SCHEMA,
+            shared: PROTOCOL_SHARED_SCHEMA,
+          },
+        });
+        await drainStdout();
+        exitWith(EXIT.OK);
+      } catch (error) {
+        handleFatalError(error);
+      }
+    });
+
+  program
+    .command("recover")
+    .description("Inspect an apply journal without retrying or restoring operations")
+    .requiredOption("--journal <path>", "Private apply journal to inspect")
+    .option("--json", "Emit JSON recovery observations", false)
+    .action(function (this: Command) {
+      void handleRecover(this.optsWithGlobals<{ journal: string; json?: boolean }>());
     });
 
   program

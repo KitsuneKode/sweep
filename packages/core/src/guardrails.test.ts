@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +8,8 @@ import {
   assertSafePattern,
   assertSizeLimit,
   assertTargetDirectory,
+  pathUsesProcessRelativeRoot,
+  isPathWithinRoot,
 } from "./guardrails.js";
 
 describe("assertSafeCwd", () => {
@@ -246,4 +248,42 @@ describe("assertSizeLimit", () => {
     expect(() => assertSizeLimit(oneGB + 1, 1, false)).toThrow(GuardrailError);
     expect(() => assertSizeLimit(oneGB + 1, 2, false)).not.toThrow();
   });
+});
+
+for (const vcs of [".git", ".svn", ".hg", ".jj"]) {
+  test(`scan target inside ${vcs} is refused before traversal`, () => {
+    expect(() => assertSafeCwd(join(tmpdir(), "project", vcs, "objects"))).toThrow(GuardrailError);
+  });
+}
+
+test.skipIf(process.platform === "win32")(
+  "canonical system aliases retain blocked-root policy",
+  () => {
+    for (const root of ["/bin", "/etc", "/var", "/tmp"]) {
+      expect(() => assertSafeCwd(realpathSync(root))).toThrow(GuardrailError);
+    }
+  },
+);
+
+test.skipIf(process.platform === "win32")("proc task magic roots are process-relative", () => {
+  for (const leaf of ["cwd", "root", "fd", "fdinfo"]) {
+    expect(pathUsesProcessRelativeRoot(`/proc/123/task/456/${leaf}/project`)).toBe(true);
+    expect(pathUsesProcessRelativeRoot(`/proc//123//task//456//${leaf}/project`)).toBe(true);
+  }
+  expect(pathUsesProcessRelativeRoot("/proc/123/task/456/status")).toBe(false);
+});
+
+test.skipIf(process.platform === "win32")(
+  "literal backslash names remain inside a POSIX root",
+  () => {
+    const root = join(tmpdir(), "sweep-project");
+    expect(isPathWithinRoot(join(root, "..\\x", "node_modules"), root)).toBe(true);
+    expect(isPathWithinRoot(join(root, "..", "outside"), root)).toBe(false);
+  },
+);
+
+test("invalid byte ceilings cannot silently disable size validation", () => {
+  for (const ceiling of [NaN, Infinity, -1, Number.MAX_VALUE])
+    expect(() => assertSizeLimit(1, ceiling, true)).toThrow("Invalid size");
+  expect(() => assertSizeLimit(Number.MAX_SAFE_INTEGER + 1, 600, true)).toThrow("Invalid size");
 });

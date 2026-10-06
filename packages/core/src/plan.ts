@@ -143,6 +143,24 @@ export function validateApplyReport(value: unknown): ApplyReport {
  * Stream events are on the hot path, so they validate by hand; plan files
  * keep the full AJV validator since they are one-shot reads.
  */
+const KINDS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  ".turbo",
+  ".vite",
+  ".parcel-cache",
+  "target",
+  "coverage",
+  ".nyc_output",
+  "tsbuildinfo",
+  "custom",
+]);
+
 export function validateScanEvent(value: unknown): ScanEvent {
   const fail = (detail: string): never => {
     throw new PlanValidationError(`Invalid scan event from engine: ${detail}`);
@@ -159,23 +177,6 @@ export function validateScanEvent(value: unknown): ScanEvent {
   const MAX_REASON_CHARS = 1024;
   const MAX_REASONS = 64;
   const MAX_MESSAGE_CHARS = 64 * 1024;
-  const KINDS = new Set([
-    "node_modules",
-    "dist",
-    "build",
-    "out",
-    ".next",
-    ".nuxt",
-    ".svelte-kit",
-    ".turbo",
-    ".vite",
-    ".parcel-cache",
-    "target",
-    "coverage",
-    ".nyc_output",
-    "tsbuildinfo",
-    "custom",
-  ]);
 
   const candidateOk = (candidate: unknown): candidate is ScanCandidate => {
     if (typeof candidate !== "object" || candidate === null) return false;

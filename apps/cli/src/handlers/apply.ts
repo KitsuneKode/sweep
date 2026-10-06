@@ -34,6 +34,7 @@ export type ApplyHandlerOptions = import("@kitsunekode/sweep-protocol").CliOptio
 export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
   applyNoColor(opts.color);
 
+  let operationEntered = false;
   try {
     const plan = loadPlan(opts.plan);
     assertSafeCwd(plan.targetDir);
@@ -104,6 +105,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
 
     const engine = resolveEngineBackend({ engine: opts.engine ?? "auto" });
 
+    operationEntered = true;
     const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(plan, engine, {
       maxSizeGB: config.maxSizeGB,
       forceLarge: opts.forceLarge,
@@ -134,6 +136,9 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
     await drainStdout();
     exitWith(interrupted ? EXIT.ABORTED : report.failedCount > 0 ? EXIT.FAILURE : EXIT.OK);
   } catch (err) {
-    handleFatalError(err);
+    handleFatalError(err, {
+      json: opts.json,
+      applyOutcome: operationEntered ? "unknown" : "not_started",
+    });
   }
 }

@@ -80,11 +80,13 @@ export interface SweepUiModule {
     config: import("@kitsunekode/sweep-protocol").SweepConfig;
     selectionPolicy: import("@kitsunekode/sweep-protocol").SelectionPolicy;
     engine: "js" | "rust";
+    forceLarge?: boolean;
+    resourceProfile?: import("@kitsunekode/sweep-protocol").ResourceProfile | undefined;
     dryRun?: boolean;
     trash?: boolean;
     yes?: boolean;
     /**
-     * In-session apply channel for single-row deletes (x). Runs the full
+     * In-session apply channel for queued and single-row deletes (x). Runs the full
      * engine apply pipeline quietly - the TUI owns the screen, so progress
      * lines must not print. History is appended inside the channel.
      */
@@ -93,6 +95,7 @@ export interface SweepUiModule {
       engine: "js" | "rust";
       trash: boolean;
       signal: AbortSignal;
+      onProgress?: (progress: import("@kitsunekode/sweep-protocol").ApplyProgress) => void;
     }) => Promise<{ report: ApplyReport; interrupted: boolean; trashDir?: string }>;
     init?: {
       catalogPatterns?: string[];
@@ -163,7 +166,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
 
     if (opts.forceLarge && !opts.yes) {
       throw new GuardrailError(
-        "--force-large requires --yes. Large deletes must be non-interactive.",
+        "--force-large requires --yes as explicit large-operation authorization. The TUI still confirms each apply.",
       );
     }
 
@@ -190,13 +193,15 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     const { runSweepUiStreaming } = await loadSweepUi();
 
     const outcome = await runSweepUiStreaming({
+      resourceProfile: opts.resourceProfile,
+      ...(opts.forceLarge ? { forceLarge: true } : {}),
       targetDir,
       config: scanConfig,
       selectionPolicy,
       engine,
       ...(opts.dryRun ? { dryRun: true } : {}),
       ...(opts.trash ? { trash: true } : {}),
-      // Single-row deletes (x) run through the same apply pipeline as the
+      // Queued and single-row deletes (x) run through the same apply pipeline as the
       // exit path - revalidation, containment, outcomes, history - just
       // quietly, because the TUI owns the screen. Trash on rust resolves to
       // the js engine here so the stderr warning never paints over it.
@@ -210,6 +215,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
             maxSizeGB: scanConfig.maxSizeGB,
             forceLarge: opts.forceLarge,
             signal: request.signal,
+            ...(request.onProgress ? { onProgress: request.onProgress } : {}),
           },
         ),
       init: {

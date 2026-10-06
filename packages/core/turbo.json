@@ -1,0 +1,8 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "dependsOn": ["transit", "^build", "sweep-engine-cli#build"]
+    }
+  }
+}
