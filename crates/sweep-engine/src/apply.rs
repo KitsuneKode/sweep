@@ -135,10 +135,6 @@ pub fn apply_plan_controlled_with_progress(
         });
     }
 
-    if selected.is_empty() {
-        return Ok(ApplyReport::empty(plan));
-    }
-
     // The target is untrusted input too: a relative/`..`-carrying spelling
     // resolves against the applying process's cwd, and a leaf symlink like
     // /proc/self/cwd resolves to wherever the victim ran sweep - every
@@ -168,6 +164,9 @@ pub fn apply_plan_controlled_with_progress(
             });
         }
     }
+    if selected.is_empty() {
+        return Ok(ApplyReport::empty(plan));
+    }
     // Resolve the target once: lexical containment alone is not enough - a
     // directory inside the tree can be swapped for a symlink between scan and
     // apply, and rm would then recurse through it outside the target.
@@ -192,6 +191,11 @@ pub fn apply_plan_controlled_with_progress(
         }
         .snapshot()
     });
+    if current_root.is_none() {
+        return Err(EngineError::InvalidPlan {
+            message: "filesystem root identity is unavailable; apply is disabled on this filesystem; rescanning cannot establish a stable identity".to_owned(),
+        });
+    }
     if scanned_root.is_none() || scanned_root != current_root.as_ref() {
         return Err(EngineError::InvalidPlan {
             message:
@@ -202,6 +206,7 @@ pub fn apply_plan_controlled_with_progress(
 
     let mut ready: Vec<ScanEntry> = Vec::new();
     let mut entry_identities = std::collections::HashMap::new();
+    let mut ids_by_path = std::collections::HashMap::new();
     let mut failed_paths: Vec<PathFailure> = Vec::new();
 
     let mut outcomes: Vec<ApplyOutcome> = selected
@@ -272,6 +277,11 @@ pub fn apply_plan_controlled_with_progress(
         match revalidate_candidate(candidate, real_root.as_deref()) {
             Ok(validated) => {
                 outcomes[outcome_index[candidate.id.as_str()]].status = "unattempted".to_owned();
+                // Only a validated candidate can own a removal receipt. A
+                // later rejected duplicate spelling must not overwrite it.
+                ids_by_path
+                    .entry(candidate.entry.path.as_str())
+                    .or_insert(candidate.id.as_str());
                 entry_identities.insert(validated.entry.path.clone(), validated.identity);
                 ready.push(validated.entry);
             }
@@ -279,14 +289,26 @@ pub fn apply_plan_controlled_with_progress(
         }
     }
 
-    let ready = deduplicate_nested_entries(ready);
+    // Resolve aliases once, before preflight can yield to external writers.
+    // The same frozen keys drive deduplication, deletion IDs and coverage.
+    let selected_keys: std::collections::HashMap<&str, String> = selected
+        .iter()
+        .map(|c| (c.id.as_str(), dedupe_key(&c.entry.path)))
+        .collect();
+    let ready = deduplicate_nested_entries(
+        ready
+            .into_iter()
+            .map(|entry| {
+                (
+                    selected_keys[ids_by_path[entry.path.as_str()]].clone(),
+                    entry,
+                )
+            })
+            .collect(),
+    );
     if let Some(limit) = max_bytes.filter(|_| !cancelled.load(Ordering::Acquire)) {
         let mut sizes = std::collections::HashMap::new();
-        let ids_by_path: std::collections::HashMap<&str, &str> = selected
-            .iter()
-            .map(|c| (c.entry.path.as_str(), c.id.as_str()))
-            .collect();
-        for (completed, entry) in ready.iter().enumerate() {
+        for (completed, (_, entry)) in ready.iter().enumerate() {
             if cancelled.load(Ordering::Acquire) {
                 break;
             }
@@ -301,6 +323,9 @@ pub fn apply_plan_controlled_with_progress(
                 &budget,
                 Some(cancelled),
             );
+            if cancelled.load(Ordering::Acquire) {
+                break;
+            }
             if let Some(message) = budget.error() {
                 return Err(EngineError::ResourceLimit { message });
             }
@@ -308,7 +333,7 @@ pub fn apply_plan_controlled_with_progress(
             on_preparing(id, completed + 1, ready.len());
         }
         let mut total = 0u64;
-        for entry in &ready {
+        for (_, entry) in &ready {
             if cancelled.load(Ordering::Acquire) {
                 break;
             }
@@ -331,7 +356,7 @@ pub fn apply_plan_controlled_with_progress(
                     message: "refreshed byte counter overflow".to_owned(),
                 })?;
         }
-        if total > limit {
+        if !cancelled.load(Ordering::Acquire) && total > limit {
             return Err(GuardrailError::SizeLimitExceeded {
                 selected_bytes: total,
             }
@@ -341,31 +366,14 @@ pub fn apply_plan_controlled_with_progress(
     let mut deleted_count = 0u32;
     let mut total_bytes_freed = 0u64;
 
-    let mut retained_ids = std::collections::HashMap::new();
-    // Freeze aliases before removals: canonicalizing an alias whose parent
-    // was just deleted falls back to its lexical spelling and loses coverage.
-    let selected_keys: std::collections::HashMap<&str, String> = selected
-        .iter()
-        .map(|c| (c.id.as_str(), dedupe_key(&c.entry.path)))
-        .collect();
-    for c in &selected {
-        if outcomes[outcome_index[c.id.as_str()]].status == "unattempted" {
-            retained_ids
-                .entry(selected_keys[c.id.as_str()].clone())
-                .or_insert(c.id.as_str());
-        }
-    }
-    let ready: Vec<(String, ScanEntry)> = ready
-        .into_iter()
-        .map(|entry| (dedupe_key(&entry.path), entry))
-        .collect();
     let mut removed = std::collections::HashMap::new();
     let mut removed_dirs = std::collections::HashMap::new();
     for (key, entry) in ready {
         if cancelled.load(Ordering::Acquire) {
             break;
         }
-        let id = retained_ids[key.as_str()];
+        // Original plan paths are stable data; live canonical parents are not.
+        let id = ids_by_path[entry.path.as_str()];
         if cancelled.load(Ordering::Acquire) {
             break;
         }
@@ -690,15 +698,9 @@ fn dedupe_key(path: &str) -> String {
     }
 }
 
-fn deduplicate_nested_entries(entries: Vec<ScanEntry>) -> Vec<ScanEntry> {
-    // Key once per entry - computing inside the comparator would be O(n log n)
-    // keys instead of O(n).
-    let mut keyed: Vec<(String, ScanEntry)> = entries
-        .into_iter()
-        .map(|entry| (dedupe_key(&entry.path), entry))
-        .collect();
+fn deduplicate_nested_entries(mut keyed: Vec<(String, ScanEntry)>) -> Vec<(String, ScanEntry)> {
     keyed.sort_by(|left, right| left.0.cmp(&right.0));
-    let mut retained: Vec<ScanEntry> = Vec::new();
+    let mut retained = Vec::new();
     let mut retained_exact = std::collections::HashSet::new();
     let mut retained_dirs = std::collections::HashSet::new();
     for (key, entry) in keyed {
@@ -724,9 +726,9 @@ fn deduplicate_nested_entries(entries: Vec<ScanEntry>) -> Vec<ScanEntry> {
         }
         retained_exact.insert(key.clone());
         if entry.entry_type == EntryType::Directory && !entry.is_symlink {
-            retained_dirs.insert(key);
+            retained_dirs.insert(key.clone());
         }
-        retained.push(entry);
+        retained.push((key, entry));
     }
     retained
 }
@@ -990,6 +992,69 @@ mod tests {
     use super::*;
     use sweep_types::{RiskTier, ScanCandidate, ScanPlanSummary, SelectionPolicy};
     use tempfile::tempdir;
+
+    #[test]
+    fn an_empty_selection_still_requires_an_existing_real_target() -> std::io::Result<()> {
+        let owned = tempdir()?;
+        let target = owned.path().join("missing");
+        let plan = ScanPlan::empty(target.to_string_lossy().into_owned(), "test");
+        assert!(apply_plan(&plan).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn a_rejected_duplicate_path_cannot_take_the_valid_candidates_receipt() -> std::io::Result<()> {
+        let owned = tempdir()?;
+        let artifact = owned.path().join("node_modules");
+        fs::create_dir(&artifact)?;
+        let mut plan = ScanPlan::empty(owned.path().to_string_lossy().into_owned(), "test");
+        let good = candidate(
+            &artifact.to_string_lossy(),
+            "node_modules",
+            EntryType::Directory,
+            false,
+        );
+        let mut bad = good.clone();
+        bad.id = "rejected_duplicate".to_owned();
+        plan.selected_candidate_ids = vec![good.id.clone(), bad.id.clone()];
+        plan.candidates = vec![good, bad];
+        let mut plan = approved_fixture(&plan);
+        plan.candidates[1].entry.identity = None;
+        let report = apply_plan(&plan).unwrap_or_else(|err| panic!("apply: {err}"));
+        let outcomes = report.outcomes.unwrap_or_default();
+        assert_eq!(outcomes[0].status, "deleted");
+        assert_eq!(outcomes[1].status, "failed");
+        assert_eq!(report.deleted_count, 1);
+        assert_eq!(report.failed_count, 1);
+        assert!(!artifact.exists());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deduplication_keeps_frozen_keys_when_an_alias_changes() -> std::io::Result<()> {
+        let owned = tempdir()?;
+        let first = owned.path().join("first");
+        let second = owned.path().join("second");
+        let alias = owned.path().join("alias");
+        fs::create_dir(&first)?;
+        fs::create_dir(&second)?;
+        std::os::unix::fs::symlink(&first, &alias)?;
+        let candidate = candidate(
+            &alias.join("node_modules").to_string_lossy(),
+            "node_modules",
+            EntryType::Directory,
+            false,
+        );
+        let frozen = dedupe_key(&candidate.entry.path);
+        fs::remove_file(&alias)?;
+        std::os::unix::fs::symlink(&second, &alias)?;
+        assert_ne!(frozen, dedupe_key(&candidate.entry.path));
+        let ready = deduplicate_nested_entries(vec![(frozen.clone(), candidate.entry)]);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].0, frozen);
+        Ok(())
+    }
 
     #[cfg(unix)]
     #[test]

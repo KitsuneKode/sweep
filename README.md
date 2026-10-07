@@ -96,24 +96,25 @@ sweep doctor --json     # config + environment + dry-scan report
 
 ### Common flags
 
-| Flag                     | Short | Description                                        |
-| ------------------------ | ----- | -------------------------------------------------- |
-| `--dry-run`              | `-n`  | Preview deletions - no changes                     |
-| `--trash`                |       | Move to `.sweep-trash-<ts>/` instead of deleting   |
-| `--yes`                  | `-y`  | Skip confirmation (CI / scripts)                   |
-| `--force-large`          |       | Allow deletion over `maxSizeGB` (requires `--yes`) |
-| `--pattern <p>`          | `-p`  | Add extra pattern (repeatable)                     |
-| `--ignore <p>`           | `-i`  | Ignore name, glob, or path prefix (repeatable)     |
-| `--disabled-pattern <p>` |       | Disable a default pattern for this run             |
-| `--select <mode>`        |       | `default`, `safe`, `all`, or `none`                |
-| `--include-dangerous`    |       | Include dangerous custom matches                   |
-| `--depth <n>`            |       | Max recursion depth (`-1` = unlimited)             |
-| `--config <path>`        |       | Explicit config file                               |
-| `--engine <backend>`     |       | `auto` (default), `rust`, or `js`                  |
-| `--cold`                 |       | Dev: fresh engine probe + page-cache drop attempt  |
-| `--no-color`             |       | Disable color output                               |
-| `--quiet`                | `-q`  | Suppress non-essential output                      |
-| `--verbose`              |       | Per-candidate scan progress                        |
+| Flag                     | Short | Description                                                   |
+| ------------------------ | ----- | ------------------------------------------------------------- |
+| `--dry-run`              | `-n`  | Preview deletions - no changes                                |
+| `--trash`                |       | Move to `.sweep-trash-<ts>/` instead of deleting              |
+| `--yes`                  | `-y`  | Skip confirmation (CI / scripts)                              |
+| `--force-large`          |       | Allow deletion over `maxSizeGB` (requires `--yes`)            |
+| `--max-size-gb <gib>`    |       | Per-run byte ceiling in GiB; `none` disables a configured cap |
+| `--pattern <p>`          | `-p`  | Add extra pattern (repeatable)                                |
+| `--ignore <p>`           | `-i`  | Ignore name, glob, or path prefix (repeatable)                |
+| `--disabled-pattern <p>` |       | Disable a default pattern for this run                        |
+| `--select <mode>`        |       | `default`, `safe`, `all`, or `none`                           |
+| `--include-dangerous`    |       | Include dangerous custom matches                              |
+| `--depth <n>`            |       | Max recursion depth (`-1` = unlimited)                        |
+| `--config <path>`        |       | Explicit config file                                          |
+| `--engine <backend>`     |       | `auto` (default), `rust`, or `js`                             |
+| `--cold`                 |       | Dev: fresh engine probe + page-cache drop attempt             |
+| `--no-color`             |       | Disable color output                                          |
+| `--quiet`                | `-q`  | Suppress non-essential output                                 |
+| `--verbose`              |       | Per-candidate scan progress                                   |
 
 `--json` is global (structured output for `scan`, `apply`, `doctor`, and the
 default `clean` flow). `scan` additionally offers `--json-stream` - newline-
@@ -297,8 +298,10 @@ Layered guarantees:
 3. **Path revalidation** immediately before each deletion - changed symlinks,
    vanished paths, or anything escaping the target directory aborts that path
    without touching the rest.
-4. **Size guardrail** - totals over `maxSizeGB` refuse to run without
-   `--force-large --yes`.
+4. **Optional byte ceiling** - there is no default size cap. A configured numeric
+   `maxSizeGB` refuses larger removal without a deliberate override. Use
+   `--max-size-gb` for one run; `null` in config means no byte cap. Resource bounds
+   still apply. Dry-run previews never need destructive authorization.
 5. **Symlinks are removed, never followed.** Path traversal (`..`, null bytes)
    rejected; unsafe patterns rejected at parse time.
 6. **Partial-failure honesty** - the final report lists every path that failed

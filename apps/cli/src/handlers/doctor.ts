@@ -1,4 +1,5 @@
 import { readApplyLockStatus } from "@kitsunekode/sweep-core/apply-session";
+import { readFilesystemIdentity } from "@kitsunekode/sweep-core/filesystem-identity";
 import { statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -106,6 +107,7 @@ export async function collectDoctorChecks(
   }
 
   const lock = readApplyLockStatus();
+  const rootIdentity = readFilesystemIdentity(targetDir);
   return [
     {
       name: "apply_lock",
@@ -115,6 +117,13 @@ export async function collectDoctorChecks(
         : `${lock.lockPath} · ${lock.owner ? `host PID ${lock.owner.pid}: ${lock.processStatus}; journal ${lock.owner.journalPath}` : (lock.detail ?? "owner unknown")}. Inspect recovery before manual cleanup; a child may outlive the host.`,
     },
     { name: "protocol", ok: true, detail: PROTOCOL_VERSION },
+    {
+      name: "filesystem_identity",
+      ok: rootIdentity !== undefined,
+      detail: rootIdentity
+        ? "stable root identifier available; descendants are checked individually at apply"
+        : "root identifier unavailable; apply is disabled, and rescanning cannot provide identity safety",
+    },
     {
       name: "target",
       ok: targetIsDirectory(targetDir),
@@ -203,6 +212,6 @@ export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
 
     exitWith(hasWarnings ? EXIT.WARN : EXIT.OK);
   } catch (err) {
-    handleFatalError(err);
+    handleFatalError(err, { json: opts.json });
   }
 }

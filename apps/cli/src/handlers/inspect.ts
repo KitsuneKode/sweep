@@ -60,6 +60,6 @@ export async function handleInspect(opts: InspectHandlerOptions): Promise<void> 
     await drainStdout();
     exitWith(EXIT.OK);
   } catch (err) {
-    handleFatalError(err);
+    handleFatalError(err, { json: opts.json });
   }
 }

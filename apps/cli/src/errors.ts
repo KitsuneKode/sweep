@@ -46,6 +46,17 @@ export function fatalErrorDocument(err: unknown, applyOutcome?: "not_started" | 
         : resolveExitCode(err) === EXIT.CONFIG_PARSE
           ? "invalid_input"
           : "failure",
+    retryable: refused && err.refusalCode === "apply_busy",
+    ...(refused
+      ? {
+          hint:
+            err.refusalCode === "apply_busy"
+              ? "Inspect the lock owner and journal. Retry only after the holder finishes; do not remove a lock automatically."
+              : err.refusalCode === "size_limit_exceeded"
+                ? "Review the queue or configured size policy. Do not widen deletion authorization automatically."
+                : "Inspect unreadable or unsupported entries before creating a newly reviewed plan.",
+        }
+      : {}),
     ...(refused || applyOutcome ? { applyOutcome: refused ? "not_started" : applyOutcome } : {}),
     message: sanitizeTerminalText(
       (err instanceof Error ? err.message : String(err)).slice(0, 4096),

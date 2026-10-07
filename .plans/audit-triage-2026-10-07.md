@@ -11,6 +11,10 @@ concurrency reports. Findings are leads until checked against current code.
 Work was performed inline; the dirty traversal-engine worktree was preserved.
 “Implemented” below refers to this checkpoint, not publication or platform proof.
 
+The later [round-two ledger](audit-round2-2026-10-07/README.md) records nullable
+byte policy, preview fixes, strict native inputs, output delivery and newer
+qualification. This table remains the first source checkpoint inventory.
+
 ## Verified changes
 
 - Same-drain dismiss/confirm, repeated confirmation, trash toggle and Ctrl-C races

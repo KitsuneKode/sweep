@@ -5,6 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isRustEngineAvailable, rustScanBlockedReason, scanToPlanViaRust } from "./rust-engine.js";
 
+test("failed embedded extraction still tries the installed resolution chain", async () => {
+  const source = `import {registerEmbeddedEngine, resolveRustEngineBinary} from ${JSON.stringify(join(import.meta.dir, "rust-engine.ts"))}; delete process.env.SWEEP_ENGINE_PATH; const expected=resolveRustEngineBinary(); registerEmbeddedEngine(()=>{throw new Error("extraction unavailable")}); if(resolveRustEngineBinary()!==expected) throw new Error("fallback changed"); process.exit(0);`;
+  const proc = Bun.spawn([process.execPath, "-e", source], { stdout: "ignore", stderr: "pipe" });
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  expect(stderr).toBe("");
+  expect(code).toBe(0);
+});
+
 test.skipIf(process.platform === "win32")(
   "Node drains an exiting native child in order across asynchronous decoder slices",
   async () => {

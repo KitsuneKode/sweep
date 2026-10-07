@@ -57,8 +57,11 @@ function isUnsafeCodepoint(cp: number): boolean {
     cp < 0x20 ||
     (cp >= 0x7f && cp <= 0x9f) ||
     (cp >= 0x200b && cp <= 0x200f) ||
+    cp === 0x2028 ||
+    cp === 0x2029 ||
     (cp >= 0x202a && cp <= 0x202e) ||
     (cp >= 0x2060 && cp <= 0x2069) ||
-    cp === 0xfeff
+    cp === 0xfeff ||
+    (cp >= 0xe0000 && cp <= 0xe007f)
   );
 }

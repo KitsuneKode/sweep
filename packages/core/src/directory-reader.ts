@@ -65,6 +65,7 @@ class DirectoryWorker {
   private handleId = 0;
   private active = 0;
   private buffer = "";
+  private stderr = Buffer.alloc(0);
   private failure: Error | undefined;
   private idle: ReturnType<typeof setTimeout> | undefined;
   private readonly abort: () => void;
@@ -84,12 +85,12 @@ class DirectoryWorker {
         ),
       ),
     );
-    this.proc.on("close", () => {
+    this.proc.on("close", (code, signal) => {
       this.signal?.removeEventListener("abort", this.abort);
       if (!this.failure)
         this.fail(
           new ResourceLimitError(
-            "incremental directory reader stopped; install Node or use the Rust engine",
+            `incremental directory reader stopped (${signal ?? code ?? "unknown status"}); ${this.stderr.toString("utf8").trim() || "install Node or use the Rust engine"}`,
           ),
         );
     });
@@ -117,14 +118,25 @@ class DirectoryWorker {
         this.fail(error instanceof Error ? error : new Error(String(error)));
       }
     });
-    // Drain diagnostics without retaining arbitrary stderr data.
-    this.proc.stderr.resume();
+    // Retain a bounded diagnostic tail; a generic stopped-reader message
+    // hides the distinction between missing runtime, crash and denied I/O.
+    this.proc.stderr.on("data", (chunk: Buffer) => {
+      const tail = chunk.subarray(-4096);
+      const retained = this.stderr.subarray(Math.max(0, this.stderr.length + tail.length - 4096));
+      this.stderr = Buffer.concat([retained, tail]);
+    });
     this.proc.stdin.on("error", (error) => this.fail(error));
     if (signal?.aborted) this.abort();
   }
 
   private fail(error: Error): void {
-    this.failure ??= error;
+    // Transport/protocol failures invalidate the entire listing. Treating
+    // EPIPE or malformed JSON as an ordinary per-directory I/O error lets
+    // discovery silently skip its unread tail and finalize a partial plan.
+    this.failure ??=
+      error instanceof ResourceLimitError || error.name === "AbortError"
+        ? error
+        : new ResourceLimitError("incremental directory reader failed");
     clearTimeout(this.idle);
     for (const waiting of this.pending.values()) waiting.reject(this.failure);
     this.pending.clear();

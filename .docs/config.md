@@ -34,7 +34,7 @@ Array merge behavior:
 | `patterns`         | Extra artifact names/globs to add to defaults                   | `[]`                 |
 | `disabledPatterns` | Default or merged patterns to disable for this project          | `[]`                 |
 | `ignore`           | Skip matches by name, glob (`*.cache`), or relative path prefix | `[".sweep-trash-*"]` |
-| `maxSizeGB`        | Size guardrail threshold                                        | `10`                 |
+| `maxSizeGB`        | Optional deletion ceiling in GiB; null means no byte cap        | `null`               |
 | `depth`            | Max scan depth (-1 = unlimited)                                 | `-1`                 |
 
 Example `.sweeprc`:
@@ -44,7 +44,7 @@ Example `.sweeprc`:
   "patterns": ["dist"],
   "disabledPatterns": [".turbo"],
   "ignore": ["packages/vendor-patched"],
-  "maxSizeGB": 10,
+  "maxSizeGB": null,
   "depth": -1
 }
 ```
@@ -90,8 +90,9 @@ pane; to narrow, use `disabledPatterns`.
    naming the count and stating the action is irreversible.
 4. **Bulk select (`a`) covers safe + caution only** - dangerous items can never enter a
    selection through a bulk shortcut.
-5. **Size guardrail**: totals above `maxSizeGB` refuse to proceed without
-   `--force-large --yes`.
+5. **Optional byte ceiling**: a numeric `maxSizeGB` is checked before removal;
+   null disables the byte cap without disabling resource or path guards.
+   `--max-size-gb` supplies a per-run policy. Previews do not enforce the cap.
 6. Every candidate path is revalidated inside the target directory immediately before
    deletion; failures abort that path, not the run.
 

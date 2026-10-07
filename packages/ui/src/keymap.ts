@@ -213,7 +213,8 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   if (isQuitChord(key)) {
     // Mid-apply ctrl-c means "stop the delete", not "leave with an unknown
     // tree state": the engine stops scheduling, reports what already ran,
-    // and the session stays up to show it. A second ctrl-c exits as usual.
+    // and the session stays up to show it. Repeated Ctrl+C continues to
+    // request cancellation; it must not destroy the pending report.
     if (ctx.applying) {
       actions.abortApply?.();
       return;

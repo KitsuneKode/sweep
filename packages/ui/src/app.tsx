@@ -322,7 +322,7 @@ function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: number }) 
         />
       ) : null}
       <text
-        content={t`${fg(tokens.textDim)("esc unwinds one layer, never quits · ctrl-c always quits")}`}
+        content={t`${fg(tokens.textDim)("esc unwinds one layer · ctrl-c stops cleanup, quits when idle")}`}
         wrapMode="none"
       />
     </Modal>
@@ -346,7 +346,7 @@ function ConfirmOverlay({
   dangerousCount: number;
   /** Largest queued candidates by bytes - the last gate should name names. */
   previewPaths: string[];
-  applyPolicy?: { maxSizeGB: number; forceLarge: boolean } | undefined;
+  applyPolicy?: { maxSizeGB: number | null; forceLarge: boolean } | undefined;
   lowerBound?: boolean;
   dryRun?: boolean;
   trash?: boolean;
@@ -371,7 +371,7 @@ function ConfirmOverlay({
         content={t`${bold(fg(accent)(`${action} ${selectedCount} item${selectedCount === 1 ? "" : "s"}`))}`}
       />
       <text
-        content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "lower bound; current size checked before removal" : "estimated size")}`}
+        content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "lower bound; actual bytes may differ" : "estimated size")}`}
       />
       <text content="" />
       {applyPolicy ? (
@@ -380,11 +380,14 @@ function ConfirmOverlay({
           content={
             applyPolicy.forceLarge
               ? "Size ceiling bypass enabled (--force-large)."
-              : `Size ceiling: ${applyPolicy.maxSizeGB} GiB; checked again before removal.`
+              : applyPolicy.maxSizeGB === null
+                ? "No byte ceiling; only the reviewed selection will be removed."
+                : `Size ceiling: ${applyPolicy.maxSizeGB} GiB; checked again before removal.`
           }
         />
       ) : null}
       {applyPolicy &&
+      applyPolicy.maxSizeGB !== null &&
       !applyPolicy.forceLarge &&
       selectedBytes > applyPolicy.maxSizeGB * 1024 ** 3 ? (
         <box flexDirection="column">

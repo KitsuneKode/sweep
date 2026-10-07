@@ -41,7 +41,7 @@ export interface UiScanHooks {
 
 /** Live-scan control handed to the app; every call starts a new generation. */
 export interface UiScanControl {
-  applyPolicy?: { maxSizeGB: number; forceLarge: boolean };
+  applyPolicy?: { maxSizeGB: number | null; forceLarge: boolean };
   /**
    * Runs one scan generation to completion (or abort). Errors funnel to
    * `hooks.onError` rather than rejecting, but it is async all the same -
@@ -138,7 +138,14 @@ export async function runSweepUiStreaming(
   let activeEngine = options.engine;
 
   const makeControl = (): UiScanControl => ({
-    applyPolicy: { maxSizeGB: currentConfig.maxSizeGB, forceLarge: options.forceLarge ?? false },
+    ...(options.dryRun
+      ? {}
+      : {
+          applyPolicy: {
+            maxSizeGB: currentConfig.maxSizeGB,
+            forceLarge: options.forceLarge ?? false,
+          },
+        }),
     async start(hooks, signal) {
       // SWEEP_COLD: every scan - including `r` rescans - pays the cold costs
       // a fresh user pays (probe respawns at resolve; page cache drops when

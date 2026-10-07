@@ -265,19 +265,21 @@ export function assertSafePattern(pattern: string): void {
  */
 export function assertSizeLimit(
   estimatedBytes: number,
-  maxSizeGB: number,
+  maxSizeGB: number | null,
   forceLarge: boolean,
 ): void {
   if (
     !Number.isSafeInteger(estimatedBytes) ||
     estimatedBytes < 0 ||
-    !Number.isFinite(maxSizeGB) ||
-    maxSizeGB < 0 ||
-    maxSizeGB > Number.MAX_SAFE_INTEGER / 1024 ** 3
+    (maxSizeGB !== null &&
+      (!Number.isFinite(maxSizeGB) ||
+        maxSizeGB < 0 ||
+        maxSizeGB > Number.MAX_SAFE_INTEGER / 1024 ** 3))
   )
     throw new GuardrailError(
       "Invalid size ceiling or byte total; cannot safely verify removal size",
     );
+  if (maxSizeGB === null) return;
   const estimatedGB = estimatedBytes / 1024 ** 3;
   if (estimatedGB > maxSizeGB && !forceLarge) {
     throw new ApplyRefusedError(

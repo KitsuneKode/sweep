@@ -5,6 +5,7 @@ import {
   SCAN_EVENT_SCHEMA,
   APPLY_REPORT_SCHEMA,
   PROTOCOL_SHARED_SCHEMA,
+  sanitizeTerminalText,
 } from "@kitsunekode/sweep-protocol";
 import { writeJson, drainStdout } from "./handlers/shared.js";
 import { EXIT, exitWith, handleFatalError } from "./errors.js";
@@ -86,6 +87,22 @@ function addScanOptions<T extends Command>(command: T): T {
       )
       .option("--include-dangerous", "Include dangerous candidates in selection", false)
       .option("--config <path>", "Explicit config file path")
+      .option(
+        "--max-size-gb <gib>",
+        "Deletion byte ceiling in GiB (none disables a configured cap)",
+        (text: string) => {
+          if (text === "none") return "none";
+          const value = Number(text);
+          if (
+            !/^\d+(?:\.\d+)?$/.test(text) ||
+            !Number.isFinite(value) ||
+            value > Number.MAX_SAFE_INTEGER / 1024 ** 3
+          ) {
+            throw new InvalidArgumentError("expected a non-negative safe GiB value or none");
+          }
+          return value;
+        },
+      )
       .addOption(
         new Option(
           "--engine <backend>",
@@ -126,6 +143,17 @@ export function makeProgram(): Command {
   const program = new Command();
 
   program
+    .configureOutput({
+      outputError: (message, write) => {
+        const safeMessage = sanitizeTerminalText(message.replace(/\n$/, ""));
+        write(
+          program.opts<{ json?: boolean }>().json
+            ? `${JSON.stringify({ type: "error", protocolVersion: PROTOCOL_VERSION, code: "invalid_arguments", exitCode: EXIT.GUARDRAIL, retryable: false, message: safeMessage })}\n`
+            : `${safeMessage}\n`,
+        );
+      },
+    })
+    .exitOverride((error) => exitWith(error.exitCode === 0 ? EXIT.OK : EXIT.GUARDRAIL))
     .name("sweep")
     .description("Safe, fast artifact cleanup for any project tree")
     .version(VERSION, "-V, --version")
@@ -235,7 +263,7 @@ export function makeProgram(): Command {
     .requiredOption("--journal <path>", "Private apply journal to inspect")
     .option("--json", "Emit JSON recovery observations", false)
     .action(function (this: Command) {
-      void handleRecover(this.optsWithGlobals<{ journal: string; json?: boolean }>());
+      void handleRecover(this.optsWithGlobals<CliOptions & { journal: string; json?: boolean }>());
     });
 
   program

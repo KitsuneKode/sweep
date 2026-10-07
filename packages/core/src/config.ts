@@ -1,7 +1,11 @@
 import {
   existsSync,
+  constants,
+  closeSync,
+  fstatSync,
   lstatSync,
-  readFileSync,
+  openSync,
+  readSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -32,7 +36,7 @@ export const DEFAULT_CONFIG: SweepConfig = {
   // Trash dirs created by `sweep --trash` must never be re-selected -
   // they hold live restore data until the user purges them.
   ignore: [".sweep-trash-*"],
-  maxSizeGB: 10,
+  maxSizeGB: null,
   depth: -1,
 };
 
@@ -40,7 +44,7 @@ export const DEFAULT_CONFIG: SweepConfig = {
 export const INIT_SWEEPRC_TEMPLATE = {
   patterns: [".custom-output"],
   ignore: ["packages/vendor-patched"],
-  maxSizeGB: 10,
+  maxSizeGB: null,
   depth: -1,
 } as const;
 
@@ -86,12 +90,54 @@ function assertReadableConfigFile(filePath: string): void {
   }
 }
 
-function readJsonConfig(filePath: string): Partial<SweepConfig> | null {
-  if (!existsSync(filePath)) return null;
+/** Pin the opened regular file and bound reads even if it grows after fstat. */
+function readConfigText(filePath: string, requireOwned = false): string {
   assertReadableConfigFile(filePath);
+  const fd = openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
-    const raw = readFileSync(filePath, "utf-8");
-    return JSON.parse(raw) as Partial<SweepConfig>;
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new ConfigParseError(`Config at ${filePath} is not a regular file`);
+    if (
+      requireOwned &&
+      process.platform !== "win32" &&
+      process.getuid &&
+      stat.uid !== process.getuid()
+    ) {
+      throw new ConfigParseError(
+        `Automatically discovered config at ${filePath} is owned by another user; review it and use --config explicitly if trusted`,
+      );
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    while (true) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, MAX_CONFIG_BYTES + 1 - bytes));
+      const count = readSync(fd, chunk, 0, chunk.length, null);
+      if (count === 0) break;
+      bytes += count;
+      if (bytes > MAX_CONFIG_BYTES)
+        throw new ConfigParseError(`Config at ${filePath} exceeds ${MAX_CONFIG_BYTES / 1024} KB`);
+      chunks.push(chunk.subarray(0, count));
+    }
+    return Buffer.concat(chunks, bytes).toString("utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readJsonConfig(filePath: string, requireOwned = false): Partial<SweepConfig> | null {
+  if (!existsSync(filePath)) return null;
+  try {
+    const raw = readConfigText(filePath, requireOwned);
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new ConfigParseError(`Config at ${filePath} must be a JSON object`);
+    }
+    for (const key of Object.keys(parsed)) {
+      if (!Object.hasOwn(CONFIG_FIELD_TYPES, key)) {
+        throw new ConfigParseError(`Config at ${filePath} has unknown field "${key}"`);
+      }
+    }
+    return parsed as Partial<SweepConfig>;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new ConfigParseError(`Failed to parse config at ${filePath}: ${msg}`, { cause: err });
@@ -122,7 +168,7 @@ export function findProjectConfigPath(startDir: string): string | null {
 function findProjectConfig(startDir: string): Partial<SweepConfig> | null {
   const configPath = findProjectConfigPath(startDir);
   if (!configPath) return null;
-  return readJsonConfig(configPath);
+  return readJsonConfig(configPath, true);
 }
 
 export type ConfigValidationResult =
@@ -140,8 +186,7 @@ export function validateProjectConfigFile(configPath: string, cwd: string): Conf
 
   let raw: unknown;
   try {
-    assertReadableConfigFile(configPath);
-    raw = JSON.parse(readFileSync(configPath, "utf-8"));
+    raw = JSON.parse(readConfigText(configPath));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, path: configPath, detail: `invalid JSON: ${msg}` };
@@ -166,7 +211,11 @@ export function validateProjectConfigFile(configPath: string, cwd: string): Conf
     if (expectedType === "string[]" && !isStringArray(value)) {
       return { ok: false, path: configPath, detail: `"${field}" must be a string array` };
     }
-    if (expectedType === "number" && typeof value !== "number") {
+    if (
+      expectedType === "number" &&
+      typeof value !== "number" &&
+      !(field === "maxSizeGB" && value === null)
+    ) {
       return { ok: false, path: configPath, detail: `"${field}" must be a number` };
     }
   }
@@ -255,7 +304,7 @@ export function writeProjectSweeprc(
   if (existed) {
     let raw: unknown;
     try {
-      raw = JSON.parse(readFileSync(configPath, "utf-8"));
+      raw = JSON.parse(readConfigText(configPath));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new ConfigParseError(
@@ -335,7 +384,7 @@ export function sweepConfigDir(): string {
 }
 
 function getGlobalConfig(): Partial<SweepConfig> | null {
-  return readJsonConfig(join(sweepConfigDir(), "config.json"));
+  return readJsonConfig(join(sweepConfigDir(), "config.json"), true);
 }
 
 // ─── Merge helpers ────────────────────────────────────────────────────────────
@@ -514,26 +563,38 @@ export function loadConfig(
   for (const p of ignore) assertSafePattern(p);
   for (const p of disabledPatterns) assertSafePattern(p);
 
+  // Presence, not nullish coalescing: null deliberately disables a byte cap.
   const maxSizeGB =
-    cliOverrides.maxSizeGB ?? project.maxSizeGB ?? global.maxSizeGB ?? DEFAULT_CONFIG.maxSizeGB;
+    cliOverrides.maxSizeGB !== undefined
+      ? cliOverrides.maxSizeGB
+      : project.maxSizeGB !== undefined
+        ? project.maxSizeGB
+        : global.maxSizeGB !== undefined
+          ? global.maxSizeGB
+          : DEFAULT_CONFIG.maxSizeGB;
   const depth = cliOverrides.depth ?? project.depth ?? global.depth ?? DEFAULT_CONFIG.depth;
 
-  // maxSizeGB is the delete-size guardrail. A CLI flag raising it is explicit
-  // intent; a buried config-file raise widens the destructive envelope with
-  // no user signal - surface it once.
-  const fileRaised =
+  if (
     cliOverrides.maxSizeGB === undefined &&
-    (project.maxSizeGB ?? global.maxSizeGB ?? 0) > DEFAULT_CONFIG.maxSizeGB;
-  if (fileRaised) {
+    project.maxSizeGB === null &&
+    typeof global.maxSizeGB === "number"
+  ) {
     onWarning?.(
-      `config raises "maxSizeGB" to ${maxSizeGB} (default ${DEFAULT_CONFIG.maxSizeGB}) - the delete-size guardrail is wider than stock`,
+      `project config disables the global ${global.maxSizeGB} GiB deletion ceiling; review this policy before applying`,
     );
   }
 
   // Scalars come from hand-edited config files - validate rather than letting
   // NaN-adjacent or negative values silently warp scan/delete behavior.
-  if (!Number.isFinite(maxSizeGB) || maxSizeGB < 0) {
-    throw new ConfigParseError(`"maxSizeGB" must be a non-negative number (got ${maxSizeGB})`);
+  if (
+    maxSizeGB !== null &&
+    (!Number.isFinite(maxSizeGB) ||
+      maxSizeGB < 0 ||
+      maxSizeGB > Number.MAX_SAFE_INTEGER / 1024 ** 3)
+  ) {
+    throw new ConfigParseError(
+      `"maxSizeGB" must be null or a non-negative safe byte ceiling in GiB (got ${maxSizeGB})`,
+    );
   }
   if (!Number.isInteger(depth) || depth < -1) {
     throw new ConfigParseError(`"depth" must be -1 or a non-negative integer (got ${depth})`);

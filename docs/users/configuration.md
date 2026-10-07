@@ -11,7 +11,7 @@ Create a starter file with `sweep init .`, or write:
   "patterns": ["dist"],
   "disabledPatterns": [".turbo"],
   "ignore": ["packages/vendor-patched"],
-  "maxSizeGB": 10,
+  "maxSizeGB": null,
   "depth": -1
 }
 ```
@@ -19,15 +19,22 @@ Create a starter file with `sweep init .`, or write:
 `dist` is opt-in and remains dangerous because the name can contain authored work.
 Do not add broad patterns such as `*` unless you understand every possible match.
 
-| Field              | Behavior                                                 |
-| ------------------ | -------------------------------------------------------- |
-| `patterns`         | Adds names or name globs to built-in defaults            |
-| `disabledPatterns` | Subtracts patterns from the merged set                   |
-| `ignore`           | Excludes artifact names, globs or relative path prefixes |
-| `maxSizeGB`        | Cleanup size ceiling; defaults to 10                     |
-| `depth`            | Discovery depth; defaults to -1, unlimited               |
+| Field              | Behavior                                                           |
+| ------------------ | ------------------------------------------------------------------ |
+| `patterns`         | Adds names or name globs to built-in defaults                      |
+| `disabledPatterns` | Subtracts patterns from the merged set                             |
+| `ignore`           | Excludes artifact names, globs or relative path prefixes           |
+| `maxSizeGB`        | Optional deletion ceiling in GiB; defaults to `null` (no byte cap) |
+| `depth`            | Discovery depth; defaults to -1, unlimited                         |
 
-`maxSizeGB` is a deletion guardrail, not a scan memory limit. Resource-budget
+Use a number such as `600` to cap the reviewed selection at 600 GiB. `null`
+explicitly disables an inherited byte cap; `0` permits only zero-byte selections.
+Existing numeric caps remain effective. Override one run with
+`sweep ui . --max-size-gb 600` or deliberately use `--max-size-gb none`.
+An uncapped run still confirms the exact selection and enforces path, identity,
+mount and resource guards. Dry-run previews never require a byte-cap override.
+
+`maxSizeGB` is a deletion policy, not a scan memory limit. Resource-budget
 counters are not individual CLI flags or `.sweeprc` fields. Use
 `--resource-profile low-memory` for smaller discovery and sizing allowances.
 This controls logical admission; it does not cap the process RSS or UI memory.
@@ -53,6 +60,14 @@ Global config is `~/.config/sweep/config.json` on Linux/macOS, honoring
 `XDG_CONFIG_HOME`, and `%APPDATA%\sweep\config.json` on Windows.
 `SWEEP_CONFIG_DIR` overrides the config directory and also determines history
 storage. Use it for isolated automation.
+
+On Linux/macOS, automatically discovered project and global config files must
+be owned by the running user. This prevents another user's ancestor `.sweeprc`
+from silently changing the selection policy. For a shared file you have reviewed,
+pass `--config PATH` explicitly. Configs must be bounded regular JSON objects;
+the same 1 MiB read limit applies to the UI pattern editor.
+Unknown fields and non-object JSON are rejected. A misspelled ceiling cannot
+silently fall back to an uncapped run.
 
 ## Match rules
 

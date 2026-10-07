@@ -100,8 +100,10 @@ entries that were never scheduled.
 - Revalidation immediately before each delete/trash catches symlink swaps,
   type changes, vanished paths, and containment breaks (canonical ancestors
   must stay inside the target).
-- Size guardrail: over `maxSizeGB` (default 10) refuses without
-  `--force-large --yes`.
+- Optional size guardrail: `maxSizeGB` defaults to `null` (no byte cap). A numeric
+  ceiling is enforced before removal, with `--max-size-gb` for a deliberate
+  per-run policy or `--force-large --yes` to bypass it. Dry-run previews are
+  independent of this policy. Zero remains a zero-byte cap.
 - Trash moves are rename-only on the same filesystem; EXDEV is reported, never
   silently copy-deleted.
 - Ctrl+C mid-apply stops scheduling, lets in-flight work finish, and reports
@@ -125,8 +127,9 @@ entries that were never scheduled.
 
 ## Output contract
 
-- `--json` produces stable machine-readable shapes (`scan`, `apply`, `doctor`,
-  `clean`); structured failures carry stable codes.
+- `--json` produces machine-readable shapes (`scan`, `apply`, `doctor`,
+  `clean`, `inspect`, `stats`, `recover`); fatal errors carry stable codes,
+  a retryable indicator and apply outcome certainty when known.
 - `scan --json-stream` emits newline-delimited `ScanEvent`s:
   `scan_started`, `candidate_found`, `candidate_updated` (sized enrichments),
   `scan_progress`, and `scan_completed` (always last). The raw engine stream
@@ -137,7 +140,7 @@ entries that were never scheduled.
   delete), `changed_symlink_state`, `changed_entry_type`, `outside_target`,
   `protected_path` (VCS metadata or protected segment), `permission_denied`,
   `busy`, `filesystem_error`.
-- Exit codes: `0` success, `1` aborted, `2` guardrail, `3` config error,
+- Exit codes: `0` success, `1` aborted, `2` guardrail or invalid arguments, `3` config error,
   `4` operation failed, `5` doctor warnings. The Rust engine exits with the
   same codes and the JS wrapper re-throws the matching class, so
   `--engine rust` and `--engine js` agree.
@@ -145,7 +148,7 @@ entries that were never scheduled.
 
 ## Distribution
 
-- npm: `@kitsunekode/sweep` (bundled ESM, Node ≥18 or Bun), optional native
+- npm: `@kitsunekode/sweep` (bundled ESM, Node ≥20.3.0 or Bun), optional native
   engine packages `sweep-engine-*` per platform.
 - Standalone binaries on GitHub releases (Bun-compiled, `--minify`), each with
   a `.sha256` sidecar; `install.sh` verifies the checksum before install.

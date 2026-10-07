@@ -70,7 +70,9 @@ fn terminal_safe(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     for character in text.chars() {
         if character.is_control()
-            || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+            || matches!(character,
+                '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' |
+                '\u{2060}'..='\u{2069}' | '\u{feff}' | '\u{e0000}'..='\u{e007f}')
         {
             output.extend(character.escape_default());
         } else {
@@ -118,7 +120,7 @@ fn run() -> Result<(), CliFailure> {
             );
             eprintln!("       sweep-engine apply               # reads ScanPlan JSON from stdin");
             Err(CliFailure {
-                code: EXIT_ABORTED,
+                code: EXIT_GUARDRAIL,
                 message: "missing or unknown subcommand".to_owned(),
             })
         }
@@ -126,7 +128,7 @@ fn run() -> Result<(), CliFailure> {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ScanStdinOptions {
     config: SweepConfig,
     selection_policy: SelectionPolicy,
@@ -591,7 +593,7 @@ fn default_sweep_config() -> SweepConfig {
         // Parity with DEFAULT_CONFIG.ignore in config.ts: sweep's own trash
         // dirs must never surface as candidates on a bare engine scan.
         ignore: vec![".sweep-trash-*".to_owned()],
-        max_size_gb: 10.0,
+        max_size_gb: None,
         depth: -1,
     }
 }
@@ -861,6 +863,22 @@ fn write_json_line_to<T: Serialize, W: Write>(value: &T, writer: &mut W) -> Resu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn misspelled_scan_limits_are_rejected() -> Result<(), serde_json::Error> {
+        let input = serde_json::json!({
+            "config": super::default_sweep_config(),
+            "selectionPolicy": sweep_types::SelectionPolicy::default(),
+            "limts": {"maxCandidates": 1}
+        });
+        assert!(serde_json::from_value::<super::ScanStdinOptions>(input.clone()).is_err());
+        let mut valid = input;
+        let fields = valid.as_object_mut().unwrap_or_else(|| panic!("object"));
+        let limits = fields.remove("limts").unwrap_or_else(|| panic!("limits"));
+        fields.insert("limits".to_owned(), limits);
+        let options: super::ScanStdinOptions = serde_json::from_value(valid)?;
+        assert_eq!(options.limits.max_candidates, 1);
+        Ok(())
+    }
     use super::*;
     use sweep_types::{EntryType, RiskTier, ScanEntry};
 

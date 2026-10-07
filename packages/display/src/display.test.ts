@@ -1,11 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import {
   formatDeletionProgress,
+  formatBytes,
   formatDeletionStatus,
   formatRiskBadge,
   groupCandidatesByKind,
   riskBadgeLabel,
+  printDeletionProgress,
 } from "@kitsunekode/sweep-display";
 
 function candidate(
@@ -24,6 +26,26 @@ function candidate(
 }
 
 describe("display formatters", () => {
+  test("deletion progress leaves stdout exclusively for results", () => {
+    const out = spyOn(process.stdout, "write").mockReturnValue(true);
+    const err = spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      printDeletionProgress(1, 4, "/tmp/owned/dist");
+      expect(out).not.toHaveBeenCalled();
+      expect(err).toHaveBeenCalled();
+      expect(String(err.mock.calls[0]?.[0])).toContain("/tmp/owned/dist");
+    } finally {
+      out.mockRestore();
+      err.mockRestore();
+    }
+  });
+  test("byte labels use binary units and handle invalid and fractional values", () => {
+    expect(formatBytes(1024)).toBe("1.0 KiB");
+    expect(formatBytes(1024 ** 3)).toBe("1.0 GiB");
+    expect(formatBytes(0.5)).toBe("1 B");
+    expect(formatBytes(NaN)).toBe("unknown");
+    expect(formatBytes(Infinity)).toBe("unknown");
+  });
   test("formatRiskBadge maps tiers to stable labels and styling", () => {
     expect(riskBadgeLabel("safe")).toBe("safe");
     expect(riskBadgeLabel("caution")).toBe("warning");
@@ -64,7 +86,7 @@ describe("display formatters", () => {
       columns: 48,
     });
     expect(line.startsWith("deleting [1/4] ")).toBe(true);
-    expect(line).toContain("~4.0 KB removed");
+    expect(line).toContain("~4.0 KiB removed");
     expect(line).not.toContain("freed");
     expect(line).toContain("2.4s");
     expect(line.length).toBeLessThanOrEqual(48);

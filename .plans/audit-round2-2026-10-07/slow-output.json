@@ -1,0 +1,34 @@
+{
+  "checkedAt": "2026-10-07",
+  "checks": [
+    {
+      "runtime": "Node bundled CLI",
+      "backend": "js",
+      "candidateCount": 1000,
+      "outputBytes": 849109,
+      "readBytesPerPause": 512,
+      "consumerPauseSeconds": 0.0002,
+      "exitCode": 0,
+      "completeEvent": true,
+      "uniqueFoundCandidates": 1000,
+      "wallSeconds": 0.511
+    },
+    {
+      "runtime": "Node bundled CLI",
+      "backend": "rust",
+      "candidateCount": 1000,
+      "outputBytes": 838564,
+      "readBytesPerPause": 512,
+      "consumerPauseSeconds": 0.0002,
+      "exitCode": 0,
+      "completeEvent": true,
+      "uniqueFoundCandidates": 1000,
+      "wallSeconds": 0.514
+    }
+  ],
+  "qualification": "Owned integration delivery check; consumer-paced wall time is not an engine benchmark.",
+  "inputs": {
+    "cliBundleSha256": "4863341a4abd456d719df9927ae53a6bc2bae8cab39fa8b7c490b8dc29c526a1",
+    "nativeReleaseEngineSha256": "087bca58511f220b7858f173969c73cfe9cbb349493d65a7acc7184cca552cdf"
+  }
+}

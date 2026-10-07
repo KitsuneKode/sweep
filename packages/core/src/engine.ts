@@ -42,7 +42,13 @@ function assertApplyTarget(target: string): void {
 }
 
 function assertPlanRootIdentity(plan: ScanPlan): void {
-  if (!sameFilesystemIdentity(plan.targetIdentity, readFilesystemIdentity(plan.targetDir))) {
+  const current = readFilesystemIdentity(plan.targetDir);
+  if (!current) {
+    throw new GuardrailError(
+      "Filesystem root identity is unavailable; apply is disabled on this filesystem. Rescanning cannot establish a stable identity.",
+    );
+  }
+  if (!sameFilesystemIdentity(plan.targetIdentity, current)) {
     throw new GuardrailError(
       "Plan root identity is missing or changed since scan; scan again before applying",
     );
@@ -82,7 +88,7 @@ export function scanToPlan(
 
 export interface ApplyPlanOptions {
   /** Refreshed observation ceiling, checked before the first removal. */
-  maxSizeGB?: number;
+  maxSizeGB?: number | null;
   forceLarge?: boolean;
   onPrepare?: (
     entry: ScanEntry,
@@ -121,6 +127,7 @@ export async function applyPlan(
   // entirely (JSON.stringify turns it into null) - reject it loudly.
   if (
     options.maxSizeGB !== undefined &&
+    options.maxSizeGB !== null &&
     (!Number.isFinite(options.maxSizeGB) ||
       options.maxSizeGB < 0 ||
       options.maxSizeGB > Number.MAX_SAFE_INTEGER / 1024 ** 3)
@@ -168,7 +175,12 @@ export async function applyPlan(
   // Dedupe up front so `interrupted` compares against the real work set -
   // entries deduped away are never attempted and must not read as skipped.
   const workSet = deduplicateNestedEntries(ready);
-  if (options.maxSizeGB !== undefined && !options.forceLarge && !options.signal?.aborted) {
+  if (
+    options.maxSizeGB !== undefined &&
+    options.maxSizeGB !== null &&
+    !options.forceLarge &&
+    !options.signal?.aborted
+  ) {
     const budget = new ResourceBudget();
     let prepared = 0;
     const sizes = await mapPool(workSet, 8, async (entry) => {
@@ -330,6 +342,7 @@ export async function applyPlanWithBackend(
   assertPlanResources(plan);
   if (
     options.maxSizeGB !== undefined &&
+    options.maxSizeGB !== null &&
     (!Number.isFinite(options.maxSizeGB) ||
       options.maxSizeGB < 0 ||
       options.maxSizeGB > Number.MAX_SAFE_INTEGER / 1024 ** 3)
@@ -353,7 +366,7 @@ export async function applyPlanWithBackend(
       const candidate = byId.get(id);
       if (candidate) options.onDeleted?.(candidate);
     },
-    options.maxSizeGB === undefined || options.forceLarge
+    options.maxSizeGB === undefined || options.maxSizeGB === null || options.forceLarge
       ? undefined
       : Math.floor(options.maxSizeGB * 1024 ** 3),
     (id) => {

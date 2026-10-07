@@ -2,6 +2,31 @@
 
 pub const PROTOCOL_VERSION: &str = "1";
 
+fn safe_integer<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    let value = <u64 as serde::Deserialize>::deserialize(deserializer)?;
+    if value > 9_007_199_254_740_991 {
+        return Err(serde::de::Error::custom(
+            "integer exceeds protocol safe-integer bound",
+        ));
+    }
+    Ok(value)
+}
+
+fn optional_safe_integer<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    safe_integer(deserializer).map(Some)
+}
+
+// Optional protocol fields may be absent, but the schemas do not permit null.
+fn present_value<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 /// Logical operation bounds. Defaults match the TypeScript protocol package.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
@@ -42,7 +67,7 @@ pub struct SweepConfig {
     pub disabled_patterns: Vec<String>,
     pub ignore: Vec<String>,
     #[serde(rename = "maxSizeGB")]
-    pub max_size_gb: f64,
+    pub max_size_gb: Option<f64>,
     pub depth: i32,
 }
 
@@ -65,7 +90,7 @@ pub enum SelectionMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionPolicy {
     pub mode: SelectionMode,
     pub include_dangerous: bool,
@@ -89,21 +114,34 @@ pub struct FilesystemIdentity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScanEntry {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub identity: Option<FilesystemIdentity>,
     pub path: String,
     pub name: String,
+    #[serde(deserialize_with = "safe_integer")]
     pub estimated_bytes: u64,
     /// `Some(false)` when sizing hit unreadable inodes - `estimated_bytes` is
     /// a partial sum. `None` on wire means an old producer (treated as known).
     /// New scans always emit it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub bytes_known: Option<bool>,
     /// Last-modified time of the artifact itself, in epoch milliseconds.
     /// Omitted from JSON when the stat failed, matching the TS protocol.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "optional_safe_integer",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub modified_ms: Option<u64>,
     pub is_symlink: bool,
     pub entry_type: EntryType,
@@ -118,7 +156,7 @@ pub enum EntryType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", from = "CandidateInput")]
 pub struct ScanCandidate {
     #[serde(flatten)]
     pub entry: ScanEntry,
@@ -129,7 +167,65 @@ pub struct ScanCandidate {
     pub selected_by_default: bool,
 }
 
+// Serde does not support deny_unknown_fields with flatten. Keep the public
+// entry model and flat serialized shape; explicitly decode the flat input.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CandidateInput {
+    #[serde(default, deserialize_with = "present_value")]
+    identity: Option<FilesystemIdentity>,
+    path: String,
+    name: String,
+    #[serde(deserialize_with = "safe_integer")]
+    estimated_bytes: u64,
+    #[serde(default, deserialize_with = "present_value")]
+    bytes_known: Option<bool>,
+    #[serde(default, deserialize_with = "optional_safe_integer")]
+    modified_ms: Option<u64>,
+    is_symlink: bool,
+    entry_type: EntryType,
+    id: String,
+    #[serde(deserialize_with = "artifact_kind")]
+    kind: String,
+    risk_tier: RiskTier,
+    reasons: Vec<String>,
+    selected_by_default: bool,
+}
+
+fn artifact_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let kind = <String as serde::Deserialize>::deserialize(deserializer)?;
+    match kind.as_str() {
+        "node_modules" | "dist" | "build" | "out" | ".next" | ".nuxt" | ".svelte-kit"
+        | ".turbo" | ".vite" | ".parcel-cache" | "target" | "coverage" | ".nyc_output"
+        | "tsbuildinfo" | "custom" => Ok(kind),
+        _ => Err(serde::de::Error::custom("unknown artifact kind")),
+    }
+}
+
+impl From<CandidateInput> for ScanCandidate {
+    fn from(input: CandidateInput) -> Self {
+        Self {
+            entry: ScanEntry {
+                identity: input.identity,
+                path: input.path,
+                name: input.name,
+                estimated_bytes: input.estimated_bytes,
+                bytes_known: input.bytes_known,
+                modified_ms: input.modified_ms,
+                is_symlink: input.is_symlink,
+                entry_type: input.entry_type,
+            },
+            id: input.id,
+            kind: input.kind,
+            risk_tier: input.risk_tier,
+            reasons: input.reasons,
+            selected_by_default: input.selected_by_default,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RiskCounts {
     pub safe: u32,
     pub caution: u32,
@@ -142,9 +238,10 @@ fn is_zero(value: &u32) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScanPlanSummary {
     pub candidate_count: u32,
+    #[serde(deserialize_with = "safe_integer")]
     pub estimated_total_bytes: u64,
     pub scanned_dirs: u32,
     /// Unreadable or deduped directories. The JS engine omits the key at
@@ -157,11 +254,15 @@ pub struct ScanPlanSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScanPlan {
     pub protocol_version: String,
     pub target_dir: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub target_identity: Option<FilesystemIdentity>,
     pub selection_policy: SelectionPolicy,
     pub candidates: Vec<ScanCandidate>,
@@ -263,5 +364,55 @@ mod tests {
         assert_eq!(json["targetDir"], "/tmp/project");
         assert!(json["candidates"].is_array());
         assert!(json["summary"]["riskCounts"]["safe"].is_number());
+    }
+
+    #[test]
+    fn native_plan_input_rejects_schema_drift_and_unsafe_numbers() -> Result<(), serde_json::Error>
+    {
+        let mut value =
+            serde_json::to_value(ScanPlan::empty("/tmp/project", "2026-01-01T00:00:00.000Z"))?;
+        value["candidates"] = serde_json::json!([{
+            "id": "one", "path": "/tmp/project/dist", "name": "dist",
+            "estimatedBytes": 1, "modifiedMs": 1, "isSymlink": false,
+            "entryType": "directory", "kind": "dist", "riskTier": "safe",
+            "reasons": [], "selectedByDefault": true
+        }]);
+        assert!(serde_json::from_value::<ScanPlan>(value.clone()).is_ok());
+        for pointer in [
+            "",
+            "/summary",
+            "/summary/riskCounts",
+            "/selectionPolicy",
+            "/candidates/0",
+        ] {
+            let mut invalid = value.clone();
+            if let Some(object) = invalid
+                .pointer_mut(pointer)
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                object.insert("unexpected".to_owned(), serde_json::json!(true));
+            }
+            assert!(
+                serde_json::from_value::<ScanPlan>(invalid).is_err(),
+                "unknown field at {pointer}"
+            );
+        }
+        for pointer in [
+            "/candidates/0/estimatedBytes",
+            "/candidates/0/modifiedMs",
+            "/summary/estimatedTotalBytes",
+        ] {
+            let mut invalid = value.clone();
+            if let Some(field) = invalid.pointer_mut(pointer) {
+                *field = serde_json::json!(9_007_199_254_740_992u64);
+            }
+            assert!(
+                serde_json::from_value::<ScanPlan>(invalid).is_err(),
+                "unsafe integer at {pointer}"
+            );
+        }
+        value["candidates"][0]["kind"] = serde_json::json!("unrecognized-artifact");
+        assert!(serde_json::from_value::<ScanPlan>(value).is_err());
+        Ok(())
     }
 }

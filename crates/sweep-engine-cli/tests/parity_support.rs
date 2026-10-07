@@ -76,7 +76,7 @@ pub fn run_rust_scan_normalized_with(name: &str, extra_patterns: &[&str]) -> Val
             patterns,
             disabled_patterns: Vec::new(),
             ignore: vec![".sweep-trash-*".to_owned()],
-            max_size_gb: 10.0,
+            max_size_gb: Some(10.0),
             depth: -1,
         };
         sweep_engine::scan_to_plan_with_sweep_config(

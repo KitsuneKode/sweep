@@ -1,0 +1,32 @@
+{
+  "checkedAt": "2026-10-07",
+  "checks": [
+    {
+      "backend": "js",
+      "runtime": "node bundled CLI",
+      "logicalSparseBytes": 644245094400,
+      "allocatedFixtureBytes": 0,
+      "checks": [
+        "scan",
+        "over-cap dry-run without yes",
+        "typed pre-mutation refusal",
+        "none overrides configured cap",
+        "apply receipt",
+        "unselected sentinel preserved"
+      ]
+    },
+    {
+      "backend": "rust",
+      "runtime": "direct current release engine",
+      "logicalSparseBytes": 644245094400,
+      "allocatedFixtureBytes": 0,
+      "checks": ["scan", "apply receipt", "unselected sentinel preserved"],
+      "limitation": "Node host native apply capability spawnSync is blocked by EPERM; direct engine is not the host path."
+    }
+  ],
+  "qualification": "Sparse metadata and policy only; not allocated 600 GiB throughput or entry-heavy scalability.",
+  "inputs": {
+    "cliBundleSha256": "4863341a4abd456d719df9927ae53a6bc2bae8cab39fa8b7c490b8dc29c526a1",
+    "nativeReleaseEngineSha256": "087bca58511f220b7858f173969c73cfe9cbb349493d65a7acc7184cca552cdf"
+  }
+}

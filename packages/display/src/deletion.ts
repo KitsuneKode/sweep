@@ -48,14 +48,17 @@ interface BuiltDeletionStatus {
 function buildDeletionStatus(status: DeletionStatus): BuiltDeletionStatus {
   const verb = status.verb ?? "deleting";
   const count = `[${status.current}/${status.total}]`;
-  const item = (status.itemBytes ?? 0) > 0 ? formatBytes(status.itemBytes ?? 0) : "";
-  const running =
+  let item = (status.itemBytes ?? 0) > 0 ? formatBytes(status.itemBytes ?? 0) : "";
+  let running =
     (status.runningBytes ?? 0) > 0 && status.runningBytes !== status.itemBytes
       ? `~${formatBytes(status.runningBytes ?? 0)} ${verb === "moving" ? "moved" : "removed"}`
       : "";
-  const elapsed = (status.elapsedMs ?? 0) >= 1000 ? formatScanElapsed(status.elapsedMs ?? 0) : "";
-  const tailBits = [item, running, elapsed].filter((part) => part.length > 0);
-  const tail = tailBits.length > 0 ? `  ${tailBits.join("  ")}` : "";
+  let elapsed = (status.elapsedMs ?? 0) >= 1000 ? formatScanElapsed(status.elapsedMs ?? 0) : "";
+  const makeTail = () => {
+    const parts = [item, running, elapsed].filter((part) => part.length > 0);
+    return parts.length > 0 ? `  ${parts.join("  ")}` : "";
+  };
+  let tail = makeTail();
   const path = status.path ? sanitizeTerminalText(status.path) : "";
   const columns = status.columns ?? Number.POSITIVE_INFINITY;
 
@@ -66,6 +69,19 @@ function buildDeletionStatus(status: DeletionStatus): BuiltDeletionStatus {
   }
 
   const head = `${verb} ${count} `;
+  // Preserve the current path before optional byte details on narrow screens.
+  if (columns - head.length - tail.length < 8) {
+    item = "";
+    tail = makeTail();
+  }
+  if (columns - head.length - tail.length < 8) {
+    running = "";
+    tail = makeTail();
+  }
+  if (columns - head.length - tail.length < 8) {
+    elapsed = "";
+    tail = makeTail();
+  }
   const room = columns - head.length - tail.length;
   if (room <= 1) {
     const line = `${verb} ${count}${tail}`;
@@ -106,7 +122,7 @@ export function printDeletionProgress(
   runningBytes = 0,
   options: { verb?: string; elapsedMs?: number; columns?: number } = {},
 ): void {
-  const columns = options.columns ?? process.stdout.columns ?? 80;
+  const columns = options.columns ?? process.stderr.columns ?? 80;
   const built = buildDeletionStatus({
     current,
     total,
@@ -124,16 +140,15 @@ export function printDeletionProgress(
     (built.running ? `  ${pc.green(built.running)}` : "") +
     (built.elapsed ? `  ${pc.dim(built.elapsed)}` : "");
 
-  if (process.stdout.isTTY) {
+  if (process.stderr.isTTY) {
     // Erase the previous path. A shorter update must not leave the tail of a
     // longer one, and a path wider than the terminal must not wrap.
-    process.stdout.write(`\r${colored}\x1b[K`);
+    process.stderr.write(`\r${colored}\x1b[K`);
     progressDrawn = true;
     return;
   }
 
-  // Bun console.log bypasses stdout stream errors; apply needs observable EPIPE.
-  process.stdout.write(`sweep: ${built.plain}\n`);
+  process.stderr.write(`sweep: ${built.plain}\n`);
 }
 
 /**
@@ -145,8 +160,8 @@ let progressDrawn = false;
 
 /** Clear the active deletion progress line in TTY mode. */
 export function clearDeletionProgress(): void {
-  if (process.stdout.isTTY && progressDrawn) {
-    process.stdout.write("\r\x1b[K");
+  if (process.stderr.isTTY && progressDrawn) {
+    process.stderr.write("\r\x1b[K");
     progressDrawn = false;
   }
 }

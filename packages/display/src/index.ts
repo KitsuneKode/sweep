@@ -256,6 +256,9 @@ export function printCleanResult(
     outcomes?: import("@kitsunekode/sweep-protocol").ApplyOutcome[];
   } = {},
 ): void {
+  // Use the observable stream, including under Bun, so a lost final apply
+  // receipt cannot bypass the CLI's EPIPE handler and delivery barrier.
+  const print = (line = "") => process.stdout.write(`${line}\n`);
   const duration =
     result.durationMs < 1000
       ? `${result.durationMs}ms`
@@ -263,13 +266,13 @@ export function printCleanResult(
   const verb = options.trashDir ? "Moved" : "Cleaned";
 
   if (process.stdout.isTTY) {
-    console.log(
+    print(
       `${pc.green("✓")} ${verb} ${pc.bold(result.deleted.length.toString())} items, ` +
         `~${pc.bold(pc.green(formatBytes(result.totalBytesFreed)))} estimated bytes ${options.trashDir ? "moved" : "removed"} ` +
         pc.dim(`(${duration})`),
     );
   } else {
-    console.log(
+    print(
       `sweep: done, ~${formatBytes(result.totalBytesFreed)} estimated bytes ${options.trashDir ? "moved" : "removed"} in ${duration}`,
     );
   }
@@ -278,13 +281,11 @@ export function printCleanResult(
   const unattempted =
     options.outcomes?.filter((outcome) => outcome.status === "unattempted").length ?? 0;
   if (covered)
-    console.log(
-      pc.dim(`  ${covered} nested or duplicate selection(s) covered by completed operations.`),
-    );
-  if (unattempted) console.log(pc.yellow(`  ${unattempted} selection(s) not attempted.`));
+    print(pc.dim(`  ${covered} nested or duplicate selection(s) covered by completed operations.`));
+  if (unattempted) print(pc.yellow(`  ${unattempted} selection(s) not attempted.`));
 
   if (options.trashDir) {
-    console.log(
+    print(
       pc.dim(
         `  restore: entries moved to ${sanitizeTerminalText(options.trashDir)}: ` +
           `delete that directory to reclaim the space.`,
@@ -293,12 +294,10 @@ export function printCleanResult(
   }
 
   if (result.failedPaths.length > 0) {
-    console.log();
-    console.log(pc.yellow(`⚠ ${result.failedPaths.length} item(s) failed to delete:`));
+    print();
+    print(pc.yellow(`⚠ ${result.failedPaths.length} item(s) failed to delete:`));
     for (const { path, error } of result.failedPaths) {
-      console.log(
-        `  ${pc.dim(sanitizeTerminalText(path))}: ${pc.red(sanitizeTerminalText(error))}`,
-      );
+      print(`  ${pc.dim(sanitizeTerminalText(path))}: ${pc.red(sanitizeTerminalText(error))}`);
     }
   }
 }
@@ -313,12 +312,12 @@ export function printInterrupted(
   total: number,
   options: { verb?: string } = {},
 ): void {
-  console.log();
-  console.log(
+  process.stdout.write("\n");
+  process.stdout.write(
     pc.yellow(
       `⚠ Interrupted: ${deleted} of ${total} item(s) ${options.verb ?? "deleted"}. ` +
         `The rest were left in place.`,
-    ),
+    ) + "\n",
   );
 }
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { directoryEntries } from "./directory-reader.js";
@@ -88,3 +88,30 @@ test("Bun fails explicitly when its incremental Node reader is unavailable", asy
   expect(code).toBe(2);
   expect(error).toContain("install Node or use the Rust engine");
 });
+
+test.skipIf(process.platform === "win32")(
+  "a malformed reader response cannot become a complete scan with skipped directories",
+  async () => {
+    const bin = join(owned, "bin");
+    mkdirSync(bin);
+    const executable = join(bin, "node");
+    writeFileSync(
+      executable,
+      `#!${process.execPath}
+// Emit an invalid reply without waiting for input; a reader must fail closed.
+process.stdout.write("not-json\\n");
+setInterval(() => {}, 1000);
+`,
+    );
+    chmodSync(executable, 0o700);
+    const source = `import {scan} from ${JSON.stringify(join(import.meta.dir, "scanner.ts"))}; import {DEFAULT_CONFIG} from ${JSON.stringify(join(import.meta.dir, "config.ts"))}; try { await scan(${JSON.stringify(owned)}, DEFAULT_CONFIG); process.exit(9); } catch (error) { console.error(error.message); process.exit(2); }`;
+    const proc = Bun.spawn([process.execPath, "-e", source], {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const [code, error] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    expect(code).toBe(2);
+    expect(error).toContain("incremental directory reader");
+  },
+);

@@ -33,6 +33,6 @@ export async function handleStats(opts: StatsHandlerOptions): Promise<void> {
     await drainStdout();
     exitWith(EXIT.OK);
   } catch (err) {
-    handleFatalError(err);
+    handleFatalError(err, { json: opts.json });
   }
 }

@@ -2,6 +2,29 @@ import { expect, test } from "bun:test";
 import { Writable } from "node:stream";
 import { JsonOutput } from "./json-output.js";
 
+test("flush waits for write completion even when a drain arrives early", async () => {
+  let delivered = false;
+  const out = new Writable({
+    highWaterMark: 1,
+    write(_chunk, _encoding, callback) {
+      setTimeout(() => out.emit("drain"), 1);
+      setTimeout(() => {
+        delivered = true;
+        callback();
+      }, 20);
+    },
+  });
+  const writer = new JsonOutput(out, 1000);
+  try {
+    writer.write("payload");
+    await writer.flush();
+    expect(delivered).toBe(true);
+  } finally {
+    writer.dispose();
+    out.destroy();
+  }
+});
+
 test("a consumer that drains before the producer waits does not falsely stall", async () => {
   const out = new Writable({
     highWaterMark: 1,

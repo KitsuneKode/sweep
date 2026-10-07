@@ -1,5 +1,5 @@
 import type { ApplyReport } from "@kitsunekode/sweep-protocol";
-import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
+import { PROTOCOL_VERSION, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import {
   GuardrailError,
   assertSafeCwd,
@@ -15,6 +15,7 @@ import {
   printInterrupted,
 } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
+import { expectApplyOutput } from "../apply-lifecycle.js";
 import {
   applyNoColor,
   drainStdout,
@@ -32,7 +33,9 @@ export type ApplyHandlerOptions = import("@kitsunekode/sweep-protocol").CliOptio
 };
 
 export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
+  if (!opts.dryRun) expectApplyOutput();
   applyNoColor(opts.color);
+  warnIgnoredOptions(opts, "apply", { applies: true, except: ["--json"] });
 
   let operationEntered = false;
   try {
@@ -61,7 +64,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       exitWith(EXIT.OK);
     }
 
-    if (opts.forceLarge && !opts.yes) {
+    if (opts.forceLarge && !opts.yes && !opts.dryRun) {
       throw new GuardrailError(
         "--force-large requires --yes. Large deletes must be non-interactive.",
       );
@@ -69,11 +72,14 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
 
     // The plan path must enforce the same size ceiling as interactive flows -
     // a saved or shared plan is not a trusted lane around maxSizeGB.
-    const config = loadConfig(plan.targetDir, undefined, {}, (message) =>
-      console.error(`warning: ${message}`),
+    const config = loadConfig(
+      plan.targetDir,
+      undefined,
+      opts.maxSizeGb === undefined
+        ? {}
+        : { maxSizeGB: opts.maxSizeGb === "none" ? null : opts.maxSizeGb },
+      (message) => console.error(`warning: ${sanitizeTerminalText(message)}`),
     );
-    assertSizeLimit(getSelectedBytes(plan), config.maxSizeGB, opts.forceLarge ?? false);
-
     if (opts.dryRun) {
       // A plan "preview" must never delete: report what applying would do.
       const totalBytes = getSelectedBytes(plan);
@@ -88,7 +94,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       exitWith(EXIT.OK);
     }
 
-    warnIgnoredOptions(opts, "apply", { applies: true, except: ["--json"] });
+    assertSizeLimit(getSelectedBytes(plan), config.maxSizeGB, opts.forceLarge ?? false);
 
     if (!opts.yes) {
       const totalBytes = getSelectedBytes(plan);

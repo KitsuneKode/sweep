@@ -1,14 +1,37 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
 import type { ApplyProgress } from "@kitsunekode/sweep-protocol";
-import { executePlanDeletion } from "./shared.js";
+import { executePlanDeletion, resolveScanTarget } from "./shared.js";
 
 const roots: string[] = [];
 const previousConfig = process.env.SWEEP_CONFIG_DIR;
+
+test.skipIf(process.platform === "win32")(
+  "CLI aliases and trailing separators resolve to one applicable target",
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-target-spelling-"));
+    roots.push(root);
+    const target = join(root, "project");
+    mkdirSync(target);
+    const alias = join(root, "link");
+    symlinkSync(target, alias);
+    expect(resolveScanTarget(target + "/")).toBe(realpathSync(target));
+    expect(resolveScanTarget(alias)).toBe(realpathSync(target));
+  },
+);
 afterEach(() => {
   if (previousConfig === undefined) delete process.env.SWEEP_CONFIG_DIR;
   else process.env.SWEEP_CONFIG_DIR = previousConfig;

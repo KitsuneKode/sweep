@@ -538,3 +538,15 @@ test("confirmation exposes the ceiling and explicit override instructions", asyn
   expect(frame).toContain("--force-large --yes");
   expect(frame).toContain("Over the limit");
 });
+
+test("uncapped confirmation remains explicit without inventing an over-limit refusal", async () => {
+  const { setup, openSingleConfirm } = await mountWithApply(() => {}, {
+    maxSizeGB: null,
+    forceLarge: false,
+  });
+  await openSingleConfirm();
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("No byte ceiling");
+  expect(frame).not.toContain("Over the limit");
+  expect(frame).toContain("Permanently delete");
+});

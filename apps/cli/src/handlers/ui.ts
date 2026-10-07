@@ -164,7 +164,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     // Native FFI for the TUI requires Bun; re-exec under Bun when on Node.
     ensureBunRuntimeForUi();
 
-    if (opts.forceLarge && !opts.yes) {
+    if (opts.forceLarge && !opts.yes && !opts.dryRun) {
       throw new GuardrailError(
         "--force-large requires --yes as explicit large-operation authorization. The TUI still confirms each apply.",
       );
@@ -248,13 +248,13 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       exitWith(EXIT.OK);
     }
 
-    assertSizeLimit(getSelectedBytes(selectedPlan), scanConfig.maxSizeGB, opts.forceLarge ?? false);
-
     if (opts.dryRun) {
       printDryRunNotice();
       await drainStdout();
       exitWith(EXIT.OK);
     }
+
+    assertSizeLimit(getSelectedBytes(selectedPlan), scanConfig.maxSizeGB, opts.forceLarge ?? false);
 
     const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(
       selectedPlan,

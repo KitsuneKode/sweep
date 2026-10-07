@@ -1,11 +1,14 @@
 import { resolve } from "node:path";
 import { recoverApplyJournal } from "@kitsunekode/sweep-core/apply-session";
-import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
+import { sanitizeTerminalText, type CliOptions } from "@kitsunekode/sweep-protocol";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
-import { drainStdout, writeJson } from "./shared.js";
+import { drainStdout, writeJson, warnIgnoredOptions } from "./shared.js";
 
 /** Recovery only reports observations; it cannot restore or delete data. */
-export async function handleRecover(options: { journal: string; json?: boolean }): Promise<void> {
+export async function handleRecover(
+  options: CliOptions & { journal: string; json?: boolean },
+): Promise<void> {
+  warnIgnoredOptions(options, "recover", { except: ["--json"] });
   try {
     const report = recoverApplyJournal(resolve(options.journal));
     if (options.json) writeJson(report);
@@ -30,6 +33,6 @@ export async function handleRecover(options: { journal: string; json?: boolean }
     await drainStdout();
     exitWith(report.complete ? EXIT.OK : EXIT.WARN);
   } catch (error) {
-    handleFatalError(error);
+    handleFatalError(error, { json: options.json });
   }
 }

@@ -232,7 +232,7 @@ describe("presentation formatters", () => {
     );
     expect(line).toContain("apps/cli/");
     expect(line).toContain("3");
-    expect(line).toContain("1KB");
+    expect(line).toContain("1KiB");
   });
 
   test("a collapsed heading points right and an expanded one points down", () => {
@@ -279,7 +279,7 @@ describe("buildHeaderStats queue counts", () => {
           width,
         ),
       );
-      expect(line).toContain("~3.0 KB");
+      expect(line).toContain("~3.0 KiB");
     }
   });
 

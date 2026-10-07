@@ -65,10 +65,11 @@ export function sidebarColumnLayout(
   };
 }
 
-/** Compact byte label for dense sidebar columns (e.g. `1.2GB`, `400MB`). */
+/** Compact byte label for dense sidebar columns (e.g. `1.2GiB`, `400MiB`). */
 export function compactBytesLabel(bytes: number): string {
+  if (!Number.isFinite(bytes)) return "unknown";
   if (bytes <= 0) return "0B";
-  const units = ["B", "KB", "MB", "GB", "TB"] as const;
+  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"] as const;
   let value = bytes;
   let unit = 0;
   while (value >= 1024 && unit < units.length - 1) {

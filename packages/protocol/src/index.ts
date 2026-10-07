@@ -76,7 +76,8 @@ export interface SweepConfig {
   /** Patterns removed from the merged default + custom set (project/global/CLI). */
   disabledPatterns?: string[];
   ignore: string[];
-  maxSizeGB: number;
+  /** Optional deletion-byte ceiling in GiB. null means no byte cap; zero is a zero cap. */
+  maxSizeGB: number | null;
   depth: number;
 }
 
@@ -157,6 +158,8 @@ export interface CliOptions {
   select: SelectionMode;
   /** Absent unless the user passed --depth - config layers stay reachable. */
   depth?: number;
+  /** Per-run deletion ceiling in GiB; none explicitly disables a configured cap. */
+  maxSizeGb?: number | "none";
   config?: string;
   color: boolean;
   engine: EngineBackend;

@@ -3,6 +3,15 @@ use sweep_types::{ApplyReport, ScanPlan, PROTOCOL_VERSION};
 use tempfile::tempdir;
 
 #[test]
+fn usage_errors_are_distinct_from_cooperative_interruption() {
+    Command::cargo_bin("sweep-engine")
+        .unwrap_or_else(|err| panic!("failed to locate engine: {err}"))
+        .arg("unknown-subcommand")
+        .assert()
+        .code(2);
+}
+
+#[test]
 fn scan_subcommand_emits_scan_plan_json() {
     let dir = tempdir().unwrap_or_else(|err| panic!("failed to create tempdir: {err}"));
     let target = dir.path().to_string_lossy().into_owned();
@@ -28,7 +37,11 @@ fn scan_subcommand_emits_scan_plan_json() {
 
 #[test]
 fn apply_subcommand_reads_plan_from_stdin() {
-    let plan = ScanPlan::empty("/tmp/project", "1970-01-01T00:00:00.000Z");
+    let owned = tempdir().unwrap_or_else(|err| panic!("fixture: {err}"));
+    let plan = ScanPlan::empty(
+        owned.path().to_string_lossy().into_owned(),
+        "1970-01-01T00:00:00.000Z",
+    );
     let input = serde_json::to_string(&plan).unwrap_or_else(|err| {
         panic!("failed to serialize ScanPlan: {err}");
     });

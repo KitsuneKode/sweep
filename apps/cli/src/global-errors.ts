@@ -1,5 +1,5 @@
-import { abortActiveApply, isApplyActive } from "./apply-lifecycle.js";
-import { handleFatalError } from "./errors.js";
+import { abortActiveApply, hasApplyEntered, isApplyActive } from "./apply-lifecycle.js";
+import { EXIT, handleFatalError } from "./errors.js";
 import { isJsonStdoutActive } from "./json-output.js";
 
 /** Shared by npm and compiled entrypoints: a broken sink must not hide apply. */
@@ -15,6 +15,10 @@ export function handleStdoutError(
   // The structured writer reports incomplete output and a nonzero exit itself.
   // Do not exit before it can cancel/drain the scan's producer.
   if (isJsonStdoutActive()) return;
+  if (hasApplyEntered()) {
+    exit(EXIT.FAILURE);
+    return;
+  }
   // Preserve ordinary Unix `sweep scan | head` behavior for human output.
   exit(0);
 }

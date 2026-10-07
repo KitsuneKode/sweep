@@ -56,7 +56,7 @@ impl Default for WalkConfig {
     fn default() -> Self {
         Self {
             patterns: default_patterns(),
-            ignore: Vec::new(),
+            ignore: vec![".sweep-trash-*".to_owned()],
             depth: -1,
         }
     }
@@ -1949,6 +1949,21 @@ mod tests {
             .map(|entry| entry.name.as_str())
             .collect();
         assert_eq!(names, vec!["dist"]);
+    }
+
+    #[test]
+    fn default_walk_does_not_rediscover_trash_payloads() -> std::io::Result<()> {
+        let owned = tempdir()?;
+        let root = Utf8Path::from_path(owned.path()).unwrap_or_else(|| panic!("utf8"));
+        fs::create_dir_all(root.join(".sweep-trash-owned/node_modules"))?;
+        fs::create_dir(root.join("node_modules"))?;
+        let result = walk_matched_entries(root, &WalkConfig::default());
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(
+            result.entries[0].path,
+            root.join("node_modules").to_string()
+        );
+        Ok(())
     }
 
     #[test]

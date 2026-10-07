@@ -21,7 +21,7 @@ export type ApplyReviewedPlanResult =
 export async function applyReviewedPlan(
   plan: ScanPlan,
   options: {
-    maxSizeGB: number;
+    maxSizeGB: number | null;
     forceLarge?: boolean;
     dryRun?: boolean;
     engine: EngineBackend;
@@ -29,9 +29,6 @@ export async function applyReviewedPlan(
     trash?: boolean;
   },
 ): Promise<ApplyReviewedPlanResult> {
-  const selectedBytes = getSelectedBytes(plan);
-  assertSizeLimit(selectedBytes, options.maxSizeGB, options.forceLarge ?? false);
-
   if (plan.selectedCandidateIds.length === 0) {
     return { status: "nothing" };
   }
@@ -39,6 +36,8 @@ export async function applyReviewedPlan(
   if (options.dryRun) {
     return { status: "dry_run" };
   }
+
+  assertSizeLimit(getSelectedBytes(plan), options.maxSizeGB, options.forceLarge ?? false);
 
   const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(
     plan,

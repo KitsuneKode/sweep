@@ -64,6 +64,8 @@ Rust pipe also pauses, allowing native workers to slow through their bounded
 channel. A consumer that stops draining for 30 seconds causes an explicit failure;
 a closed pipe or an oversized queued payload also fails. Check both the final
 completion event and Sweep's exit status before trusting a stream.
+Final delivery waits for preceding writes to finish; `drain` only resumes a
+producer. A broken or stalled structured-output pipe is a failure, not success.
 
 ## Reports and interruption
 
@@ -107,13 +109,28 @@ JSON Schemas. Register the shared schema by its `$id` before resolving the other
 schemas' references. These are the schemas embedded in the installed CLI, so an
 integration can validate against the version it is actually running.
 
-For `apply --json` and `clean --json`, fatal errors end stderr with a JSON error
-record containing `type`, `protocolVersion`, `code`, `exitCode` and `message`.
+For JSON scan, inspect, stats, recover, doctor, apply and clean commands, fatal
+errors end stderr with a JSON error record containing `type`, `protocolVersion`,
+`code`, `exitCode`, `retryable` and `message`. `plan` uses this error format too.
+Put `--json` before other arguments if usage errors must also be structured.
+Invalid arguments exit with code 2 and code `invalid_arguments`; cancellation
+uses exit 1. Known apply refusals also include a remediation `hint`.
 Earlier stderr lines can contain warnings. Stdout remains reserved for plans and
 completed reports. An `applyOutcome: "not_started"` means that this request
 refused before removal; `"unknown"` means no trusted final report established the
 result. A known size refusal has code `size_limit_exceeded`, and cooperative lock
 contention has code `apply_busy`. These codes do not authorize automatic retries.
+Only cooperative lock contention is marked retryable; wait for the holder to
+finish. Never delete a lock based only on a PID observation. Human deletion
+progress goes to stderr, and report delivery remains part of the destructive
+command's success condition even after removal has finished.
+
+There is no default byte cap. Existing numeric caps remain effective. For a
+deliberately reviewed operation, an agent can pass `--max-size-gb 600` to apply
+or clean. `--max-size-gb none` explicitly removes a configured byte ceiling;
+doing so requires authorization for that policy change. Resource budgets are
+independent and remain enforced. Dry-run previews require neither `--yes` nor
+an override, even when the selection exceeds a configured cap.
 
 Store completed reports separately from plans. `deleted` and `covered` account
 for removal; `failed` may include partial recursive removal; `unattempted` means

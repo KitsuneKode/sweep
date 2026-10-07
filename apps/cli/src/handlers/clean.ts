@@ -9,6 +9,7 @@ import {
 } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { applyReviewedPlan } from "./apply-plan.js";
+import { expectApplyOutput } from "../apply-lifecycle.js";
 import {
   applyNoColor,
   confirmPlanDeletion,
@@ -23,13 +24,14 @@ import {
 } from "./shared.js";
 
 export async function handleClean(pathArg: string, opts: CliOptions): Promise<void> {
+  if (!opts.dryRun) expectApplyOutput();
   applyNoColor(opts.color);
 
   let operationEntered = false;
   try {
     const targetDir = resolveScanTarget(pathArg);
 
-    if (opts.forceLarge && !opts.yes) {
+    if (opts.forceLarge && !opts.yes && !opts.dryRun) {
       throw new GuardrailError(
         "--force-large requires --yes. Large deletes must be non-interactive.",
       );
@@ -60,9 +62,6 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       exitWith(EXIT.OK);
     }
 
-    const selectedBytes = getSelectedBytes(plan);
-    assertSizeLimit(selectedBytes, config.maxSizeGB, opts.forceLarge);
-
     if (opts.dryRun) {
       if (opts.json) {
         writeJson(plan);
@@ -72,6 +71,8 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       await drainStdout();
       exitWith(EXIT.OK);
     }
+
+    assertSizeLimit(getSelectedBytes(plan), config.maxSizeGB, opts.forceLarge);
 
     if (plan.selectedCandidateIds.length === 0) {
       if (opts.json) {

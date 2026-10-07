@@ -1,0 +1,49 @@
+{
+  "checkedAt": "2026-10-07",
+  "tool": "cargo-audit 0.22.2",
+  "advisoryDatabaseCommit": "ef6173cbc5c50ec8166f9a5b28f07834144373ee",
+  "lockfileSha256": "7b923bf4ef9848ca0752628fe76211785e3b2e2a65cf470ca6a2a7555810136c",
+  "command": "cargo-audit audit --file Cargo.lock --db /tmp/sweep-rustsec-db --no-fetch --no-yanked --json",
+  "result": {
+    "database": {
+      "advisory-count": 1290,
+      "last-commit": null,
+      "last-updated": null
+    },
+    "lockfile": {
+      "dependency-count": 114
+    },
+    "settings": {
+      "target_arch": [],
+      "target_os": [],
+      "severity": null,
+      "ignore": [],
+      "informational_warnings": ["unmaintained", "unsound", "notice"]
+    },
+    "vulnerabilities": {
+      "found": false,
+      "count": 0,
+      "list": []
+    },
+    "warnings": {}
+  },
+  "remediated": [
+    {
+      "package": "crossbeam-epoch",
+      "from": "0.9.18",
+      "to": "0.9.20",
+      "advisory": "RUSTSEC-2026-0204"
+    },
+    {
+      "package": "anyhow",
+      "from": "1.0.102",
+      "to": "1.0.104",
+      "advisory": "RUSTSEC-2026-0190"
+    }
+  ],
+  "limitations": [
+    "Offline public advisory snapshot, not continuous monitoring.",
+    "Registry yank lookup was excluded.",
+    "This does not cover Bun/npm dependencies or attest runtime safety."
+  ]
+}

@@ -148,7 +148,7 @@ describe("layout across terminal sizes", () => {
     expect(frame).toContain("artifacts");
     expect(frame).toContain("Age");
     expect(frame).toContain("2y");
-    expect(frame).toMatch(/8mo\s+█+\s+300\.0 MB/);
+    expect(frame).toMatch(/8mo\s+█+\s+300\.0 MiB/);
     // Insights panel: tier breakdown and the stale total.
     expect(frame).toContain("caution");
     expect(frame).toContain("dangerous");
@@ -162,7 +162,7 @@ describe("layout across terminal sizes", () => {
 
     expect(frame).toContain("Age");
     // The size bar sits between the age and the size on each row.
-    expect(frame).toMatch(/8mo\s+300\.0 MB/);
+    expect(frame).toMatch(/8mo\s+300\.0 MiB/);
     expect(frame).not.toMatch(/8mo\s+█/);
     expectFits(frame, 100);
   });
@@ -356,22 +356,22 @@ describe("scroll stability", () => {
     // The lane's bottom-most cell sits on the hit-grid boundary and does not
     // register in the test renderer, so seek one cell in from each edge.
     await mouse(setup, (m) => m.click(x, bottom - 1));
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+[0-9.]+ MB/);
-    const mid = setup.captureCharFrame().match(/▌\s+○ node_modules\s+([0-9.]+) MB/);
+    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+[0-9.]+ MiB/);
+    const mid = setup.captureCharFrame().match(/▌\s+○ node_modules\s+([0-9.]+) MiB/);
     expect(Number(mid![1])).toBeLessThan(10);
 
     await mouse(setup, (m) => m.click(x, top));
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+30\.0 MB/);
+    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+30\.0 MiB/);
   });
 
   test("dragging the scrollbar thumb seeks continuously", async () => {
     const setup = await mountBig();
     const frame = setup.captureCharFrame();
     const { x, top, bottom } = scrollbarGeometry(frame);
-    expect(frame).toMatch(/▌\s+○ node_modules\s+30\.0 MB/);
+    expect(frame).toMatch(/▌\s+○ node_modules\s+30\.0 MiB/);
 
     await mouse(setup, (m) => m.drag(x, top, x, bottom - 1));
-    const landed = setup.captureCharFrame().match(/▌\s+○ node_modules\s+([0-9.]+) MB/);
+    const landed = setup.captureCharFrame().match(/▌\s+○ node_modules\s+([0-9.]+) MiB/);
     expect(Number(landed![1])).toBeLessThan(10);
   });
 
@@ -385,7 +385,7 @@ describe("scroll stability", () => {
     // at its travel end. Mapping that drag over the full track height -
     // the old behavior - stops ~thumbHeight rows short of the last item.
     await mouse(setup, (m) => m.drag(x, top, x, bottom - 1));
-    // Sorted desc by size: the last item is the 1.0 MB row.
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+1\.0 MB/);
+    // Sorted desc by size: the last item is the 1.0 MiB row.
+    expect(setup.captureCharFrame()).toMatch(/▌\s+○ node_modules\s+1\.0 MiB/);
   });
 });

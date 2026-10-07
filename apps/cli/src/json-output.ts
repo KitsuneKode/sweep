@@ -66,21 +66,22 @@ export class JsonOutput {
   /** Await every buffered byte before an explicit process.exit. */
   async flush(): Promise<void> {
     this.assertWritable();
-    if (!this.blocked && this.out.writableLength === 0) return;
-    await this.wait();
+    // A drain is a producer backpressure signal, not a delivery receipt.
+    // Queue a callback behind every preceding write, even when Bun reports
+    // zero writableLength for a pending stdout write.
+    await this.wait(true);
     this.assertWritable();
   }
 
-  private wait(): Promise<void> {
-    if (this.pending) return this.pending;
-    this.pending = new Promise<void>((resolve, reject) => {
+  private wait(delivery = false): Promise<void> {
+    if (!delivery && this.pending) return this.pending;
+    const pending = new Promise<void>((resolve, reject) => {
       let settled = false;
       const cleanup = () => {
         clearTimeout(timer);
         this.out.removeListener("drain", onDrain);
         this.out.removeListener("error", onFailure);
         this.out.removeListener("close", onClose);
-        this.pending = undefined;
       };
       const done = (error?: Error | null) => {
         if (settled) return;
@@ -108,11 +109,15 @@ export class JsonOutput {
           ),
         this.timeoutMs,
       );
-      this.out.once("drain", onDrain);
+      if (!delivery) this.out.once("drain", onDrain);
       this.out.once("error", onFailure);
       this.out.once("close", onClose);
       // A zero-byte callback waits for preceding writes even if needDrain is false.
-      if (!this.blocked && !this.out.writableNeedDrain) this.out.write("", done);
+      if (delivery || (!this.blocked && !this.out.writableNeedDrain)) this.out.write("", done);
+    });
+    if (delivery) return pending;
+    this.pending = pending.finally(() => {
+      this.pending = undefined;
     });
     return this.pending;
   }

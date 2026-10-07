@@ -127,7 +127,14 @@ export function resolveRustEngineBinary(): string {
   if (fromEnv && fromEnv.length > 0) {
     return fromEnv;
   }
-  if (embeddedEngine) return embeddedEngine();
+  if (embeddedEngine) {
+    try {
+      return embeddedEngine();
+    } catch {
+      // A full/missing extraction directory does not invalidate an installed
+      // engine. Continue the documented resolution chain before falling back.
+    }
+  }
 
   const packageRoot = sweepPackageRoot();
   const binaryName = process.platform === "win32" ? "sweep-engine.exe" : "sweep-engine";
@@ -228,7 +235,7 @@ async function runEngineAsync(
   return await new Promise<string>((resolvePromise, rejectPromise) => {
     let stdout = "";
     let stdoutBytes = 0;
-    let stderr = "";
+    let stderr = Buffer.alloc(0);
     const lines = onLine
       ? new NdjsonDecoder(onLine, options.cooperativeApply ? MAX_ENGINE_STDOUT : MAX_EVENT_LINE)
       : undefined;
@@ -274,7 +281,6 @@ async function runEngineAsync(
     };
 
     proc.stdout.setEncoding("utf8");
-    proc.stderr.setEncoding("utf8");
 
     if (onLine) {
       proc.stdout.on("data", (chunk: string) => {
@@ -314,10 +320,12 @@ async function runEngineAsync(
       });
     }
 
-    proc.stderr.on("data", (chunk: string) => {
-      if (stderr.length < MAX_ENGINE_STDERR) {
-        stderr += chunk;
-      }
+    proc.stderr.on("data", (chunk: Buffer) => {
+      const tail = chunk.subarray(-MAX_ENGINE_STDERR);
+      const retained = stderr.subarray(
+        Math.max(0, stderr.length + tail.length - MAX_ENGINE_STDERR),
+      );
+      stderr = Buffer.concat([retained, tail]);
     });
     // A stream-level error on a flowing pipe would otherwise escape as an
     // uncaughtException, bypassing the exit-code taxonomy entirely.
@@ -354,7 +362,8 @@ async function runEngineAsync(
           // The engine exits with the CLI's taxonomy (2 guardrail, 3 invalid
           // input, 4 failure) so `sweep --engine rust` maps errors identically
           // to the JS engine instead of collapsing every failure to exit 4.
-          const message = stderr.trim() || `rust engine exited with status ${code ?? "signal"}`;
+          const message =
+            stderr.toString("utf8").trim() || `rust engine exited with status ${code ?? "signal"}`;
           settle(() =>
             rejectPromise(
               code === 2

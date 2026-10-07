@@ -15,12 +15,16 @@ const SIZE_UNITS: Record<string, number> = {
   b: 1,
   k: 1024,
   kb: 1024,
+  kib: 1024,
   m: 1024 ** 2,
   mb: 1024 ** 2,
+  mib: 1024 ** 2,
   g: 1024 ** 3,
   gb: 1024 ** 3,
+  gib: 1024 ** 3,
   t: 1024 ** 4,
   tb: 1024 ** 4,
+  tib: 1024 ** 4,
 };
 
 const DURATION_UNITS: Record<string, number> = {
@@ -37,7 +41,7 @@ const DURATION_TERM = /^(\d+(?:\.\d+)?)(m|h|d|w|mo|y)$/i;
 
 /** Every accepted `key:value` prefix, for hints and tests. */
 export const FILTER_KEYS = ["kind", "risk", "path", "is", "older", "newer"] as const;
-export const FILTER_HINT = "kind:target risk:caution >100MB older:30d is:dir";
+export const FILTER_HINT = "kind:target risk:caution >100MiB older:30d is:dir";
 
 const FILTER_KEY_SET = new Set<string>(FILTER_KEYS);
 const RISK_TIERS = new Set(["safe", "caution", "dangerous", "blocked"]);

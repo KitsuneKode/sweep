@@ -81,9 +81,10 @@ already selected artifact still handles raw filenames.
 
 For distribution sizes and measurement conditions, read [Benchmarks](../developer/benchmarks.md).
 
-The deletion size ceiling defaults to 10 GiB and is independent of resource
-admission. For an intentionally reviewed 200–600 GiB selection, set `maxSizeGB`
-in `.sweeprc` to the reviewed ceiling or launch with `--force-large --yes`.
+There is no default deletion byte ceiling. An existing numeric `maxSizeGB`
+still limits removal independently of resource admission. For an intentionally
+reviewed 200–600 GiB selection, use `--max-size-gb 600` for a run-specific cap,
+or explicitly choose `--max-size-gb none` to disable a configured cap.
 The TUI still asks for confirmation. A known size refusal preserves its scan and
 queue. A 600 GiB capacity claim requires measurements of representative file
 counts, layouts, storage and deletion behavior; sparse-file tests alone do not

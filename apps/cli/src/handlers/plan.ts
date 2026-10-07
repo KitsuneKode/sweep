@@ -10,10 +10,12 @@ import {
   resolveScanTarget,
   runScanToPlan,
   writeJson,
+  warnIgnoredOptions,
 } from "./shared.js";
 
 export async function handlePlan(pathArg: string, opts: CliOptions): Promise<void> {
   applyNoColor(opts.color);
+  warnIgnoredOptions(opts, "plan", { scans: true, structured: true });
 
   try {
     const targetDir = resolveScanTarget(pathArg);
@@ -32,6 +34,6 @@ export async function handlePlan(pathArg: string, opts: CliOptions): Promise<voi
     await drainStdout();
     exitWith(EXIT.OK);
   } catch (err) {
-    handleFatalError(err);
+    handleFatalError(err, { json: true });
   }
 }

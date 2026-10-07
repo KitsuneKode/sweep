@@ -29,4 +29,7 @@ describe("sanitizeTerminalText", () => {
   test("leaves astral-plane characters alone", () => {
     expect(sanitizeTerminalText("🦊")).toBe("🦊");
   });
+  test("escapes line separators and invisible tag characters in consent text", () => {
+    expect(sanitizeTerminalText("a\u2028b\u2029c\u{e0061}")).toBe("a\\u2028b\\u2029c\\u{e0061}");
+  });
 });

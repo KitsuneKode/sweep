@@ -38,7 +38,7 @@ describe("loadConfig: defaults", () => {
   test("returns built-in defaults when no config files exist", () => {
     const config = loadConfig(dir("nonexistent-project"));
     expect(config.patterns).toEqual(DEFAULT_CONFIG.patterns);
-    expect(config.maxSizeGB).toBe(10);
+    expect(config.maxSizeGB).toBeNull();
     expect(config.depth).toBe(-1);
     expect(config.ignore).toEqual(DEFAULT_CONFIG.ignore);
   });
@@ -63,6 +63,14 @@ describe("loadConfig: defaults", () => {
 });
 
 describe("loadConfig: project config (.sweeprc)", () => {
+  test("non-object JSON configuration is rejected consistently with doctor", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    for (const value of [5, [], null]) {
+      writeFileSync(dir("project", ".sweeprc"), JSON.stringify(value));
+      expect(() => loadConfig(dir("project"))).toThrow("JSON object");
+      expect(validateProjectConfigFile(dir("project", ".sweeprc"), dir("project")).ok).toBe(false);
+    }
+  });
   test("finds .sweeprc in the target directory", () => {
     mkdirSync(dir("project"), { recursive: true });
     writeConfig(dir("project"), { maxSizeGB: 5 });
@@ -387,6 +395,32 @@ describe("DEFAULT_PATTERNS sanity checks", () => {
 });
 
 describe("config hardening", () => {
+  test("an explicit null disables an inherited byte cap while zero remains a zero cap", () => {
+    mkdirSync(dir("uncapped"));
+    writeConfig(dir("uncapped"), { maxSizeGB: 3 });
+    expect(loadConfig(dir("uncapped"), undefined, { maxSizeGB: null }).maxSizeGB).toBeNull();
+    writeConfig(dir("uncapped"), { maxSizeGB: null });
+    expect(loadConfig(dir("uncapped")).maxSizeGB).toBeNull();
+    expect(validateProjectConfigFile(dir("uncapped", ".sweeprc"), dir("uncapped")).ok).toBe(true);
+    writeConfig(dir("uncapped"), { maxSizeGB: 0 });
+    expect(loadConfig(dir("uncapped")).maxSizeGB).toBe(0);
+  });
+
+  test("a misspelled byte ceiling cannot silently turn a capped config into an uncapped run", () => {
+    mkdirSync(dir("misspelled-cap"));
+    writeFileSync(dir("misspelled-cap", ".sweeprc"), JSON.stringify({ maxSIzeGB: 10 }));
+    expect(() => loadConfig(dir("misspelled-cap"))).toThrow(/unknown field/);
+  });
+  test("the pattern editor cannot read or overwrite an oversized existing config", () => {
+    mkdirSync(dir("big-editor"));
+    const path = dir("big-editor", ".sweeprc");
+    const original = " ".repeat(1024 * 1024) + "{}";
+    writeFileSync(path, original);
+    expect(() =>
+      writeProjectSweeprc(path, { patterns: [".custom"], disabledPatterns: [] }, true),
+    ).toThrow(/exceeds 1024 KB/);
+    expect(readFileSync(path, "utf8")).toBe(original);
+  });
   test("rejects a non-regular .sweeprc (FIFO would hang readFileSync)", () => {
     // A directory is the portable stand-in for "not a regular file".
     mkdirSync(dir("fifo-project", ".sweeprc"), { recursive: true });

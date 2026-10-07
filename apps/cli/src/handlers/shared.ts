@@ -76,12 +76,20 @@ export function resolveScanTarget(pathArg: string): string {
   const targetDir = resolveTargetPath(pathArg);
   assertSafeCwd(targetDir);
   assertTargetDirectory(targetDir);
-  return targetDir;
+  if (pathUsesProcessRelativeRoot(targetDir)) {
+    throw new GuardrailError("scan target resolves through a process-relative path");
+  }
+  // Review, serialize and apply the same real target. A leaf symlink is a
+  // valid CLI spelling, but must not become an unappliable saved plan.
+  const canonical = realpathSync(targetDir);
+  assertSafeCwd(canonical);
+  assertTargetDirectory(canonical);
+  return canonical;
 }
 
 /** Config-layer warnings go to stderr - stdout stays machine-readable. */
 const warnConfig = (message: string): void => {
-  console.error(`warning: ${message}`);
+  console.error(`warning: ${sanitizeTerminalText(message)}`);
 };
 
 export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepConfig {
@@ -94,6 +102,9 @@ export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepCon
   for (const pattern of ignore) assertSafePattern(pattern);
 
   const cliOverrides: Partial<SweepConfig> = {
+    ...(opts.maxSizeGb === undefined
+      ? {}
+      : { maxSizeGB: opts.maxSizeGb === "none" ? null : opts.maxSizeGb }),
     // Only forward depth when the user actually passed it - a defaulted flag
     // must not shadow the project/global config layer.
     ...(opts.depth !== undefined ? { depth: opts.depth } : {}),
@@ -146,6 +157,7 @@ export function warnIgnoredOptions(
   if (!shape.scans && !shape.applies && opts.engine && opts.engine !== "auto")
     ignored.add("--engine");
   if (!shape.applies) {
+    if (opts.maxSizeGb !== undefined) ignored.add("--max-size-gb");
     if (opts.yes) ignored.add("--yes");
     if (opts.trash) ignored.add("--trash");
     if (opts.forceLarge) ignored.add("--force-large");
@@ -466,7 +478,7 @@ export async function executePlanDeletion(
   options: {
     quiet?: boolean;
     trash?: boolean;
-    maxSizeGB?: number;
+    maxSizeGB?: number | null;
     forceLarge?: boolean;
     /** External cancel (in-session TUI apply): stops scheduling like SIGINT. */
     signal?: AbortSignal;
@@ -605,7 +617,7 @@ export async function executePlanDeletion(
   // Repaint on a short interval so the elapsed time moves while that one
   // path is in flight. Non-TTY logs stay one line per finished item.
   const progressTimer =
-    options.onProgress || (!options.quiet && process.stdout.isTTY)
+    options.onProgress || (!options.quiet && process.stderr.isTTY)
       ? setInterval(paintDeletion, 400)
       : undefined;
   progressTimer?.unref();
@@ -625,13 +637,13 @@ export async function executePlanDeletion(
       activePath = entry.path;
       if (preparation.preparationPhase !== phase) lastProgressAt = -Infinity;
       preparation = { preparedCount: completed, preparingCount: total, preparationPhase: phase };
-      paintDeletion(Boolean(process.stdout.isTTY));
+      paintDeletion(Boolean(process.stderr.isTTY));
     },
     onBegin: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
       applyStarted = true;
       activePath = entry.path;
       activeBytes = entry.estimatedBytes;
-      paintDeletion(Boolean(process.stdout.isTTY));
+      paintDeletion(Boolean(process.stderr.isTTY));
     },
     onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
       current++;
@@ -642,7 +654,7 @@ export async function executePlanDeletion(
     },
   };
 
-  if (options.onProgress || process.stdout.isTTY) paintDeletion();
+  if (options.onProgress || process.stderr.isTTY) paintDeletion();
 
   // Register the in-flight apply so bin.ts's EPIPE handler aborts it instead
   // of exiting 0 on a dead stdout.
@@ -658,8 +670,8 @@ export async function executePlanDeletion(
     try {
       session.finish(report);
     } catch (error) {
-      console.error(
-        `warning: Apply finished but its journal could not be committed: ${session.journalPath}: ${error instanceof Error ? error.message : String(error)}`,
+      warnConfig(
+        `Apply finished but its journal could not be committed: ${session.journalPath}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     // Best-effort - a stats write must never fail an apply.
@@ -697,8 +709,8 @@ export async function executePlanDeletion(
           interrupted: false,
         });
       } catch (journalError) {
-        console.error(
-          `warning: Could not record apply refusal: ${session.journalPath}: ${String(journalError)}`,
+        warnConfig(
+          `Could not record apply refusal: ${session.journalPath}: ${String(journalError)}`,
         );
       }
     }

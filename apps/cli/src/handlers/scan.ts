@@ -112,6 +112,6 @@ export async function handleScan(
     await drainStdout();
     exitWith(EXIT.OK);
   } catch (err) {
-    handleFatalError(err);
+    handleFatalError(err, { json: opts.json || opts.jsonStream });
   }
 }

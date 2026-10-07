@@ -40,12 +40,17 @@ test("automation errors distinguish a proven refusal from uncertain mutation", (
     code: "size_limit_exceeded",
     exitCode: 2,
     applyOutcome: "not_started",
+    retryable: false,
   });
   expect(fatalErrorDocument(new Error("broken native pipe"), "unknown")).toMatchObject({
     code: "failure",
     applyOutcome: "unknown",
   });
   expect(fatalErrorDocument(new Error("bad input"), "not_started")).toMatchObject({
+    applyOutcome: "not_started",
+  });
+  expect(fatalErrorDocument(new ApplyRefusedError("busy", "apply_busy"))).toMatchObject({
+    retryable: true,
     applyOutcome: "not_started",
   });
 });

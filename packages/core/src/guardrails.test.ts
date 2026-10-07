@@ -229,6 +229,11 @@ describe("assertSafePattern: adversarial inputs", () => {
 });
 
 describe("assertSizeLimit", () => {
+  test("an absent byte ceiling supports large totals without disabling arithmetic guards", () => {
+    expect(() => assertSizeLimit(600 * 1024 ** 3, null, false)).not.toThrow();
+    expect(() => assertSizeLimit(1, 0, false)).toThrow();
+    expect(() => assertSizeLimit(Number.MAX_SAFE_INTEGER + 1, null, false)).toThrow();
+  });
   const TEN_GB = 10 * 1024 ** 3;
 
   test("does not throw under limit", () => {

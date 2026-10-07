@@ -48,6 +48,7 @@ describe("compileFilter", () => {
   test("size comparisons use binary units and accept short suffixes", () => {
     const big = candidate({ estimatedBytes: 200 * MB });
     expect(matches(">100MB", big)).toBe(true);
+    expect(matches(">100MiB", big)).toBe(true);
     expect(matches(">100m", big)).toBe(true);
     expect(matches("<100MB", big)).toBe(false);
     expect(matches(">=200mb", big)).toBe(true);

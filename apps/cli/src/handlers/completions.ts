@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { applyNoColor, warnIgnoredOptions } from "./shared.js";
+import { JsonOutput } from "../json-output.js";
 
 /** Options whose value is a filesystem path - shells complete files for them. */
 const FILE_VALUE_OPTIONS = new Set([
@@ -16,6 +17,8 @@ const FILE_VALUE_OPTIONS = new Set([
 const WORD_VALUE_OPTIONS: Record<string, string> = {
   "--engine": "auto js rust",
   "--select": "default safe all none",
+  "--resource-profile": "balanced low-memory",
+  "--max-size-gb": "none",
 };
 
 /**
@@ -214,7 +217,9 @@ export async function handleCompletions(
       printError(`Unknown shell "${shell}". Supported: bash, zsh, fish`);
       exitWith(EXIT.GUARDRAIL);
     }
-    process.stdout.write(script);
+    const output = new JsonOutput(process.stdout);
+    output.write(script);
+    await output.flush();
     exitWith(EXIT.OK);
   } catch (err) {
     handleFatalError(err);
