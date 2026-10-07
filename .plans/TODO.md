@@ -13,9 +13,12 @@
 
 ## Next
 
+- [ ] Finish [live delivery, queue clarity and native activity](ui-streaming-followup-2026-10-08.md),
+      including current hosted verification and retained large-UI memory evidence.
+
 - [ ] Complete [final audit follow-ups](audit-round3-2026-10-07.md): apply feedback,
       bounded concurrent-writer retry, candidate accounting and release guards
-      are implemented and local gates pass; exact-current hosted qualification remains.
+      are implemented; checkpoint 9e7169c passed local and all eight hosted jobs.
 
 - [x] Complete [traversal worktree retirement and folder UX](traversal-worktree-retirement.md):
       preserve branch/dirt, restore the progressive partial marker, window the

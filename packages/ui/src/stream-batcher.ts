@@ -1,3 +1,9 @@
+/** Grow burst frames to amortize whole-view derivation as scans get larger.
+ * Timed reveal still bounds quiet tails; this does not change scan budgets. */
+export function scanBatchCap(records: number): number {
+  return Math.min(2000, Math.max(200, Math.floor(records / 10)));
+}
+
 /** Coalesce a scan generation without delaying its first visible result. */
 export class StreamBatcher<T, P> {
   private readonly pending = new Map<string, T>();
@@ -7,17 +13,22 @@ export class StreamBatcher<T, P> {
   private closed = false;
   private yieldNeeded = false;
   private yielding: Promise<void> | undefined;
+  private delivery: Promise<void> | undefined;
+  private releaseDelivery: (() => void) | undefined;
+  private failure: { error: unknown } | undefined;
+  private finishing = false;
 
   constructor(
-    private readonly onFrame: (items: T[], progress: P | null) => void,
+    private readonly onFrame: (items: T[], progress: P | null) => void | Promise<void>,
     private readonly windowMs = 60,
-    private readonly maxItems = 200,
+    private readonly maxItems: number | (() => number) = 200,
   ) {}
 
   record(id: string, item: T): void {
-    if (this.closed) return;
+    if (this.closed || this.finishing || this.failure) return;
     this.pending.set(id, item);
-    if (!this.revealed || this.pending.size >= this.maxItems) {
+    const limit = typeof this.maxItems === "number" ? this.maxItems : this.maxItems();
+    if (!this.revealed || this.pending.size >= limit) {
       this.revealed = true;
       this.flush();
     } else {
@@ -26,14 +37,19 @@ export class StreamBatcher<T, P> {
   }
 
   progress(progress: P): void {
-    if (this.closed) return;
+    if (this.closed || this.finishing || this.failure) return;
     this.pendingProgress = progress;
     this.schedule();
   }
 
-  /** Let React and terminal input run after a delivered frame. Both engines
-   * consult this hook before taking further input; no unbounded frame queue. */
+  /** Await the consumer's commit receipt when supplied, then let input run.
+   * Both engines consult this hook before admitting further backend work. */
   waitForConsumer(): Promise<void> | undefined {
+    if (this.failure) return Promise.reject(this.failure.error);
+    if (this.delivery)
+      return this.delivery.then(() => {
+        if (this.failure) throw this.failure.error;
+      });
     if (this.yielding) return this.yielding;
     if (!this.yieldNeeded || this.closed) return undefined;
     this.yieldNeeded = false;
@@ -43,10 +59,16 @@ export class StreamBatcher<T, P> {
     return this.yielding;
   }
 
-  finish(): void {
+  async finish(): Promise<void> {
     if (this.closed) return;
+    this.finishing = true;
     this.flush();
+    while (this.delivery) {
+      await this.delivery;
+      this.flush();
+    }
     this.closed = true;
+    if (this.failure) throw this.failure.error;
   }
 
   cancel(): void {
@@ -54,9 +76,11 @@ export class StreamBatcher<T, P> {
     this.clearTimer();
     this.pending.clear();
     this.pendingProgress = null;
+    this.releaseDelivery?.();
   }
 
   private schedule(): void {
+    if (this.delivery || this.closed || this.finishing || this.failure) return;
     if (this.timer === null) this.timer = setTimeout(() => this.flush(), this.windowMs);
   }
 
@@ -67,12 +91,38 @@ export class StreamBatcher<T, P> {
 
   private flush(): void {
     this.clearTimer();
+    if (this.closed || this.delivery || this.failure) return;
     if (this.pending.size === 0 && this.pendingProgress === null) return;
     const items = [...this.pending.values()];
     const progress = this.pendingProgress;
     this.pending.clear();
     this.pendingProgress = null;
-    this.onFrame(items, progress);
+    let receipt: void | Promise<void>;
+    try {
+      receipt = this.onFrame(items, progress);
+    } catch (error) {
+      this.failure = { error };
+      return;
+    }
     this.yieldNeeded = true;
+    if (receipt) {
+      const cancelled = new Promise<void>((resolve) => {
+        this.releaseDelivery = resolve;
+      });
+      // Observe rejection even when a timer delivered the frame. Surface it at
+      // the next producer wait/finish, rather than an unhandled rejection.
+      this.delivery = Promise.race([receipt, cancelled])
+        .then(
+          () => {},
+          (error: unknown) => {
+            this.failure = { error };
+          },
+        )
+        .then(() => {
+          this.delivery = undefined;
+          this.releaseDelivery = undefined;
+          if (this.pending.size > 0 || this.pendingProgress !== null) this.schedule();
+        });
+    }
   }
 }

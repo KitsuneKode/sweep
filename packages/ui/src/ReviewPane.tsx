@@ -29,7 +29,7 @@ export interface ReviewPaneProps {
   sidebarWidth: number;
   displayRows: UiDisplayRow[];
   visibleItems: ScanCandidate[];
-  candidatesById: Map<string, ScanCandidate>;
+  candidatesById: ReadonlyMap<string, ScanCandidate>;
   onMutate: (fn: (s: SweepUiState) => SweepUiState) => void;
   onFocusPanel: (focus: UiFocus) => void;
   onToggleSelection: (candidateId: string) => void;

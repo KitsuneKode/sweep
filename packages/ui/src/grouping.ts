@@ -1,4 +1,5 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { candidateIndex } from "./candidate-index.js";
 import { relativePath } from "./presentation.js";
 
 export interface ArtifactScopeGroup {
@@ -31,7 +32,7 @@ export function groupCandidatesByScope(
   options?: GroupScopeOptions,
 ): ArtifactScopeGroup[] {
   const buckets = new Map<string, { label: string; ids: string[] }>();
-  const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const byId = candidateIndex(candidates);
 
   for (const candidate of candidates) {
     const relative = relativePath(targetDir, candidate.path).replaceAll("\\", "/");

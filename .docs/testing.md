@@ -498,6 +498,22 @@ a physical terminal or establish a hard RSS ceiling. The apply lifecycle tests
 use the production `exitOnCtrlC: false` setting so cancellation leaves the screen
 alive, and cover same-drain confirm/dismiss, trash mode and stop requests.
 
+For live delivery and sizing updates through the actual app hooks:
+
+```sh
+bun run packages/ui/benchmarks/stream-render.tsx --candidates 10000
+bun run packages/ui/benchmarks/stream-render.tsx --candidates 25000
+# Diagnostic comparison only; the app always awaits commits.
+bun run packages/ui/benchmarks/stream-render.tsx --candidates 10000 --event-loop-only
+```
+
+This synthetic producer paints native in-memory frames with production React
+scheduling, reports outstanding commit receipts, sampled RSS and input latency,
+and stops at two minutes or a sampled 1 GiB RSS limit. It does not enumerate a
+real filesystem or qualify physical terminal transport. Its input samples are
+sparse observations, not a release p99 guarantee. Do not raise application
+resource limits based on this probe alone.
+
 ### Recorded fat/wide engine comparison
 
 ```sh

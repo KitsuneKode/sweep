@@ -14,6 +14,43 @@ afterEach(async () => {
   teardown = undefined;
 });
 
+test("queue coverage distinguishes byte percentage from item count, including zero-byte items", async () => {
+  const fixture = plan(3);
+  fixture.candidates[0]!.estimatedBytes = 9900;
+  fixture.candidates[1]!.estimatedBytes = 100;
+  fixture.candidates[2]!.estimatedBytes = 0;
+  fixture.selectedCandidateIds = [fixture.candidates[0]!.id];
+  let update!: (next: SweepUiState) => void;
+  const initial = createUiState(fixture);
+  function Harness() {
+    const [state, setState] = useState(initial);
+    update = setState;
+    return (
+      <ScopeSidebar
+        state={state}
+        tokens={darkTheme}
+        focused={false}
+        paneWidth={40}
+        onApplyScope={() => {}}
+      />
+    );
+  }
+  const setup = await testRender(<Harness />, { width: 44, height: 14 });
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+    await setup.flush();
+  });
+  expect(setup.captureCharFrame()).toContain("99% of bytes");
+  expect(setup.captureCharFrame()).toContain("1 of 3 items queued");
+  await act(async () => {
+    update({ ...initial, selectedIds: new Set([fixture.candidates[2]!.id]) });
+    await setup.flush();
+  });
+  expect(setup.captureCharFrame()).toContain("1 of 3 items queued");
+  expect(setup.captureCharFrame()).not.toContain("nothing queued");
+});
+
 function plan(count: number): ScanPlan {
   const candidates = Array.from({ length: count }, (_, i) => ({
     id: `cand_${i}`,

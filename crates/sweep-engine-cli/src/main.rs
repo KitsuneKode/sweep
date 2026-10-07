@@ -7,7 +7,7 @@ use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use sweep_engine::{
-    apply_plan_controlled_with_limit, apply_plan_controlled_with_progress,
+    apply_plan_controlled_with_activity, apply_plan_controlled_with_limit,
     scan_to_plan_with_sweep_config, ScanHooks, ScanOptions,
 };
 use sweep_errors::EngineError;
@@ -108,7 +108,7 @@ fn run() -> Result<(), CliFailure> {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
         Some("--capabilities") => write_json_stdout(
-            &serde_json::json!({"applyControl": true, "planIdentity": true, "applyPreparation": true}),
+            &serde_json::json!({"applyControl": true, "planIdentity": true, "applyPreparation": true, "applyActivity": true}),
         ),
         Some("--version" | "-V") => {
             println!("{}", env!("CARGO_PKG_VERSION"));
@@ -751,6 +751,8 @@ fn run_apply_controlled() -> Result<(), CliFailure> {
         max_size_bytes: Option<u64>,
         #[serde(default)]
         preflight_progress: bool,
+        #[serde(default)]
+        removal_progress: bool,
     }
     let request: Request = serde_json::from_slice(&line)
         .map_err(|e| CliFailure::invalid_input(format!("invalid plan: {e}")))?;
@@ -779,7 +781,8 @@ fn run_apply_controlled() -> Result<(), CliFailure> {
         let _ = reader.take(1025).read_until(b'\n', &mut request);
         control.store(true, Ordering::Release);
     });
-    let report = apply_plan_controlled_with_progress(
+    let mut last_activity_at = std::time::Instant::now();
+    let report = apply_plan_controlled_with_activity(
         &request.plan,
         cancelled,
         &mut |id| {
@@ -800,6 +803,17 @@ fn run_apply_controlled() -> Result<(), CliFailure> {
         &mut |id, completed, total| {
             if request.preflight_progress && write_json_line(&serde_json::json!({"type":"apply_preparing", "candidateId": id, "completed": completed, "total": total})).is_err() {
                 cancelled.store(true, Ordering::Release);
+            }
+        },
+        &mut |id, removed_entries| {
+            if request.removal_progress
+                && (removed_entries == 1
+                    || last_activity_at.elapsed() >= std::time::Duration::from_millis(100))
+            {
+                last_activity_at = std::time::Instant::now();
+                if write_json_line(&serde_json::json!({"type":"apply_activity", "candidateId":id, "removedEntries":removed_entries})).is_err() {
+                    cancelled.store(true, Ordering::Release);
+                }
             }
         },
     );

@@ -1,0 +1,90 @@
+{
+  "baseCommit": "9e7169c71f24abbf96312597bb3960a456f34d78",
+  "artifactSha256": {
+    "packages/ui/src/app.tsx": "46517d65fc282587abbc0f02b12a71bc5ec346ee7144a8d7c6890337e05c813d",
+    "packages/ui/src/stream-batcher.ts": "c90fd072a713045584c07ff43be6f3ec917d173677f3d7c0ca4e1cad7fc7016d",
+    "packages/ui/src/streaming.tsx": "7d9322fd358cbbd701f0345714997564bbe5e45ecbe12bcddcb5b4345c07af70",
+    "packages/ui/src/scope-tree.ts": "bf96248c89c8622761abfa3068f4dc3cc874de505bef143d4a6b2c80c6a487ec",
+    "packages/ui/src/candidate-index.ts": "32ed8876e04cb3fecc844f0d072c9b2c4c17dbd58eee55a3afd122894c09fd05",
+    "packages/ui/src/state/store.ts": "36671a970977cbc3734b4783ff4f909ceffb97fb8c3ea2af5256a54e14df803b",
+    "packages/core/src/rust-engine.ts": "d2b586e23b183b9eb7454e4b0e7d2f16d9e26e9c847c8ca6cd1f6b00b3ed3631",
+    "packages/core/src/engine.ts": "68d4a9fb8b62655759935b82c2464ef85b225de18f6dfec5ad9f2a7adf67b151",
+    "apps/cli/src/handlers/shared.ts": "e3c0f6d26aadc00525a8167b3decdf7272bb72786ac1fb54cfdcd815f3ef09f5",
+    "crates/sweep-fs/src/removal.rs": "d88c4c4056c6ae39787cecda075442cb4f524b44e086f48ce079c5c36604ea5c",
+    "crates/sweep-engine/src/apply.rs": "768764fdc6b94ede64aabdf6294d4ff48bb4b96d10f585bffe3aa27b063771d3",
+    "crates/sweep-engine-cli/src/main.rs": "3d5647bb8e49a7de13b9e16180a26d20a1793c7d3b8e518d8bd238c9532589c9",
+    "target/release/sweep-engine": "78693526b984af2b2649c2c3f4f0e7f2085dc2b91bc485f64715ce84dfde9f4c",
+    "packages/ui/benchmarks/stream-render.tsx": "aed85b3c2fe39931c6cb9339dd61f67712ed715f3dd946a635e5bda142433013"
+  },
+  "nativeEngineBytes": 1018672,
+  "localVerifyBeforeCommit": [
+    {
+      "name": "fixtures:sync",
+      "status": "pass",
+      "ms": 88.600863
+    },
+    {
+      "name": "fixtures:validate-goldens",
+      "status": "pass",
+      "ms": 22.995616000000012
+    },
+    {
+      "name": "check",
+      "status": "pass",
+      "ms": 50987.400045
+    },
+    {
+      "name": "rust:check",
+      "status": "pass",
+      "ms": 3609.7649999999994
+    },
+    {
+      "name": "engine:verify",
+      "status": "pass",
+      "ms": 49.443998000002466
+    },
+    {
+      "name": "preflight",
+      "status": "fail",
+      "ms": 771.422986000005,
+      "detail": "exit 1",
+      "outputTail": "@kitsunekode/sweep:preflight:  M packages/core/src/engine.ts\n@kitsunekode/sweep:preflight:  M packages/core/src/rust-engine.ts\n@kitsunekode/sweep:preflight:  M packages/core/src/scanner.test.ts\n@kitsunekode/sweep:preflight:  M packages/protocol/src/index.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/ApplyOverlay.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/ArtifactList.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/ReviewPane.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/ScopeSidebar.test.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/ScopeSidebar.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/app.apply-break.test.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/app.test.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/app.tsx\n@kitsunekode/sweep:preflight:  M packages/ui/src/grouping.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/keymap.test.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/keymap.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/presentation.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/rows.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/scope-tree.test.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/scope-tree.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/state/store.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/stream-batcher.test.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/stream-batcher.ts\n@kitsunekode/sweep:preflight:  M packages/ui/src/streaming.tsx\n@kitsunekode/sweep:preflight: ?? packages/ui/benchmarks/stream-render.tsx\n@kitsunekode/sweep:preflight: ?? packages/ui/src/candidate-index.test.ts\n@kitsunekode/sweep:preflight: ?? packages/ui/src/candidate-index.ts\n@kitsunekode/sweep:preflight: \n@kitsunekode/sweep:preflight: \n@kitsunekode/sweep:preflight: preflight failed. Fix the errors above before publishing\n@kitsunekode/sweep:preflight: \n@kitsunekode/sweep:preflight: error: script \"preflight\" exited with code 1\n\n Tasks:    8 successful, 9 total\nCached:    8 cached, 9 total\n  Time:    680ms \nFailed:    @kitsunekode/sweep#preflight\n\n\n@kitsunekode/sweep#preflight:  ERROR  command (/home/kitsunekode/Projects/cli-tools/sweep/apps/cli) /home/kitsunekode/.bun/bin/bun run preflight exited (1)\n ERROR  run failed: command  exited (1)"
+    },
+    {
+      "name": "installed package smoke",
+      "status": "pass",
+      "ms": 4702.947787000005
+    },
+    {
+      "name": "pack:preview",
+      "status": "pass",
+      "ms": 1933.8214630000002
+    },
+    {
+      "name": "standalone smoke",
+      "status": "pass",
+      "ms": 1766.3644980000026
+    }
+  ],
+  "preflightFailureExplanation": "Preflight deliberately refuses a dirty tracked working tree; all eight other local/release-shape steps passed. Repeat exact-current ladder after commit. No publication performed.",
+  "nativeHostTests": {
+    "passed": 42,
+    "command": "SWEEP_REQUIRE_RUST_TESTS=1 SWEEP_ENGINE_PATH=$PWD/target/release/sweep-engine bun test packages/core/src/engine.test.ts"
+  },
+  "rustCheck": "8 tasks passed: fmt, clippy all targets, native tests and doc tests",
+  "reactDoctor": {
+    "introducedWarnings": [
+      "OpenTUI fg prop is valid, terminal typecheck/render tests pass",
+      "Serial await loop intentionally drains commit receipts; cancellation/rejection/tail tests pass"
+    ],
+    "suppressed": false,
+    "wholeAppClaim": false
+  },
+  "limits": [
+    "Synthetic native in-memory UI only",
+    "25k adaptive case passes sampled 1 GiB probe budget, but is not low-memory qualification",
+    "50k adaptive case exceeds sampled budget and stops; retained as a failed qualification",
+    "No physical TTY, allocated 200-600 GiB or mid-delete mount-race qualification"
+  ],
+  "comparisonEvidence": "stream-10k.json is an earlier shared-index, fixed-frame probe; stream-25k-fixed-batch-diagnostic.json is a diagnostic comparison. Neither represents the final adaptive batching configuration."
+}

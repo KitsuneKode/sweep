@@ -21,7 +21,7 @@ import type { ThemeTokens } from "./theme.js";
 
 export interface ArtifactListProps {
   rows: UiDisplayRow[];
-  candidatesById: Map<string, ScanCandidate>;
+  candidatesById: ReadonlyMap<string, ScanCandidate>;
   selectedIds: Set<string>;
   currentRowIndex: number;
   /** Rows (inclusive) covered by the visual-mode range, or null. */

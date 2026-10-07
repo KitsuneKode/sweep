@@ -36,6 +36,76 @@ afterEach(() => {
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
+test.skipIf(process.platform !== "linux" || !NATIVE_AVAILABLE)(
+  "rust: active artifact removal activity reaches the host without changing outcome accounting",
+  async () => {
+    mkdirSync(dir("node_modules", "nested"), { recursive: true });
+    for (let i = 0; i < 1000; i++) writeFileSync(dir("node_modules", "nested", `${i}`), "x");
+    writeFileSync(dir("keep"), "keep");
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const counts: number[] = [];
+    const result = await applyPlanWithBackend(plan, "rust", {
+      onActivity: (entry, n) => {
+        expect(entry.path).toBe(dir("node_modules"));
+        counts.push(n);
+      },
+    });
+    expect(counts.length).toBeGreaterThan(0);
+    expect(counts[0]).toBe(1);
+    expect(counts.every((n, i) => i === 0 || n > counts[i - 1]!)).toBe(true);
+    expect(result.cleanResult.deleted.length).toBe(1);
+    expect(existsSync(dir("node_modules"))).toBe(false);
+    expect(readFileSync(dir("keep"), "utf8")).toBe("keep");
+  },
+);
+
+for (const shape of ["before-begin", "regression", "unsafe-number", "after-deleted"] as const) {
+  test.skipIf(process.platform === "win32")(
+    `rust: refuses malformed removal activity (${shape})`,
+    async () => {
+      const { chmodSync } = await import("node:fs");
+      mkdirSync(dir("node_modules"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      const id = plan.selectedCandidateIds[0]!;
+      const events = [
+        ...(shape === "before-begin" ? [] : [{ type: "apply_begin", candidateId: id }]),
+        ...(shape === "after-deleted" ? [{ type: "apply_deleted", candidateId: id }] : []),
+        {
+          type: "apply_activity",
+          candidateId: id,
+          removedEntries: shape === "unsafe-number" ? Number.MAX_SAFE_INTEGER + 1 : 2,
+        },
+        ...(shape === "regression"
+          ? [{ type: "apply_activity", candidateId: id, removedEntries: 1 }]
+          : []),
+      ];
+      const binary = dir("activity-engine");
+      writeFileSync(
+        binary,
+        `#!/usr/bin/env bun
+if (process.argv[2] === "--capabilities") {
+  process.stdout.write('{"applyControl":true,"planIdentity":true,"applyActivity":true}\\n');
+} else {
+  process.stdout.write(${JSON.stringify(events.map((event) => JSON.stringify(event)).join("\n") + "\n")});
+}
+`,
+      );
+      chmodSync(binary, 0o700);
+      const previous = process.env.SWEEP_ENGINE_PATH;
+      process.env.SWEEP_ENGINE_PATH = binary;
+      try {
+        await expect(applyPlanWithBackend(plan, "rust", { onActivity() {} })).rejects.toThrow(
+          /removal activity|Outcomes are unknown/,
+        );
+        expect(existsSync(dir("node_modules"))).toBe(true);
+      } finally {
+        if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
+        else process.env.SWEEP_ENGINE_PATH = previous;
+      }
+    },
+  );
+}
+
 for (const backend of ["js", "rust"] as const) {
   test.skipIf(process.platform === "win32")(
     `${backend}: covered alias receipts survive parent removal`,

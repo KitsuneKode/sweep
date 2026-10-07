@@ -18,12 +18,14 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
 } from "react";
 import { ReviewPane } from "./ReviewPane.js";
+import { candidateIndex } from "./candidate-index.js";
 import { ApplyOverlay } from "./ApplyOverlay.js";
 import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
@@ -340,6 +342,8 @@ function ConfirmOverlay({
   trash,
   applyPolicy,
   lowerBound,
+  otherQueuedCount,
+  feedback,
 }: {
   tokens: ThemeTokens;
   selectedCount: number;
@@ -351,6 +355,8 @@ function ConfirmOverlay({
   lowerBound?: boolean;
   dryRun?: boolean;
   trash?: boolean;
+  otherQueuedCount?: number;
+  feedback?: string | undefined;
 }) {
   // The verb has to match what executePlanDeletion will actually do -
   // "permanently delete" while moving to trash understates nothing, and
@@ -370,6 +376,7 @@ function ConfirmOverlay({
       height={selectedCount === 1 && !dangerous ? 18 : 22}
       footer={
         <>
+          {feedback ? <text fg={tokens.info} content={feedback} /> : null}
           {dryRun ? null : (
             <text
               content={t`${bold(fg(tokens.text)("t"))} ${fg(tokens.textMuted)(trash ? "delete permanently instead" : "move to trash instead (reversible)")}`}
@@ -382,11 +389,21 @@ function ConfirmOverlay({
       }
     >
       <text
+        fg={tokens.textMuted}
+        content={otherQueuedCount === undefined ? "Apply the queued selection" : "Only this item"}
+      />
+      <text
         content={t`${bold(fg(accent)(`${action} ${selectedCount} item${selectedCount === 1 ? "" : "s"}`))}`}
       />
       <text
         content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "partial estimate; actual bytes may differ" : "estimated size")}`}
       />
+      {otherQueuedCount !== undefined && otherQueuedCount > 0 ? (
+        <text
+          fg={tokens.textSecondary}
+          content={`${otherQueuedCount} other queued item${otherQueuedCount === 1 ? " stays" : "s stay"} queued`}
+        />
+      ) : null}
       <text content="" />
       {applyPolicy ? (
         <text
@@ -590,6 +607,14 @@ export function SweepApp({
 
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const [scanCommitToken, setScanCommitToken] = useState(0);
+  const scanCommitSequence = useRef(0);
+  const scanCommitWaiters = useRef(new Map<number, () => void>());
+  useLayoutEffect(() => {
+    for (const [token, release] of scanCommitWaiters.current) {
+      if (token <= scanCommitToken) release();
+    }
+  }, [scanCommitToken]);
   // Engine the next scan generation runs (E flips it); the `engine` prop only
   // seeds the first generation. Timing per engine lives in scanDurationsRef
   // so the notice can compare backends on the same tree.
@@ -650,6 +675,7 @@ export function SweepApp({
         return false;
       }
       setPendingApplyState(true);
+      setNotice(null);
     } else {
       closeModal("confirm");
       setPendingApplyState(false);
@@ -698,6 +724,22 @@ export function SweepApp({
         if (gen !== generationRef.current || controller.signal.aborted) return;
         return scan.start(
           {
+            waitForCommit: () => {
+              if (gen !== generationRef.current || controller.signal.aborted)
+                return Promise.resolve();
+              const token = ++scanCommitSequence.current;
+              const receipt = new Promise<void>((resolve) => {
+                const release = () => {
+                  scanCommitWaiters.current.delete(token);
+                  controller.signal.removeEventListener("abort", release);
+                  resolve();
+                };
+                scanCommitWaiters.current.set(token, release);
+                controller.signal.addEventListener("abort", release, { once: true });
+              });
+              setScanCommitToken(token);
+              return receipt;
+            },
             onBatch: (candidates) => {
               if (gen !== generationRef.current || controller.signal.aborted) return;
               dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
@@ -829,10 +871,7 @@ export function SweepApp({
   const visibleItems = useMemo(() => getVisibleCandidates(state), [state]);
   const displayRows = useMemo(() => buildDisplayRows(state), [state]);
   const dangerousSelected = useMemo(() => countSelectedDangerous(state), [state]);
-  const candidatesById = useMemo(
-    () => new Map(state.candidates.map((candidate) => [candidate.id, candidate])),
-    [state.candidates],
-  );
+  const candidatesById = useMemo(() => candidateIndex(state.candidates), [state.candidates]);
 
   const finalizedRef = useRef(false);
   const finalize = useCallback(
@@ -861,7 +900,7 @@ export function SweepApp({
       return;
     }
     if (getUiSummary(s).selectedCount === 0) {
-      setNotice("nothing queued: space on a row queues it");
+      setNotice("nothing queued · Space queues this item · x deletes just this item");
       return;
     }
     // Every apply deletes real files - the confirm gate is not reserved for
@@ -931,7 +970,7 @@ export function SweepApp({
           const stopped = result.interrupted || merged.interrupted || merged.unattempted > 0;
           const verb = result.trashDir ? "moved to trash" : "deleted";
           setNotice(
-            `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
+            `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${getUiSummary(merged.state).selectedCount} still queued · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
           );
         } catch (error) {
           if (applyAbortRef.current !== controller) return;
@@ -1463,6 +1502,10 @@ export function SweepApp({
           <ConfirmOverlay
             tokens={tokens}
             selectedCount={1}
+            otherQueuedCount={
+              summary.selectedCount - Number(state.selectedIds.has(pendingSingleCandidate.id))
+            }
+            feedback={notice?.startsWith("Press y") ? notice : undefined}
             applyPolicy={scan?.applyPolicy}
             lowerBound={pendingSingleCandidate.bytesKnown === false}
             selectedBytes={pendingSingleCandidate.estimatedBytes}
@@ -1479,6 +1522,7 @@ export function SweepApp({
           <ConfirmOverlay
             tokens={tokens}
             selectedCount={summary.selectedCount}
+            feedback={notice?.startsWith("Press y") ? notice : undefined}
             applyPolicy={scan?.applyPolicy}
             lowerBound={Boolean(summary.selectedBytesPartial)}
             selectedBytes={summary.selectedBytes}

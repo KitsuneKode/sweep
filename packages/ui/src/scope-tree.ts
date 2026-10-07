@@ -1,4 +1,5 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { candidateIndex } from "./candidate-index.js";
 import { groupCandidatesByScope, type ArtifactScopeGroup } from "./grouping.js";
 import { relativePath } from "./presentation.js";
 
@@ -97,7 +98,7 @@ interface Stats {
 // for every comparator and visible row. Structural order is cached separately.
 function aggregate(
   node: TrieNode,
-  byId: Map<string, ScanCandidate>,
+  byId: ReadonlyMap<string, ScanCandidate>,
   selected: Set<string>,
   stats: Map<TrieNode, Stats>,
 ): Stats {
@@ -130,7 +131,7 @@ let topology: {
   candidates: ScanCandidate[];
   root: TrieNode;
   tops: TrieNode[];
-  byId: Map<string, ScanCandidate>;
+  byId: ReadonlyMap<string, ScanCandidate>;
   children: Map<TrieNode, TrieNode[]>;
   limited: boolean;
 } | null = null;
@@ -179,11 +180,26 @@ function computeScopeTreeRows(
   selectedIds: Set<string>,
   expandedKeys: ReadonlySet<string>,
 ): ScopeSidebarRow[] {
-  if (!topology || topology.targetDir !== targetDir || topology.candidates !== candidates) {
+  const orderChanged =
+    !topology || topology.targetDir !== targetDir || topology.candidates !== candidates;
+  const sameShape =
+    orderChanged &&
+    topology &&
+    topology.targetDir === targetDir &&
+    topology.candidates.length === candidates.length &&
+    topology.candidates.every(
+      (previous, i) => previous.id === candidates[i]!.id && previous.path === candidates[i]!.path,
+    );
+  if (orderChanged && sameShape && topology) {
+    // Sizing replaces immutable candidate records, not folder topology. Keep
+    // the trie and refresh its observations instead of allocating every node.
+    topology.byId = candidateIndex(candidates);
+    topology.candidates = candidates;
+  } else if (orderChanged) {
     const groups = groupCandidatesByScope(targetDir, candidates, undefined, {
       maxGroups: Number.POSITIVE_INFINITY,
     });
-    const byId = new Map(candidates.map((c) => [c.id, c]));
+    const byId = candidateIndex(candidates);
     const root = emptyNode("", "");
     const budget: ScopeBudget = { nodes: 0, keyBytes: 0 };
     let limited = false;
@@ -200,26 +216,31 @@ function computeScopeTreeRows(
       root.ids = candidates.map((candidate) => candidate.id);
     }
     flattenTrieNode(root);
-    const stats = new Map<TrieNode, Stats>();
-    aggregate(root, byId, new Set(), stats);
+    topology = { targetDir, candidates, root, tops: [], byId, children: new Map(), limited };
+  }
+  if (!topology) return [];
+  const { root, byId } = topology;
+  const stats = new Map<TrieNode, Stats>();
+  const all = aggregate(root, byId, selectedIds, stats);
+  if (orderChanged) {
     const children = new Map<TrieNode, TrieNode[]>();
     const compare = (a: TrieNode, b: TrieNode) =>
       stats.get(b)!.bytes - stats.get(a)!.bytes || a.segment.localeCompare(b.segment);
-    for (const node of stats.keys()) children.set(node, [...node.children.values()].sort(compare));
-    const tops = [...children.get(root)!];
-    if (root.ids.length && !limited) {
+    for (const node of stats.keys()) {
+      if (node.children.size) children.set(node, [...node.children.values()].sort(compare));
+    }
+    const tops = [...(children.get(root) ?? [])];
+    if (root.ids.length && !topology.limited) {
       const synthetic = emptyNode("project root", "");
       synthetic.ids = root.ids;
-      aggregate(synthetic, byId, new Set(), stats);
-      children.set(synthetic, []);
+      aggregate(synthetic, byId, selectedIds, stats);
       tops.push(synthetic);
       tops.sort(compare);
     }
-    topology = { targetDir, candidates, root, tops, byId, children, limited };
+    topology.children = children;
+    topology.tops = tops;
   }
-  const { root, tops, byId, children } = topology;
-  const stats = new Map<TrieNode, Stats>();
-  const all = aggregate(root, byId, selectedIds, stats);
+  const { tops, children } = topology;
   const rows: ScopeSidebarRow[] = [
     {
       key: null,

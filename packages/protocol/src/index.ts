@@ -342,6 +342,9 @@ export interface ApplyProgress {
   preparationPhase?: "validating" | "sizing";
   preparedCount?: number;
   preparingCount?: number;
+  /** Successful unlink/rmdir operations inside the active artifact, when the
+   * backend supports them. Includes directories/symlinks; not a byte estimate. */
+  removedEntries?: number;
 }
 
 export interface ApplyReport {

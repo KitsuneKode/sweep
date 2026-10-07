@@ -21,6 +21,11 @@ const RESOLVE: ResolveFlags = ResolveFlags::BENEATH
 pub struct RemovalRoot {
     fd: OwnedFd,
 }
+struct RemovalHooks<'a> {
+    step: &'a mut dyn FnMut(),
+    before_rmdir: &'a mut dyn FnMut(),
+    on_removed: &'a mut dyn FnMut(u64),
+}
 struct Frame {
     dir: Option<Dir>,
     name: OsString,
@@ -154,6 +159,66 @@ impl RemovalRoot {
         step: &mut dyn FnMut(),
         before_rmdir: &mut dyn FnMut(),
     ) -> io::Result<()> {
+        self.remove_with_hooks_and_progress(
+            path,
+            expected,
+            directory,
+            flag,
+            RemovalHooks {
+                step,
+                before_rmdir,
+                on_removed: &mut |_| {},
+            },
+        )
+    }
+
+    /// Reports successful unlink/rmdir operations within this artifact. Counts
+    /// include directories and symlinks; they are activity, not freed bytes.
+    pub fn remove_with_progress(
+        &self,
+        path: &Path,
+        expected: (u64, u64),
+        directory: bool,
+        flag: &AtomicBool,
+        on_removed: &mut dyn FnMut(u64),
+    ) -> io::Result<()> {
+        self.remove_with_hooks_and_progress(
+            path,
+            expected,
+            directory,
+            flag,
+            RemovalHooks {
+                step: &mut || {},
+                before_rmdir: &mut || {},
+                on_removed,
+            },
+        )
+    }
+
+    fn remove_with_hooks_and_progress(
+        &self,
+        path: &Path,
+        expected: (u64, u64),
+        directory: bool,
+        flag: &AtomicBool,
+        hooks: RemovalHooks<'_>,
+    ) -> io::Result<()> {
+        let RemovalHooks {
+            step,
+            before_rmdir,
+            on_removed,
+        } = hooks;
+        let mut removed_entries = 0u64;
+        let mut record_removed = || -> io::Result<()> {
+            removed_entries = removed_entries
+                .checked_add(1)
+                .filter(|count| *count <= 9_007_199_254_740_991)
+                .ok_or_else(|| {
+                    io::Error::other("removal activity count exceeded safe integer range")
+                })?;
+            on_removed(removed_entries);
+            Ok(())
+        };
         cancelled(flag)?;
         if path.as_os_str().is_empty()
             || path
@@ -183,6 +248,7 @@ impl RemovalRoot {
         cancelled(flag)?;
         if !directory {
             rfs::unlinkat(&parent, name, AtFlags::empty())?;
+            record_removed()?;
             return Ok(());
         }
         let mut retained_bytes = frame_bytes(name);
@@ -230,6 +296,7 @@ impl RemovalRoot {
                     } else {
                         cancelled(flag)?;
                         rfs::unlinkat(fd, name, AtFlags::empty())?;
+                        record_removed()?;
                     }
                 }
                 None => {
@@ -256,7 +323,10 @@ impl RemovalRoot {
                     before_rmdir();
                     cancelled(flag)?;
                     match rfs::unlinkat(fd, &completed.name, AtFlags::REMOVEDIR) {
-                        Ok(()) => retained_bytes -= frame_bytes(&completed.name),
+                        Ok(()) => {
+                            retained_bytes -= frame_bytes(&completed.name);
+                            record_removed()?;
+                        }
                         Err(err)
                             if err == rustix::io::Errno::NOTEMPTY
                                 && completed.redrains < MAX_REDRAINS =>
@@ -294,6 +364,45 @@ mod tests {
     fn id(path: &Path) -> (u64, u64) {
         let meta = fs::symlink_metadata(path).unwrap_or_else(|e| panic!("metadata: {e}"));
         (meta.dev(), meta.ino())
+    }
+    #[test]
+    fn activity_counts_successful_removals_and_cancellation_preserves_unvisited_entries(
+    ) -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let artifact = root.path().join("target");
+        fs::create_dir_all(artifact.join("empty"))?;
+        fs::write(artifact.join("file"), "data")?;
+        fs::write(root.path().join("keep"), "keep")?;
+        symlink(root.path().join("keep"), artifact.join("link"))?;
+        let anchor = RemovalRoot::open(root.path(), id(root.path()))?;
+        let flag = AtomicBool::new(false);
+        let mut observed = Vec::new();
+        anchor.remove_with_progress(Path::new("target"), id(&artifact), true, &flag, &mut |n| {
+            observed.push(n)
+        })?;
+        assert_eq!(observed, vec![1, 2, 3, 4]);
+        assert_eq!(fs::read_to_string(root.path().join("keep"))?, "keep");
+        fs::create_dir(&artifact)?;
+        for n in 0..8 {
+            fs::write(artifact.join(n.to_string()), "x")?;
+        }
+        let result = anchor.remove_with_progress(
+            Path::new("target"),
+            id(&artifact),
+            true,
+            &flag,
+            &mut |n| {
+                assert_eq!(n, 1);
+                flag.store(true, Ordering::Release);
+            },
+        );
+        assert_eq!(
+            result.err().map(|error| error.kind()),
+            Some(io::ErrorKind::Interrupted)
+        );
+        assert_eq!(fs::read_dir(&artifact)?.count(), 7);
+        assert_eq!(fs::read_to_string(root.path().join("keep"))?, "keep");
+        Ok(())
     }
     #[test]
     fn one_late_writer_is_redrained_without_touching_an_unselected_sentinel() -> io::Result<()> {

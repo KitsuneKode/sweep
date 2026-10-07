@@ -14,6 +14,37 @@ Results appear while scanning, then sizes fill in. A queued dot means selected;
 it does not mean deleted. A size prefixed with `~` is incomplete or approximate.
 An `INCOMPLETE` scan cannot apply or export a cleanup plan.
 
+The sidebar separates items from bytes: `535 of 3,192 items queued` can be
+`99% of bytes` when a few large artifacts contain almost all the measured
+data. This is queue coverage, not deletion or scan completion. During a scan,
+the meter instead labels sizing progress; the number of discoveries can still
+grow. Partial byte estimates do not display an exact coverage percentage.
+
+Enter opens confirmation for the **whole queue**. `x` or `d` opens confirmation
+for **only this item**, including inside inspect. The single-item dialog says
+how many other items stay queued, and the result says how many remain queued.
+Inside confirmation, press `y` to proceed or `n` / Esc to cancel. Enter gives
+a reminder; it does not confirm a destructive operation.
+
+While applying, Sweep shows preparation, completed artifact operations,
+elapsed time and the active path. A large directory can remain at `0 of 1`
+completed artifacts while work continues inside it. The activity loader keeps
+moving. Supported native Linux engines also show successful entries removed
+inside that artifact, including files, directories and symlinks. This count
+is not a byte percentage or an estimate of physical disk space reclaimed.
+Other backends show elapsed activity without inventing a per-file count.
+The final report decides which artifacts completed.
+
+Esc, Ctrl+C or the stop control requests cancellation and keeps the UI open
+for the report. Completed deletions are not undone. Continuous writers or
+path changes can leave an artifact partially removed; pause builds and sync
+jobs in the selection before cleaning.
+
+To review larger artifacts first without hiding them by default, use `/` and
+enter `>1MiB`, or sort by size. Small or empty artifacts remain available for
+deliberate cleanup. Filters narrow the view; applying the queue still includes
+queued items outside that view.
+
 ## Everyday controls
 
 | Key                 | Action                                             |

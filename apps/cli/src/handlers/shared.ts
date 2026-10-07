@@ -580,6 +580,7 @@ export async function executePlanDeletion(
 
   const verb = trashDir ? "moving" : "deleting";
   let applyStarted = false;
+  let removedEntries: number | undefined;
   let lastProgressAt = -Infinity;
   let lastStage: ApplyProgress["stage"] | undefined;
   const paintDeletion = (paintTerminal = true) => {
@@ -597,6 +598,7 @@ export async function executePlanDeletion(
           elapsedMs: Date.now() - startedAt,
           ...preparation,
           ...(activePath ? { activePath } : {}),
+          ...(removedEntries === undefined ? {} : { removedEntries }),
         });
       }
     } catch {
@@ -640,17 +642,24 @@ export async function executePlanDeletion(
       paintDeletion(Boolean(process.stderr.isTTY));
     },
     onBegin: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
+      removedEntries = undefined;
       applyStarted = true;
       activePath = entry.path;
       activeBytes = entry.estimatedBytes;
       paintDeletion(Boolean(process.stderr.isTTY));
     },
     onDeleted: (entry: import("@kitsunekode/sweep-protocol").ScanEntry) => {
+      removedEntries = undefined;
       current++;
       freedBytes += entry.estimatedBytes;
       activePath = undefined;
       activeBytes = 0;
       paintDeletion();
+    },
+    onActivity: (entry: import("@kitsunekode/sweep-protocol").ScanEntry, count: number) => {
+      if (activePath !== entry.path) return;
+      removedEntries = count;
+      paintDeletion(false);
     },
   };
 

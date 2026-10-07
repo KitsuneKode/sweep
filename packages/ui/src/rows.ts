@@ -1,5 +1,6 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { groupCandidatesByScope } from "./grouping.js";
+import { candidateIndex } from "./candidate-index.js";
 import type { SweepUiState, UiSortBy } from "./state.js";
 import { getVisibleCandidates } from "./state.js";
 
@@ -143,7 +144,7 @@ function firstDiscovery(group: { candidateIds: string[] }, order: Map<string, nu
 
 function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
   const visible = getVisibleCandidates(state);
-  const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
+  const byId = candidateIndex(state.candidates);
 
   // Pinned (live scan): order by discovery so sizes landing mid-scan cannot
   // reshuffle the list under the cursor. Unpinned: the real triage order.
@@ -219,7 +220,7 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
 
 function oldestModified(
   group: { candidateIds: string[] },
-  byId: Map<string, ScanCandidate>,
+  byId: ReadonlyMap<string, ScanCandidate>,
 ): number {
   let oldest = Number.POSITIVE_INFINITY;
   for (const id of group.candidateIds) {
@@ -228,7 +229,10 @@ function oldestModified(
   return oldest;
 }
 
-function groupBytes(group: { candidateIds: string[] }, byId: Map<string, ScanCandidate>): number {
+function groupBytes(
+  group: { candidateIds: string[] },
+  byId: ReadonlyMap<string, ScanCandidate>,
+): number {
   let total = 0;
   for (const id of group.candidateIds) {
     total += byId.get(id)?.estimatedBytes ?? 0;

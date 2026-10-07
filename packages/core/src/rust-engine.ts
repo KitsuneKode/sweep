@@ -497,6 +497,7 @@ export async function applyPlanViaRust(
   maxSizeBytes?: number,
   onBegin?: (id: string) => void,
   onPreparing?: (id: string, completed: number, total: number) => void,
+  onActivity?: (id: string, removedEntries: number) => void,
 ): Promise<ApplyReport> {
   if (maxSizeBytes !== undefined && (!Number.isSafeInteger(maxSizeBytes) || maxSizeBytes < 0))
     throw new GuardrailError("Invalid native size ceiling; expected a nonnegative safe integer");
@@ -532,11 +533,14 @@ export async function applyPlanViaRust(
   let controlled = false;
   let identityChecked = false;
   let preflightProgress = false;
+  let removalProgress = false;
   try {
     const supported = JSON.parse(capabilities.stdout);
     controlled = capabilities.status === 0 && supported.applyControl === true;
     identityChecked = capabilities.status === 0 && supported.planIdentity === true;
     preflightProgress = capabilities.status === 0 && supported.applyPreparation === true;
+    removalProgress =
+      capabilities.status === 0 && supported.applyActivity === true && onActivity !== undefined;
   } catch {
     /* older engine */
   }
@@ -551,12 +555,14 @@ export async function applyPlanViaRust(
   let report: ApplyReport | undefined;
   let refusal: ApplyRefusedError | undefined;
   let preparedCount = 0;
+  let activeActivityId: string | undefined;
+  let activityCount = 0;
   const progress = new Set<string>();
   const began = new Set<string>();
   try {
     await runEngineAsync(
       ["apply", "--json-control"],
-      `${JSON.stringify({ plan, maxSizeBytes, ...(preflightProgress ? { preflightProgress: true } : {}) })}\n{"type":"start"}\n`,
+      `${JSON.stringify({ plan, maxSizeBytes, ...(preflightProgress ? { preflightProgress: true } : {}), ...(removalProgress ? { removalProgress: true } : {}) })}\n{"type":"start"}\n`,
       (line) => {
         let event: {
           type?: string;
@@ -566,6 +572,7 @@ export async function applyPlanViaRust(
           message?: unknown;
           completed?: unknown;
           total?: unknown;
+          removedEntries?: unknown;
         };
         try {
           event = JSON.parse(line) as typeof event;
@@ -611,7 +618,22 @@ export async function applyPlanViaRust(
           )
             throw new PlanValidationError("Invalid apply begin identity");
           began.add(event.candidateId);
+          activeActivityId = event.candidateId;
+          activityCount = 0;
           onBegin?.(event.candidateId);
+        } else if (event.type === "apply_activity") {
+          if (
+            !removalProgress ||
+            typeof event.candidateId !== "string" ||
+            event.candidateId !== activeActivityId ||
+            progress.has(event.candidateId) ||
+            !Number.isSafeInteger(event.removedEntries) ||
+            (event.removedEntries as number) <= activityCount
+          ) {
+            throw new PlanValidationError("Invalid removal activity");
+          }
+          activityCount = event.removedEntries as number;
+          onActivity?.(event.candidateId, activityCount);
         } else if (event.type === "apply_deleted") {
           if (
             typeof event.candidateId !== "string" ||
@@ -621,6 +643,7 @@ export async function applyPlanViaRust(
             throw new PlanValidationError("Invalid apply progress identity");
           }
           progress.add(event.candidateId);
+          if (activeActivityId === event.candidateId) activeActivityId = undefined;
           onDeleted?.(event.candidateId);
         } else if (event.type === "apply_completed") {
           report = validateApplyReport(event.report);

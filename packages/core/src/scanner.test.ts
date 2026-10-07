@@ -118,7 +118,9 @@ test("a large flat directory is enumerated incrementally with bounded metadata b
   // Keep the wide fixture on the checkout filesystem: /tmp may have a small
   // per-user quota even when statvfs reports plenty of global capacity.
   rmSync(tmpDir, { recursive: true, force: true });
-  tmpDir = mkdtempSync(join(import.meta.dir, "../../../.plans/sweep-flat-test-"));
+  const scratch = join(import.meta.dir, "../../../.scratch");
+  mkdirSync(scratch, { recursive: true });
+  tmpDir = mkdtempSync(join(scratch, "sweep-flat-test-"));
   mkdirSync(dir("node_modules"));
   for (let i = 0; i < 4096; i++) writeFileSync(dir("node_modules", `${i}`), "x");
   const result = await scan(tmpDir, DEFAULT_CONFIG, true, { limits: { maxQueuedDirs: 2 } });

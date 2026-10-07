@@ -565,6 +565,13 @@ describe("single-row apply (x/d)", () => {
   });
 
   describe("input-burst freshness", () => {
+    test("enter in confirmation explains the deliberate key without applying", () => {
+      const actions = makeActions();
+      actions.notify = mock(() => {});
+      handleKeymap(makeContext({ key: { name: "return" }, pendingApply: true }), actions);
+      expect(actions.applyPlan).not.toHaveBeenCalled();
+      expect(actions.notify).toHaveBeenCalledWith("Press y to confirm, or n / Esc to cancel");
+    });
     // OpenTUI's ConcurrentRoot only commits reducer work at the next render, so
     // a multi-key stdin drain (bracketed-less paste, tmux send-keys, SSH packet
     // coalescing) runs every key through one committed snapshot. These tests pin

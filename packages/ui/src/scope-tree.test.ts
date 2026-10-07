@@ -5,6 +5,7 @@ import {
   buildScopeTreeRows,
   candidateMatchesScope,
   isScopeAncestor,
+  clearScopeTreeCache,
 } from "./scope-tree.js";
 
 function candidate(path: string, name: string, bytes = 1): ScanCandidate {
@@ -21,6 +22,30 @@ function candidate(path: string, name: string, bytes = 1): ScanCandidate {
     selectedByDefault: true,
   };
 }
+
+test("sizing refreshes reused topology exactly like a fresh rebuild, including scope order and selection", () => {
+  const original = [
+    candidate("/tmp/tree/a/node_modules", "a", 100),
+    candidate("/tmp/tree/b/dist", "b", 1),
+    candidate("/tmp/tree/cache", "root", 3),
+  ];
+  const selected = new Set([original[1]!.id]);
+  const expanded = new Set<string>();
+  buildScopeTreeRows("/tmp/tree", original, selected, expanded);
+  const sized = original.map((c, i) => ({ ...c, estimatedBytes: i === 1 ? 1000 : 0 }));
+  const reused = buildScopeTreeRows("/tmp/tree", sized, selected, expanded);
+  expect(reused[0]!.bytes).toBe(1000);
+  expect(reused[0]!.selectedBytes).toBe(1000);
+  expect(reused[1]!.key).toBe("b");
+  clearScopeTreeCache();
+  expect(reused).toEqual(buildScopeTreeRows("/tmp/tree", sized, selected, expanded));
+  // A renamed path invalidates topology; same-length arrays alone are unsafe.
+  const moved = sized.map((c, i) => (i === 1 ? { ...c, path: "/tmp/tree/c/dist" } : c));
+  const updated = buildScopeTreeRows("/tmp/tree", moved, selected, expanded);
+  expect(updated[1]!.key).toBe("c");
+  clearScopeTreeCache();
+  expect(updated).toEqual(buildScopeTreeRows("/tmp/tree", moved, selected, expanded));
+});
 
 describe("scope tree", () => {
   test("a large single scope avoids argument-count overflow", () => {

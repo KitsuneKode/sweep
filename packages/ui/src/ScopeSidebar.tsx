@@ -12,6 +12,7 @@ import {
   type ScopeRowState,
 } from "./presentation.js";
 import { isScopeAncestor } from "./scope-tree.js";
+import { formatBytes } from "@kitsunekode/sweep-display";
 import {
   buildScopeSidebarRows,
   compactBytesLabel,
@@ -121,6 +122,8 @@ export function ScopeSidebar({
         incomplete={state.scanIncomplete}
         foundCount={state.candidates.length}
         sizedCount={state.scanSizedCount}
+        selectedCount={rows[0]?.selectedCount ?? 0}
+        partial={state.candidates.some((candidate) => candidate.bytesKnown === false)}
       />
       <box flexGrow={1} minHeight={3} width="100%" flexDirection="row" onMouseScroll={handleWheel}>
         <box
@@ -258,6 +261,8 @@ function ReclaimPanel({
   incomplete,
   foundCount,
   sizedCount,
+  selectedCount,
+  partial,
 }: {
   tokens: ThemeTokens;
   selectedBytes: number;
@@ -267,13 +272,15 @@ function ReclaimPanel({
   incomplete: boolean;
   foundCount: number;
   sizedCount: number;
+  selectedCount: number;
+  partial: boolean;
 }) {
   // While a scan runs the meter reports sizing progress, not queue coverage -
   // default selection keeps coverage pinned near 100%, which reads as "done"
   // even on a scan that later fails.
   if (scanning) {
     const percent = foundCount > 0 ? Math.min(99, Math.round((sizedCount / foundCount) * 100)) : 0;
-    const percentLabel = `${String(percent).padStart(3, " ")}%`;
+    const percentLabel = `${String(percent).padStart(3, " ")}% sized`;
     const barWidth = Math.max(8, width - percentLabel.length - 1);
     return (
       <box
@@ -323,11 +330,11 @@ function ReclaimPanel({
     );
   }
 
-  const hasSelection = selectedBytes > 0 && totalBytes > 0;
-  const percent = totalBytes > 0 ? Math.round((selectedBytes / totalBytes) * 100) : 0;
-  const scanned = t`${fg(tokens.textDim)(`${compactBytesLabel(totalBytes)} found`)}`;
+  const percent =
+    totalBytes > 0 ? Math.min(100, Math.max(0, Math.round((selectedBytes / totalBytes) * 100))) : 0;
+  const scanned = t`${fg(tokens.textDim)(`${partial ? "~" : ""}${formatBytes(totalBytes)} estimated`)}`;
 
-  if (!hasSelection) {
+  if (selectedCount === 0) {
     return (
       <box
         width="100%"
@@ -343,13 +350,13 @@ function ReclaimPanel({
     );
   }
 
-  const percentLabel = `${String(percent).padStart(3, " ")}% queued`;
+  const percentLabel = partial ? "partial bytes" : `${percent}% of bytes`;
   const barWidth = Math.max(8, width - percentLabel.length - 1);
 
   return (
     <box
       width="100%"
-      height={2}
+      height={3}
       flexDirection="column"
       paddingLeft={1}
       backgroundColor={tokens.bg}
@@ -363,7 +370,11 @@ function ReclaimPanel({
         wrapMode="none"
       />
       <text
-        content={t`${fg(tokens.positive)(compactBytesLabel(selectedBytes))} ${fg(tokens.textMuted)("queued of")} ${fg(tokens.textMuted)(compactBytesLabel(totalBytes))}`}
+        content={t`${fg(tokens.positive)(`${selectedCount.toLocaleString()} of ${foundCount.toLocaleString()} items queued`)}`}
+        wrapMode="none"
+      />
+      <text
+        content={t`${fg(tokens.textMuted)(`${partial ? "~" : ""}${formatBytes(selectedBytes)} / ${partial ? "~" : ""}${formatBytes(totalBytes)} estimated`)}`}
         wrapMode="none"
       />
     </box>

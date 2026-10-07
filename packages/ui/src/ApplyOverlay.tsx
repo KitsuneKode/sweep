@@ -86,6 +86,13 @@ export function ApplyOverlay({
       ) : (
         <text content={buildMeter(percent, 100, meterWidth, tokens)} wrapMode="none" />
       )}
+      {!preparing && !reportPending ? <DotStrip tokens={tokens} width={12} /> : null}
+      {progress?.removedEntries !== undefined ? (
+        <text
+          content={`${progress.removedEntries.toLocaleString()} entries removed inside this item`}
+          fg={tokens.info}
+        />
+      ) : null}
       <text
         content={`${completed} / ${total} removals completed · ${((progress?.elapsedMs ?? 0) / 1000).toFixed(1)}s`}
         fg={tokens.text}

@@ -1,4 +1,5 @@
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { candidateIndex, clearCandidateIndex } from "../candidate-index.js";
 import {
   CATALOG_PATTERNS,
   DEFAULT_PATTERN_SET,
@@ -813,6 +814,8 @@ export function releaseUiCaches(): void {
   clearRowsCache();
   clearScopeTreeCache();
   summaryLast = null;
+  candidatePositionCache = null;
+  clearCandidateIndex();
 }
 
 export function resetForRescan(state: SweepUiState): SweepUiState {
@@ -872,27 +875,17 @@ export function toggleCurrentSelection(state: SweepUiState): SweepUiState {
  * replaced only when the scan upserts, so cursor/keypress dispatches reuse
  * one map instead of rebuilding it per lookup. O(n) build, then O(1) hits.
  */
-const candidatePositionCache = new WeakMap<ScanCandidate[], Map<string, number>>();
+// A WeakMap for every historical streaming array defers index reclamation
+// to ephemeron GC. Keep only the current array, like the other UI selectors.
+let candidatePositionCache: { candidates: ScanCandidate[]; positions: Map<string, number> } | null =
+  null;
 function candidatePositions(candidates: ScanCandidate[]): Map<string, number> {
-  let positions = candidatePositionCache.get(candidates);
-  if (!positions) {
-    positions = new Map();
+  if (candidatePositionCache?.candidates !== candidates) {
+    const positions = new Map<string, number>();
     for (let i = 0; i < candidates.length; i++) positions.set(candidates[i]!.id, i);
-    candidatePositionCache.set(candidates, positions);
+    candidatePositionCache = { candidates, positions };
   }
-  return positions;
-}
-
-const candidateIndexCache = new WeakMap<ScanCandidate[], Map<string, ScanCandidate>>();
-
-function candidateIndex(candidates: ScanCandidate[]): Map<string, ScanCandidate> {
-  let index = candidateIndexCache.get(candidates);
-  if (!index) {
-    index = new Map();
-    for (const candidate of candidates) index.set(candidate.id, candidate);
-    candidateIndexCache.set(candidates, index);
-  }
-  return index;
+  return candidatePositionCache.positions;
 }
 
 function candidateById(state: SweepUiState, candidateId: string): ScanCandidate | undefined {
@@ -1063,7 +1056,7 @@ export function applyVisualRange(state: SweepUiState): VisualApplyResult {
   const cleared = cancelVisual(state);
   if (!range) return { state: cleared, queued: 0, unqueued: 0, skipped: 0 };
 
-  const byId = new Map(state.candidates.map((candidate) => [candidate.id, candidate]));
+  const byId = candidateIndex(state.candidates);
   const eligible: ScanCandidate[] = [];
   let skipped = 0;
   for (const id of range.ids) {

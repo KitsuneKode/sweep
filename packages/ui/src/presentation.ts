@@ -425,7 +425,10 @@ export function buildRiskTally(summary: SweepUiSummary, tokens: ThemeTokens): St
   if (dangerous > 0) {
     parts.push(t`${bold(fg(tokens.danger)(`${dangerous} dangerous`))}`);
   }
-  return joinStyled(interleave(parts, t`${dim(" · ")}`));
+  return concatStyled(
+    t`${fg(tokens.textDim)("queue: ")}`,
+    joinStyled(interleave(parts, t`${dim(" · ")}`)),
+  );
 }
 
 function interleave(items: StyledText[], separator: StyledText): StyledText[] {
@@ -570,7 +573,7 @@ export function buildFooterHints(
     return t`${key("enter")} ${hint("list")}${sep}${key("esc")} ${hint("clear")}${sep}${key("tab")} ${hint("panes")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
-  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("x")} ${hint("delete row")}${sep}${key("enter")} ${hint(options.dryRun ? "done" : "apply")}${sep}${key("i")} ${hint("inspect")}${sep}${key("/")} ${hint("filter")}${sep}${key("?")} ${hint("help")}`;
+  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("x")} ${hint("delete this")}${sep}${key("enter")} ${hint(options.dryRun ? "done" : "apply queue")}${sep}${key("i")} ${hint("inspect")}${sep}${key("/")} ${hint("filter")}${sep}${key("?")} ${hint("help")}`;
 }
 
 /** Statusline mode segment label for the focused panel. */

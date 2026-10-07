@@ -555,6 +555,52 @@ describe("sweep TUI render", () => {
 });
 
 describe("streaming reorder", () => {
+  test("scan receipts resolve after reconciliation and release on generation cancellation", async () => {
+    let hooks!: UiScanHooks;
+    let signal!: AbortSignal;
+    const control: UiScanControl = {
+      async start(next, nextSignal) {
+        hooks = next;
+        signal = nextSignal;
+      },
+      syncPatterns() {},
+      setEngine: () => true,
+    };
+    const setup = await testRender(
+      <SweepApp plan={emptyStreamPlan()} onDone={() => {}} scan={control} initiallyScanning />,
+      { width: 120, height: 32 },
+    );
+    teardown = () => setup.renderer.destroy();
+    await act(async () => {
+      await setup.renderOnce();
+    });
+    let receipt!: Promise<void>;
+    let committed = false;
+    await act(async () => {
+      hooks.onBatch(createPlan().candidates);
+      expect(hooks.waitForCommit).toBeDefined();
+      receipt = hooks.waitForCommit!().then(() => {
+        committed = true;
+      });
+      await Promise.resolve();
+      expect(committed).toBe(false);
+    });
+    await receipt;
+    await setup.renderOnce();
+    expect(committed).toBe(true);
+    expect(setup.captureCharFrame()).toContain("2 found");
+
+    const previousSignal = signal;
+    await act(async () => {
+      hooks.onBatch([streamCandidate(99, 0)]);
+      receipt = hooks.waitForCommit!();
+      setup.mockInput.pressKey("r");
+      await setup.flush();
+    });
+    await receipt;
+    expect(previousSignal.aborted).toBe(true);
+    expect(signal.aborted).toBe(false);
+  });
   function streamCandidate(index: number, bytes: number): ScanCandidate {
     const tree = `tree-${index % 8}`;
     const pkg = ["apps/cli", "apps/docs", "packages/core"][index % 3];

@@ -1,5 +1,5 @@
 {
-  "ignore": ["tests/fixtures", "apps/cli/dist"],
-  "maxSizeGB": 10,
+  "ignore": ["tests/fixtures", "apps/cli/dist", ".scratch", ".plans/sweep-flat-test-*"],
+  "maxSizeGB": null,
   "depth": -1
 }

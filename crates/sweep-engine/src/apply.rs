@@ -63,6 +63,27 @@ pub fn apply_plan_controlled_with_progress(
     max_bytes: Option<u64>,
     on_preparing: &mut dyn FnMut(&str, usize, usize),
 ) -> Result<ApplyReport, EngineError> {
+    apply_plan_controlled_with_activity(
+        plan,
+        cancelled,
+        on_begin,
+        on_deleted,
+        max_bytes,
+        on_preparing,
+        &mut |_, _| {},
+    )
+}
+
+/// Opt-in removal activity; the final report remains the outcome authority.
+pub fn apply_plan_controlled_with_activity(
+    plan: &ScanPlan,
+    cancelled: &AtomicBool,
+    on_begin: &mut dyn FnMut(&str),
+    on_deleted: &mut dyn FnMut(&str),
+    max_bytes: Option<u64>,
+    on_preparing: &mut dyn FnMut(&str, usize, usize),
+    on_activity: &mut dyn FnMut(&str, u64),
+) -> Result<ApplyReport, EngineError> {
     if plan.protocol_version != PROTOCOL_VERSION {
         return Err(EngineError::Guardrail(
             GuardrailError::UnsupportedProtocolVersion {
@@ -385,6 +406,7 @@ pub fn apply_plan_controlled_with_progress(
                 real_root_id,
                 entry_identities[&entry.path],
                 cancelled,
+                &mut |count| on_activity(id, count),
             ),
             None => Err(path_failure(
                 &entry.path,
@@ -731,10 +753,11 @@ fn delete_entry(
     real_root_id: Option<(u64, u64)>,
     expected_identity: Option<FileIdentity>,
     cancelled: &AtomicBool,
+    on_activity: &mut dyn FnMut(u64),
 ) -> Result<(), PathFailure> {
     let path = Path::new(entry.path.as_str());
     #[cfg(not(target_os = "linux"))]
-    let _ = cancelled;
+    let _ = (cancelled, on_activity);
 
     // Identity pin, not just a path: a renamed-away-and-recreated root
     // resolves to the same spelling but is a different directory. Re-stat
@@ -846,11 +869,12 @@ fn delete_entry(
         let relative = relative
             .strip_prefix(real_root)
             .map_err(|_| std::io::Error::other("candidate parent outside root"))?;
-        sweep_fs::RemovalRoot::open(real_root, root_identity)?.remove(
+        sweep_fs::RemovalRoot::open(real_root, root_identity)?.remove_with_progress(
             relative,
             identity,
             !entry.is_symlink && entry.entry_type == EntryType::Directory,
             cancelled,
+            on_activity,
         )
     })();
     #[cfg(not(target_os = "linux"))]
@@ -1166,7 +1190,8 @@ mod tests {
                 &root,
                 root_id,
                 None,
-                &AtomicBool::new(false)
+                &AtomicBool::new(false),
+                &mut |_| {},
             )
             .is_err(),
             "VCS symlink passed delete-time checks"

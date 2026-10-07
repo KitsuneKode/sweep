@@ -73,6 +73,21 @@ The UI mounts immediately and fills in as data arrives. Long work shows live
 progress (`SCANNING` chip, growing counts). A spinner over a frozen screen is
 a bug, not a loading state.
 
+Live scan delivery waits for a React commit receipt before admitting the next
+batch; a bare event-loop turn is insufficient. Receipts are scoped to a scan
+generation and released on cancellation/unmount. This bounds outstanding UI
+frames, not total candidate memory or physical terminal output. Sizing updates
+reuse folder topology only when candidate IDs and paths are unchanged. The
+60 ms coalescing window remains; burst frames adapt from 200 up to 2,000 records
+to amortize index rebuilding. Candidate lookups share one immutable index per
+array revision, and caches are released at generation/session boundaries.
+
+Queue coverage names its units: item count and share of estimated bytes are
+different facts. Unknown byte coverage is labeled partial. A queued zero-byte
+item must not display as an empty queue. Single-item confirmation names its
+scope and the other queued items it leaves behind. Enter inside confirmation
+explains `y`; it does not silently disappear or implicitly change scope.
+
 ## 6. Mouse is a peer, not a fallback
 
 Rows scroll, hover, click-to-focus, and toggle on click. Headers collapse on
@@ -90,7 +105,7 @@ selection.
 
 Every accepted key either changes the screen or updates the statusline. A key
 that deliberately does nothing must say why via a one-line notice - e.g.
-`Enter` on an empty queue flashes `nothing queued - space on a row queues it`,
+`Enter` on an empty queue explains Space to queue and x to delete this item,
 `Esc` with nothing left to unwind flashes `nothing to unwind - ctrl-c quits`.
 
 ## 8. Cursor and viewport are one

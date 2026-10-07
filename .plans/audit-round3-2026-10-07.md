@@ -2,7 +2,8 @@ Status: in_progress
 Scope: supplied final audit, apply feedback, resource accounting, release guardrails
 Created: 2026-10-07
 Base: 9f0d450e9fb8c3596ab1b724678441cc8a244467
-Commit: this changeset; exact-current hosted qualification pending
+Updated: 2026-10-08
+Commit: 9e7169c71f24abbf96312597bb3960a456f34d78
 
 # Final audit follow-ups
 
@@ -28,7 +29,7 @@ qualification of these later changes.
 | Native host binary mislabeled as foreign | Default packaging selects only a matching host release or the requested target's release path. It refuses foreign host fallback and implicit debug builds. Explicit --binary remains a caller choice and still needs architecture qualification.                                                                                                                                             |
 | zsh value completion missing             | Generated specs distinguish files, enum values and depth values. Regression checks cover plan/journal/engine/depth. Syntax validation is added to Linux CI. Full interactive shell completion remains a separate check.                                                                                                                                                                      |
 | Stale output qualification               | The script previously expected progress on stdout. It now reads stderr, tests stdout receipt loss separately from SIGINT, bounds preparation wait, and checks history against the owned tree plus an unselected sentinel.                                                                                                                                                                    |
-| CI gaps                                  | Linux CI now runs output/cancellation and modest resource/slow-consumer probes, plus generated bash/zsh/fish syntax checks. These workflow additions have not run hosted yet.                                                                                                                                                                                                                |
+| CI gaps                                  | Linux CI now runs output/cancellation and modest resource/slow-consumer probes, plus generated bash/zsh/fish syntax checks. These additions passed the hosted Linux job on the recorded checkpoint.                                                                                                                                                                                          |
 
 ## Current local evidence
 
@@ -55,8 +56,10 @@ qualification of these later changes.
   service recovered after its earlier usage-limit failure.
 - [Local evidence](audit-round2-2026-10-07/qualification-round3-local.json)
   records outputs and artifact hashes; [resources](audit-round2-2026-10-07/round3-resources.json)
-  records sampled process-tree RSS. Exact-current hosted qualification remains
-  pending. Earlier checkpoint greens do not certify these changes.
+  records sampled process-tree RSS. The recorded checkpoint passed all eight hosted CI jobs: Linux x64/ARM64,
+  macOS Intel/Apple Silicon, Windows, TypeScript, docs and workflow lint.
+  [Exact-SHA CI](https://github.com/KitsuneKode/sweep/actions/runs/37654449605)
+  includes the new output/resource/completion probes. Later changes need their own gates.
 - React Doctor's comparison against HEAD reports six DOM-property warnings
   on valid OpenTUI props and one complexity warning in the progress component.
   Terminal prop types and rendered interactions pass; no diagnostic was
@@ -65,9 +68,10 @@ qualification of these later changes.
 
 ## Still open, in order
 
-1. Review/commit/push, then verify exact-current
-   hosted platform/install jobs and the new CI probes. Do not publish before
-   those checks and explicit release authorization.
+1. The checkpoint is committed/pushed and its hosted CI is green.
+   [The October 8 follow-up](ui-streaming-followup-2026-10-08.md) addresses
+   screenshot feedback, live delivery, indexes and native removal activity.
+   Do not publish without explicit release authorization and release qualification.
 2. Qualify allocated large trees by entry count and filesystem shape, not only
    byte size. The 50k-folder synthetic completed-plan probe sampled about 581
    MiB RSS. It is not low-memory or live-stream qualification. Bound retained

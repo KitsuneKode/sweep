@@ -311,7 +311,8 @@ pub fn apply_plan(plan: &ScanPlan) -> Result<ApplyReport, EngineError> {
 }
 
 pub use apply::{
-    apply_plan_controlled, apply_plan_controlled_with_limit, apply_plan_controlled_with_progress,
+    apply_plan_controlled, apply_plan_controlled_with_activity, apply_plan_controlled_with_limit,
+    apply_plan_controlled_with_progress,
 };
 
 fn build_plan(

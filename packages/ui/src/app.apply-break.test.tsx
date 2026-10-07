@@ -391,6 +391,21 @@ describe("adversarial: committed applying state", () => {
       applyCalls[0]!.onProgress?.({
         stage: "applying",
         selectedCount: 1,
+        deletedCount: 0,
+        estimatedBytesFreed: 0,
+        elapsedMs: 2000,
+        removedEntries: 1234,
+        activePath: "/tmp/sweep-ui/node_modules",
+      });
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("1,234 entries removed inside this item");
+    expect(setup.captureCharFrame()).toContain("0% of items");
+    await act(async () => {
+      applyCalls[0]!.onProgress?.({
+        stage: "applying",
+        selectedCount: 1,
         deletedCount: 1,
         estimatedBytesFreed: 1024,
         elapsedMs: 4300,
@@ -537,6 +552,15 @@ describe("adversarial: apply resolution state surgery", () => {
       () => {},
     );
     await openSingleConfirm();
+    expect(setup.captureCharFrame()).toContain("Only this item");
+    expect(setup.captureCharFrame()).toContain("1 other queued item stays queued");
+    await act(async () => {
+      setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    await settle();
+    expect(applyCalls).toHaveLength(0);
+    expect(setup.captureCharFrame()).toContain("Press y to confirm");
     await act(async () => {
       setup.mockInput.pressKey("y");
       await setup.flush();
@@ -568,6 +592,7 @@ describe("adversarial: apply resolution state surgery", () => {
     // the "deleted X" notice); the summary recomputed to one candidate.
     expect(frame).toContain("1 found");
     expect(frame).toContain("1 deleted");
+    expect(frame).toContain("1 still queued");
     // Input works again: a second single apply can be requested.
     await act(async () => {
       setup.mockInput.pressKey("x");

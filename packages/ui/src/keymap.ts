@@ -256,6 +256,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (pendingApply) {
+    if (key.name === "return" || key.name === "enter") {
+      actions.notify?.("Press y to confirm, or n / Esc to cancel");
+      return;
+    }
     // Consequential keys (confirm, mode flip) need the dialog to have been
     // *seen*: a non-bracketed paste or scripted burst can carry y/t bytes
     // that arrive while the dialog is milliseconds old. The arm check runs
@@ -268,7 +272,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (key.name === "y") {
-      if (confirmUnarmed) return;
+      if (confirmUnarmed) {
+        actions.notify?.("Press y again after reviewing the confirmation");
+        return;
+      }
       if (ctx.pendingSingle) {
         actions.confirmSingle?.();
       } else {

@@ -99,6 +99,7 @@ export interface ApplyPlanOptions {
   /** Path about to be removed or moved, before the slow call. */
   onBegin?: (entry: ScanEntry) => void;
   onDeleted?: (entry: ScanEntry) => void;
+  onActivity?: (entry: ScanEntry, removedEntries: number) => void;
   /** JS engine: checked before each delete; true stops scheduling new work. */
   isCancelled?: () => boolean;
   /** Stop scheduling removals and drain the native final report. */
@@ -376,6 +377,10 @@ export async function applyPlanWithBackend(
     (id, completed, total) => {
       const candidate = byId.get(id);
       if (candidate) options.onPrepare?.(candidate, completed, total, "sizing");
+    },
+    (id, removedEntries) => {
+      const candidate = byId.get(id);
+      if (candidate) options.onActivity?.(candidate, removedEntries);
     },
   );
   const deletedIds = new Set(

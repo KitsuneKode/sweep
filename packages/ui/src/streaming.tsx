@@ -15,7 +15,7 @@ import { SweepApp, UiErrorBoundary } from "./app.js";
 import type { SweepUiOutcome, UiApplyResult } from "./outcome.js";
 import { openUiSession } from "./runtime.js";
 import type { SweepUiInitOptions } from "./state.js";
-import { StreamBatcher } from "./stream-batcher.js";
+import { StreamBatcher, scanBatchCap } from "./stream-batcher.js";
 
 export interface UiScanProgress {
   scannedDirs: number;
@@ -30,6 +30,9 @@ export interface UiScanHooks {
   /** Candidates discovered or resized since the last flush. */
   onBatch: (candidates: ScanCandidate[]) => void;
   onProgress?: (meta: UiScanProgress) => void;
+  /** Receipt for the preceding callbacks after React commits their frame.
+   * Cancellation/unmount must release it so a stopped generation can finish. */
+  waitForCommit?: () => Promise<void>;
   /**
    * Scan finished. `plan` is the authoritative enriched result - the same
    * `buildPlan` output a non-streaming run produces, so workspace stubs and
@@ -101,7 +104,6 @@ const BATCH_FLUSH_MS = 60;
 // window) must not wait out the timer - flush at the cap and keep the paint
 // pipeline fed. Sits between opencode's 16ms transport window and ncdu's
 // 100ms draw cap on purpose.
-const BATCH_FLUSH_CAP = 200;
 
 function emptyPlan(targetDir: string, selectionPolicy: SelectionPolicy): ScanPlan {
   return {
@@ -155,14 +157,16 @@ export async function runSweepUiStreaming(
       let skippedDirs = 0;
       let currentDir: string | undefined;
       const sizedIds = new Set<string>();
+      let recordCount = 0;
       const batcher = new StreamBatcher<ScanCandidate, UiScanProgress>(
         (candidates, progress) => {
           if (signal.aborted) return;
           if (progress) hooks.onProgress?.(progress);
           if (candidates.length > 0) hooks.onBatch(candidates);
+          return hooks.waitForCommit?.();
         },
         BATCH_FLUSH_MS,
-        BATCH_FLUSH_CAP,
+        () => scanBatchCap(recordCount),
       );
       const cancel = () => batcher.cancel();
       signal.addEventListener("abort", cancel, { once: true });
@@ -181,6 +185,7 @@ export async function runSweepUiStreaming(
       const record = (entry: ScanEntry) => {
         if (signal.aborted) return;
         const candidate = candidateFromEntry(entry);
+        recordCount++;
         batcher.record(candidate.id, candidate);
       };
       const recordSized = (entry: ScanEntry) => {
@@ -227,10 +232,10 @@ export async function runSweepUiStreaming(
           finalPlan = buildPlan(options.targetDir, result, options.selectionPolicy);
         }
 
-        batcher.finish();
+        await batcher.finish();
         if (!signal.aborted) hooks.onDone({ scannedDirs, skippedDirs, plan: finalPlan });
       } catch (error) {
-        batcher.finish();
+        batcher.cancel();
         if (!signal.aborted) hooks.onError(error);
       } finally {
         batcher.cancel();
