@@ -5,6 +5,7 @@ import {
   type ScanPlan,
 } from "@kitsunekode/sweep-protocol";
 import { GuardrailError } from "./guardrails.js";
+import { SYMLINK_ALIAS_REASON, WORKSPACE_STUB_REASON } from "./candidate-insights.js";
 
 export class ResourceLimitError extends GuardrailError {
   constructor(resource: string) {
@@ -164,6 +165,21 @@ export function candidateFieldChars(candidate: ScanCandidate): number {
         candidate.identity.inode.length
       : 0) +
     candidate.reasons.reduce((sum, reason) => sum + reason.length, 0)
+  );
+}
+
+/** Reserve reasons added after sizing/enrichment so a completed scan fits its plan. */
+export function discoveryCandidateFieldChars(candidate: ScanCandidate): number {
+  return (
+    candidateFieldChars(candidate) +
+    (candidate.isSymlink && !candidate.reasons.includes(SYMLINK_ALIAS_REASON)
+      ? SYMLINK_ALIAS_REASON.length
+      : 0) +
+    (candidate.name === "node_modules" &&
+    candidate.entryType === "directory" &&
+    !candidate.reasons.includes(WORKSPACE_STUB_REASON)
+      ? WORKSPACE_STUB_REASON.length
+      : 0)
   );
 }
 

@@ -54,7 +54,7 @@ export function createProgressiveScanRenderer(
       count++;
       stopSpinnerIfNeeded();
 
-      const size = formatBytes(candidateBytes(candidate));
+      const size = `${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidateBytes(candidate))}`;
       const badge = riskTier ? ` ${formatRiskBadge(riskTier)}` : "";
       const symlinkBadge = candidate.isSymlink ? pc.dim(" [symlink]") : "";
 

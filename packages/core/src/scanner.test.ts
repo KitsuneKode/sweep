@@ -77,6 +77,29 @@ test("resource exhaustion rejects without presenting a partial scan as complete"
   expect(discovered).toBe(1);
 });
 
+test("scan charges the plan's retained metadata before revealing a candidate", async () => {
+  mkdirSync(dir("node_modules"));
+  let discovered = 0;
+  // Root path + root identity + candidate path/object, but insufficient
+  // room for its ID, name, kind, identity and classification reasons.
+  const pathOnly =
+    128 + Buffer.byteLength(tmpDir) * 4 + 128 + 1024 + Buffer.byteLength(dir("node_modules")) * 4;
+  stubDirectoryEntriesForTest(async function* (path) {
+    if (String(path) === tmpDir) yield { name: Buffer.from("node_modules"), type: "d" };
+  });
+  try {
+    await expect(
+      scan(tmpDir, DEFAULT_CONFIG, false, {
+        limits: { maxRetainedBytes: pathOnly + 16 },
+        onEntry: () => discovered++,
+      }),
+    ).rejects.toThrow("maxRetainedBytes");
+    expect(discovered).toBe(0);
+  } finally {
+    stubDirectoryEntriesForTest();
+  }
+});
+
 test("sizing bounds itself per-job, not against the walk admission budget", async () => {
   mkdirSync(dir("node_modules", "nested"), { recursive: true });
   writeFileSync(dir("node_modules", "nested", "file"), "hello");

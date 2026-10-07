@@ -151,6 +151,16 @@ impl ResourceBudget {
         )
     }
 
+    /// Top up a walk entry already admitted before its protocol metadata exists.
+    /// Units match the JS host's UTF-16 string lengths, charged at four bytes.
+    pub fn candidate_metadata(&self, chars: usize) -> bool {
+        let Some(bytes) = chars.checked_mul(4) else {
+            self.fail("candidate metadata overflow");
+            return false;
+        };
+        self.retained(bytes)
+    }
+
     /// Charge a queued directory job: live queue slot plus retained path
     /// bytes. Runs at discovery push; `dequeue_directory` releases the slot
     /// when the job is popped.

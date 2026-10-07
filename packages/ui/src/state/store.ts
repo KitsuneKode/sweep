@@ -184,9 +184,7 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
 }
 
 export function activePatterns(state: SweepUiState): string[] {
-  const enabled = state.catalogPatterns.filter((pattern) => !state.disabledPatterns.has(pattern));
-  const extras = state.extraPatterns.filter((pattern) => !state.disabledPatterns.has(pattern));
-  return [...new Set([...enabled, ...extras])];
+  return allPatterns(state).filter((pattern) => isPatternEnabled(state, pattern));
 }
 
 /**

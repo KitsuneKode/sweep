@@ -1,7 +1,7 @@
 import { StyledText, TextAttributes, fg } from "@opentui/core";
-import type { TextChunk } from "@opentui/core";
-import { useTerminalDimensions } from "@opentui/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { ScrollBoxRenderable, TextChunk } from "@opentui/core";
+import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DOT_GRID, dotFrame, dotRamp, dotStrip, type DotPattern } from "./dot-matrix.js";
 import type { ThemeTokens } from "./theme.js";
 
@@ -20,12 +20,18 @@ export function Modal({
   title,
   titleColor,
   width,
+  height,
+  footer,
   children,
 }: {
   tokens: ThemeTokens;
   title: string;
   titleColor?: string;
   width: number;
+  /** Explicit compact height; contents remain scrollable on smaller terminals. */
+  height?: number;
+  /** Consent/stop controls stay visible independently of scrollable details. */
+  footer?: ReactNode;
   children: ReactNode;
 }) {
   const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
@@ -33,6 +39,12 @@ export function Modal({
   // still overflows a 3x2 terminal.
   const modalWidth = Math.max(1, Math.min(width, Math.max(1, screenWidth - 2)));
   const maxHeight = Math.max(1, screenHeight - 2);
+  const scrollRef = useRef<ScrollBoxRenderable | null>(null);
+  useKeyboard((key) => {
+    const delta = key.name === "pagedown" ? 1 : key.name === "pageup" ? -1 : 0;
+    if (delta && scrollRef.current)
+      scrollRef.current.scrollBy({ x: 0, y: delta * Math.max(1, scrollRef.current.height - 1) });
+  });
 
   return (
     <box
@@ -47,6 +59,7 @@ export function Modal({
     >
       <box
         width={modalWidth}
+        {...(height === undefined ? {} : { height: Math.min(maxHeight, Math.max(1, height)) })}
         maxHeight={maxHeight}
         border
         borderStyle="rounded"
@@ -58,8 +71,10 @@ export function Modal({
         flexDirection="column"
       >
         <scrollbox
-          // No flexGrow: the card hugs content height. flexShrink still lets
-          // the scrollbox compress and scroll once the card hits maxHeight.
+          ref={scrollRef}
+          flexGrow={height === undefined ? 0 : 1}
+          // Auto-height cards hug content; compact fixed-height cards fill
+          // their viewport. Either mode scrolls when content exceeds it.
           flexShrink={1}
           minHeight={0}
           width="100%"
@@ -72,6 +87,11 @@ export function Modal({
         >
           {children}
         </scrollbox>
+        {footer ? (
+          <box flexDirection="column" flexShrink={0}>
+            {footer}
+          </box>
+        ) : null}
       </box>
     </box>
   );

@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { createProgressiveScanRenderer } from "./progressive.js";
 import {
   formatDeletionProgress,
   formatBytes,
@@ -26,6 +27,36 @@ function candidate(
 }
 
 describe("display formatters", () => {
+  test("progressive candidate lines distinguish partial sizing from known sizes", () => {
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    const out = spyOn(process.stdout, "write").mockReturnValue(true);
+    const renderer = createProgressiveScanRenderer();
+    try {
+      renderer.onCandidate(
+        candidate({ id: "partial", name: "dist", kind: "dist", bytesKnown: false }),
+      );
+      renderer.onCandidate(
+        candidate({ id: "known", name: "target", kind: "target", bytesKnown: true }),
+      );
+      renderer.onCandidate(
+        candidate({
+          id: "pending",
+          name: "node_modules",
+          kind: "node_modules",
+          estimatedBytes: 0,
+          bytesKnown: false,
+        }),
+      );
+      expect(String(log.mock.calls[0]?.[0])).toContain("~1.0 KiB");
+      expect(String(log.mock.calls[1]?.[0])).toContain("1.0 KiB");
+      expect(String(log.mock.calls[1]?.[0])).not.toContain("~");
+      expect(String(log.mock.calls[2]?.[0])).toContain("~0 B");
+    } finally {
+      renderer.stopSpinner();
+      log.mockRestore();
+      out.mockRestore();
+    }
+  });
   test("deletion progress leaves stdout exclusively for results", () => {
     const out = spyOn(process.stdout, "write").mockReturnValue(true);
     const err = spyOn(process.stderr, "write").mockReturnValue(true);

@@ -9,7 +9,7 @@ import type {
 import { hasCanonicalPathSpelling, isPathWithinRoot, isSameResolvedPath } from "./guardrails.js";
 import { PlanValidationError, validateScanEvent } from "./plan.js";
 import type { ScanHooks } from "./scanner.js";
-import { ResourceBudget, candidateFieldChars, checkedBytes } from "./resource-budget.js";
+import { ResourceBudget, discoveryCandidateFieldChars, checkedBytes } from "./resource-budget.js";
 import { sameFilesystemIdentity } from "./filesystem-identity.js";
 
 // Progress/warning events carry no candidates, so the per-line byte cap is
@@ -133,7 +133,7 @@ export class RustScanStream {
       if (prior || this.ids.has(candidate.id)) {
         throw new PlanValidationError("duplicate scan candidate");
       }
-      this.budget.candidate(candidate.path, candidateFieldChars(candidate));
+      this.budget.candidate(candidate.path, discoveryCandidateFieldChars(candidate));
       this.ids.add(candidate.id);
       this.candidates.set(candidate.path, candidate);
       this.hooks.onEntry?.(entryFrom(candidate));
@@ -145,6 +145,12 @@ export class RustScanStream {
       prior.name !== candidate.name ||
       prior.entryType !== candidate.entryType ||
       prior.isSymlink !== candidate.isSymlink ||
+      prior.kind !== candidate.kind ||
+      prior.riskTier !== candidate.riskTier ||
+      prior.selectedByDefault !== candidate.selectedByDefault ||
+      prior.modifiedMs !== candidate.modifiedMs ||
+      prior.reasons.length !== candidate.reasons.length ||
+      prior.reasons.some((reason, index) => reason !== candidate.reasons[index]) ||
       ((prior.identity !== undefined || candidate.identity !== undefined) &&
         !sameFilesystemIdentity(prior.identity, candidate.identity))
     ) {

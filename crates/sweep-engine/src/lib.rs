@@ -145,15 +145,32 @@ pub fn scan_to_plan_with_config(
         // the sender does below.
         let walk = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let on_match = |entry: &WalkEntry| {
+                let candidate = to_candidate(
+                    entry,
+                    sweep_fs::SubtreeSize {
+                        bytes: 0,
+                        complete: false,
+                    },
+                );
+                // The filesystem walker charged the path/object. Account for
+                // protocol strings before publishing or enqueueing any sizing.
+                let enrichment = if candidate.entry.is_symlink {
+                    "symlink-alias".len()
+                } else {
+                    0
+                } + if candidate.entry.name == "node_modules"
+                    && candidate.entry.entry_type == EntryType::Directory
+                {
+                    "workspace-stub".len()
+                } else {
+                    0
+                };
+                if !budget.candidate_metadata(candidate_field_chars(&candidate) + enrichment) {
+                    return;
+                }
                 found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let Some(cb) = on_entry {
-                    cb(to_candidate(
-                        entry,
-                        sweep_fs::SubtreeSize {
-                            bytes: 0,
-                            complete: false,
-                        },
-                    ));
+                    cb(candidate);
                 }
                 // The found line is fully buffered before the entry reaches a
                 // sizer - an update can never overtake its own discovery event.
@@ -355,6 +372,19 @@ fn build_plan(
 
 fn iso_timestamp_now() -> String {
     chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+/// Match JavaScript string.length units even for non-ASCII fields. Paths use
+/// UTF-8 byte length separately in both implementations.
+fn candidate_field_chars(candidate: &ScanCandidate) -> usize {
+    let chars = |s: &str| s.encode_utf16().count();
+    chars(&candidate.id)
+        + chars(&candidate.entry.name)
+        + chars(&candidate.kind)
+        + candidate.entry.identity.as_ref().map_or(0, |id| {
+            chars(&id.platform) + chars(&id.device) + chars(&id.inode)
+        })
+        + candidate.reasons.iter().map(|r| chars(r)).sum::<usize>()
 }
 
 fn to_candidate(entry: &WalkEntry, size: sweep_fs::SubtreeSize) -> ScanCandidate {
@@ -824,6 +854,59 @@ mod tests {
             );
             assert!(result.is_err_and(|e| e.to_string().contains("maxCandidates")));
         }
+    }
+
+    #[test]
+    fn candidate_metadata_is_charged_before_publication() {
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("fixture: {e}"));
+        let path = dir.path().join("node_modules");
+        std::fs::create_dir(&path).unwrap_or_else(|e| panic!("fixture: {e}"));
+        let root = Utf8Path::from_path(dir.path()).unwrap_or_else(|| panic!("encoding"));
+        let path_only = 128 + root.as_str().len() * 4 + 128 + 1024 + path.as_os_str().len() * 4;
+        let revealed = std::sync::atomic::AtomicU32::new(0);
+        let on_entry = |_: ScanCandidate| {
+            revealed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        };
+        let result = scan_to_plan_with_config(
+            root,
+            &WalkConfig::default(),
+            &SelectionPolicy::default(),
+            ScanOptions {
+                limits: sweep_types::ScanLimits {
+                    max_retained_bytes: (path_only + 16) as u32,
+                    ..sweep_types::ScanLimits::default()
+                },
+                hooks: ScanHooks {
+                    on_entry: Some(&on_entry),
+                    ..ScanHooks::default()
+                },
+                ..ScanOptions::default()
+            },
+        );
+        assert!(result.is_err_and(|e| e.to_string().contains("maxRetainedBytes")));
+        assert_eq!(revealed.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn candidate_fields_use_host_utf16_lengths() {
+        let candidate = ScanCandidate {
+            entry: sweep_types::ScanEntry {
+                identity: None,
+                path: "/root/🦊".to_owned(),
+                name: "🦊".to_owned(),
+                estimated_bytes: 0,
+                bytes_known: Some(false),
+                modified_ms: None,
+                is_symlink: false,
+                entry_type: EntryType::File,
+            },
+            id: "cand_123".to_owned(),
+            kind: "other".to_owned(),
+            risk_tier: RiskTier::Caution,
+            reasons: vec!["日本語".to_owned()],
+            selected_by_default: false,
+        };
+        assert_eq!(candidate_field_chars(&candidate), 8 + 2 + 5 + 3);
     }
 
     #[test]

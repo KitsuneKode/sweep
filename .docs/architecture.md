@@ -48,7 +48,7 @@ CLI flags / config
 - `sweep ui` - OpenTUI interactive selection (TTY required)
 - `sweep inspect --plan` - read-only plan provenance and totals
 - `sweep stats` - retained cleanup history and estimated removed/moved totals
-- `sweep completions` - static bash/zsh/fish completion scripts
+- `sweep completions` - bash/zsh/fish scripts generated from the installed command model
 - `sweep init` / `sweep doctor` - scaffolding and environment checks
 
 ## Intended direction
@@ -236,11 +236,8 @@ Both engines re-validate before deleting:
   non-symlink candidate and require real containment. Every candidate also has
   its canonical parent checked for containment and VCS metadata. A symlink
   leaf is unlinked without canonicalizing or following its target.
-- **Size ceiling** - `sweep plan` - save a read-only reviewed scan plan
-- `sweep clean` - explicit cleanup entrypoint
-- `sweep recover --journal` - read-only intent and outcome inspection
-- `sweep schema` - export the installed protocol schemas
-- `sweep apply --plan` enforces `maxSizeGB` just like the
+- **Size ceiling** - `sweep apply --plan` enforces an explicitly configured
+  `maxSizeGB` just like the
   interactive flows; a saved plan is not a trusted lane around the cap
   (`--force-large --yes` to bypass, matching `clean`). Before destructive apply,
   both engines refresh selected, revalidated, deduplicated entries using the

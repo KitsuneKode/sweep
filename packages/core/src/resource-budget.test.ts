@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test";
-import { ResourceBudget, checkedBytes } from "./resource-budget.js";
+import {
+  ResourceBudget,
+  checkedBytes,
+  candidateFieldChars,
+  discoveryCandidateFieldChars,
+} from "./resource-budget.js";
+import { toCandidate } from "./planner.js";
+import { enrichCandidates } from "./candidate-insights.js";
 
 test("discovery and live sizing cannot each consume the combined allowance", () => {
   const budget = new ResourceBudget({ maxRetainedBytes: 2048, maxCombinedBytes: 1156 });
@@ -60,4 +67,25 @@ test("invalid limits and unsafe byte arithmetic fail explicitly", () => {
   expect(checkedBytes(Number.MAX_SAFE_INTEGER - 1, 1)).toBe(Number.MAX_SAFE_INTEGER);
   expect(() => checkedBytes(Number.MAX_SAFE_INTEGER, 1)).toThrow("overflow");
   expect(() => checkedBytes(-1, 1)).toThrow("overflow");
+});
+
+test("discovery reserves workspace enrichment without counting its reasons twice", () => {
+  const stub = toCandidate({
+    path: "/tmp/budget/app/node_modules",
+    name: "node_modules",
+    entryType: "directory",
+    isSymlink: false,
+    estimatedBytes: 4096,
+  });
+  const primary = toCandidate({
+    ...stub,
+    path: "/tmp/budget/node_modules",
+    estimatedBytes: 2 * 1024 ** 2,
+  });
+  const enriched = enrichCandidates([stub, primary])[0]!;
+  expect(enriched.reasons).toContain("workspace-stub");
+  expect(discoveryCandidateFieldChars(stub)).toBe(candidateFieldChars(enriched));
+  expect(discoveryCandidateFieldChars(enriched)).toBe(candidateFieldChars(enriched));
+  const unicode = { ...stub, name: "🦊", reasons: ["日本語"] };
+  expect(candidateFieldChars(unicode)).toBe(unicode.id.length + 2 + unicode.kind.length + 3);
 });

@@ -7,8 +7,16 @@ Commit: f5c2270 (source checkpoint; broader release blockers remain)
 # Round-two audit execution
 
 The user's static report is a set of leads. Current code, reproductions and
-qualification results decide the status below. Work is inline; the five dirty
-paths in `.worktrees/traversal-engine` remain unchanged. No release is authorized.
+qualification results decide the status below. Work is inline. The five dirty
+paths in `.worktrees/traversal-engine` were preserved through this checkpoint;
+the later [worktree retirement](../traversal-worktree-retirement.md) archived
+them, restored the missing progressive marker and removed only the reviewed
+worktree with user authorization. No release is authorized.
+
+Latest continuation: [round-three follow-ups](../audit-round3-2026-10-07.md)
+records compact apply UI, percentages/stop controls, bounded ENOTEMPTY retries,
+candidate accounting, prerelease/pack/completion fixes and current validation
+limits. Earlier checkpoint greens below do not certify this uncommitted pass.
 
 ## Implemented in this working tree
 
@@ -48,7 +56,9 @@ paths in `.worktrees/traversal-engine` remain unchanged. No release is authorize
    remain separate and must be bounded with identity checks.
 3. **Scale and UI:** reconcile discovery/stream/apply candidate charges and
    directory admission timing. Introduce actual committed-frame backpressure,
-   incremental indexes and sidebar windowing. Measure live 25k–100k UI workloads,
+   incremental indexes. [Sidebar windowing](../traversal-worktree-retirement.md)
+   is implemented; a 50k-folder synthetic run still samples 581 MiB RSS.
+   Measure live 25k–100k UI workloads,
    million-entry deletion, cold storage/NFS, cancellation and observed RSS. Byte
    policy removal does not qualify allocated 200–600 GiB production use.
 4. **Engine lifecycle:** add bounded operation/worker timeouts, verify availability

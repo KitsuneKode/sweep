@@ -1,7 +1,7 @@
-import type { MouseEvent, ScrollBoxRenderable } from "@opentui/core";
+import type { BoxRenderable, MouseEvent } from "@opentui/core";
 import { bold, fg, t } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SelectableRow, useHoverState } from "./SelectableRow.js";
 import { allocateBarCells, buildInsights, STALE_AFTER_DAYS, type Insights } from "./insights.js";
 import {
@@ -22,6 +22,7 @@ import {
   type ScopeSidebarRow,
 } from "./sidebar.js";
 import { nextScrollTop } from "./scroll.js";
+import { ScrollbarColumn, scrollbarModel } from "./ScrollbarColumn.js";
 import type { SweepUiState } from "./state.js";
 import { riskColor, type ThemeTokens } from "./theme.js";
 import { buildTreeGuides } from "./tree-line.js";
@@ -35,6 +36,7 @@ export interface ScopeSidebarProps {
   onApplyScope: (scopeFilter: string | null) => void;
   /** Wheel input moves the sidebar cursor by this many rows. */
   onCursorDelta?: (delta: number) => void;
+  onSetCursor?: (index: number) => void;
 }
 
 export function ScopeSidebar({
@@ -44,9 +46,10 @@ export function ScopeSidebar({
   paneWidth,
   onApplyScope,
   onCursorDelta,
+  onSetCursor,
 }: ScopeSidebarProps) {
-  const scrollRef = useRef<ScrollBoxRenderable>(null);
-  const { isHovered, onHoverChange } = useHoverState<number>();
+  const listRef = useRef<BoxRenderable>(null);
+  const { isHovered, onHoverChange } = useHoverState<string>();
 
   const rows = useMemo(
     () =>
@@ -68,15 +71,23 @@ export function ScopeSidebar({
     ? state.sidebarIndex
     : scopeFilterToSidebarIndex(state.scopeFilter, rows);
 
-  useEffect(() => {
-    if (!focused) return;
-    const scroll = scrollRef.current;
-    if (!scroll) return;
-    scroll.scrollTop = nextScrollTop(scroll.scrollTop, scroll.viewport.height, cursorIndex);
-  }, [cursorIndex, focused]);
-
   const meterWidth = Math.max(10, paneWidth - 4);
   const { height: screenHeight } = useTerminalDimensions();
+  const [viewportHeight, setViewportHeight] = useState(() => Math.max(1, screenHeight - 10));
+  const scrollTopRef = useRef(0);
+  const appliedTop = Math.min(
+    Math.max(0, nextScrollTop(scrollTopRef.current, viewportHeight, cursorIndex)),
+    Math.max(0, rows.length - viewportHeight),
+  );
+  useEffect(() => {
+    scrollTopRef.current = appliedTop;
+  });
+  const handleSizeChange = useCallback(() => {
+    const height = listRef.current?.height;
+    if (height !== undefined && height > 0) setViewportHeight(height);
+  }, []);
+  const visibleRows = rows.slice(appliedTop, appliedTop + viewportHeight);
+  const scrollbar = scrollbarModel(rows.length, viewportHeight, appliedTop);
   // The insights panel is garnish: it yields to the scope list on short terminals.
   const showInsights = screenHeight >= INSIGHTS_MIN_SCREEN_HEIGHT;
   const insights = useMemo(
@@ -111,37 +122,49 @@ export function ScopeSidebar({
         foundCount={state.candidates.length}
         sizedCount={state.scanSizedCount}
       />
-      <scrollbox
-        ref={scrollRef}
-        // Never focused: cursor keys belong to the app keymap alone. Giving
-        // the scrollbox a second set of scroll keys made arrows move the view
-        // and the cursor in different amounts.
-        focusable={false}
-        flexGrow={1}
-        minHeight={3}
-        width="100%"
-        stickyScroll={false}
-        scrollX={false}
-        contentOptions={{ flexGrow: 0 }}
-      >
-        <box width="100%" flexDirection="column" onMouseScroll={handleWheel}>
-          {rows.map((row, index) => (
-            <ScopeRow
-              key={row.key ?? "__all__"}
-              row={row}
-              guide={guides[index] ?? ""}
-              rowState={scopeRowState(row, state, index, cursorIndex, focused)}
-              isCursor={index === cursorIndex && focused}
-              hovered={isHovered(index)}
-              expanded={row.key !== null && state.expandedScopes.has(row.key)}
-              layout={sidebarColumnLayout(paneWidth, countWidth, bytesWidth, row.depth)}
-              tokens={tokens}
-              onSelect={() => onApplyScope(row.key)}
-              onHoverChange={onHoverChange(index)}
-            />
-          ))}
+      <box flexGrow={1} minHeight={3} width="100%" flexDirection="row" onMouseScroll={handleWheel}>
+        <box
+          ref={listRef}
+          flexGrow={1}
+          minHeight={0}
+          flexDirection="column"
+          overflow="hidden"
+          onSizeChange={handleSizeChange}
+        >
+          {visibleRows.map((row, offset) => {
+            const index = appliedTop + offset;
+            return (
+              <ScopeRow
+                key={row.key ?? "__all__"}
+                row={row}
+                guide={guides[index] ?? ""}
+                rowState={scopeRowState(row, state, index, cursorIndex, focused)}
+                isCursor={index === cursorIndex && focused}
+                hovered={isHovered(row.key ?? "__all__")}
+                expanded={row.key !== null && state.expandedScopes.has(row.key)}
+                layout={sidebarColumnLayout(
+                  paneWidth - (scrollbar ? 1 : 0),
+                  countWidth,
+                  bytesWidth,
+                  row.depth,
+                )}
+                tokens={tokens}
+                onSelect={() => onApplyScope(row.key)}
+                onHoverChange={onHoverChange(row.key ?? "__all__")}
+              />
+            );
+          })}
         </box>
-      </scrollbox>
+        {scrollbar ? (
+          <ScrollbarColumn
+            tokens={tokens}
+            model={scrollbar}
+            height={viewportHeight}
+            rowCount={rows.length}
+            onSeek={onSetCursor}
+          />
+        ) : null}
+      </box>
       {insights && insights.tiers.length > 0 ? (
         <InsightsPanel tokens={tokens} insights={insights} width={meterWidth} />
       ) : null}
@@ -291,9 +314,9 @@ function ReclaimPanel({
         backgroundColor={tokens.bg}
         flexShrink={0}
       >
-        <text content={t`${fg(tokens.warning)("scan incomplete")}`} wrapMode="none" />
+        <text content={t`${fg(tokens.warning)("review incomplete")}`} wrapMode="none" />
         <text
-          content={t`${fg(tokens.textMuted)("sizes are lower bounds - press")} ${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("to rescan")}`}
+          content={t`${fg(tokens.textMuted)("rescan before applying ·")} ${bold(fg(tokens.text)("r"))}`}
           wrapMode="none"
         />
       </box>
@@ -320,7 +343,7 @@ function ReclaimPanel({
     );
   }
 
-  const percentLabel = `${String(percent).padStart(3, " ")}%`;
+  const percentLabel = `${String(percent).padStart(3, " ")}% queued`;
   const barWidth = Math.max(8, width - percentLabel.length - 1);
 
   return (

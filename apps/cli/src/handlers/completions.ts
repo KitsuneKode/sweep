@@ -8,6 +8,7 @@ import { JsonOutput } from "../json-output.js";
 const FILE_VALUE_OPTIONS = new Set([
   "--config",
   "--plan",
+  "--journal",
   "--ignore",
   "--pattern",
   "--disabled-pattern",
@@ -111,14 +112,22 @@ complete -F _sweep sweep
 }
 
 function zshScript(model: CompletionModel): string {
+  const optionSpec = (flag: string) => {
+    const base = `${flag}[sweep option]`;
+    if (FILE_VALUE_OPTIONS.has(flag)) return `${base}:file:_files`;
+    const words = WORD_VALUE_OPTIONS[flag];
+    if (words) return `${base}:value:(${words})`;
+    if (flag === "--depth") return `${base}:number:`;
+    return base;
+  };
   const commandEntries = model.commands
     .map((command) => `    '${command}:sweep ${command}'`)
     .join("\n");
-  const flagEntries = model.globalFlags.map((flag) => `    '${flag}[sweep option]'`).join("\n");
+  const flagEntries = model.globalFlags.map((flag) => `    '${optionSpec(flag)}'`).join("\n");
   const cases = model.commands
     .map((command) => {
       const flags = flagsFor(model, command)
-        .map((flag) => `'${flag}[sweep option]'`)
+        .map((flag) => `'${optionSpec(flag)}'`)
         .join(" ");
       return `    ${command}) _arguments ${flags} '*:path:_files -/' ;;`;
     })
@@ -143,7 +152,7 @@ ${flagEntries}
   fi
   case "$words[2]" in
 ${cases}
-    *) _arguments ${model.rootFlags.map((flag) => `'${flag}[sweep option]'`).join(" ")} '*:path:_files -/' ;;
+    *) _arguments ${model.rootFlags.map((flag) => `'${optionSpec(flag)}'`).join(" ")} '*:path:_files -/' ;;
   esac
 }
 _sweep "$@"

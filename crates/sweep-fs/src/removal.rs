@@ -13,6 +13,7 @@ use std::{
 
 const MAX_OPEN_DIRS: usize = 16;
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
+const MAX_REDRAINS: u8 = 2;
 const RESOLVE: ResolveFlags = ResolveFlags::BENEATH
     .union(ResolveFlags::NO_SYMLINKS)
     .union(ResolveFlags::NO_XDEV);
@@ -24,6 +25,7 @@ struct Frame {
     dir: Option<Dir>,
     name: OsString,
     identity: (u64, u64),
+    redrains: u8,
 }
 
 fn frame_bytes(name: &std::ffi::OsStr) -> usize {
@@ -140,6 +142,18 @@ impl RemovalRoot {
         flag: &AtomicBool,
         step: &mut dyn FnMut(),
     ) -> io::Result<()> {
+        self.remove_with_hooks(path, expected, directory, flag, step, &mut || {})
+    }
+
+    fn remove_with_hooks(
+        &self,
+        path: &Path,
+        expected: (u64, u64),
+        directory: bool,
+        flag: &AtomicBool,
+        step: &mut dyn FnMut(),
+        before_rmdir: &mut dyn FnMut(),
+    ) -> io::Result<()> {
         cancelled(flag)?;
         if path.as_os_str().is_empty()
             || path
@@ -176,6 +190,7 @@ impl RemovalRoot {
             dir: Some(Dir::new(open_relative(&leaf, ".", true)?)?),
             name: name.to_owned(),
             identity: expected,
+            redrains: 0,
         }];
         while !frames.is_empty() {
             step();
@@ -209,6 +224,7 @@ impl RemovalRoot {
                             dir: Some(Dir::new(directory)?),
                             name,
                             identity: identity(&stat),
+                            redrains: 0,
                         });
                         retained_bytes = next_bytes;
                     } else {
@@ -217,8 +233,10 @@ impl RemovalRoot {
                     }
                 }
                 None => {
-                    let completed = frames.pop().ok_or_else(changed)?;
-                    retained_bytes -= frame_bytes(&completed.name);
+                    let mut completed = frames.pop().ok_or_else(changed)?;
+                    // EOF iterators no longer need an FD. Close before restoring
+                    // an evicted parent or opening a retry iterator.
+                    completed.dir = None;
                     if !frames.is_empty() {
                         let index = frames.len() - 1;
                         restore_frame(&leaf, &mut frames, index, flag)?;
@@ -235,8 +253,29 @@ impl RemovalRoot {
                     {
                         return Err(changed());
                     }
+                    before_rmdir();
                     cancelled(flag)?;
-                    rfs::unlinkat(fd, &completed.name, AtFlags::REMOVEDIR)?;
+                    match rfs::unlinkat(fd, &completed.name, AtFlags::REMOVEDIR) {
+                        Ok(()) => retained_bytes -= frame_bytes(&completed.name),
+                        Err(err)
+                            if err == rustix::io::Errno::NOTEMPTY
+                                && completed.redrains < MAX_REDRAINS =>
+                        {
+                            // A writer can add entries after iterator EOF. Retry
+                            // this exact directory only, through its pinned
+                            // parent with all mount/symlink restrictions intact.
+                            cancelled(flag)?;
+                            let reopened = open_relative(fd, &completed.name, true)?;
+                            if identity(&rfs::fstat(&reopened)?) != completed.identity {
+                                return Err(changed());
+                            }
+                            evict_oldest(&mut frames);
+                            completed.dir = Some(Dir::new(reopened)?);
+                            completed.redrains += 1;
+                            frames.push(completed);
+                        }
+                        Err(err) => return Err(err.into()),
+                    }
                 }
             }
         }
@@ -255,6 +294,116 @@ mod tests {
     fn id(path: &Path) -> (u64, u64) {
         let meta = fs::symlink_metadata(path).unwrap_or_else(|e| panic!("metadata: {e}"));
         (meta.dev(), meta.ino())
+    }
+    #[test]
+    fn one_late_writer_is_redrained_without_touching_an_unselected_sentinel() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let artifact = root.path().join("target");
+        fs::create_dir(&artifact)?;
+        fs::write(root.path().join("keep"), "keep")?;
+        let anchor = RemovalRoot::open(root.path(), id(root.path()))?;
+        let mut writes = 0;
+        anchor.remove_with_hooks(
+            Path::new("target"),
+            id(&artifact),
+            true,
+            &AtomicBool::new(false),
+            &mut || {},
+            &mut || {
+                if writes == 0 {
+                    fs::write(artifact.join("late"), "late")
+                        .unwrap_or_else(|e| panic!("late write: {e}"));
+                    writes += 1;
+                }
+            },
+        )?;
+        assert_eq!(writes, 1);
+        assert!(!artifact.exists());
+        assert_eq!(fs::read_to_string(root.path().join("keep"))?, "keep");
+        Ok(())
+    }
+
+    #[test]
+    fn cancellation_during_redrain_preserves_late_contents() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let artifact = root.path().join("target");
+        fs::create_dir(&artifact)?;
+        let anchor = RemovalRoot::open(root.path(), id(root.path()))?;
+        let cancel = AtomicBool::new(false);
+        let draining_again = std::cell::Cell::new(false);
+        let result = anchor.remove_with_hooks(
+            Path::new("target"),
+            id(&artifact),
+            true,
+            &cancel,
+            &mut || {
+                if draining_again.get() {
+                    cancel.store(true, Ordering::Release);
+                }
+            },
+            &mut || {
+                fs::write(artifact.join("late"), "keep")
+                    .unwrap_or_else(|e| panic!("late write: {e}"));
+                draining_again.set(true);
+            },
+        );
+        assert!(result.is_err_and(|err| err.kind() == io::ErrorKind::Interrupted));
+        assert_eq!(fs::read_to_string(artifact.join("late"))?, "keep");
+        Ok(())
+    }
+
+    #[test]
+    fn repeated_writers_stop_after_two_redrains() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let artifact = root.path().join("target");
+        fs::create_dir(&artifact)?;
+        let anchor = RemovalRoot::open(root.path(), id(root.path()))?;
+        let mut attempts = 0;
+        let result = anchor.remove_with_hooks(
+            Path::new("target"),
+            id(&artifact),
+            true,
+            &AtomicBool::new(false),
+            &mut || {},
+            &mut || {
+                attempts += 1;
+                fs::write(artifact.join("late"), "late")
+                    .unwrap_or_else(|e| panic!("late write: {e}"));
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(attempts, 3);
+        assert!(artifact.join("late").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn replacement_during_redrain_keeps_its_new_contents() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let artifact = root.path().join("target");
+        fs::create_dir(&artifact)?;
+        let anchor = RemovalRoot::open(root.path(), id(root.path()))?;
+        let mut replaced = false;
+        let result = anchor.remove_with_hooks(
+            Path::new("target"),
+            id(&artifact),
+            true,
+            &AtomicBool::new(false),
+            &mut || {},
+            &mut || {
+                if !replaced {
+                    fs::rename(&artifact, root.path().join("original"))
+                        .unwrap_or_else(|e| panic!("rename: {e}"));
+                    fs::create_dir(&artifact).unwrap_or_else(|e| panic!("replacement: {e}"));
+                    fs::write(artifact.join("keep"), "keep")
+                        .unwrap_or_else(|e| panic!("write: {e}"));
+                    replaced = true;
+                }
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(artifact.join("keep"))?, "keep");
+        Ok(())
     }
     #[test]
     fn removal_unlinks_interior_links_and_preserves_external_contents() {

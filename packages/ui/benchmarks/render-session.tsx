@@ -16,6 +16,7 @@ function countFlag(name: string, fallback: number, maximum: number): number {
   return n;
 }
 const count = countFlag("--candidates", 5000, 100000);
+const scopes = countFlag("--scopes", Math.min(100, count), count);
 const cycles = countFlag("--cycles", 5, 100);
 const samples = countFlag("--samples", 100, 1000);
 const rows: Array<{
@@ -28,7 +29,7 @@ const rows: Array<{
 for (let cycle = 0; cycle < cycles; cycle++) {
   const candidates: ScanCandidate[] = Array.from({ length: count }, (_, i) => ({
     id: `candidate_${i}`,
-    path: `/tmp/sweep-ui-synthetic/project-${i % 100}/node_modules-${i}`,
+    path: `/tmp/sweep-ui-synthetic/project-${i % scopes}/node_modules-${i}`,
     name: `node_modules-${i}`,
     kind: "node_modules",
     entryType: "directory",
@@ -50,7 +51,7 @@ for (let cycle = 0; cycle < cycles; cycle++) {
       candidateCount: count,
       selectedCount: 0,
       estimatedTotalBytes: (count * (count - 1)) / 2,
-      scannedDirs: 101,
+      scannedDirs: scopes + 1,
       exact: false,
       riskCounts: { safe: count, caution: 0, dangerous: 0, blocked: 0 },
     },
@@ -104,6 +105,7 @@ console.log(
   JSON.stringify(
     {
       candidates: count,
+      scopes,
       cycles,
       samplesPerCycle: samples,
       forcedGc: false,

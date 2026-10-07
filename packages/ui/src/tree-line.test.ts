@@ -16,6 +16,53 @@ function row(key: string, depth: number): ScopeSidebarRow {
 }
 
 describe("buildTreeGuides", () => {
+  test("a wide nested folder does not repeatedly search its remaining siblings", () => {
+    const input = [row("a", 0), row("a/x", 1)];
+    for (let i = 0; i < 512; i++) input.push(row(`a/x/${i}`, 2));
+    let reads = 0;
+    const rows = new Proxy(input, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const guides = buildTreeGuides(rows);
+    expect(guides[2]).toBe("  ├─");
+    expect(guides.at(-1)).toBe("  └─");
+    expect(reads).toBeLessThan(input.length * 8);
+  });
+
+  test("guides match sibling boundaries through uneven subtree depths", () => {
+    // Deterministic shapes exercise depth increases, decreases and separate
+    // roots. The simple forward oracle specifies visible tree continuity.
+    let seed = 17;
+    for (let shape = 0; shape < 100; shape++) {
+      const rows = [row("root", 0)];
+      let depth = 0;
+      for (let i = 0; i < 40; i++) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        depth = seed % Math.min(8, depth + 2);
+        rows.push(row(String(i), depth));
+      }
+      const oracle = rows.map((entry, index) => {
+        let guide = "";
+        for (let d = 1; d <= entry.depth; d++) {
+          let hasSibling = false;
+          for (let next = index + 1; next < rows.length; next++) {
+            if (rows[next]!.depth < d) break;
+            if (rows[next]!.depth === d) {
+              hasSibling = true;
+              break;
+            }
+          }
+          guide += d === entry.depth ? (hasSibling ? "├─" : "└─") : hasSibling ? "│ " : "  ";
+        }
+        return guide;
+      });
+      expect(buildTreeGuides(rows)).toEqual(oracle);
+    }
+  });
+
   test("top-level rows carry no guide", () => {
     expect(buildTreeGuides([row("a", 0), row("b", 0)])).toEqual(["", ""]);
   });

@@ -424,6 +424,12 @@ describe("handleKeymap", () => {
     const actionsCtrlU = makeActions();
     handleKeymap(ctxCtrlU, actionsCtrlU);
     expect(actionsCtrlU.mutate).toHaveBeenCalled();
+    const pageUp = (actionsCtrlU.mutate as ReturnType<typeof mock>).mock.calls[0]![0] as (
+      s: SweepUiState,
+    ) => SweepUiState;
+    const afterPageUp = pageUp(ctxCtrlU.state);
+    expect(afterPageUp.selectedIds).toEqual(ctxCtrlU.state.selectedIds);
+    expect(afterPageUp.queueCleared).toBe(false);
 
     const ctxCtrlD = makeContext({
       key: { name: "d", ctrl: true },
@@ -432,6 +438,21 @@ describe("handleKeymap", () => {
     const actionsCtrlD = makeActions();
     handleKeymap(ctxCtrlD, actionsCtrlD);
     expect(actionsCtrlD.mutate).toHaveBeenCalled();
+  });
+
+  test("sidebar page-up variants move the cursor without clearing the queue", () => {
+    for (const key of [{ name: "u", ctrl: true }, { name: "ctrl+u" }, { name: "pageup" }]) {
+      const state = { ...createUiState(mockPlan()), focus: "sidebar" as const, sidebarIndex: 1 };
+      let next: SweepUiState | undefined;
+      const actions = makeActions();
+      actions.mutate = (fn) => {
+        next = fn(state);
+      };
+      handleKeymap(makeContext({ key, state }), actions);
+      expect(next?.sidebarIndex).toBe(0);
+      expect(next?.selectedIds).toEqual(state.selectedIds);
+      expect(next?.queueCleared).toBe(false);
+    }
   });
 });
 
@@ -514,17 +535,19 @@ describe("single-row apply (x/d)", () => {
     expect(actions.confirmSingle).not.toHaveBeenCalled();
   });
 
-  test("an in-flight apply traps every key except ctrl-c", () => {
+  test("an in-flight apply traps mutations; escape requests cancellation", () => {
     const actions = makeActions();
     actions.abortApply = mock(() => {});
     actions.requestSingleApply = mock(() => {});
-    for (const name of ["j", "x", "space", "return", "escape", "r"]) {
+    for (const name of ["j", "x", "space", "return", "r"]) {
       handleKeymap(makeContext({ key: { name }, applying: true }), actions);
     }
     expect(actions.mutate).not.toHaveBeenCalled();
     expect(actions.requestSingleApply).not.toHaveBeenCalled();
     expect(actions.finalize).not.toHaveBeenCalled();
     expect(actions.abortApply).not.toHaveBeenCalled();
+    handleKeymap(makeContext({ key: { name: "escape" }, applying: true }), actions);
+    expect(actions.abortApply).toHaveBeenCalledTimes(1);
   });
 
   test("ctrl-c during apply aborts the apply, not the session", () => {

@@ -9,12 +9,16 @@ import type { ScopeSidebarRow } from "./scope-tree.js";
  * at once rather than per row.
  */
 export function buildTreeGuides(rows: readonly ScopeSidebarRow[]): string[] {
-  const guides: string[] = [];
-
-  for (let i = 0; i < rows.length; i++) {
+  const guides: string[] = new Array(rows.length);
+  // Walking backwards keeps the next sibling at each ancestor depth. A
+  // shallower row ends all deeper sibling groups. Work is proportional to
+  // the guides we produce, rather than repeatedly scanning whole subtrees.
+  const nextSibling: boolean[] = [];
+  for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i];
     if (!row || row.depth === 0) {
-      guides.push("");
+      guides[i] = "";
+      nextSibling.length = 0;
       continue;
     }
 
@@ -24,31 +28,15 @@ export function buildTreeGuides(rows: readonly ScopeSidebarRow[]): string[] {
     // nothing else at this depth follows.
     const trunk: string[] = [];
     for (let d = 1; d < row.depth; d++) {
-      trunk.push(hasLaterSiblingAt(rows, i, d) ? "│ " : "  ");
+      trunk.push(nextSibling[d] ? "│ " : "  ");
     }
-    trunk.push(hasLaterSiblingAt(rows, i, row.depth) ? "├─" : "└─");
-    guides.push(trunk.join(""));
+    trunk.push(nextSibling[row.depth] ? "├─" : "└─");
+    guides[i] = trunk.join("");
+    nextSibling.length = row.depth + 1;
+    nextSibling[row.depth] = true;
   }
 
   return guides;
-}
-
-/**
- * True when some row after `index` sits at exactly `depth` without the tree
- * first popping back above it - i.e. the guide at `depth` keeps going.
- */
-function hasLaterSiblingAt(
-  rows: readonly ScopeSidebarRow[],
-  index: number,
-  depth: number,
-): boolean {
-  for (let i = index + 1; i < rows.length; i++) {
-    const candidate = rows[i];
-    if (!candidate) break;
-    if (candidate.depth < depth) return false;
-    if (candidate.depth === depth) return true;
-  }
-  return false;
 }
 
 /**

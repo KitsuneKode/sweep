@@ -72,6 +72,21 @@ describe("Rust scan stream contract", () => {
     ).toThrow("Invalid scan event");
   });
 
+  test("sizing updates cannot replace retained classification metadata", () => {
+    for (const patch of [
+      { reasons: [...candidate.reasons, "new-reason"] },
+      { kind: "custom" as const },
+      { selectedByDefault: false },
+    ]) {
+      const stream = new RustScanStream(target);
+      send(stream, start);
+      send(stream, found);
+      expect(() =>
+        send(stream, { ...updated, candidate: { ...updated.candidate, ...patch } }),
+      ).toThrow("update does not match discovery");
+    }
+  });
+
   test("reveals discovery and size updates progressively and completes consistently", () => {
     const bytes: number[] = [];
     const stream = new RustScanStream(target, {

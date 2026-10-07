@@ -119,18 +119,38 @@ Two corollaries that keep the list stable at boundaries:
   inconvenience - this is a hard invariant.
 - Every artifact group emits a header; an orphan row must never read as part
   of the group above it.
-- The artifact list is windowed - only visible rows mount, so render cost is
-  O(viewport), not O(artifacts). While a scan streams, rows hold discovery
+- The artifact list and scope sidebar are windowed - only visible rows mount,
+  so row rendering costs O(viewport). Folder aggregation and filtering still
+  process the retained candidates. Both scrollbars seek the actual cursor;
+  resizing keeps the cursor in view. While a scan streams, rows hold discovery
   order; the list re-sorts once on completion so nothing moves mid-cursor.
 - Narrow widths degrade by shedding detail (brand → `◆`, stats → queued only,
   footer → minimal hints), never by clipping mid-word.
+
+An incomplete review requires a rescan before applying. Its sizes can be partial
+estimates or stale after an apply without authoritative outcomes; do not label
+all such totals as lower bounds. A typed refusal before deletion preserves the
+queue and review generation.
 
 ## Queue clearing and folder movement
 
 `u` clears the entire queue from the artifact or scope pane, including hidden
 items, and prevents streaming discoveries from restoring defaults in that scan.
 `U` unqueues only currently visible items. Text inputs and pattern editing retain
-their own keys. Right expands a scope and then enters its first visible child;
+their own keys. Ctrl+U and Ctrl+D page in either pane without altering the queue.
+Right expands a scope and then enters its first visible child;
 Left collapses or moves to the visible parent. Streaming sizes preserve folder
 identity under the cursor. Rescan and session teardown release retained display,
 summary, scope topology and path caches.
+
+## Apply feedback
+
+Confirmation is compact, shows the exact reviewed selection and keeps long
+paths scrollable. A missing byte ceiling is neutral policy information.
+Confirm/cancel and stop controls stay outside the scrollable details; PageUp
+and PageDown scroll long modal contents without changing the selection.
+Preparation and removal show separate progress. Removal percentages count
+completed artifact operations, not files or bytes inside a directory; final
+success requires the authoritative report. Esc, Ctrl+C and the visible stop
+control request cancellation, keep the session open and wait for the report.
+Cancellation does not restore contents already removed.

@@ -83,15 +83,7 @@ pub fn apply_plan_controlled_with_progress(
     for candidate in &plan.candidates {
         if !budget.candidate(
             candidate.entry.path.len(),
-            candidate.id.len()
-                + candidate.entry.name.len()
-                + candidate.kind.len()
-                + candidate
-                    .entry
-                    .identity
-                    .as_ref()
-                    .map_or(0, |id| id.platform.len() + id.device.len() + id.inode.len())
-                + candidate.reasons.iter().map(|r| r.len()).sum::<usize>(),
+            crate::candidate_field_chars(candidate),
         ) {
             break;
         }

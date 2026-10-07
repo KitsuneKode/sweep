@@ -13,6 +13,14 @@
 
 ## Next
 
+- [ ] Complete [final audit follow-ups](audit-round3-2026-10-07.md): apply feedback,
+      bounded concurrent-writer retry, candidate accounting and release guards
+      are implemented and local gates pass; exact-current hosted qualification remains.
+
+- [x] Complete [traversal worktree retirement and folder UX](traversal-worktree-retirement.md):
+      preserve branch/dirt, restore the progressive partial marker, window the
+      sidebar and verify main before retiring the old worktree.
+
 - [ ] Finish the [round-two safety/output audit](audit-round2-2026-10-07/README.md),
       platform mount work, deeper filesystem qualification and scale/UI evidence.
       Checkpoints bfdcd96/f5c2270 passed all nine local steps and the hosted matrix;

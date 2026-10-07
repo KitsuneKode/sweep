@@ -3,6 +3,7 @@ import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { buildRescanConfig, DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import {
   allPatterns,
+  activePatterns,
   applyUiSelection,
   planForCandidateIds,
   mergeApplyReport,
@@ -185,6 +186,15 @@ function createMultiScopePlan(): ScanPlan {
 }
 
 describe("sweep ui state", () => {
+  test("active pattern counts match what the next scan actually enables", () => {
+    const state = createUiState(createPlan(), {
+      extraPatterns: ["vendor", "my-output"],
+      disabledPatterns: ["node_modules"],
+    });
+    expect(activePatterns(state)).toEqual(
+      allPatterns(state).filter((pattern) => isPatternEnabled(state, pattern)),
+    );
+  });
   test("filter narrows visible candidates by structured fields", () => {
     const state = setFilter(createUiState(createPlan()), "custom");
 

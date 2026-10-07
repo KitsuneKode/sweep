@@ -42,4 +42,12 @@ describe("generated completions", () => {
   test("unknown shells render nothing", () => {
     expect(renderCompletions("powershell", program)).toBeUndefined();
   });
+
+  test("zsh completes option values instead of treating them as directories", () => {
+    const script = renderCompletions("zsh", program)!;
+    expect(script).toContain("--plan[sweep option]:file:_files");
+    expect(script).toContain("--journal[sweep option]:file:_files");
+    expect(script).toContain("--engine[sweep option]:value:(auto js rust)");
+    expect(script).toContain("--depth[sweep option]:number:");
+  });
 });

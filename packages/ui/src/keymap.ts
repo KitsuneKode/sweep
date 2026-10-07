@@ -225,7 +225,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
 
   // While an in-session apply runs, every other key waits: the list the keys
   // would act on is being mutated by the engine.
-  if (ctx.applying) return;
+  if (ctx.applying) {
+    if (key.name === "escape") actions.abortApply?.();
+    return;
+  }
 
   const isShiftTab = (key.name === "tab" && key.shift) || key.name === "shift+tab";
   const isTab = key.name === "tab" && !key.shift;
@@ -448,6 +451,8 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
 
   if (
     (state.focus === "list" || state.focus === "sidebar") &&
+    !key.ctrl &&
+    !key.meta &&
     (key.name === "u" || key.name === "U")
   ) {
     const visibleOnly = key.name === "U" || key.shift === true;
@@ -463,6 +468,18 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (state.focus === "sidebar") {
+    if (isCtrlU || isCtrlD) {
+      actions.mutate((s) => moveSidebarCursor(s, (isCtrlU ? -1 : 1) * pageRows(ctx)));
+      return;
+    }
+    if (isShiftG || key.name === "end") {
+      actions.mutate((s) => moveSidebarCursor(s, Number.MAX_SAFE_INTEGER));
+      return;
+    }
+    if (key.name === "g" || key.name === "home") {
+      actions.mutate((s) => moveSidebarCursor(s, -Number.MAX_SAFE_INTEGER));
+      return;
+    }
     if (key.name === "up" || key.name === "k") {
       actions.mutate((s) => moveSidebarCursor(s, -1));
       return;

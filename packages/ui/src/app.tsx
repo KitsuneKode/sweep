@@ -24,6 +24,7 @@ import {
   useState,
 } from "react";
 import { ReviewPane } from "./ReviewPane.js";
+import { ApplyOverlay } from "./ApplyOverlay.js";
 import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
@@ -71,7 +72,7 @@ import {
 } from "./state.js";
 import { getVisibleCandidates } from "./state/selectors.js";
 import { resolveTheme, type ThemeTokens } from "./theme.js";
-import { ModeChip, ScanModeChip, DotStrip, Modal } from "./widgets.js";
+import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
 import type { UiScanControl } from "./streaming.js";
 
 export { runSweepUiStreaming } from "./streaming.js";
@@ -366,22 +367,39 @@ function ConfirmOverlay({
       title={dangerous ? " ⚠ apply " : " apply "}
       titleColor={accent}
       width={56}
+      height={selectedCount === 1 && !dangerous ? 18 : 22}
+      footer={
+        <>
+          {dryRun ? null : (
+            <text
+              content={t`${bold(fg(tokens.text)("t"))} ${fg(tokens.textMuted)(trash ? "delete permanently instead" : "move to trash instead (reversible)")}`}
+            />
+          )}
+          <text
+            content={t`${bold(fg(tokens.text)("y"))} ${fg(tokens.textMuted)("confirm")}    ${bold(fg(tokens.text)("n"))}${fg(tokens.textMuted)(" / esc cancel")}`}
+          />
+        </>
+      }
     >
       <text
         content={t`${bold(fg(accent)(`${action} ${selectedCount} item${selectedCount === 1 ? "" : "s"}`))}`}
       />
       <text
-        content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "lower bound; actual bytes may differ" : "estimated size")}`}
+        content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "partial estimate; actual bytes may differ" : "estimated size")}`}
       />
       <text content="" />
       {applyPolicy ? (
         <text
-          fg={tokens.warning}
+          fg={
+            applyPolicy.forceLarge || applyPolicy.maxSizeGB !== null
+              ? tokens.warning
+              : tokens.textMuted
+          }
           content={
             applyPolicy.forceLarge
               ? "Size ceiling bypass enabled (--force-large)."
               : applyPolicy.maxSizeGB === null
-                ? "No byte ceiling; only the reviewed selection will be removed."
+                ? "No byte ceiling"
                 : `Size ceiling: ${applyPolicy.maxSizeGB} GiB; checked again before removal.`
           }
         />
@@ -402,7 +420,7 @@ function ConfirmOverlay({
         <text
           key={path}
           content={t`${fg(tokens.textDim)("·")} ${fg(tokens.textSecondary)(path)}`}
-          wrapMode="none"
+          wrapMode="word"
         />
       ))}
       {hidden > 0 ? (
@@ -424,15 +442,6 @@ function ConfirmOverlay({
       ) : (
         <text content={t`${fg(tokens.textDim)("No dangerous items in this selection.")}`} />
       )}
-      <text content="" />
-      {dryRun ? null : (
-        <text
-          content={t`${bold(fg(tokens.text)("t"))} ${fg(tokens.textMuted)(trash ? "delete permanently instead" : "move to trash instead (reversible)")}`}
-        />
-      )}
-      <text
-        content={t`${bold(fg(tokens.text)("y"))} ${fg(tokens.textMuted)("confirm")}    ${bold(fg(tokens.text)("n"))}${fg(tokens.textMuted)(" / esc cancel")}`}
-      />
     </Modal>
   );
 }
@@ -1495,50 +1504,14 @@ export function SweepApp({
         </Modal>
       ) : null}
       {applying !== null ? (
-        <Modal tokens={tokens} title=" applying " titleColor={tokens.info} width={68}>
-          <DotStrip tokens={tokens} width={12} />
-          <text
-            content={`${applyProgress?.stage === "stopping" ? "Stopping" : applyProgress?.stage === "preparing" ? "Preparing" : "Removing"} ${applying}`}
-            fg={tokens.text}
-            wrapMode="none"
-          />
-          {applyProgress?.stage === "preparing" && applyProgress.preparingCount !== undefined ? (
-            <text
-              content={`${applyProgress.preparationPhase === "validating" ? "Validating paths" : "Checking current size"}: ${applyProgress.preparedCount ?? 0} / ${applyProgress.preparingCount}`}
-              fg={tokens.textMuted}
-            />
-          ) : null}
-          <text
-            content={`${applyProgress?.deletedCount ?? 0} / ${applyProgress?.selectedCount ?? 0} removals completed · ${((applyProgress?.elapsedMs ?? 0) / 1000).toFixed(1)}s`}
-            fg={tokens.text}
-          />
-          <text
-            content={`~${formatBytes(applyProgress?.estimatedBytesFreed ?? 0)} estimated bytes ${trashMode ? "moved" : "removed"}`}
-            fg={tokens.textMuted}
-          />
-          {applyProgress?.activePath ? (
-            <text
-              content={sanitizeTerminalText(
-                relativePath(state.targetDir, applyProgress.activePath),
-              )}
-              fg={tokens.textMuted}
-              wrapMode="none"
-            />
-          ) : null}
-          <text content="" />
-          <text
-            content={
-              applyProgress?.stage === "stopping"
-                ? "Stopping new removals; waiting for in-flight work."
-                : "ctrl-c stops new removals; in-flight work may finish."
-            }
-            fg={tokens.textMuted}
-          />
-          <text
-            content="Completed deletions are not undone. The report stays here."
-            fg={tokens.textMuted}
-          />
-        </Modal>
+        <ApplyOverlay
+          tokens={tokens}
+          name={applying}
+          progress={applyProgress}
+          targetDir={state.targetDir}
+          trash={trashMode}
+          onCancel={abortApply}
+        />
       ) : null}
     </box>
   );

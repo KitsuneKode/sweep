@@ -1,0 +1,38 @@
+{
+  "branch": "traversal-engine",
+  "branchHead": "3e458e8e7b2ecf8b93114cd6b775bfe4d2bf97f5",
+  "reviewedMain": "9f0d450e9fb8c3596ab1b724678441cc8a244467",
+  "gitBundleVerification": "complete history, verified",
+  "archiveFollowsSymlinks": false,
+  "dirtyPaths": [
+    " M bun.lock",
+    " M package.json",
+    " D tests/fixtures/monorepo/apps/docs/.next/.gitkeep",
+    " D tests/fixtures/workspace-matrix/apps/docs/.next/.gitkeep",
+    " M turbo.json"
+  ],
+  "artifacts": {
+    "history.bundle": {
+      "bytes": 2216594,
+      "sha256": "b081d4837f585f95a5e647baed972ba0c6b81b8069f02a59b5bcc0a485b96b86"
+    },
+    "uncommitted.patch": {
+      "bytes": 5324,
+      "sha256": "1a8d3ed69b7d10343facea6c0573e6b8b88c4ec461f69508896b9516baae8ffd"
+    },
+    "working-tree.tar.gz": {
+      "bytes": 1378276,
+      "sha256": "e851ab2fa721dc9cb98115a088ed296115b1acffe125c76d62ed91e57494b83b"
+    }
+  },
+  "retirement": {
+    "worktreeRemoved": true,
+    "branchRetained": true,
+    "freshDirtyPatchMatchedArchive": true,
+    "archiveRegularFilesAndSymlinksComparedToWorktree": true,
+    "readableProcCwdCheck": "No worktree cwd observed",
+    "requiredCheck": "48 of 48 tasks passed before removal",
+    "reactDoctorChanged": "0 introduced findings reported, score 62; not a full health qualification",
+    "recoveryDirectory": ".scratch/worktree-retirement/traversal-engine-2026-10-07/"
+  }
+}

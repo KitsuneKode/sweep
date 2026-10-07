@@ -18,6 +18,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePlatformById, NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
+import { defaultBinaryPath } from "./binary-path.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const NATIVE_PACKAGES = join(REPO_ROOT, "native-packages");
@@ -64,28 +65,6 @@ function rootVersion(): string {
   return pkg.version;
 }
 
-function defaultBinaryPath(platform: ReturnType<typeof nativePlatformById>): string {
-  if (!platform) {
-    throw new Error("unknown platform");
-  }
-  const ext = platform.os === "win32" ? ".exe" : "";
-  const release = join(REPO_ROOT, "target", "release", `sweep-engine${ext}`);
-  if (existsSync(release)) {
-    return release;
-  }
-  const cross = join(REPO_ROOT, "target", platform.cargoTarget, "release", `sweep-engine${ext}`);
-  if (existsSync(cross)) {
-    return cross;
-  }
-  const debug = join(REPO_ROOT, "target", "debug", `sweep-engine${ext}`);
-  if (existsSync(debug)) {
-    return debug;
-  }
-  throw new Error(
-    `no binary found for ${platform.id}; run cargo build --release -p sweep-engine-cli or pass --binary`,
-  );
-}
-
 const {
   platform: platformId,
   binary: binaryArg,
@@ -106,7 +85,7 @@ if (!/^\d+\.\d+\.\d+/.test(version)) {
   console.error(`error: invalid semver for native package: ${version}`);
   process.exit(1);
 }
-const sourceBinary = resolve(binaryArg ?? defaultBinaryPath(platform));
+const sourceBinary = resolve(binaryArg ?? defaultBinaryPath(REPO_ROOT, platform));
 if (!existsSync(sourceBinary)) {
   console.error(`error: binary not found: ${sourceBinary}`);
   process.exit(1);

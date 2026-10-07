@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "bun test scripts",
     "transit": "exit 0",
     "pack": "bun run ./scripts/pack.ts",
     "verify-binary": "bun run ./scripts/verify-binary.ts",

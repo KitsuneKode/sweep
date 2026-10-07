@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORM_NPM_NAMES } from "@kitsunekode/sweep-core/native-platforms";
+import { releasePolicy } from "./release-policy.js";
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(CLI_ROOT, "../..");
@@ -149,9 +150,9 @@ check("package name is @kitsunekode/sweep", () => {
   assert(name === "@kitsunekode/sweep", `got: "${name}"`);
 });
 
-check("version is valid semver (x.y.z)", () => {
+check("version is valid release semver (including prereleases)", () => {
   const { version } = pkg() as { version: string };
-  assert(/^\d+\.\d+\.\d+$/.test(version), `invalid: "${version}"`);
+  releasePolicy(version);
 });
 
 check("publishConfig.access is 'public' (required for scoped packages)", () => {

@@ -5,11 +5,14 @@
   sparse timers and failure accounting are implemented on main. Phase 5 is not
   needed for the demonstrated traversal gate. Hosted OS/runtime and security
   qualification remain; see [remediation](codebase-audit-2026-10-01/remediation.md).
-  The separate worktree at `3e458e8` was reviewed and was not merged.
+  The separate worktree at `3e458e8` was semantically reviewed rather than merged.
+  It was [archived and retired](traversal-worktree-retirement.md) on 2026-10-07
+  after restoring the missing progressive partial-size marker. Branch history
+  and the complete dirty worktree are preserved locally.
 - **Scope:** `engine`, `performance`, `protocol`
 - **Created:** 2026-10-01
-- **Updated:** 2026-10-02
-- **Commit:** `uncommitted`
+- **Updated:** 2026-10-07
+- **Commit:** `f5c2270` (implemented source checkpoint; retirement follows)
 
 Execution plan for both engines. Background research lives in
 [.reference/filesystem-traversal.md](../.reference/filesystem-traversal.md).
@@ -20,8 +23,9 @@ file wins. Audit findings A01, A02, A03, A05, A08, and A09 are absorbed here.
 UI selection cost (A04) and history (A10) stay in
 [the audit](codebase-audit-2026-10-01/audit.md).
 
-One phase at a time in this worktree. Scanner, protocol, and `sweep-fs`
-overlap. Do not commit or publish without a separate instruction.
+Scanner, protocol, and `sweep-fs` overlap; execute changes sequentially.
+The user authorized commits/pushes and worktree retirement. Publication still
+requires a separate instruction.
 
 ## Original problems
 
@@ -302,7 +306,8 @@ The old exclusion on switching JS away from `du` is superseded for resource
 safety by [resource bounds and release qualification](resource-bounds-and-release.md).
 External sizing cannot enforce the shared inode budget. Current apparent scans
 use metadata batching; the new benchmark records the tradeoff. Phase 4 controlled
-apply and Phase 0 fat/wide evidence already exist locally; neither source nor
-evidence is committed. Phase 5 syscall sizing remains deferred because the
+apply and Phase 0 fat/wide evidence were initially local. Source and the
+[fat/wide evidence](../.docs/benchmarks/fat-wide-2026-10-07.json) are now committed;
+see [.docs/testing.md](../.docs/testing.md). Phase 5 syscall sizing remains deferred because the
 performance gate passed. Deletion race/mount qualification is a separate safety
 question, not a reason to add speculative sizing FFI.

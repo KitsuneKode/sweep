@@ -1,0 +1,118 @@
+{
+  "checkedAt": "2026-10-07",
+  "base": "9f0d450e9fb8c3596ab1b724678441cc8a244467",
+  "source": "uncommitted round-three changes",
+  "requiredCheck": {
+    "successfulTasks": 49,
+    "nativeRequired": true,
+    "documentationLinks": "passed",
+    "postReviewSuccessfulTasks": 49
+  },
+  "requiredRustCheck": {
+    "successfulTasks": 8,
+    "nativeTests": 118
+  },
+  "uiTests": {
+    "pass": 318,
+    "fail": 0
+  },
+  "targetedContracts": {
+    "pass": 46,
+    "fail": 0
+  },
+  "staticChecks": {
+    "successfulTasks": 33
+  },
+  "applyOutputAndInterruption": [
+    {
+      "engine": "js",
+      "scenario": "lost-receipt",
+      "candidates": 40,
+      "deleted": 40,
+      "remaining": 0,
+      "exitCode": 4,
+      "historyMatchesDisk": true
+    },
+    {
+      "engine": "js",
+      "scenario": "sigint",
+      "candidates": 40,
+      "deleted": 8,
+      "remaining": 32,
+      "exitCode": 1,
+      "historyMatchesDisk": true
+    },
+    {
+      "engine": "rust",
+      "scenario": "lost-receipt",
+      "candidates": 40,
+      "deleted": 40,
+      "remaining": 0,
+      "exitCode": 4,
+      "historyMatchesDisk": true
+    },
+    {
+      "engine": "rust",
+      "scenario": "sigint",
+      "candidates": 40,
+      "deleted": 1,
+      "remaining": 39,
+      "exitCode": 1,
+      "historyMatchesDisk": true
+    }
+  ],
+  "deepDeletion": {
+    "platform": "Linux",
+    "binarySha256": "feabbdf44f34fe80afbd450d5defed4c9de98f54a8e74a693bed7a3ffc0a7d6e",
+    "depth": 256,
+    "repeats": 3,
+    "fdSoftLimit": 32,
+    "qualification": "Owned deep artifacts with a file and sibling at each level; actual low-FD native apply. Sampled resources and timings are evidence, not a hard RSS cap or p99 benchmark.",
+    "samples": [
+      {
+        "elapsedMs": 48.393389995908365,
+        "sampledPeakDescriptors": 8,
+        "sampledPeakRssBytes": 3112960,
+        "deletedCount": 1,
+        "failedCount": 0,
+        "unselectedPreserved": true
+      },
+      {
+        "elapsedMs": 61.20187399210408,
+        "sampledPeakDescriptors": 8,
+        "sampledPeakRssBytes": 3108864,
+        "deletedCount": 1,
+        "failedCount": 0,
+        "unselectedPreserved": true
+      },
+      {
+        "elapsedMs": 51.33134400239214,
+        "sampledPeakDescriptors": 8,
+        "sampledPeakRssBytes": 3186688,
+        "deletedCount": 1,
+        "failedCount": 0,
+        "unselectedPreserved": true
+      }
+    ]
+  },
+  "resourcesFile": "round3-resources.json",
+  "artifactSha256": {
+    "apps/cli/dist/sweep.js": "4765fd8855523c2f832aa4d162d736cfc3f7617f9fbb730c702cf34409e457ba",
+    "target/release/sweep-engine": "feabbdf44f34fe80afbd450d5defed4c9de98f54a8e74a693bed7a3ffc0a7d6e",
+    "crates/sweep-fs/src/removal.rs": "4a576e4bca74d1f0c5d6a08ac73a5f45eb5f950319044743e42ff1bd18abf10a",
+    "crates/sweep-engine/src/lib.rs": "5d26138bafa96ca61e9ba8f00dea5bc1e086a58aba6001b70a5c426de6f946eb",
+    "packages/core/src/resource-budget.ts": "c6223bd744282b9cb1fc4abc376b9c0b68aa105e49af7d2af750aeaa68545c96",
+    "packages/core/src/rust-stream.ts": "11f167499e739a79561068be7a29a2ee8536d5d26991bd9f44857bab4339f76b",
+    "scripts/smoke-apply-pipe.py": "96ee2375df1423b0026bc0f3b3ad16af1830e99defa4615bbf56c5712d02ac29",
+    "apps/cli/dist/sweep-ui.js": "a2b9f0aa0bebc8e0c10c984a644c2f44e7dc81baccf834248512318338528e14",
+    "packages/ui/src/ApplyOverlay.tsx": "ae460b6558b55f8d3f11323849e79e898e49fbc1c3d38698d6dc51e8cbbe45ab",
+    "packages/ui/src/widgets.tsx": "e68989584414b727c7de14f551285fb58c870060f2529178a19624c1fcabad1d"
+  },
+  "qualificationBoundaries": [
+    "Owned Linux synthetic fixtures only",
+    "Resource probes cover 4096 flat files and 256 wide artifacts with two rescans",
+    "No allocated 200-600 GiB storage or NFS qualification",
+    "Physical terminal and live large UI streaming excluded",
+    "Hosted workflow additions are pending exact-current execution"
+  ]
+}

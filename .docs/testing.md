@@ -426,12 +426,13 @@ Docs build/dev commands need Node 22.12+ and root Turbo commands need Cargo for
 workspace discovery. Website builds are excluded from CLI publication filters.
 See [the app guide](../apps/docs/README.md) for hosting and styling boundaries.
 
-Broken apply output pipes: `python scripts/smoke-apply-pipe.py` qualifies the
-Bun CLI bundle; pass a compiled path as its argument to qualify standalone.
-It owns all temporary trees, closes the progress consumer after the first
-removal, and verifies remaining artifacts, failure exit and persisted history.
-The local standalone JS/Rust run passed. This is a small synthetic interruption
-probe, not a large allocated-storage deletion benchmark.
+Apply output and interruption: `python3 scripts/smoke-apply-pipe.py` runs the
+Node-hosted CLI bundle; pass a compiled path to qualify standalone. Progress
+is read from stderr. One scenario closes stdout after first-removal progress
+and requires exit 4 for a lost final result, even if deletion finishes. Another
+sends SIGINT, requires exit 1 and remaining work, and checks history against
+disk. Both preserve an unselected sentinel. The Linux CI job runs this probe;
+it remains a small synthetic qualification, not a large-storage benchmark.
 
 ### Rust follow-up review
 
@@ -485,6 +486,9 @@ it is qualification tooling, not a production RAM limiter.
 
 ```sh
 bun run packages/ui/benchmarks/render-session.tsx --candidates 5000 --cycles 5 --samples 100
+
+# A folder per artifact exercises sidebar breadth rather than 100 shared folders.
+bun run packages/ui/benchmarks/render-session.tsx --candidates 50000 --scopes 50000 --cycles 3 --samples 100
 ```
 
 This harness paints real OpenTUI native in-memory frames and records first-frame

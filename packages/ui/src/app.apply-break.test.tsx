@@ -13,6 +13,7 @@ import { SweepApp, type SweepUiOutcome } from "./app.js";
 import type { UiApplyRequest, UiApplyResult } from "./outcome.js";
 import type { UiScanControl } from "./streaming.js";
 import { requestUiApplyCancellation } from "./runtime.js";
+import { BoxRenderable } from "@opentui/core";
 
 // Match production signal ownership: renderer teardown must follow an app
 // outcome, not a key or process signal handled by the cancellation bridge.
@@ -87,6 +88,7 @@ interface ApplyCall extends Omit<UiApplyRequest, "engine"> {
 async function mountWithApply(
   onDone: (outcome: SweepUiOutcome) => void,
   applyPolicy?: UiScanControl["applyPolicy"],
+  fixturePlan: ScanPlan = createPlan(),
 ) {
   const applyCalls: ApplyCall[] = [];
   const applyResolvers: ((result: UiApplyResult) => void)[] = [];
@@ -110,7 +112,7 @@ async function mountWithApply(
       });
     },
   };
-  const setup = await testRender(<SweepApp plan={createPlan()} scan={control} onDone={onDone} />, {
+  const setup = await testRender(<SweepApp plan={fixturePlan} scan={control} onDone={onDone} />, {
     width: 120,
     height: 32,
     exitOnCtrlC: false,
@@ -316,6 +318,35 @@ describe("adversarial: same-drain bursts on the queue confirm", () => {
 });
 
 describe("adversarial: committed applying state", () => {
+  test("single-item confirmation stays compact instead of filling the terminal", async () => {
+    const { setup, openSingleConfirm } = await mountWithApply(() => {});
+    await openSingleConfirm();
+    const pending = [...setup.renderer.root.getChildren()];
+    let height = 0;
+    while (pending.length) {
+      const node = pending.pop()!;
+      if (node instanceof BoxRenderable && node.title?.trim() === "apply") height = node.height;
+      pending.push(...node.getChildren());
+    }
+    expect(height).toBeGreaterThan(0);
+    expect(height).toBeLessThanOrEqual(18);
+  });
+
+  test("long-path review keeps confirmation controls visible and permits keyboard scrolling", async () => {
+    const fixture = createPlan();
+    fixture.candidates[0]!.path = `/tmp/sweep-ui/${"long-component/".repeat(70)}tail-marker/node_modules`;
+    fixture.candidates = [fixture.candidates[0]!];
+    const { setup, settle, openSingleConfirm } = await mountWithApply(() => {}, undefined, fixture);
+    await openSingleConfirm();
+    expect(setup.captureCharFrame()).toContain("y confirm    n / esc cancel");
+    await act(async () => {
+      for (let i = 0; i < 5; i++) setup.mockInput.pressKey("\x1b[6~");
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("tail-marker");
+    expect(setup.captureCharFrame()).toContain("y confirm    n / esc cancel");
+  });
   test("once applying commits, every mutating key is ignored until the apply lands", async () => {
     const outcomes: SweepUiOutcome[] = [];
     const { setup, settle, openSingleConfirm, applyCalls } = await mountWithApply((o) =>
@@ -355,6 +386,7 @@ describe("adversarial: committed applying state", () => {
     });
     await settle();
     expect(setup.captureCharFrame()).toContain("0 / 1 removals completed");
+    expect(setup.captureCharFrame()).toContain("counting targets");
     await act(async () => {
       applyCalls[0]!.onProgress?.({
         stage: "applying",
@@ -369,6 +401,40 @@ describe("adversarial: committed applying state", () => {
     await settle();
     expect(setup.captureCharFrame()).toContain("1 / 1 removals completed");
     expect(setup.captureCharFrame()).toContain("4.3s");
+    expect(setup.captureCharFrame()).toContain("99% of items");
+    expect(setup.captureCharFrame()).toContain("report pending");
+  });
+
+  test("preparation has its own percentage and stopping stays responsive", async () => {
+    const { setup, settle, openSingleConfirm, applyCalls } = await mountWithApply(() => {});
+    await openSingleConfirm();
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    await act(async () => {
+      applyCalls[0]!.onProgress?.({
+        stage: "preparing",
+        selectedCount: 1,
+        deletedCount: 0,
+        estimatedBytesFreed: 0,
+        elapsedMs: 2500,
+        preparationPhase: "sizing",
+        preparedCount: 1,
+        preparingCount: 2,
+      });
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("Size check · 50%");
+    await act(async () => {
+      setup.mockInput.pressEscape();
+      await new Promise((resolve) => setTimeout(resolve, 35));
+      await setup.flush();
+    });
+    await settle();
+    expect(applyCalls[0]!.signal.aborted).toBe(true);
+    expect(setup.captureCharFrame()).toContain("Stopping");
   });
 
   test("terminal signals request cancellation without closing an active apply", async () => {
@@ -385,6 +451,31 @@ describe("adversarial: committed applying state", () => {
     await settle();
     await act(async () => {
       expect(requestUiApplyCancellation()).toBe(true);
+    });
+    await settle();
+    expect(applyCalls[0]!.signal.aborted).toBe(true);
+    expect(outcomes).toEqual([]);
+    expect(setup.captureCharFrame()).toContain("Stopping");
+  });
+
+  test("clicking stop requests cancellation without dismissing the apply", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const { setup, settle, openSingleConfirm, applyCalls } = await mountWithApply((o) =>
+      outcomes.push(o),
+    );
+    await openSingleConfirm();
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    const lines = setup.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("click here to stop"));
+    expect(y).toBeGreaterThanOrEqual(0);
+    const x = lines[y]!.indexOf("esc / ctrl-c");
+    await act(async () => {
+      await setup.mockMouse.click(x, y);
+      await setup.flush();
     });
     await settle();
     expect(applyCalls[0]!.signal.aborted).toBe(true);

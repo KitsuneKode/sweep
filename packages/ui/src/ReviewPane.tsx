@@ -116,6 +116,7 @@ export function ReviewPane({
               onFocusPanel("list");
             }}
             onCursorDelta={(delta) => onMutate((s) => moveSidebarCursor(s, delta))}
+            onSetCursor={(index) => onMutate((s) => moveSidebarCursor(s, index - s.sidebarIndex))}
           />
         </box>
       ) : null}

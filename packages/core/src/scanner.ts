@@ -10,7 +10,13 @@ import type {
   ResourceProfile,
 } from "@kitsunekode/sweep-protocol";
 import { SCAN_RESOURCE_PROFILES } from "@kitsunekode/sweep-protocol";
-import { ResourceBudget, ResourceLimitError, checkedBytes } from "./resource-budget.js";
+import {
+  ResourceBudget,
+  ResourceLimitError,
+  checkedBytes,
+  discoveryCandidateFieldChars,
+} from "./resource-budget.js";
+import { toCandidate } from "./planner.js";
 import { directoryEntries, disposeDirectoryReader } from "./directory-reader.js";
 import { mapPool } from "./async-pool.js";
 import { SCAN_CONCURRENCY } from "./scan-concurrency.js";
@@ -684,7 +690,7 @@ export async function scan(
           isSymlink: isLink,
           entryType: isLink ? "symlink" : rawIsDir ? "directory" : "file",
         };
-        budget.candidate(fullPath);
+        budget.candidate(fullPath, discoveryCandidateFieldChars(toCandidate(entry)));
         entries.push(entry);
         hooks.onEntry?.(entry);
         sizer?.add(entry);

@@ -127,6 +127,25 @@ jobs:
           cargo build --release -p sweep-engine-cli --locked
           bun run build
 
+      - name: Qualify result delivery and apply cancellation
+        run: python3 scripts/smoke-apply-pipe.py
+
+      - name: Qualify bounded resources, repeated scans and slow consumers
+        run: |
+          python3 scripts/resource-stress.py --files 4096 --repeats 2 \
+            --fds 64 --rss-mb 768 --fixture-parent "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/sweep-resource-stress.json"
+
+      - name: Validate generated completion syntax
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zsh fish
+          for shell in bash zsh fish; do
+            node apps/cli/dist/sweep.js completions "$shell" > "$RUNNER_TEMP/sweep-completion.$shell"
+            "$shell" -n "$RUNNER_TEMP/sweep-completion.$shell"
+          done
+
       - name: Install local tarballs and verify owned scan-save-apply
         run: bun run scripts/smoke-package.ts --online
 
