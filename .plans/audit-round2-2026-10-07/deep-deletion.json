@@ -1,0 +1,34 @@
+{
+  "platform": "Linux",
+  "binarySha256": "466976854ef0db5964a0f14fc1ff70c8b7f576c5192e5b3fb131e6b37c74649d",
+  "depth": 256,
+  "repeats": 3,
+  "fdSoftLimit": 32,
+  "qualification": "Owned deep artifacts with a file and sibling at each level; actual low-FD native apply. Sampled resources and timings are evidence, not a hard RSS cap or p99 benchmark.",
+  "samples": [
+    {
+      "elapsedMs": 23.178538991487585,
+      "sampledPeakDescriptors": 9,
+      "sampledPeakRssBytes": 3104768,
+      "deletedCount": 1,
+      "failedCount": 0,
+      "unselectedPreserved": true
+    },
+    {
+      "elapsedMs": 23.41067200177349,
+      "sampledPeakDescriptors": 9,
+      "sampledPeakRssBytes": 3088384,
+      "deletedCount": 1,
+      "failedCount": 0,
+      "unselectedPreserved": true
+    },
+    {
+      "elapsedMs": 22.80516701284796,
+      "sampledPeakDescriptors": 9,
+      "sampledPeakRssBytes": 3121152,
+      "deletedCount": 1,
+      "failedCount": 0,
+      "unselectedPreserved": true
+    }
+  ]
+}

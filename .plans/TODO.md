@@ -14,7 +14,8 @@
 ## Next
 
 - [ ] Finish the [round-two safety/output audit](audit-round2-2026-10-07/README.md),
-      full current qualification, platform mount/deep-removal work and scale evidence.
+      platform mount work, deeper filesystem qualification and scale/UI evidence.
+      Checkpoint bfdcd96 passed all nine local steps and the hosted platform matrix.
 
 - [ ] Finish the [supplied audit triage and release boundaries](audit-triage-2026-10-07.md),
       including macOS mounts, resource-charge parity, live UI streaming and installer faults.

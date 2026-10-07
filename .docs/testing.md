@@ -349,6 +349,8 @@ can be smaller than statvfs reports. The harness cleans up only its own tree:
 
 ```bash
 bun run engine:build
+# Owned native deep-deletion fixtures: 256 levels, RLIMIT_NOFILE=32
+python3 scripts/qualify-linux-deletion.py --output /tmp/sweep-deep-deletion.json
 python3 scripts/resource-stress.py --files 100000 --repeats 5 --fixture-parent .plans --output /tmp/sweep-resources.json
 # Opt-in: approximately 4 GiB of filesystem blocks and a million inodes
 python3 scripts/resource-stress.py --files 1000000 --repeats 2 --fixture-parent .plans --output /tmp/sweep-million.json
@@ -364,6 +366,12 @@ The harness limits descriptors to 64, samples combined host/child RSS with a
 slowly, and verifies explicit quota failure. The watchdog is test tooling, not
 a shipped memory cap. Tiny injected budget, cancellation, raw filename, deep
 scope and large ID group regressions also run in `bun run check` / `rust:check`.
+
+Deep Linux removal retains at most 16 directory iterators plus pinned root and
+transient resolution handles; it meters one MiB of logical frame metadata.
+Older iterators reopen through the candidate descriptor with ancestor identity,
+symlink and mount checks. Resource sampling can miss short peaks; the OS-enforced
+descriptor limit is the qualification bound.
 
 Current combined qualification: [million entries, 200 GiB sparse totals and read-only Projects](../.plans/codebase-audit-2026-10-01/resource-200gib-and-projects.json).
 The existing-tree scan runs after owned fixtures are removed, preventing fixture

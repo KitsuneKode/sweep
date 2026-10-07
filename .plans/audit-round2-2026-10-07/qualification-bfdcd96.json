@@ -1,0 +1,59 @@
+{
+  "checkedAt": "2026-10-07",
+  "sourceCommit": "bfdcd96484cb0518452b8c00daf026ac40098f07",
+  "qualification": "Linux x64 local nine-step ladder; not publication, interactive terminal or allocated 600 GiB proof.",
+  "steps": [
+    {
+      "name": "fixtures:sync",
+      "status": "pass",
+      "ms": 57.54163
+    },
+    {
+      "name": "fixtures:validate-goldens",
+      "status": "pass",
+      "ms": 15.787748999999998
+    },
+    {
+      "name": "check",
+      "status": "pass",
+      "ms": 37462.675552
+    },
+    {
+      "name": "rust:check",
+      "status": "pass",
+      "ms": 1888.0383250000014
+    },
+    {
+      "name": "engine:verify",
+      "status": "pass",
+      "ms": 13.043042999997851
+    },
+    {
+      "name": "preflight",
+      "status": "pass",
+      "ms": 282.15597799999523
+    },
+    {
+      "name": "installed package smoke",
+      "status": "pass",
+      "ms": 1447.3187880000041
+    },
+    {
+      "name": "pack:preview",
+      "status": "pass",
+      "ms": 547.0310129999998
+    },
+    {
+      "name": "standalone smoke",
+      "status": "pass",
+      "ms": 613.4032689999949
+    }
+  ],
+  "hosted": {
+    "ci": "https://github.com/KitsuneKode/sweep/actions/runs/37580787135",
+    "ciConclusion": "success",
+    "release": "https://github.com/KitsuneKode/sweep/actions/runs/37580787315",
+    "releaseConclusion": "success",
+    "nativeReleaseBuild": "skipped"
+  }
+}

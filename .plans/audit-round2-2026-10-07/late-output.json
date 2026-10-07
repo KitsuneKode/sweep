@@ -1,0 +1,22 @@
+{
+  "checkedAt": "2026-10-07",
+  "checks": [
+    {
+      "backend": "js",
+      "exitCode": 4,
+      "selectedRemoved": true,
+      "unselectedPreserved": true
+    },
+    {
+      "backend": "rust",
+      "exitCode": 4,
+      "selectedRemoved": true,
+      "unselectedPreserved": true
+    }
+  ],
+  "qualification": "Owned 500-file artifacts; stdout reader closes before final human receipt. Nonzero receipt-delivery failure is required even when removal has completed. This does not qualify mid-removal SIGINT or scaling.",
+  "inputs": {
+    "cliBundleSha256": "5892f1c931834b87848475a89e95c8dd9d5e91086a96949b4927e687323a4718",
+    "nativeReleaseEngineSha256": "570cf405ba23a3f8852dde8f0eda3df942217a7b1319d411a31c74aeeb1dcb86"
+  }
+}

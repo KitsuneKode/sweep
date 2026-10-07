@@ -146,6 +146,9 @@ jobs:
       - name: Compile and verify self-contained standalone
         run: bun run scripts/verify-standalone.ts
 
+      - name: Qualify deep native deletion with bounded descriptors
+        run: python3 scripts/qualify-linux-deletion.py --output "$RUNNER_TEMP/sweep-deep-deletion.json"
+
   platform:
     name: cross-platform (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -211,6 +214,10 @@ jobs:
 
       - name: Compile and verify self-contained standalone
         run: bun run scripts/verify-standalone.ts
+
+      - name: Qualify deep native deletion with bounded descriptors
+        if: runner.os == 'Linux'
+        run: python3 scripts/qualify-linux-deletion.py --output "$RUNNER_TEMP/sweep-deep-deletion.json"
 
       - name: Smoke - scan a temp tree (no deletion, no TTY)
         shell: bash

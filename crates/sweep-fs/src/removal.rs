@@ -11,7 +11,8 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-const MAX_DEPTH: usize = 32;
+const MAX_OPEN_DIRS: usize = 16;
+const MAX_FRAME_BYTES: usize = 1024 * 1024;
 const RESOLVE: ResolveFlags = ResolveFlags::BENEATH
     .union(ResolveFlags::NO_SYMLINKS)
     .union(ResolveFlags::NO_XDEV);
@@ -20,9 +21,50 @@ pub struct RemovalRoot {
     fd: OwnedFd,
 }
 struct Frame {
-    dir: Dir,
+    dir: Option<Dir>,
     name: OsString,
     identity: (u64, u64),
+}
+
+fn frame_bytes(name: &std::ffi::OsStr) -> usize {
+    use std::os::unix::ffi::OsStrExt;
+    128 + name.as_bytes().len()
+}
+
+fn evict_oldest(frames: &mut [Frame]) {
+    if frames.iter().filter(|frame| frame.dir.is_some()).count() >= MAX_OPEN_DIRS {
+        if let Some(frame) = frames.iter_mut().find(|frame| frame.dir.is_some()) {
+            frame.dir = None;
+        }
+    }
+}
+
+/// Reopen through the pinned candidate, never a live absolute pathname. Every
+/// component must retain its original identity and kernel resolution guards.
+fn restore_frame(
+    anchor: &OwnedFd,
+    frames: &mut [Frame],
+    index: usize,
+    flag: &AtomicBool,
+) -> io::Result<()> {
+    if frames[index].dir.is_some() {
+        return Ok(());
+    }
+    evict_oldest(frames);
+    let mut fd = open_relative(anchor, ".", true)?;
+    for (depth, frame) in frames[..=index].iter().enumerate() {
+        cancelled(flag)?;
+        if depth != 0 {
+            fd = open_relative(&fd, &frame.name, true)?;
+        }
+        if identity(&rfs::fstat(&fd)?) != frame.identity {
+            return Err(changed());
+        }
+    }
+    // Restart enumeration: completed entries are gone. This avoids relying
+    // on an opaque directory cookie remaining valid across reopen/removal.
+    frames[index].dir = Some(Dir::new(fd)?);
+    Ok(())
 }
 fn identity(stat: &rfs::Stat) -> (u64, u64) {
     (stat.st_dev, stat.st_ino)
@@ -76,8 +118,9 @@ impl RemovalRoot {
         Ok(Self { fd })
     }
 
-    /// Removes one relative approved entry. At most 32 directory frames are
-    /// retained. Interior symlinks are unlinked; mounts (including bind mounts)
+    /// Removes one relative approved entry. At most 16 directory iterators and
+    /// one MiB of logical frame metadata are retained, independently of depth.
+    /// Interior symlinks are unlinked; mounts (including bind mounts)
     /// and symlinked ancestors are refused by every kernel resolution.
     pub fn remove(
         &self,
@@ -128,42 +171,46 @@ impl RemovalRoot {
             rfs::unlinkat(&parent, name, AtFlags::empty())?;
             return Ok(());
         }
+        let mut retained_bytes = frame_bytes(name);
         let mut frames = vec![Frame {
-            dir: Dir::new(leaf)?,
+            dir: Some(Dir::new(open_relative(&leaf, ".", true)?)?),
             name: name.to_owned(),
             identity: expected,
         }];
         while !frames.is_empty() {
             step();
             cancelled(flag)?;
+            let index = frames.len() - 1;
+            restore_frame(&leaf, &mut frames, index, flag)?;
             let frame = frames.last_mut().ok_or_else(changed)?;
-            match frame.dir.next() {
+            let dir = frame.dir.as_mut().ok_or_else(changed)?;
+            match dir.next() {
                 Some(item) => {
                     let item = item?;
                     let name = item.file_name();
                     if name.to_bytes() == b"." || name.to_bytes() == b".." {
                         continue;
                     }
-                    let fd = frame.dir.fd()?;
+                    let fd = dir.fd()?;
                     // O_PATH avoids opening FIFO/device contents or blocking on
                     // them, and NOFOLLOW keeps a symlink itself as the leaf.
                     let child = open_relative(fd, name, false)?;
                     let stat = rfs::fstat(&child)?;
                     if FileType::from_raw_mode(stat.st_mode) == FileType::Directory {
-                        if frames.len() >= MAX_DEPTH {
-                            return Err(io::Error::other("secure removal directory depth limit (32) exceeded; some descendants may already have been removed"));
-                        }
-                        let frame = frames.last().ok_or_else(changed)?;
-                        let directory = open_relative(frame.dir.fd()?, name, true)?;
+                        use std::os::unix::ffi::OsStrExt;
+                        let name = std::ffi::OsStr::from_bytes(name.to_bytes()).to_owned();
+                        let next_bytes = retained_bytes.checked_add(frame_bytes(&name)).filter(|bytes| *bytes <= MAX_FRAME_BYTES).ok_or_else(|| io::Error::other("secure removal frame metadata limit exceeded; some descendants may already have been removed"))?;
+                        let directory = open_relative(fd, &name, true)?;
                         if identity(&rfs::fstat(&directory)?) != identity(&stat) {
                             return Err(changed());
                         }
-                        use std::os::unix::ffi::OsStrExt;
+                        evict_oldest(&mut frames);
                         frames.push(Frame {
-                            dir: Dir::new(directory)?,
-                            name: std::ffi::OsStr::from_bytes(name.to_bytes()).to_owned(),
+                            dir: Some(Dir::new(directory)?),
+                            name,
                             identity: identity(&stat),
                         });
+                        retained_bytes = next_bytes;
                     } else {
                         cancelled(flag)?;
                         rfs::unlinkat(fd, name, AtFlags::empty())?;
@@ -171,8 +218,13 @@ impl RemovalRoot {
                 }
                 None => {
                     let completed = frames.pop().ok_or_else(changed)?;
+                    retained_bytes -= frame_bytes(&completed.name);
+                    if !frames.is_empty() {
+                        let index = frames.len() - 1;
+                        restore_frame(&leaf, &mut frames, index, flag)?;
+                    }
                     let fd = match frames.last() {
-                        Some(frame) => frame.dir.fd()?,
+                        Some(frame) => frame.dir.as_ref().ok_or_else(changed)?.fd()?,
                         None => rustix::fd::AsFd::as_fd(&parent),
                     };
                     if identity(&rfs::statat(
@@ -313,12 +365,14 @@ mod stress_tests {
         assert!(remaining > 0 && remaining < 20);
     }
     #[test]
-    fn directory_depth_is_bounded_and_raw_names_are_supported() {
+    fn deep_removal_keeps_handles_bounded_and_supports_raw_names() {
         let root = tempfile::tempdir().unwrap_or_else(|e| panic!("fixture: {e}"));
         let artifact = root.path().join("target");
         fs::create_dir(&artifact).unwrap_or_else(|e| panic!("mkdir: {e}"));
         let mut deep = artifact.clone();
-        for _ in 0..40 {
+        for _ in 0..128 {
+            fs::write(deep.join("file"), "owned").unwrap_or_else(|e| panic!("write: {e}"));
+            fs::create_dir(deep.join("sibling")).unwrap_or_else(|e| panic!("mkdir: {e}"));
             deep = deep.join("d");
             fs::create_dir(&deep).unwrap_or_else(|e| panic!("mkdir: {e}"));
         }
@@ -331,10 +385,8 @@ mod stress_tests {
             true,
             &AtomicBool::new(false),
         );
-        assert!(result
-            .err()
-            .is_some_and(|e| e.to_string().contains("depth limit")));
-        assert!(deep.join("keep").exists());
+        result.unwrap_or_else(|e| panic!("deep removal: {e}"));
+        assert!(!artifact.exists());
         let raw = root.path().join(OsString::from_vec(vec![255]));
         fs::write(&raw, "owned").unwrap_or_else(|e| panic!("write: {e}"));
         anchor
@@ -346,6 +398,80 @@ mod stress_tests {
             )
             .unwrap_or_else(|e| panic!("remove: {e}"));
         assert!(!raw.exists());
+    }
+
+    #[test]
+    fn reopening_checks_evicted_ancestor_identity_and_does_not_follow_links() -> io::Result<()> {
+        for use_link in [false, true] {
+            let root = tempfile::tempdir()?;
+            let artifact = root.path().join("target");
+            let outside = root.path().join("outside");
+            fs::create_dir(&artifact)?;
+            fs::create_dir(&outside)?;
+            fs::write(outside.join("keep"), "keep")?;
+            let mut deep = artifact.clone();
+            for _ in 0..64 {
+                deep = deep.join("d");
+                fs::create_dir(&deep)?;
+            }
+            let victim = artifact.join("d");
+            let original = artifact.join("original");
+            let anchor = RemovalRoot::open(root.path(), id(root.path()))?;
+            let mut swapped = false;
+            let result = anchor.remove_with_step(
+                Path::new("target"),
+                id(&artifact),
+                true,
+                &AtomicBool::new(false),
+                &mut || {
+                    if !swapped && !deep.exists() {
+                        fs::rename(&victim, &original).unwrap_or_else(|e| panic!("swap: {e}"));
+                        if use_link {
+                            std::os::unix::fs::symlink(&outside, &victim)
+                                .unwrap_or_else(|e| panic!("link: {e}"));
+                        } else {
+                            fs::create_dir(&victim).unwrap_or_else(|e| panic!("replacement: {e}"));
+                            fs::write(victim.join("keep"), "keep")
+                                .unwrap_or_else(|e| panic!("write: {e}"));
+                        }
+                        swapped = true;
+                    }
+                },
+            );
+            assert!(swapped);
+            assert!(result.is_err());
+            assert!(original.exists());
+            assert_eq!(fs::read(outside.join("keep"))?, b"keep");
+            assert_eq!(fs::read(victim.join("keep"))?, b"keep");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn deep_removal_cancels_before_reopening_an_evicted_parent() -> io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let artifact = root.path().join("target");
+        fs::create_dir(&artifact)?;
+        let mut deep = artifact.clone();
+        for _ in 0..64 {
+            deep = deep.join("d");
+            fs::create_dir(&deep)?;
+        }
+        let anchor = RemovalRoot::open(root.path(), id(root.path()))?;
+        let flag = AtomicBool::new(false);
+        let result =
+            anchor.remove_with_step(Path::new("target"), id(&artifact), true, &flag, &mut || {
+                if !deep.exists() {
+                    flag.store(true, Ordering::Release);
+                }
+            });
+        assert_eq!(
+            result.err().map(|error| error.kind()),
+            Some(io::ErrorKind::Interrupted)
+        );
+        assert!(artifact.exists());
+        assert!(!deep.exists());
+        Ok(())
     }
     #[test]
     fn kernel_resolution_refuses_an_existing_mount_without_mutation() {
