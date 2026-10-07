@@ -15,7 +15,8 @@
 
 - [ ] Finish the [round-two safety/output audit](audit-round2-2026-10-07/README.md),
       platform mount work, deeper filesystem qualification and scale/UI evidence.
-      Checkpoint bfdcd96 passed all nine local steps and the hosted platform matrix.
+      Checkpoints bfdcd96/f5c2270 passed all nine local steps and the hosted matrix;
+      [bounded deep removal](bounded-deep-removal.md) is implemented and qualified.
 
 - [ ] Finish the [supplied audit triage and release boundaries](audit-triage-2026-10-07.md),
       including macOS mounts, resource-charge parity, live UI streaming and installer faults.

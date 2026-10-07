@@ -1,0 +1,81 @@
+{
+  "sourceCommit": "f5c2270bc6aada1c034fd63520893ad7259eb8e2",
+  "run": "https://github.com/KitsuneKode/sweep/actions/runs/37611719181",
+  "qualification": "Actual release native deletion on hosted Linux x64 and ARM64; 256 levels with files/siblings under RLIMIT_NOFILE=32. Timings and sampled resources are not p99 or device-wide RSS guarantees.",
+  "checks": [
+    {
+      "job": "rust",
+      "result": {
+        "platform": "Linux",
+        "binarySha256": "f586dc5bd562da3cd1e1d9cc9ed7f3e6107148604979f4ca39e0ccd0e41a7089",
+        "depth": 256,
+        "repeats": 3,
+        "fdSoftLimit": 32,
+        "qualification": "Owned deep artifacts with a file and sibling at each level; actual low-FD native apply. Sampled resources and timings are evidence, not a hard RSS cap or p99 benchmark.",
+        "samples": [
+          {
+            "elapsedMs": 131.6946889999997,
+            "sampledPeakDescriptors": 23,
+            "sampledPeakRssBytes": 2723840,
+            "deletedCount": 1,
+            "failedCount": 0,
+            "unselectedPreserved": true
+          },
+          {
+            "elapsedMs": 131.42944499999487,
+            "sampledPeakDescriptors": 23,
+            "sampledPeakRssBytes": 2719744,
+            "deletedCount": 1,
+            "failedCount": 0,
+            "unselectedPreserved": true
+          },
+          {
+            "elapsedMs": 128.27668100000267,
+            "sampledPeakDescriptors": 24,
+            "sampledPeakRssBytes": 2678784,
+            "deletedCount": 1,
+            "failedCount": 0,
+            "unselectedPreserved": true
+          }
+        ]
+      }
+    },
+    {
+      "job": "cross-platform (ubuntu-24.04-arm)",
+      "result": {
+        "platform": "Linux",
+        "binarySha256": "07d776c955cc30ff0ee1617e29fd8a572e69a4cab1f843374371f60ebcc18393",
+        "depth": 256,
+        "repeats": 3,
+        "fdSoftLimit": 32,
+        "qualification": "Owned deep artifacts with a file and sibling at each level; actual low-FD native apply. Sampled resources and timings are evidence, not a hard RSS cap or p99 benchmark.",
+        "samples": [
+          {
+            "elapsedMs": 53.9729909999096,
+            "sampledPeakDescriptors": 22,
+            "sampledPeakRssBytes": 2392064,
+            "deletedCount": 1,
+            "failedCount": 0,
+            "unselectedPreserved": true
+          },
+          {
+            "elapsedMs": 53.50785600001018,
+            "sampledPeakDescriptors": 23,
+            "sampledPeakRssBytes": 2404352,
+            "deletedCount": 1,
+            "failedCount": 0,
+            "unselectedPreserved": true
+          },
+          {
+            "elapsedMs": 53.82863099998758,
+            "sampledPeakDescriptors": 22,
+            "sampledPeakRssBytes": 2404352,
+            "deletedCount": 1,
+            "failedCount": 0,
+            "unselectedPreserved": true
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -23,3 +23,6 @@ apps/docs/src/routeTree.gen.ts
 
 # Target-local cleanup holding directories
 .sweep-trash-*/
+
+# Local clones and qualification scratch must not become broken gitlinks.
+.scratch/

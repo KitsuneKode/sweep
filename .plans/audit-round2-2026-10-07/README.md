@@ -2,7 +2,7 @@ Status: in_progress
 Scope: destructive safety, native protocol, output, config, release qualification
 Created: 2026-10-07
 Updated: 2026-10-07
-Commit: bfdcd96 (source checkpoint; deep-removal follow-up is local)
+Commit: f5c2270 (source checkpoint; broader release blockers remain)
 
 # Round-two audit execution
 
@@ -38,7 +38,7 @@ paths in `.worktrees/traversal-engine` remain unchanged. No release is authorize
    behavior and implement platform-native constraints. Linux JS removal still
    has a mid-walk mount race. Fresh pathname identity checks are not handle-based
    transactions; trash slot/root races need that qualification too.
-2. **Deep deletion:** the Linux 32-frame failure is fixed locally with a
+2. **Deep deletion:** the Linux 32-frame failure is fixed and hosted-qualified on x64/ARM64 with a
    bounded cache of 16 iterators and one MiB logical frame metadata. A failing
    128-level fixture now passes; replacement-directory, symlink and cancellation
    regressions pass. [Three 256-level applies](deep-deletion.json) succeed under
@@ -87,8 +87,10 @@ before changing algorithms or removing live deletion-time validation.
   including clean-source preflight, installed CLI/native tarballs and standalone.
   [Exact checkpoint qualification](qualification-bfdcd96.json) records this and
   green hosted CI on Linux x64/ARM64, macOS Intel/Apple Silicon and Windows.
-  This is not publication or real-terminal proof. The local deep-removal
-  follow-up needs its own current gates and exact-commit hosted checks.
+  The later [f5c2270 checkpoint](qualification-f5c2270.json) also passed all nine
+  local steps and all hosted platforms. [Hosted deep deletion](deep-deletion-hosted.json)
+  executed successfully on Linux x64 and ARM64. This is not publication or
+  real-terminal proof.
 - [Policy smoke](policy-smoke.json) covers a 600 GiB sparse file with zero
   allocated bytes, dry-run without destructive flags, a configured refusal,
   an explicit uncapped override and an unselected sentinel. It is not an

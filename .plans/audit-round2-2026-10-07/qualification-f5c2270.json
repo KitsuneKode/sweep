@@ -1,0 +1,58 @@
+{
+  "sourceCommit": "f5c2270bc6aada1c034fd63520893ad7259eb8e2",
+  "qualification": "Linux x64 local nine-step ladder and hosted five-target matrix. No publication, real-terminal proof, NFS or allocated 600 GiB qualification.",
+  "steps": [
+    {
+      "name": "fixtures:sync",
+      "status": "pass",
+      "ms": 75.58123099999999
+    },
+    {
+      "name": "fixtures:validate-goldens",
+      "status": "pass",
+      "ms": 19.770840000000007
+    },
+    {
+      "name": "check",
+      "status": "pass",
+      "ms": 38879.20149
+    },
+    {
+      "name": "rust:check",
+      "status": "pass",
+      "ms": 1220.7720310000004
+    },
+    {
+      "name": "engine:verify",
+      "status": "pass",
+      "ms": 12.764162999999826
+    },
+    {
+      "name": "preflight",
+      "status": "pass",
+      "ms": 256.0920049999986
+    },
+    {
+      "name": "installed package smoke",
+      "status": "pass",
+      "ms": 1318.3661809999976
+    },
+    {
+      "name": "pack:preview",
+      "status": "pass",
+      "ms": 858.8000350000002
+    },
+    {
+      "name": "standalone smoke",
+      "status": "pass",
+      "ms": 927.6908239999975
+    }
+  ],
+  "hosted": {
+    "ci": "https://github.com/KitsuneKode/sweep/actions/runs/37611719181",
+    "ciConclusion": "success",
+    "release": "https://github.com/KitsuneKode/sweep/actions/runs/37611719678",
+    "releaseConclusion": "success",
+    "nativeReleaseBuild": "skipped"
+  }
+}

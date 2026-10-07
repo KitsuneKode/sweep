@@ -1,8 +1,8 @@
-Status: in_progress
+Status: done
 Scope: Linux descriptor-constrained deletion
 Created: 2026-10-07
 Updated: 2026-10-07
-Commit: uncommitted (baseline bfdcd96)
+Commit: f5c2270
 
 # Bounded deep deletion
 
@@ -45,5 +45,8 @@ performance equivalence. Reopening prioritizes low descriptor use and checked
 identities; it adds work on very deep shapes. See
 [raw measurements](audit-round2-2026-10-07/shallow-removal-comparison.json).
 
-Current full release-shape and hosted follow-up checks remain to run before
-marking this plan done. No allocated 600 GiB or NFS qualification is implied.
+All nine local release-shape checks passed on the committed tree. Hosted CI
+passed the five shipped targets, including actual low-descriptor native deletion
+on Linux x64 and ARM64. See [hosted evidence](audit-round2-2026-10-07/deep-deletion-hosted.json)
+and [checkpoint qualification](audit-round2-2026-10-07/qualification-f5c2270.json).
+No allocated 600 GiB or NFS qualification is implied.
