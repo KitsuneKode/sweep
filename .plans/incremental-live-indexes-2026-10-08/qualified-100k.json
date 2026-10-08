@@ -1,0 +1,22 @@
+{
+  "runtime": "1.4.2",
+  "width": 120,
+  "status": "passed",
+  "candidates": 100000,
+  "scopes": 100000,
+  "batches": 123,
+  "awaitCommit": true,
+  "maxOutstanding": 1,
+  "elapsedMs": 22183.792838999998,
+  "inputSamples": 115,
+  "tailSampleMinimumMet": true,
+  "inputPaintP50Ms": 51.98943799999961,
+  "inputPaintP95Ms": 64.705919,
+  "inputPaintP99Ms": 68.16050199999881,
+  "sampledPeakRssMiB": 930.01171875,
+  "forcedGc": false,
+  "updateDepthWarnings": 0,
+  "realFilesystemScan": false,
+  "physicalTerminalIncluded": false,
+  "method": "Synthetic discovery and sizing, actual UI hooks/commit receipts, OpenTUI native in-memory output. Event-loop-only is a comparison mode, not a shipped setting."
+}

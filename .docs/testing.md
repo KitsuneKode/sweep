@@ -503,6 +503,8 @@ For live delivery and sizing updates through the actual app hooks:
 ```sh
 bun run packages/ui/benchmarks/stream-render.tsx --candidates 10000
 bun run packages/ui/benchmarks/stream-render.tsx --candidates 25000
+bun run packages/ui/benchmarks/stream-render.tsx --candidates 100000
+bun run packages/ui/benchmarks/stream-render.tsx --candidates 5000 --width 70
 # Diagnostic comparison only; the app always awaits commits.
 bun run packages/ui/benchmarks/stream-render.tsx --candidates 10000 --event-loop-only
 ```
@@ -513,6 +515,12 @@ and stops at two minutes or a sampled 1 GiB RSS limit. It does not enumerate a
 real filesystem or qualify physical terminal transport. Its input samples are
 sparse observations, not a release p99 guarantee. Do not raise application
 resource limits based on this probe alone.
+
+The Linux CI job runs the 5k live-delivery probe and fails on React update-depth
+warnings, stalled delivery, missing final reconciliation or its resource guard.
+Reported timings are observations, not a portable latency threshold. The
+[incremental-index qualification](../.plans/incremental-live-indexes-2026-10-08.md)
+records the larger local runs and their remaining memory limits.
 
 ### Recorded fat/wide engine comparison
 

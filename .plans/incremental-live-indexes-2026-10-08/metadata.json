@@ -1,0 +1,44 @@
+{
+  "baselineCommit": "762fc15067eda095b457c08885c5fa7612145eb0",
+  "platform": "Linux-7.2.8-zen1-2-zen-x86_64-with-glibc2.44",
+  "machine": "x86_64",
+  "qualifiedCommands": [
+    "bun run packages/ui/benchmarks/stream-render.tsx --candidates 5000",
+    "bun run packages/ui/benchmarks/stream-render.tsx --candidates 50000",
+    "bun run packages/ui/benchmarks/stream-render.tsx --candidates 100000",
+    "bun run packages/ui/benchmarks/stream-render.tsx --candidates 5000 --width 70"
+  ],
+  "sourceSha256": {
+    "packages/ui/src/rows.ts": "1d0e615f77507045f9652b44e889d3c50b69bdd151204f48b83691a269f0968b",
+    "packages/ui/src/scope-tree.ts": "8e5a1d37b261c9290d0ce5e106220c4906906165dde5cc4701585d478a71a110",
+    "packages/ui/src/ArtifactList.tsx": "20e59eed171081e06624c1ca9bba86949bf709957f26a5f597957854fafa1578",
+    "packages/ui/src/app.tsx": "440c5aeb3a1f1572e6a3e6756eac31b0428ba43b5876dc43d3439ac9abafdbcf",
+    "packages/ui/src/grouping.ts": "63c88b3b4de27684d3a46d22bd5e9a9d6a1c26271ba9e5bf610d56115d1590d7",
+    "packages/ui/src/presentation.ts": "f41953a8ea90e940ca344bcb7ae25d9852c810d64314dd0276ed2d213e79bb48",
+    "packages/ui/benchmarks/stream-render.tsx": "54bf9820005083e7ae64e1f34fb5ba695ba5c4241376a36a92f4c98daf805ebb"
+  },
+  "comparisonNote": "comparison-100k-repeat.json predates only the final POSIX path-spelling change; RSS differs across runs. It is supplemental, not the final-code receipt.",
+  "boundaries": [
+    "Synthetic discovery/sizing, no real scan or deletion",
+    "Native in-memory output; no physical terminal",
+    "No forced garbage collection",
+    "Sparse input timing samples do not establish a production p99",
+    "Sampled RSS guard is not a production process limiter"
+  ],
+  "originalScopeParity": {
+    "transitions": 100,
+    "baselineSha256": "f7f7197c6590d43343783bc1cef454c038873e27190011ec7373146157a254c7",
+    "replaySha256": "180c36d12e60f2ce877c78ffb513ea7757b8185681ba5f6f3a4dba1b830c3e5f",
+    "result": "matched original implementation output byte-for-byte"
+  },
+  "narrowAssertion": "Final NORMAL state with neither SCANNING nor INCOMPLETE; default-width runs also assert full discovery count.",
+  "requiredGate": "bun run check: 49 of 49 tasks passed after final production changes; clean-tree verify --all and exact-commit hosted CI run after commit.",
+  "reactDoctor": {
+    "version": "0.9.17",
+    "scope": "changed",
+    "files": 9,
+    "diagnostics": [],
+    "score": 56,
+    "note": "No changed-file issues; aggregate score is not a whole-app clean claim."
+  }
+}

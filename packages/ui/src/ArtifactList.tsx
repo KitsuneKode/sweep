@@ -155,9 +155,14 @@ export function ArtifactList({
   // The hovered index is meaningless across a row-set change (same index, new
   // row): filters, collapses, and scan upserts clear it rather than paint a
   // hover tint on a row the pointer never touched.
+  const hoveredRowsRef = useRef(rows);
   useEffect(() => {
-    setHoveredRowIndex(null);
-  }, [rows]);
+    const changed = hoveredRowsRef.current !== rows;
+    hoveredRowsRef.current = rows;
+    // Live frames usually have no hovered row. Do not schedule a redundant
+    // passive update for every discovery commit, especially long bursts.
+    if (changed && hoveredRowIndex !== null) setHoveredRowIndex(null);
+  }, [rows, hoveredRowIndex]);
 
   const handleSizeChange = useCallback(() => {
     const height = listRef.current?.height;

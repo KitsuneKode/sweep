@@ -479,7 +479,7 @@ function InspectOverlay({
   queued: boolean;
   targetDir: string;
 }) {
-  const rel = relativePath(targetDir, candidate.path).replaceAll("\\", "/");
+  const rel = relativePath(targetDir, candidate.path);
   const riskGlyphColor = {
     safe: tokens.positive,
     caution: tokens.warning,
@@ -1511,9 +1511,7 @@ export function SweepApp({
             selectedBytes={pendingSingleCandidate.estimatedBytes}
             dangerousCount={pendingSingleCandidate.riskTier === "dangerous" ? 1 : 0}
             previewPaths={[
-              sanitizeTerminalText(
-                relativePath(state.targetDir, pendingSingleCandidate.path).replaceAll("\\", "/"),
-              ),
+              sanitizeTerminalText(relativePath(state.targetDir, pendingSingleCandidate.path)),
             ]}
             {...(dryRun ? { dryRun: true } : {})}
             {...(trashModeRef.current ? { trash: true } : {})}

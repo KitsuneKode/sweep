@@ -136,6 +136,9 @@ jobs:
             --fds 64 --rss-mb 768 --fixture-parent "$RUNNER_TEMP" \
             --output "$RUNNER_TEMP/sweep-resource-stress.json"
 
+      - name: Qualify live UI delivery and update stability
+        run: bun run packages/ui/benchmarks/stream-render.tsx --candidates 5000
+
       - name: Validate generated completion syntax
         shell: bash
         run: |

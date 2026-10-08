@@ -1,6 +1,7 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
-import { groupCandidatesByScope } from "./grouping.js";
+import { groupCandidatesByScope, labelForKey } from "./grouping.js";
 import { candidateIndex } from "./candidate-index.js";
+import { artifactScopeKey } from "./scope-tree.js";
 import type { SweepUiState, UiSortBy } from "./state.js";
 import { getVisibleCandidates } from "./state.js";
 
@@ -64,9 +65,108 @@ let rowsLast: { inputs: RowsInputs; visible: ScanCandidate[]; result: UiDisplayR
   null;
 let groupMembers = new Map<string, string[]>();
 
+interface LiveGroup {
+  key: string;
+  label: string;
+  items: UiDisplayRow[];
+  bytes: number;
+  selectedCount: number;
+  header: Extract<UiDisplayRow, { kind: "header" }> | undefined;
+}
+let liveRows: {
+  targetDir: string;
+  candidates: ScanCandidate[];
+  selectedIds: ReadonlySet<string>;
+  groups: Map<string, LiveGroup>;
+  owners: LiveGroup[];
+  members: Map<string, string[]>;
+} | null = null;
+
 export function clearRowsCache(): void {
   rowsLast = null;
   groupMembers.clear();
+  liveRows = null;
+}
+
+/** Discovery order stays fixed during a scan. Reuse its groups and item rows
+ * rather than reallocate them on every discovery/sizing frame. Headers and the
+ * returned array remain immutable so an earlier React frame cannot change. */
+function buildLiveRows(state: SweepUiState, visible: ScanCandidate[]): UiDisplayRow[] {
+  const previous = liveRows;
+  const compatible =
+    previous &&
+    previous.targetDir === state.targetDir &&
+    previous.candidates.length <= visible.length &&
+    previous.candidates.every((c, i) => c.id === visible[i]!.id && c.path === visible[i]!.path);
+  if (!compatible) {
+    liveRows = {
+      targetDir: state.targetDir,
+      candidates: [],
+      selectedIds: state.selectedIds,
+      groups: new Map(),
+      owners: [],
+      members: new Map(),
+    };
+  }
+  const cache = liveRows!;
+  const oldCount = cache.candidates.length;
+  const selectionChanged = cache.selectedIds !== state.selectedIds;
+  if (selectionChanged) for (const group of cache.groups.values()) group.selectedCount = 0;
+  for (let i = 0; i < visible.length; i++) {
+    const candidate = visible[i]!;
+    let group = cache.owners[i];
+    if (i >= oldCount) {
+      const key = artifactScopeKey(state.targetDir, candidate.path);
+      group = cache.groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          label: labelForKey(key),
+          items: [],
+          bytes: 0,
+          selectedCount: 0,
+          header: undefined,
+        };
+        cache.groups.set(key, group);
+        cache.members.set(key, []);
+      }
+      cache.owners.push(group);
+      group.items.push({ kind: "item", candidateId: candidate.id, groupLabel: group.label });
+      cache.members.get(key)!.push(candidate.id);
+      group.bytes += candidate.estimatedBytes;
+      if (!selectionChanged && state.selectedIds.has(candidate.id)) group.selectedCount++;
+    } else if (cache.candidates[i] !== candidate) {
+      group!.bytes += candidate.estimatedBytes - cache.candidates[i]!.estimatedBytes;
+    }
+    if (selectionChanged && state.selectedIds.has(candidate.id)) group!.selectedCount++;
+  }
+  cache.candidates = visible;
+  cache.selectedIds = state.selectedIds;
+  groupMembers = cache.members;
+  const rows: UiDisplayRow[] = [];
+  for (const group of cache.groups.values()) {
+    const collapsed = state.collapsedGroups.has(group.key);
+    if (
+      !group.header ||
+      group.header.bytes !== group.bytes ||
+      group.header.selectedCount !== group.selectedCount ||
+      group.header.collapsed !== collapsed ||
+      group.header.itemCount !== group.items.length
+    ) {
+      group.header = {
+        kind: "header",
+        groupKey: group.key,
+        label: group.label,
+        itemCount: group.items.length,
+        selectedCount: group.selectedCount,
+        collapsed,
+        bytes: group.bytes,
+      };
+    }
+    rows.push(group.header);
+    if (!collapsed) for (const item of group.items) rows.push(item);
+  }
+  return rows;
 }
 
 export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
@@ -117,42 +217,13 @@ export function buildDisplayRows(state: SweepUiState): UiDisplayRow[] {
   return result;
 }
 
-/**
- * Discovery position per candidate.
- *
- * `state.candidates` is insertion-ordered: `upsertCandidates` merges through a
- * Map, and re-setting an existing key keeps its original slot, so a sized
- * update never moves a candidate. That makes array position a stable identity
- * for "when did we first see this".
- */
-function discoveryIndex(state: SweepUiState): Map<string, number> {
-  const index = new Map<string, number>();
-  for (const [position, candidate] of state.candidates.entries()) {
-    index.set(candidate.id, position);
-  }
-  return index;
-}
-
-/** Earliest discovery position in a group - where the group sorts while pinned. */
-function firstDiscovery(group: { candidateIds: string[] }, order: Map<string, number>): number {
-  let earliest = Number.POSITIVE_INFINITY;
-  for (const id of group.candidateIds) {
-    earliest = Math.min(earliest, order.get(id) ?? Number.POSITIVE_INFINITY);
-  }
-  return earliest;
-}
-
 function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
   const visible = getVisibleCandidates(state);
+  if (state.orderPinned) return buildLiveRows(state, visible);
+  liveRows = null;
   const byId = candidateIndex(state.candidates);
 
-  // Pinned (live scan): order by discovery so sizes landing mid-scan cannot
-  // reshuffle the list under the cursor. Unpinned: the real triage order.
-  const order = state.orderPinned ? discoveryIndex(state) : null;
-  const compare = order
-    ? (left: ScanCandidate, right: ScanCandidate) =>
-        (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0)
-    : itemComparator(state.sortBy);
+  const compare = itemComparator(state.sortBy);
 
   const groups = groupCandidatesByScope(state.targetDir, visible, compare, {
     maxGroups: Number.POSITIVE_INFINITY,
@@ -165,16 +236,11 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
       {
         bytes: groupBytes(group, byId),
         oldest: oldestModified(group, byId),
-        first: order ? firstDiscovery(group, order) : 0,
       },
     ]),
   );
 
-  if (order) {
-    // A newly discovered scope lands at the bottom rather than pushing the
-    // list around; existing scopes keep their place for the whole scan.
-    groups.sort((left, right) => metrics.get(left.key)!.first - metrics.get(right.key)!.first);
-  } else if (state.sortBy === "size") {
+  if (state.sortBy === "size") {
     // Heaviest scope first so the top of the list is the biggest win.
     groups.sort((left, right) => metrics.get(right.key)!.bytes - metrics.get(left.key)!.bytes);
   } else if (state.sortBy === "age") {

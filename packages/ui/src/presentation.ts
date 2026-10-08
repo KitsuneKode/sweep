@@ -92,7 +92,9 @@ export function artifactRowWidths(listWidth: number): RowWidths {
 }
 
 export function relativePath(root: string, path: string): string {
-  return relative(root, path);
+  const result = relative(root, path);
+  // Backslash is a legal filename character on POSIX, not a separator.
+  return process.platform === "win32" ? result.replaceAll("\\", "/") : result;
 }
 
 export function buildListColumnHeader(widths: RowWidths, tokens: ThemeTokens): StyledText {
@@ -221,7 +223,7 @@ export function buildArtifactRowContent(
 
 /** Directory that contains the artifact, relative to the scan root. */
 export function artifactParentLabel(root: string, path: string): string {
-  const rel = relativePath(root, path).replaceAll("\\", "/");
+  const rel = relativePath(root, path);
   const slash = rel.lastIndexOf("/");
   if (slash <= 0) return "";
   return rel.slice(0, slash);

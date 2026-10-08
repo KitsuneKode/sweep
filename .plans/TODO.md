@@ -13,8 +13,10 @@
 
 ## Next
 
-- [ ] Finish [live delivery, queue clarity and native activity](ui-streaming-followup-2026-10-08.md),
-      including current hosted verification and retained large-UI memory evidence.
+- [x] Implement [live delivery, queue clarity and native activity](ui-streaming-followup-2026-10-08.md):
+      checkpoint 762fc15 passed all nine local steps and all eight hosted jobs.
+- [x] Implement and measure [incremental live indexes and literal path identity](incremental-live-indexes-2026-10-08.md);
+      paging, low-memory devices and real allocated large trees remain separate gates.
 
 - [ ] Complete [final audit follow-ups](audit-round3-2026-10-07.md): apply feedback,
       bounded concurrent-writer retry, candidate accounting and release guards

@@ -35,7 +35,7 @@ export function groupCandidatesByScope(
   const byId = candidateIndex(candidates);
 
   for (const candidate of candidates) {
-    const relative = relativePath(targetDir, candidate.path).replaceAll("\\", "/");
+    const relative = relativePath(targetDir, candidate.path);
     const segments = relative.split("/").filter((segment) => segment.length > 0);
     const key = segments.length <= 1 ? "" : segments.slice(0, -1).join("/");
     const label = labelForKey(key);

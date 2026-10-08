@@ -1,0 +1,21 @@
+{
+  "runtime": "1.4.2",
+  "status": "failed",
+  "error": "Streaming probe exceeded its 1 GiB sampled RSS budget",
+  "candidates": 50000,
+  "scopes": 50000,
+  "batches": 72,
+  "awaitCommit": true,
+  "maxOutstanding": 1,
+  "elapsedMs": 15403.619107,
+  "inputSamples": 68,
+  "tailSampleMinimumMet": false,
+  "inputPaintP50Ms": 81.75964999999997,
+  "inputPaintP95Ms": 144.9302090000001,
+  "inputPaintP99Ms": 162.35958100000062,
+  "sampledPeakRssMiB": 1027.38671875,
+  "forcedGc": false,
+  "realFilesystemScan": false,
+  "physicalTerminalIncluded": false,
+  "method": "Synthetic discovery and sizing, actual UI hooks/commit receipts, OpenTUI native in-memory output. Event-loop-only is a comparison mode, not a shipped setting."
+}

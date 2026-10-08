@@ -1,8 +1,8 @@
-Status: in_progress
+Status: completed
 Scope: screenshot feedback, live UI delivery, native removal activity
 Created: 2026-10-08
 Updated: 2026-10-08
-Commit: this changeset (see git history)
+Commit: 762fc15067eda095b457c08885c5fa7612145eb0
 
 # UI and streaming follow-up
 
@@ -45,10 +45,13 @@ platform, mount-race or large allocated-tree qualification work.
 
 ## Evidence and limits
 
-Required check passed all 49 tasks; rust:check passed all eight tasks. Eight
-of nine full-ladder steps passed, including installed packages, pack preview
-and standalone smoke. Preflight deliberately refused the dirty tracked tree;
-repeat the full ladder after commit. Current hosted verification is pending.
+The clean committed checkpoint passed all nine local verification steps,
+including required check, rust:check, installed packages and standalone smoke.
+[All eight exact-commit hosted jobs](https://github.com/KitsuneKode/sweep/actions/runs/37693662912)
+passed on Linux x64/ARM64, macOS Intel/Apple Silicon and Windows, plus docs and
+workflow lint. No package was published; the release workflow updated version
+PR #22. The archived local receipt below records the earlier pre-commit
+boundary rather than claiming it is the clean-tree receipt.
 Tests cover actual native-host activity, malformed events,
 one-entry cooperative cancellation, untouched sentinels, queue disclosure,
 Enter feedback and commit receipts across rescan cancellation.
@@ -70,9 +73,10 @@ record the exact tested source/binary and the pre-commit gate boundary.
 React Doctor reports a valid OpenTUI prop and the intentional serial receipt
 drain loop; neither warning was suppressed. This is not a whole-app clean claim.
 
-## Still required
+## Follow-up work
 
-1. Incremental/paged discovery indexes and measured low-memory UI profiles;
+1. [Incremental live indexes](incremental-live-indexes-2026-10-08.md) address the
+   recorded 50k failure. Paging and measured low-memory UI profiles remain;
    current logical scan budgets are not process RSS ceilings.
 2. Real allocated large-tree and long-session tests, stratified by entry count,
    filesystem shape, cold IO and hardlink/mount behavior.

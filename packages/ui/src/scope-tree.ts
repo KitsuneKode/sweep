@@ -1,13 +1,9 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
-import { candidateIndex } from "./candidate-index.js";
-import { groupCandidatesByScope, type ArtifactScopeGroup } from "./grouping.js";
 import { relativePath } from "./presentation.js";
 
 export interface ScopeSidebarRow {
-  /** `null` means all scopes. */
   key: string | null;
   label: string;
-  /** Indent level in the folder tree (`all scopes` is 0). */
   depth: number;
   hasChildren: boolean;
   count: number;
@@ -15,129 +11,49 @@ export interface ScopeSidebarRow {
   bytes: number;
   selectedBytes: number;
 }
-
-interface TrieNode {
-  segment: string;
-  key: string;
-  ids: string[];
-  children: Map<string, TrieNode>;
-}
-
-function emptyNode(segment: string, key: string): TrieNode {
-  return { segment, key, ids: [], children: new Map() };
-}
-
-const MAX_SCOPE_NODES = 100_000;
-const MAX_SCOPE_KEY_BYTES = 16 * 1024 * 1024;
-interface ScopeBudget {
-  nodes: number;
-  keyBytes: number;
-}
-
-function insertGroup(root: TrieNode, group: ArtifactScopeGroup, budget: ScopeBudget): boolean {
-  if (group.key.length === 0) {
-    for (const id of group.candidateIds) root.ids.push(id);
-    return true;
-  }
-
-  const parts = group.key.split("/").filter((part) => part.length > 0);
-  let node = root;
-  let acc = "";
-  for (const part of parts) {
-    acc = acc.length === 0 ? part : `${acc}/${part}`;
-    let child = node.children.get(part);
-    if (!child) {
-      budget.nodes++;
-      budget.keyBytes += Buffer.byteLength(acc);
-      if (budget.nodes > MAX_SCOPE_NODES || budget.keyBytes > MAX_SCOPE_KEY_BYTES) return false;
-      child = emptyNode(part, acc);
-      node.children.set(part, child);
-    }
-    node = child;
-  }
-  for (const id of group.candidateIds) node.ids.push(id);
-  return true;
-}
-
-/** Iterative postorder avoids call-stack overflow on deep folder chains. */
-function* postorder(root: TrieNode): Generator<TrieNode> {
-  const pending: Array<[TrieNode, boolean]> = [[root, false]];
-  while (pending.length) {
-    const [node, ready] = pending.pop()!;
-    if (ready) {
-      yield node;
-      continue;
-    }
-    pending.push([node, true]);
-    for (const child of node.children.values()) pending.push([child, false]);
-  }
-}
-
-/** Collapse single-child folder chains the way trees.software flattens empty dirs. */
-export function flattenTrieNode(root: TrieNode): void {
-  for (const node of postorder(root)) {
-    while (node.key.length > 0 && node.ids.length === 0 && node.children.size === 1) {
-      const child = node.children.values().next().value;
-      if (!child) break;
-      node.segment = `${node.segment}/${child.segment}`;
-      node.key = child.key;
-      node.ids = child.ids;
-      node.children = child.children;
-    }
-  }
-}
-
 interface Stats {
   count: number;
   bytes: number;
   selectedCount: number;
   selectedBytes: number;
 }
-
-// One postorder pass per selection, rather than repeatedly walking subtrees
-// for every comparator and visible row. Structural order is cached separately.
-function aggregate(
-  node: TrieNode,
-  byId: ReadonlyMap<string, ScanCandidate>,
-  selected: Set<string>,
-  stats: Map<TrieNode, Stats>,
-): Stats {
-  for (const current of postorder(node)) {
-    const result: Stats = { count: 0, bytes: 0, selectedCount: 0, selectedBytes: 0 };
-    for (const id of current.ids) {
-      const c = byId.get(id);
-      if (!c) continue;
-      result.count++;
-      result.bytes += c.estimatedBytes;
-      if (selected.has(id)) {
-        result.selectedCount++;
-        result.selectedBytes += c.estimatedBytes;
-      }
-    }
-    for (const child of current.children.values()) {
-      const value = stats.get(child)!;
-      result.count += value.count;
-      result.bytes += value.bytes;
-      result.selectedCount += value.selectedCount;
-      result.selectedBytes += value.selectedBytes;
-    }
-    stats.set(current, result);
-  }
-  return stats.get(node)!;
+interface Node {
+  segment: string;
+  key: string;
+  parent: Node | null;
+  ownCount: number;
+  children: Map<string, Node> | null;
+  stats: Stats;
+  sorted: Node[] | undefined;
+  compressed: { end: Node; label: string } | undefined;
+  row: ScopeSidebarRow | undefined;
 }
-
-let topology: {
+function emptyNode(segment: string, key: string, parent: Node | null): Node {
+  return {
+    segment,
+    key,
+    parent,
+    ownCount: 0,
+    children: null,
+    stats: { count: 0, bytes: 0, selectedCount: 0, selectedBytes: 0 },
+    sorted: undefined,
+    compressed: undefined,
+    row: undefined,
+  };
+}
+const MAX_SCOPE_NODES = 100_000;
+const MAX_SCOPE_KEY_BYTES = 16 * 1024 * 1024;
+interface ScopeIndex {
   targetDir: string;
   candidates: ScanCandidate[];
-  root: TrieNode;
-  tops: TrieNode[];
-  byId: ReadonlyMap<string, ScanCandidate>;
-  children: Map<TrieNode, TrieNode[]>;
+  selectedIds: ReadonlySet<string>;
+  root: Node;
+  owners: Node[];
+  nodes: number;
+  keyBytes: number;
   limited: boolean;
-} | null = null;
-
-// Rebuilt per render otherwise - tuple-keyed single-slot cache, same pattern
-// as the display-rows cache in rows.ts.
+}
+let topology: ScopeIndex | null = null;
 let treeLast: {
   targetDir: string;
   candidates: ScanCandidate[];
@@ -153,7 +69,177 @@ export function clearScopeTreeCache(): void {
   scopeKeyCache.clear();
 }
 
-/** Visible sidebar rows: all-scopes, then an indented folder tree. */
+/** Keep the uncompressed tree so a later sibling can split a displayed chain.
+ * Compression is a view, not a destructive rewrite of the discovery index. */
+function compressed(node: Node): { end: Node; label: string } {
+  if (node.compressed) return node.compressed;
+  let end = node;
+  const labels = [node.segment];
+  while (end.key.length > 0 && end.ownCount === 0 && end.children?.size === 1) {
+    end = end.children.values().next().value!;
+    labels.push(end.segment);
+  }
+  node.compressed = { end, label: labels.join("/") };
+  return node.compressed;
+}
+function invalidateStructure(node: Node): void {
+  for (let current: Node | null = node; current; current = current.parent) {
+    current.compressed = undefined;
+    current.sorted = undefined;
+  }
+}
+function ownerFor(index: ScopeIndex, candidate: ScanCandidate): Node | undefined {
+  const key = artifactScopeKey(index.targetDir, candidate.path);
+  if (!key) {
+    let direct = index.root.children?.get("");
+    if (!direct) {
+      direct = emptyNode("project root", "", index.root);
+      (index.root.children ??= new Map()).set("", direct);
+    }
+    return direct;
+  }
+  let node = index.root;
+  let acc = "";
+  for (const part of key.split("/").filter(Boolean)) {
+    acc = acc ? `${acc}/${part}` : part;
+    let child = node.children?.get(part);
+    if (!child) {
+      index.nodes++;
+      index.keyBytes += Buffer.byteLength(acc);
+      if (index.nodes > MAX_SCOPE_NODES || index.keyBytes > MAX_SCOPE_KEY_BYTES) return undefined;
+      child = emptyNode(part, acc, node);
+      (node.children ??= new Map()).set(part, child);
+    }
+    node = child;
+  }
+  return node;
+}
+function addStats(owner: Node, delta: Stats): void {
+  if (
+    delta.count === 0 &&
+    delta.bytes === 0 &&
+    delta.selectedCount === 0 &&
+    delta.selectedBytes === 0
+  )
+    return;
+  for (let node: Node | null = owner; node; node = node.parent) {
+    node.stats.count += delta.count;
+    node.stats.bytes += delta.bytes;
+    node.stats.selectedCount += delta.selectedCount;
+    node.stats.selectedBytes += delta.selectedBytes;
+    if (delta.bytes !== 0 && node.parent) node.parent.sorted = undefined;
+  }
+}
+function syncIndex(
+  targetDir: string,
+  candidates: ScanCandidate[],
+  selectedIds: Set<string>,
+): ScopeIndex {
+  const old = topology;
+  const compatible =
+    old &&
+    old.targetDir === targetDir &&
+    old.candidates.length <= candidates.length &&
+    old.candidates.every(
+      (candidate, i) =>
+        candidate.id === candidates[i]!.id && candidate.path === candidates[i]!.path,
+    );
+  if (!compatible)
+    topology = {
+      targetDir,
+      candidates: [],
+      selectedIds: new Set(),
+      root: emptyNode("", "", null),
+      owners: [],
+      nodes: 0,
+      keyBytes: 0,
+      limited: false,
+    };
+  const index = topology!;
+  if (!index.limited) {
+    const oldCount = index.candidates.length;
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i]!;
+      const previous = index.candidates[i];
+      const wasSelected = previous !== undefined && index.selectedIds.has(previous.id);
+      const selected = selectedIds.has(candidate.id);
+      let owner = index.owners[i];
+      if (i >= oldCount) {
+        owner = ownerFor(index, candidate);
+        if (!owner) {
+          // Discard the partial optional index. All artifacts remain visible
+          // and reviewable in the main list; aggregate fallback stays honest.
+          index.limited = true;
+          index.root = emptyNode("", "", null);
+          index.owners = [];
+          break;
+        }
+        index.owners.push(owner);
+        if (owner.ownCount === 0) invalidateStructure(owner);
+        owner.ownCount++;
+      }
+      addStats(owner!, {
+        count: previous === undefined ? 1 : 0,
+        bytes: candidate.estimatedBytes - (previous?.estimatedBytes ?? 0),
+        selectedCount: Number(selected) - Number(wasSelected),
+        selectedBytes:
+          (selected ? candidate.estimatedBytes : 0) - (wasSelected ? previous!.estimatedBytes : 0),
+      });
+    }
+  }
+  if (index.limited) {
+    const stats: Stats = { count: candidates.length, bytes: 0, selectedCount: 0, selectedBytes: 0 };
+    for (const candidate of candidates) {
+      stats.bytes += candidate.estimatedBytes;
+      if (selectedIds.has(candidate.id)) {
+        stats.selectedCount++;
+        stats.selectedBytes += candidate.estimatedBytes;
+      }
+    }
+    index.root.stats = stats;
+  }
+  index.candidates = candidates;
+  index.selectedIds = selectedIds;
+  return index;
+}
+function sortedChildren(node: Node): Node[] {
+  if (!node.sorted)
+    node.sorted = [...(node.children?.values() ?? [])].sort(
+      (a, b) =>
+        b.stats.bytes - a.stats.bytes ||
+        compressed(a).label.localeCompare(compressed(b).label) ||
+        (a.key === "" ? 1 : b.key === "" ? -1 : 0),
+    );
+  return node.sorted;
+}
+function snapshotRow(
+  node: Node,
+  key: string | null,
+  label: string,
+  depth: number,
+  hasChildren: boolean,
+  stats: Stats,
+): ScopeSidebarRow {
+  const old = node.row;
+  if (
+    old &&
+    old.key === key &&
+    old.label === label &&
+    old.depth === depth &&
+    old.hasChildren === hasChildren &&
+    old.count === stats.count &&
+    old.bytes === stats.bytes &&
+    old.selectedCount === stats.selectedCount &&
+    old.selectedBytes === stats.selectedBytes
+  )
+    return old;
+  node.row = { key, label, depth, hasChildren, ...stats };
+  return node.row;
+}
+
+/** Incremental observations and immutable rows. A frame only creates nodes for
+ * new paths and replaces changed row snapshots; selection/size deltas reach
+ * their ancestors without allocating a full-tree aggregate Map. */
 export function buildScopeTreeRows(
   targetDir: string,
   candidates: ScanCandidate[],
@@ -166,112 +252,45 @@ export function buildScopeTreeRows(
     treeLast.candidates === candidates &&
     treeLast.selectedIds === selectedIds &&
     treeLast.expandedKeys === expandedKeys
-  ) {
+  )
     return treeLast.rows;
-  }
-  const rows = computeScopeTreeRows(targetDir, candidates, selectedIds, expandedKeys);
-  treeLast = { targetDir, candidates, selectedIds, expandedKeys, rows };
-  return rows;
-}
-
-function computeScopeTreeRows(
-  targetDir: string,
-  candidates: ScanCandidate[],
-  selectedIds: Set<string>,
-  expandedKeys: ReadonlySet<string>,
-): ScopeSidebarRow[] {
-  const orderChanged =
-    !topology || topology.targetDir !== targetDir || topology.candidates !== candidates;
-  const sameShape =
-    orderChanged &&
-    topology &&
-    topology.targetDir === targetDir &&
-    topology.candidates.length === candidates.length &&
-    topology.candidates.every(
-      (previous, i) => previous.id === candidates[i]!.id && previous.path === candidates[i]!.path,
-    );
-  if (orderChanged && sameShape && topology) {
-    // Sizing replaces immutable candidate records, not folder topology. Keep
-    // the trie and refresh its observations instead of allocating every node.
-    topology.byId = candidateIndex(candidates);
-    topology.candidates = candidates;
-  } else if (orderChanged) {
-    const groups = groupCandidatesByScope(targetDir, candidates, undefined, {
-      maxGroups: Number.POSITIVE_INFINITY,
-    });
-    const byId = candidateIndex(candidates);
-    const root = emptyNode("", "");
-    const budget: ScopeBudget = { nodes: 0, keyBytes: 0 };
-    let limited = false;
-    for (const group of groups) {
-      if (!insertGroup(root, group, budget)) {
-        limited = true;
-        break;
+  const index = syncIndex(targetDir, candidates, selectedIds);
+  const rows = [
+    snapshotRow(
+      index.root,
+      null,
+      index.limited ? "all scopes (folder index limit)" : "all scopes",
+      0,
+      false,
+      index.root.stats,
+    ),
+  ];
+  if (!index.limited) {
+    const pending: Array<{ node: Node; depth: number }> = [];
+    const tops = sortedChildren(index.root);
+    for (let i = tops.length - 1; i >= 0; i--) pending.push({ node: tops[i]!, depth: 0 });
+    while (pending.length) {
+      const { node, depth } = pending.pop()!;
+      const { end, label } = compressed(node);
+      const hasChildren = (end.children?.size ?? 0) > 0;
+      rows.push(
+        snapshotRow(
+          node,
+          end.key,
+          end.key === "" ? "project root" : `${label}/`,
+          depth,
+          hasChildren,
+          end.stats,
+        ),
+      );
+      if (hasChildren && expandedKeys.has(end.key)) {
+        const children = sortedChildren(end);
+        for (let i = children.length - 1; i >= 0; i--)
+          pending.push({ node: children[i]!, depth: depth + 1 });
       }
     }
-    if (limited) {
-      // Keep every candidate available in the main list. Only the optional
-      // folder index is suppressed, with explicit feedback on its sole row.
-      root.children.clear();
-      root.ids = candidates.map((candidate) => candidate.id);
-    }
-    flattenTrieNode(root);
-    topology = { targetDir, candidates, root, tops: [], byId, children: new Map(), limited };
   }
-  if (!topology) return [];
-  const { root, byId } = topology;
-  const stats = new Map<TrieNode, Stats>();
-  const all = aggregate(root, byId, selectedIds, stats);
-  if (orderChanged) {
-    const children = new Map<TrieNode, TrieNode[]>();
-    const compare = (a: TrieNode, b: TrieNode) =>
-      stats.get(b)!.bytes - stats.get(a)!.bytes || a.segment.localeCompare(b.segment);
-    for (const node of stats.keys()) {
-      if (node.children.size) children.set(node, [...node.children.values()].sort(compare));
-    }
-    const tops = [...(children.get(root) ?? [])];
-    if (root.ids.length && !topology.limited) {
-      const synthetic = emptyNode("project root", "");
-      synthetic.ids = root.ids;
-      aggregate(synthetic, byId, selectedIds, stats);
-      tops.push(synthetic);
-      tops.sort(compare);
-    }
-    topology.children = children;
-    topology.tops = tops;
-  }
-  const { tops, children } = topology;
-  const rows: ScopeSidebarRow[] = [
-    {
-      key: null,
-      label: topology.limited ? "all scopes (folder index limit)" : "all scopes",
-      depth: 0,
-      hasChildren: false,
-      ...all,
-    },
-  ];
-  const pending = tops
-    .slice()
-    .reverse()
-    .map((node) => ({ node, depth: 0 }));
-  while (pending.length) {
-    const { node, depth } = pending.pop()!;
-    const values = stats.get(node) ?? aggregate(node, byId, selectedIds, stats);
-    const hasChildren = node.children.size > 0;
-    rows.push({
-      key: node.key,
-      label: node.key === "" ? "project root" : `${node.segment}/`,
-      depth,
-      hasChildren,
-      ...values,
-    });
-    if (hasChildren && expandedKeys.has(node.key)) {
-      const nested = children.get(node) ?? [];
-      for (let i = nested.length - 1; i >= 0; i--)
-        pending.push({ node: nested[i]!, depth: depth + 1 });
-    }
-  }
-
+  treeLast = { targetDir, candidates, selectedIds, expandedKeys, rows };
   return rows;
 }
 
@@ -291,7 +310,7 @@ export function artifactScopeKey(targetDir: string, path: string): string {
   }
   const cached = scopeKeyCache.get(path);
   if (cached !== undefined) return cached;
-  const rel = relativePath(targetDir, path).replaceAll("\\", "/");
+  const rel = relativePath(targetDir, path);
   const slash = rel.lastIndexOf("/");
   const key = slash <= 0 ? "" : rel.slice(0, slash);
   // Keep content cache bounded across rescans of the same root.

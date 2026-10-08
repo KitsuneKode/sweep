@@ -15,6 +15,10 @@ if (!Number.isSafeInteger(count) || count < 1 || count > 100000)
   throw new Error("Invalid candidate count (1..100000)");
 const awaitCommit = !process.argv.includes("--event-loop-only");
 const diagnoseMemory = process.argv.includes("--memory-diagnostics");
+const widthArg = process.argv.indexOf("--width");
+const width = widthArg < 0 ? 120 : Number(process.argv[widthArg + 1]);
+if (!Number.isSafeInteger(width) || width < 40 || width > 240)
+  throw new Error("Invalid terminal width (40..240)");
 const candidates: ScanCandidate[] = Array.from({ length: count }, (_, i) => ({
   id: `candidate_${i}`,
   path: `/tmp/sweep-stream-synthetic/project-${i}/node_modules`,
@@ -52,8 +56,18 @@ let outstanding = 0;
 let maxOutstanding = 0;
 let sampledPeakRss = process.memoryUsage().rss;
 const inputPaintMs: number[] = [];
+let updateDepthWarnings = 0;
+const originalConsoleError = console.error;
+console.error = (...args: unknown[]) => {
+  if (
+    args.some((arg) => typeof arg === "string" && arg.includes("Maximum update depth exceeded"))
+  ) {
+    updateDepthWarnings++;
+  }
+  originalConsoleError(...args);
+};
 const setup = await createTestRenderer({
-  width: 120,
+  width,
   height: 32,
   exitOnCtrlC: false,
   exitSignals: [],
@@ -158,8 +172,16 @@ try {
   await setup.flush();
   elapsedMs = performance.now() - started;
   const frame = setup.captureCharFrame();
-  if (!frame.includes(`${count} found`) || frame.includes("SCANNING"))
-    throw new Error("Final frame did not reconcile");
+  // Narrow headers omit discovery counts and input can dismiss the completion
+  // notice. Their final assertion covers completion state; full counts are
+  // asserted in the default-width probe and reducer correctness tests.
+  if (
+    !(width < 100 ? frame.includes("NORMAL") : frame.includes(`${count} found`)) ||
+    frame.includes("SCANNING") ||
+    frame.includes("INCOMPLETE")
+  )
+    throw new Error(`Final frame did not reconcile: ${frame}`);
+  if (updateDepthWarnings > 0) throw new Error("UI emitted maximum update depth warnings");
 } catch (error) {
   failure = error;
 } finally {
@@ -171,6 +193,7 @@ try {
   setup.renderer.destroy();
   await producer;
   releaseUiCaches();
+  console.error = originalConsoleError;
   if (diagnoseMemory) {
     Bun.gc(true);
     memoryAfterCleanup = heapStats();
@@ -183,6 +206,7 @@ console.log(
   JSON.stringify(
     {
       runtime: Bun.version,
+      width,
       status: failure === undefined ? "passed" : "failed",
       ...(failure === undefined
         ? {}
@@ -200,6 +224,7 @@ console.log(
       inputPaintP99Ms: percentile(0.99),
       sampledPeakRssMiB: sampledPeakRss / 1024 ** 2,
       forcedGc: diagnoseMemory,
+      updateDepthWarnings,
       ...(diagnoseMemory
         ? {
             memoryBeforeCleanup,

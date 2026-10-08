@@ -158,6 +158,12 @@ Left collapses or moves to the visible parent. Streaming sizes preserve folder
 identity under the cursor. Rescan and session teardown release retained display,
 summary, scope topology and path caches.
 
+Live discovery reuses artifact groups and folder observations. Sizing and
+selection update affected ancestors; earlier frame rows remain immutable.
+Folder compression is a view, so new siblings can split a displayed chain.
+Literal POSIX backslashes remain filename characters in scopes and previews;
+only Windows separators are normalized for tree display.
+
 ## Apply feedback
 
 Confirmation is compact, shows the exact reviewed selection and keeps long
