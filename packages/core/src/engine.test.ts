@@ -608,7 +608,10 @@ ${failure === "exit" ? "process.exit(4);" : "process.stdout.write('invalid JSON\
       const previous = process.env.SWEEP_ENGINE_PATH;
       process.env.SWEEP_ENGINE_PATH = binary;
       try {
-        await expect(applyPlanWithBackend(plan, "rust")).rejects.toThrow(/Outcomes are unknown/);
+        await expect(applyPlanWithBackend(plan, "rust")).rejects.toMatchObject({
+          code: 4,
+          applyOutcome: "unknown",
+        });
         expect(existsSync(dir("node_modules"))).toBe(true);
       } finally {
         if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;

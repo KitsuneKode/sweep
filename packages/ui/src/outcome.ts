@@ -4,7 +4,16 @@ export type SweepUiOutcome =
   /** `trash`: the user chose "move to trash" in the confirm dialog. */
   | { type: "apply"; plan: ScanPlan; trash?: boolean }
   | { type: "rescan"; disabledPatterns: string[]; extraPatterns: string[] }
-  | { type: "abort" };
+  | { type: "abort" }
+  | {
+      type: "done";
+      deletedCount: number;
+      movedCount: number;
+      failedCount: number;
+      unattemptedCount: number;
+      interrupted: boolean;
+      unknownOutcome: boolean;
+    };
 
 /**
  * A scoped apply the app runs without leaving the session (queued or single-row `x`).

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { ApplyRefusedError, GuardrailError } from "@kitsunekode/sweep-core/guardrails";
+import {
+  ApplyOutcomeUnknownError,
+  ApplyRefusedError,
+  GuardrailError,
+} from "@kitsunekode/sweep-core/guardrails";
 import { ConfigParseError } from "@kitsunekode/sweep-core/config";
 import { PlanValidationError } from "@kitsunekode/sweep-core/plan";
 import { EXIT, resolveExitCode, fatalErrorDocument } from "./errors.js";
@@ -52,5 +56,42 @@ test("automation errors distinguish a proven refusal from uncertain mutation", (
   expect(fatalErrorDocument(new ApplyRefusedError("busy", "apply_busy"))).toMatchObject({
     retryable: true,
     applyOutcome: "not_started",
+  });
+});
+
+test("unknown apply outcomes are failures, never ordinary user aborts", () => {
+  const error = new ApplyOutcomeUnknownError("report missing");
+  expect(resolveExitCode(error)).toBe(EXIT.FAILURE);
+  expect(fatalErrorDocument(error, "not_started")).toMatchObject({
+    code: "apply_outcome_unknown",
+    exitCode: 4,
+    applyOutcome: "unknown",
+    retryable: false,
+  });
+  expect(resolveExitCode(new GuardrailError("unsupported code", 5))).toBe(EXIT.FAILURE);
+  expect(resolveExitCode(new GuardrailError("unsupported code", 99))).toBe(EXIT.FAILURE);
+});
+
+test("error codes survive separately bundled core constructors", () => {
+  const refused = Object.assign(new Error("busy"), {
+    name: "ApplyRefusedError",
+    applyOutcome: "not_started",
+    refusalCode: "apply_busy",
+  });
+  expect(resolveExitCode(refused)).toBe(EXIT.GUARDRAIL);
+  expect(fatalErrorDocument(refused)).toMatchObject({
+    exitCode: 2,
+    retryable: true,
+    applyOutcome: "not_started",
+  });
+  const unknown = Object.assign(new Error("lost"), {
+    name: "ApplyOutcomeUnknownError",
+    applyOutcome: "unknown",
+  });
+  expect(fatalErrorDocument(unknown)).toMatchObject({
+    exitCode: 4,
+    code: "apply_outcome_unknown",
+    retryable: false,
+    applyOutcome: "unknown",
   });
 });

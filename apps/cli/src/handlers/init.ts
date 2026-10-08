@@ -26,7 +26,7 @@ export async function handleInit(opts: InitHandlerOptions): Promise<void> {
     const shownPath = sanitizeTerminalText(configPath);
     if (result === "exists") {
       console.error(`error: ${shownPath} already exists (use --force to overwrite)`);
-      exitWith(EXIT.ABORTED);
+      exitWith(EXIT.GUARDRAIL);
     }
 
     console.log(`Created ${shownPath}`);

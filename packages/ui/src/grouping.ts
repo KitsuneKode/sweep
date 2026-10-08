@@ -1,6 +1,6 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { candidateIndex } from "./candidate-index.js";
-import { relativePath } from "./presentation.js";
+import { artifactScopeKey } from "./scope-tree.js";
 
 export interface ArtifactScopeGroup {
   /** Stable sort key - empty string means scan root. */
@@ -35,9 +35,7 @@ export function groupCandidatesByScope(
   const byId = candidateIndex(candidates);
 
   for (const candidate of candidates) {
-    const relative = relativePath(targetDir, candidate.path);
-    const segments = relative.split("/").filter((segment) => segment.length > 0);
-    const key = segments.length <= 1 ? "" : segments.slice(0, -1).join("/");
+    const key = artifactScopeKey(targetDir, candidate.path);
     const label = labelForKey(key);
 
     const bucket = buckets.get(key) ?? { label, ids: [] };

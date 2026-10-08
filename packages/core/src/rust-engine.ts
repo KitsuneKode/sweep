@@ -12,7 +12,7 @@ import type {
 } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { isColdRequested } from "./cold.js";
-import { ApplyRefusedError, GuardrailError } from "./guardrails.js";
+import { ApplyOutcomeUnknownError, ApplyRefusedError, GuardrailError } from "./guardrails.js";
 import { applyPlanInsights, buildPlan } from "./planner.js";
 import {
   PlanValidationError,
@@ -402,9 +402,8 @@ async function runEngineAsync(
         proc.kill("SIGKILL");
         settle(() =>
           rejectPromise(
-            new GuardrailError(
+            new ApplyOutcomeUnknownError(
               "Apply cancellation timed out. Outcomes are unknown; inspect the tree before retrying.",
-              1,
             ),
           ),
         );
@@ -692,9 +691,8 @@ export async function applyPlanViaRust(
     if (refusal && !(error instanceof PlanValidationError) && began.size === 0) throw refusal;
     if (began.size > 0) {
       const detail = error instanceof Error ? error.message : String(error);
-      throw new GuardrailError(
+      throw new ApplyOutcomeUnknownError(
         `Native apply did not return a trusted outcome report. Outcomes are unknown; inspect the tree before retrying. ${detail}`,
-        1,
       );
     }
     throw error;

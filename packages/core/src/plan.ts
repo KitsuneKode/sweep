@@ -2,7 +2,11 @@ import Ajv2020 from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { assertPlanResources } from "./resource-budget.js";
-import { hasCanonicalPathSpelling, pathUsesProcessRelativeRoot } from "./guardrails.js";
+import {
+  filesystemErrorCode,
+  hasCanonicalPathSpelling,
+  pathUsesProcessRelativeRoot,
+} from "./guardrails.js";
 import { validFilesystemIdentity } from "./filesystem-identity.js";
 import type { ApplyReport, ScanCandidate, ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
@@ -284,9 +288,10 @@ export function loadPlan(planPath: string): ScanPlan {
   let handle: number;
   try {
     handle = openSync(planPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch {
+  } catch (error) {
+    const code = filesystemErrorCode(error);
     throw new PlanValidationError(
-      `Plan file not found or cannot be opened: ${sanitizeTerminalText(planPath)}`,
+      `Plan file cannot be opened${code ? ` (${code})` : ""}: ${sanitizeTerminalText(planPath)}`,
     );
   }
   let raw: string;
@@ -329,3 +334,6 @@ export function getSelectedBytes(plan: ScanPlan): number {
     .filter((candidate) => selectedIds.has(candidate.id))
     .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
 }
+
+/** The host must check this before entering a destructive session. */
+export { assertPlanResources } from "./resource-budget.js";

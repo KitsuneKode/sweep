@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
@@ -28,7 +29,14 @@ const FIXTURES_ROOT = join(REPO_ROOT, "tests/fixtures");
 // The resolver picks the freshest workspace build, so pin the expectation to
 // the same rule: a stale debug binary must not beat a newer release build.
 const LOCAL_BINARY = ["debug", "release"]
-  .map((profile) => join(REPO_ROOT, "target", profile, "sweep-engine"))
+  .map((profile) =>
+    join(
+      REPO_ROOT,
+      "target",
+      profile,
+      process.platform === "win32" ? "sweep-engine.exe" : "sweep-engine",
+    ),
+  )
   .filter((path) => existsSync(path))
   .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
 
@@ -71,7 +79,7 @@ function loadFixtureCases(): Array<{ name: string; root: string; request: Fixtur
 }
 
 function rustAvailable(): boolean {
-  return process.env.SWEEP_ENGINE_FROM_NPM !== "1" && LOCAL_BINARY !== undefined;
+  return LOCAL_BINARY !== undefined;
 }
 
 function assertMatchesGolden(actual: ScanPlan, fixtureRoot: string): void {
@@ -331,7 +339,7 @@ test.skipIf(!NATIVE_AVAILABLE)("direct native errors escape terminal control seq
   expect(stderr).toContain("payload");
 });
 
-test.skipIf(!rustAvailable())(
+test.skipIf(!NATIVE_AVAILABLE)(
   "native refreshed-size refusal is explicit and leaves all files untouched",
   async () => {
     const root = mkdtempSync(join(tmpdir(), "sweep-native-refusal-"));
@@ -346,6 +354,38 @@ test.skipIf(!rustAvailable())(
         refusalCode: "size_limit_exceeded",
       });
       expect(readFileSync(join(target, "node_modules", "keep"), "utf8")).toBe("preserve");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!NATIVE_AVAILABLE)(
+  "both engines match absolute file bytes and mtime rather than normalized goldens",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-ground-truth-"));
+    try {
+      const file = join(root, "tsconfig.tsbuildinfo");
+      const contents = Buffer.alloc(8377, 42);
+      writeFileSync(file, contents);
+      const modified = new Date("2026-01-02T03:04:05.000Z");
+      utimesSync(file, modified, modified);
+      const metadata = statSync(file, { bigint: true });
+      const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG);
+      const rustPlan = await scanToPlanViaRust(root, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+      });
+      for (const plan of [jsPlan, rustPlan]) {
+        expect(plan.candidates).toHaveLength(1);
+        const candidate = plan.candidates[0]!;
+        expect(candidate.path).toBe(file);
+        expect(candidate.estimatedBytes).toBe(contents.length);
+        expect(candidate.bytesKnown).not.toBe(false);
+        expect(candidate.modifiedMs).toBe(Number(metadata.mtimeMs));
+        expect(candidate.identity?.device).toBe(metadata.dev.toString());
+        expect(candidate.identity?.inode).toBe(metadata.ino.toString());
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

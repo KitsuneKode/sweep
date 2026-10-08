@@ -1,3 +1,4 @@
+import type { SweepUiOutcome } from "@kitsunekode/sweep-ui/outcome";
 import { spawnSync } from "node:child_process";
 
 import { fileURLToPath } from "node:url";
@@ -67,13 +68,8 @@ function ensureBunRuntimeForUi(): boolean {
 
 /**
  * Runtime contract for the OpenTUI app. Declared locally so the Node CLI does
- * not type-depend on the React/JSX UI package - it is loaded dynamically.
+ * only imports a type-only outcome module; React/JSX is loaded dynamically.
  */
-type SweepUiOutcome =
-  | { type: "apply"; plan: ScanPlan; trash?: boolean }
-  | { type: "rescan"; disabledPatterns: string[]; extraPatterns: string[] }
-  | { type: "abort" };
-
 export interface SweepUiModule {
   runSweepUiStreaming: (options: {
     targetDir: string;
@@ -84,7 +80,6 @@ export interface SweepUiModule {
     resourceProfile?: import("@kitsunekode/sweep-protocol").ResourceProfile | undefined;
     dryRun?: boolean;
     trash?: boolean;
-    yes?: boolean;
     /**
      * In-session apply channel for queued and single-row deletes (x). Runs the full
      * engine apply pipeline quietly - the TUI owns the screen, so progress
@@ -142,7 +137,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
   // yes/force-large gate --force-large; trash/dry-run reach the UI directly.
   warnIgnoredOptions(opts, "ui", {
     scans: true,
-    except: ["--yes", "--force-large", "--trash", "--dry-run"],
+    except: ["--yes", "--force-large", "--trash", "--dry-run", "--max-size-gb"],
   });
 
   try {
@@ -227,6 +222,24 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       },
     });
 
+    if (outcome.type === "done") {
+      console.log(
+        `${outcome.deletedCount} deleted · ${outcome.movedCount} moved to trash · ${outcome.failedCount} failed · ${outcome.unattemptedCount} unattempted`,
+      );
+      if (outcome.unknownOutcome)
+        console.error(
+          "An apply outcome is unknown. Inspect disk and the recovery journal before retrying.",
+        );
+      await drainStdout();
+      exitWith(
+        outcome.unknownOutcome || outcome.failedCount > 0
+          ? EXIT.FAILURE
+          : outcome.interrupted
+            ? EXIT.ABORTED
+            : EXIT.OK,
+      );
+    }
+
     if (outcome.type === "abort") {
       printAborted();
       exitWith(EXIT.ABORTED);
@@ -239,8 +252,8 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     }
 
     const selectedPlan = outcome.plan;
-    // `--trash` or the confirm dialog's `t` toggle: either asks for reversible.
-    const useTrash = Boolean(opts.trash) || outcome.trash === true;
+    // The reviewed dialog choice wins, including an explicit flip off.
+    const useTrash = outcome.trash ?? Boolean(opts.trash);
 
     if (selectedPlan.selectedCandidateIds.length === 0) {
       console.log("Nothing selected.");

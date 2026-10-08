@@ -1,21 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SWEEP = join(REPO_ROOT, "apps/cli/dist/sweep.js");
-const LOCAL_RUST_ENGINE = join(REPO_ROOT, "target/debug/sweep-engine");
+const LOCAL_RUST_ENGINE = join(
+  REPO_ROOT,
+  "target",
+  "debug",
+  process.platform === "win32" ? "sweep-engine.exe" : "sweep-engine",
+);
 
-function rustCliAvailable(): boolean {
-  return process.env.SWEEP_ENGINE_FROM_NPM !== "1" && existsSync(LOCAL_RUST_ENGINE);
-}
+const NATIVE_CLI_AVAILABLE = existsSync(LOCAL_RUST_ENGINE);
+if (process.env.SWEEP_REQUIRE_RUST_TESTS === "1" && !NATIVE_CLI_AVAILABLE)
+  throw new Error("Native CLI coverage is required, but the Rust test engine is missing");
 
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync("/tmp/sweep-cli-test-");
+  tmpDir = mkdtempSync(join(tmpdir(), "sweep-cli-test-"));
 });
 
 afterEach(() => {
@@ -361,7 +367,7 @@ describe("CLI scan/apply", () => {
     expect(result.stderr).toContain("requires an interactive TTY");
   });
 
-  test.skipIf(!rustCliAvailable())("rust engine honors --pattern on scan --json", () => {
+  test.skipIf(!NATIVE_CLI_AVAILABLE)("rust engine honors --pattern on scan --json", () => {
     mkdirSync(dir("custom-cache"));
     mkdirSync(dir("node_modules"));
 

@@ -1,3 +1,5 @@
+import { assertPlanResources } from "@kitsunekode/sweep-core/plan";
+import { noteApplyBackendEntered, noteApplyReportTrusted } from "../apply-lifecycle.js";
 import { beginApplySession, type ApplySession } from "@kitsunekode/sweep-core/apply-session";
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
@@ -27,6 +29,7 @@ import {
   assertSafeCwd,
   assertSizeLimit,
   isApplyRefusedError,
+  ApplyRefusedError,
   assertSafePattern,
   assertTargetDirectory,
   isSameResolvedPath,
@@ -491,6 +494,14 @@ export async function executePlanDeletion(
   /** Absolute trash dir when `--trash` moved entries instead of deleting. */
   trashDir?: string;
 }> {
+  // A resource refusal precedes trash creation, journaling and backend entry.
+  try {
+    assertPlanResources(plan);
+  } catch (error) {
+    if (error instanceof GuardrailError)
+      throw new ApplyRefusedError(error.message, "resource_limit_exceeded");
+    throw error;
+  }
   // Re-assert the target guardrail here - not just in callers - so the trash
   // mkdir below can never run against a root a forged plan would fail on.
   assertSafeCwd(plan.targetDir);
@@ -671,11 +682,13 @@ export async function executePlanDeletion(
   let session: ApplySession | undefined;
   try {
     session = beginApplySession(plan, effectiveEngine, trashDir);
+    noteApplyBackendEntered();
     const { report, cleanResult, interrupted } = await applyPlanWithBackend(
       plan,
       effectiveEngine,
       applyOptions,
     );
+    noteApplyReportTrusted();
     try {
       session.finish(report);
     } catch (error) {
@@ -702,6 +715,7 @@ export async function executePlanDeletion(
     };
   } catch (error) {
     if (session && isApplyRefusedError(error)) {
+      noteApplyReportTrusted();
       try {
         session.finish({
           protocolVersion: plan.protocolVersion,

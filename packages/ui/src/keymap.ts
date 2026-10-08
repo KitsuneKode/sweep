@@ -174,7 +174,7 @@ export interface KeymapActions {
    */
   readState?: () => SweepUiState;
   /**
-   * Whether the confirm dialog has painted long enough for its destructive
+   * Whether the confirm dialog has committed for its destructive
    * keys to count as deliberate. Evaluated live at keypress time - a `y`/`t`
    * byte in the same stdin drain as the dialog's opener is leftover burst,
    * not an answer. Absent means "always armed" (tests, non-burst callers).
@@ -262,13 +262,14 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     }
     // Consequential keys (confirm, mode flip) need the dialog to have been
     // *seen*: a non-bracketed paste or scripted burst can carry y/t bytes
-    // that arrive while the dialog is milliseconds old. The arm check runs
+    // that arrive before the dialog commits. The arm check runs
     // live at keypress time because the ctx snapshot predates the paint.
     // Dismissal keys stay live - closing a dialog early is always safe,
     // confirming early isn't.
     const confirmUnarmed = actions.isConfirmArmed !== undefined && !actions.isConfirmArmed();
     if (key.name === "t") {
       if (!confirmUnarmed) actions.toggleTrash?.();
+      else actions.notify?.("Wait for the confirmation to appear before changing deletion mode");
       return;
     }
     if (key.name === "y") {

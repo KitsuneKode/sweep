@@ -725,3 +725,36 @@ test("a synchronous scan startup failure renders an incomplete error instead of 
   expect(setup.captureCharFrame()).toContain("startup failed");
   expect(setup.captureCharFrame()).toContain("scan error");
 });
+
+test("an explicitly reviewed trash flip off survives the exit apply outcome", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  const setup = await testRender(
+    <SweepApp plan={createPlan()} trash onDone={(o) => outcomes.push(o)} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    setup.mockInput.pressKey("x");
+    await setup.flush();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    setup.mockInput.pressKey("t");
+    await setup.flush();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  expect(setup.captureCharFrame()).toContain("Permanently delete");
+  await act(async () => {
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  expect(outcomes[0]).toMatchObject({ type: "apply", trash: false });
+  if (outcomes[0]?.type === "apply") expect(outcomes[0].plan.selectedCandidateIds).toHaveLength(1);
+});

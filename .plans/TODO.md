@@ -13,6 +13,10 @@
 
 ## Next
 
+- [ ] Close [round-four audit reconciliation](audit-round4-2026-10-08.md):
+      confirmation authority, error contract, session truth and recovery evidence;
+      compact discovery paging and platform race qualification remain separate.
+
 - [x] Implement [live delivery, queue clarity and native activity](ui-streaming-followup-2026-10-08.md):
       checkpoint 762fc15 passed all nine local steps and all eight hosted jobs.
 - [x] Implement and measure [incremental live indexes and literal path identity](incremental-live-indexes-2026-10-08.md);

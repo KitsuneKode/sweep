@@ -114,12 +114,17 @@ errors end stderr with a JSON error record containing `type`, `protocolVersion`,
 `code`, `exitCode`, `retryable` and `message`. `plan` uses this error format too.
 Put `--json` before other arguments if usage errors must also be structured.
 Invalid arguments exit with code 2 and code `invalid_arguments`; cancellation
-uses exit 1. Known apply refusals also include a remediation `hint`.
+uses exit 1. A lost native apply report uses exit 4 with code
+`apply_outcome_unknown`, `applyOutcome: "unknown"` and `retryable: false`;
+it must never be treated as an ordinary user abort. Unexpected crashes also
+preserve JSON mode. Known apply refusals include a remediation `hint`.
 Earlier stderr lines can contain warnings. Stdout remains reserved for plans and
 completed reports. An `applyOutcome: "not_started"` means that this request
 refused before removal; `"unknown"` means no trusted final report established the
 result. A known size refusal has code `size_limit_exceeded`, and cooperative lock
-contention has code `apply_busy`. These codes do not authorize automatic retries.
+contention has code `apply_busy`. A plan resource refusal before backend entry
+has code `resource_limit_exceeded` and outcome `not_started`. These codes do not
+authorize automatic retries.
 Only cooperative lock contention is marked retryable; wait for the holder to
 finish. Never delete a lock based only on a PID observation. Human deletion
 progress goes to stderr, and report delivery remains part of the destructive
@@ -144,3 +149,11 @@ Run under the project owner's normal account. Sweep does not request elevated
 privileges. Do not give an agent unrestricted root access to bypass permission,
 mount or protected-root refusals. Pause builds and synchronization jobs inside
 selected artifacts: their interior files can change between scan and removal.
+
+## Incomplete recovery journals
+
+`recover --json` keeps uncertain candidate statuses as `unknown`. An incomplete
+journal can additionally expose `recordedStatus` and `recordedTrashMoves` from
+fully read records. These are uncommitted observations, not confirmed disk state
+or authorization to retry/restore. Confirmed `trashMoves` remain empty until a
+complete journal establishes the outcome. Recovery itself never mutates data.

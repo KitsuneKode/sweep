@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { unlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
@@ -88,7 +88,7 @@ describe("plan validation", () => {
   });
 
   test("loadPlan validates JSON from disk", () => {
-    const path = join(tmpdir(), `sweep-plan-load-${Date.now()}.json`);
+    const path = join(tmpdir(), `sweep-plan-load-${crypto.randomUUID()}.json`);
     writeFileSync(path, JSON.stringify({ not: "a plan" }));
     try {
       expect(() => loadPlan(path)).toThrow(PlanValidationError);
@@ -104,9 +104,9 @@ describe("plan validation", () => {
   });
 
   test("loadPlan rejects missing files with a clear error", () => {
-    expect(() => loadPlan(join(tmpdir(), `sweep-no-such-plan-${Date.now()}.json`))).toThrow(
-      /not found/,
-    );
+    expect(() =>
+      loadPlan(join(tmpdir(), `sweep-no-such-plan-${crypto.randomUUID()}.json`)),
+    ).toThrow(/ENOENT/);
   });
 });
 
@@ -155,3 +155,17 @@ test("rejects a plan whose candidate path is not in canonical form", () => {
   forged.candidates[0]!.path += "/";
   expect(() => validatePlan(forged)).toThrow("canonical");
 });
+
+test.skipIf(process.platform === "win32")(
+  "a symlinked plan reports ELOOP instead of a missing file",
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-plan-errno-"));
+    try {
+      const path = join(root, "loop.json");
+      symlinkSync(path, path);
+      expect(() => loadPlan(path)).toThrow(/ELOOP/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

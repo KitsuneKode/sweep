@@ -87,6 +87,11 @@ different facts. Unknown byte coverage is labeled partial. A queued zero-byte
 item must not display as an empty queue. Single-item confirmation names its
 scope and the other queued items it leaves behind. Enter inside confirmation
 explains `y`; it does not silently disappear or implicitly change scope.
+Confirmation requires a committed dialog for the current item/queue; elapsed time
+cannot arm unseen consent. Missing single items show an unavailable-item dialog instead of falling back
+to a queue dialog. Quitting after an apply reports the session outcomes, including
+failures/interruption or an unknown report, rather than calling completed work an
+abort. Changing trash mode is an explicit choice in either direction.
 
 ## 6. Mouse is a peer, not a fallback
 

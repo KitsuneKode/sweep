@@ -5,7 +5,7 @@
  * with no render/flush between — both keys dispatch against the same
  * committed React snapshot, exactly like coalesced stdin bytes.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import { testRender as nativeTestRender } from "@opentui/react/test-utils";
 import { act } from "react";
@@ -136,10 +136,6 @@ async function mountWithApply(
       await setup.flush();
     });
     await settle();
-    // confirmArmedAtRef flips to -Inf after the first committed paint; the
-    // 150ms sleep covers the 100ms wall-clock fallback either way.
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    await settle();
   };
   return {
     setup,
@@ -160,6 +156,31 @@ async function mountWithApply(
 }
 
 describe("adversarial: same-drain bursts on the confirm dialog", () => {
+  test("elapsed time without a committed confirm never escalates a single row to the queue", async () => {
+    const plan = createPlan();
+    plan.selectedCandidateIds = plan.candidates.map((c) => c.id);
+    const { setup, settle, applyCalls } = await mountWithApply(() => {}, undefined, plan);
+    let now = performance.now();
+    const clock = spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      await act(async () => {
+        setup.mockInput.pressKey("x");
+        now += 200; // Simulate a delayed frame; React has not committed the dialog.
+        setup.mockInput.pressKey("y");
+        expect(applyCalls).toHaveLength(0);
+        await setup.flush();
+      });
+    } finally {
+      clock.mockRestore();
+    }
+    await settle();
+    expect(applyCalls).toHaveLength(0);
+    await act(async () => setup.mockInput.pressKey("y"));
+    await settle();
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0]!.plan.selectedCandidateIds).toEqual(["cand_caution"]);
+  });
+
   test("n then y in one drain must NOT apply the dismissed single row", async () => {
     const outcomes: SweepUiOutcome[] = [];
     const { setup, settle, openSingleConfirm, applyCalls } = await mountWithApply((o) =>
@@ -665,4 +686,75 @@ test("uncapped confirmation remains explicit without inventing an over-limit ref
   expect(frame).toContain("No byte ceiling");
   expect(frame).not.toContain("Over the limit");
   expect(frame).toContain("Permanently delete");
+});
+
+test("quitting after a trusted apply reports the session result rather than abort", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  const { setup, settle, openSingleConfirm, applyCalls, applyResolvers } = await mountWithApply(
+    (o) => outcomes.push(o),
+  );
+  await openSingleConfirm();
+  await act(async () => {
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  await settle();
+  const id = applyCalls[0]!.plan.selectedCandidateIds[0]!;
+  await act(async () => {
+    applyResolvers[0]!({
+      report: {
+        protocolVersion: "1",
+        targetDir: "/tmp/sweep-ui",
+        selectedCandidateIds: [id],
+        deletedCount: 1,
+        failedCount: 0,
+        totalBytesFreed: 1024,
+        failedPaths: [],
+        outcomes: [{ candidateId: id, status: "deleted" }],
+      },
+      interrupted: false,
+    });
+    await setup.flush();
+  });
+  await settle();
+  await act(async () => {
+    setup.mockInput.pressKey("q");
+    await setup.flush();
+  });
+  await settle();
+  expect(outcomes).toEqual([
+    {
+      type: "done",
+      deletedCount: 1,
+      movedCount: 0,
+      failedCount: 0,
+      unattemptedCount: 0,
+      interrupted: false,
+      unknownOutcome: false,
+    },
+  ]);
+});
+
+test("quitting after a lost apply report retains the unknown outcome", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  const { setup, settle, openSingleConfirm, applyRejecters } = await mountWithApply((o) =>
+    outcomes.push(o),
+  );
+  await openSingleConfirm();
+  await act(async () => {
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  await settle();
+  await act(async () => {
+    applyRejecters[0]!(new Error("lost report"));
+    await setup.flush();
+  });
+  await settle();
+  await act(async () => {
+    setup.mockInput.pressKey("q");
+    await setup.flush();
+  });
+  await settle();
+  expect(outcomes[0]).toMatchObject({ type: "done", deletedCount: 0, unknownOutcome: true });
 });

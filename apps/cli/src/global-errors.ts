@@ -1,5 +1,10 @@
-import { abortActiveApply, hasApplyEntered, isApplyActive } from "./apply-lifecycle.js";
-import { EXIT, handleFatalError } from "./errors.js";
+import {
+  abortActiveApply,
+  hasApplyEntered,
+  hasApplyOutcomeUnresolved,
+  isApplyActive,
+} from "./apply-lifecycle.js";
+import { EXIT, handleFatalError, isFatalErrorJsonMode } from "./errors.js";
 import { isJsonStdoutActive } from "./json-output.js";
 
 /** Shared by npm and compiled entrypoints: a broken sink must not hide apply. */
@@ -26,6 +31,11 @@ export function handleStdoutError(
 export function installGlobalErrorHandlers(): void {
   process.stdout.on("error", handleStdoutError);
   process.stderr.on("error", () => {});
-  process.on("unhandledRejection", handleFatalError);
-  process.on("uncaughtException", handleFatalError);
+  const fatal = (error: unknown) =>
+    handleFatalError(error, {
+      json: isFatalErrorJsonMode(),
+      ...(hasApplyOutcomeUnresolved() ? { applyOutcome: "unknown" as const } : {}),
+    });
+  process.on("unhandledRejection", fatal);
+  process.on("uncaughtException", fatal);
 }

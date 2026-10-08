@@ -92,9 +92,30 @@ export class GuardrailError extends Error {
   }
 }
 
+/** Removal may have begun, but no trusted report establishes the disk outcome. */
+export class ApplyOutcomeUnknownError extends GuardrailError {
+  readonly applyOutcome = "unknown" as const;
+  constructor(message: string) {
+    super(message, 4);
+    this.name = "ApplyOutcomeUnknownError";
+  }
+}
+
+export function isApplyOutcomeUnknownError(error: unknown): error is ApplyOutcomeUnknownError {
+  return (
+    error instanceof Error &&
+    (error as Partial<ApplyOutcomeUnknownError>).applyOutcome === "unknown" &&
+    error.name === "ApplyOutcomeUnknownError"
+  );
+}
+
 /** A refusal with authoritative evidence that no removal began. Never infer
  * this from an empty progress set after a process crash or broken stream. */
-export type ApplyRefusalCode = "size_limit_exceeded" | "current_size_unavailable" | "apply_busy";
+export type ApplyRefusalCode =
+  | "size_limit_exceeded"
+  | "current_size_unavailable"
+  | "apply_busy"
+  | "resource_limit_exceeded";
 export class ApplyRefusedError extends GuardrailError {
   readonly applyOutcome = "not_started" as const;
   constructor(
@@ -112,10 +133,20 @@ export function isApplyRefusedError(error: unknown): error is ApplyRefusedError 
   const value = error as Partial<ApplyRefusedError>;
   return (
     value.applyOutcome === "not_started" &&
-    ["size_limit_exceeded", "current_size_unavailable", "apply_busy"].includes(
-      value.refusalCode ?? "",
-    )
+    [
+      "size_limit_exceeded",
+      "current_size_unavailable",
+      "apply_busy",
+      "resource_limit_exceeded",
+    ].includes(value.refusalCode ?? "")
   );
+}
+
+/** Keep errno useful without rendering arbitrary caller-controlled text. */
+export function filesystemErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const code = (error as NodeJS.ErrnoException).code;
+  return typeof code === "string" && /^E[A-Z0-9_]{1,31}$/.test(code) ? code : undefined;
 }
 
 // ─── Checks ───────────────────────────────────────────────────────────────────
@@ -217,7 +248,14 @@ export function assertTargetDirectory(targetPath: string): void {
     if (code === "EACCES" || code === "EPERM") {
       throw new GuardrailError(`Permission denied reading directory: ${shown}`);
     }
-    throw new GuardrailError(`Directory does not exist: ${shown}`);
+    if (code === "ENOENT") throw new GuardrailError(`Directory does not exist (ENOENT): ${shown}`);
+    if (code === "ENOTDIR")
+      throw new GuardrailError(`A path component is not a directory (ENOTDIR): ${shown}`);
+    if (code === "ELOOP")
+      throw new GuardrailError(`Directory path contains a symlink loop (ELOOP): ${shown}`);
+    throw new GuardrailError(
+      `Cannot read directory${filesystemErrorCode(error) ? ` (${filesystemErrorCode(error)})` : ""}: ${shown}`,
+    );
   }
   if (!stat.isDirectory()) {
     throw new GuardrailError(`Path is not a directory: ${sanitizeTerminalText(resolved)}`);

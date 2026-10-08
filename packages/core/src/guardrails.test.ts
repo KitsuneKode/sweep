@@ -292,3 +292,17 @@ test("invalid byte ceilings cannot silently disable size validation", () => {
     expect(() => assertSizeLimit(1, ceiling, true)).toThrow("Invalid size");
   expect(() => assertSizeLimit(Number.MAX_SAFE_INTEGER + 1, 600, true)).toThrow("Invalid size");
 });
+
+test.skipIf(process.platform === "win32")(
+  "target symlink loops are not misreported as missing directories",
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-loop-target-"));
+    try {
+      const loop = join(root, "loop");
+      symlinkSync(loop, loop);
+      expect(() => assertTargetDirectory(loop)).toThrow(/symlink loop.*ELOOP/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

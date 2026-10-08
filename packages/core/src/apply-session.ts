@@ -302,7 +302,11 @@ export interface RecoveredApplyJournal {
     candidateId: string;
     path: string;
     status: ApplyOutcome["status"] | "unknown";
+    /** An uncommitted record, never authority to retry or restore. */
+    recordedStatus?: ApplyOutcome["status"];
   }>;
+  /** Uncommitted move records from an incomplete journal, for inspection only. */
+  recordedTrashMoves?: Array<{ path: string; destination: string }>;
   trashMoves: Array<{ path: string; destination: string }>;
 }
 
@@ -329,10 +333,7 @@ export function recoverApplyJournal(path: string): RecoveredApplyJournal {
     let armed = false;
     let complete = false;
     let count = 0;
-    const candidates = new Map<
-      string,
-      { candidateId: string; path: string; status: ApplyOutcome["status"] | "unknown" }
-    >();
+    const candidates = new Map<string, RecoveredApplyJournal["candidates"][number]>();
     const outcomes = new Map<string, ApplyOutcome["status"]>();
     const trashMoves: RecoveredApplyJournal["trashMoves"] = [];
     const consume = (line: string) => {
@@ -418,12 +419,15 @@ export function recoverApplyJournal(path: string): RecoveredApplyJournal {
     // A torn trailing record cannot certify completion.
     if (carry.length) complete = false;
     if (!targetDir) throw new GuardrailError("Missing journal intent");
-    for (const candidate of candidates.values())
+    for (const candidate of candidates.values()) {
+      if (!complete && outcomes.has(candidate.candidateId))
+        candidate.recordedStatus = outcomes.get(candidate.candidateId)!;
       candidate.status = complete
         ? outcomes.get(candidate.candidateId)!
         : armed
           ? "unknown"
           : "unattempted";
+    }
     const lock = readApplyLockStatus();
     const activeSession =
       lock.owner && resolve(lock.owner.journalPath) === resolve(path)
@@ -437,6 +441,7 @@ export function recoverApplyJournal(path: string): RecoveredApplyJournal {
       armed,
       candidates: [...candidates.values()],
       trashMoves: complete ? trashMoves : [],
+      ...(!complete && trashMoves.length > 0 ? { recordedTrashMoves: trashMoves } : {}),
     };
   } finally {
     closeSync(fd);

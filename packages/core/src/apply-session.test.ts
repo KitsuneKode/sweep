@@ -97,6 +97,8 @@ test("a torn completion cannot turn uncertain intents into deleted receipts", as
   const recovered = recoverApplyJournal(session.journalPath);
   expect(recovered.complete).toBe(false);
   expect(recovered.candidates[0]!.status).toBe("unknown");
+  expect(recovered.candidates[0]!.recordedStatus).toBe("deleted");
+  expect(existsSync(plan.candidates[0]!.path)).toBe(true);
 });
 
 test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(

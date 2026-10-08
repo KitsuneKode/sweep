@@ -25,6 +25,13 @@ export async function handleRecover(
       for (const candidate of report.candidates)
         counts.set(candidate.status, (counts.get(candidate.status) ?? 0) + 1);
       for (const [status, count] of counts) console.log(`${status}: ${count}`);
+      const recorded = report.candidates.filter(
+        (candidate) => candidate.recordedStatus !== undefined,
+      );
+      if (recorded.length || report.recordedTrashMoves?.length)
+        console.log(
+          `Uncommitted evidence: ${recorded.length} outcome records · ${report.recordedTrashMoves?.length ?? 0} trash moves. These records do not establish the final disk state.`,
+        );
       if (!report.complete)
         console.log(
           "Unknown means deletion may have been partial. Inspect the filesystem and rescan; this command never retries operations or releases an apply lock.",

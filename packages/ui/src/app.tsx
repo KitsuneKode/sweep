@@ -31,7 +31,7 @@ import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
 import { writePlanExport } from "./plan-export.js";
-import { noteCtrlCHandled, openUiSession, registerUiApplyCancellation } from "./runtime.js";
+import { noteCtrlCHandled, registerUiApplyCancellation } from "./runtime.js";
 import {
   buildBrandLine,
   buildContextLine,
@@ -79,16 +79,6 @@ import type { UiScanControl } from "./streaming.js";
 
 export { runSweepUiStreaming } from "./streaming.js";
 export type { SweepUiStreamingOptions } from "./streaming.js";
-
-export interface SweepUiOptions {
-  yes?: boolean;
-  dryRun?: boolean;
-  /** Trash mode: the apply dialog must say "move", not "permanently delete". */
-  trash?: boolean;
-  /** Which scan backend produced the plan - shown as a dim header chip. */
-  engine?: "js" | "rust";
-  init?: SweepUiInitOptions;
-}
 
 export type { SweepUiOutcome } from "./outcome.js";
 
@@ -559,7 +549,12 @@ export function SweepApp({
   const [pendingApply, setPendingApplyState] = useState(false);
   // Non-null while the confirm dialog is scoped to one row (x/d): the same
   // dialog renders, but `y` applies only that candidate.
-  const [pendingSingleId, setPendingSingleId] = useState<string | null>(null);
+  const [pendingSingleId, setPendingSingleIdState] = useState<string | null>(null);
+  const pendingSingleIdRef = useRef<string | null>(null);
+  const setPendingSingleId = (id: string | null) => {
+    pendingSingleIdRef.current = id;
+    setPendingSingleIdState(id);
+  };
   // Inspect pins identity across streaming/sort changes; x must never follow a
   // cursor that moved underneath the displayed detail overlay.
   const inspectedIdRef = useRef<string | null>(null);
@@ -588,22 +583,16 @@ export function SweepApp({
   const openModal = (kind: ModalKind): boolean => {
     if (openModalsRef.current.size > 0) return false;
     openModalsRef.current.add(kind);
-    if (kind === "confirm") confirmArmedAtRef.current = performance.now();
+    if (kind === "confirm") confirmReadyRef.current = false;
     return true;
   };
   const closeModal = (kind: ModalKind): void => {
     openModalsRef.current.delete(kind);
-    if (kind === "confirm") confirmArmedAtRef.current = Number.POSITIVE_INFINITY;
+    if (kind === "confirm") confirmReadyRef.current = false;
   };
-  // A consequential confirm key must outlive the burst that opened the
-  // dialog. Arming happens on first paint (the effect below): a pasted or
-  // scripted `y` landing in the same stdin drain as the opener finds the
-  // dialog never rendered and is dropped, while a y after any paint - or
-  // 100ms with none, so a wedged frame can't deadlock the dialog - works.
-  // Read live by the keymap (isConfirmArmed) because ctx values bake at
-  // render and would carry the pre-paint timestamp past the effect.
-  const CONFIRM_ARM_MS = 100;
-  const confirmArmedAtRef = useRef(0);
+  // Elapsed time cannot authorize an unseen destructive confirmation.
+  // Commit arms it; dismissal always remains available during a slow frame.
+  const confirmReadyRef = useRef(false);
 
   const generationRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -873,13 +862,23 @@ export function SweepApp({
   const dangerousSelected = useMemo(() => countSelectedDangerous(state), [state]);
   const candidatesById = useMemo(() => candidateIndex(state.candidates), [state.candidates]);
 
+  const sessionResultRef = useRef({
+    attempted: false,
+    deletedCount: 0,
+    movedCount: 0,
+    failedCount: 0,
+    unattemptedCount: 0,
+    interrupted: false,
+    unknownOutcome: false,
+  });
   const finalizedRef = useRef(false);
   const finalize = useCallback(
     (outcome: SweepUiOutcome) => {
       if (finalizedRef.current) return;
       finalizedRef.current = true;
       abortRef.current?.abort();
-      onDone(outcome);
+      const { attempted, ...result } = sessionResultRef.current;
+      onDone(outcome.type === "abort" && attempted ? { type: "done", ...result } : outcome);
     },
     [onDone],
   );
@@ -933,7 +932,7 @@ export function SweepApp({
       const requestedTrash = trashModeRef.current;
       const applyFn = scan?.apply;
       if (!applyFn) {
-        finalize({ type: "apply", plan: scopedPlan, ...(requestedTrash ? { trash: true } : {}) });
+        finalize({ type: "apply", plan: scopedPlan, trash: requestedTrash });
         return;
       }
       if (dryRun) {
@@ -968,6 +967,13 @@ export function SweepApp({
           const merged = mergeApplyReport(stateRef.current, result.report);
           dispatch({ type: "replace", state: merged.state });
           const stopped = result.interrupted || merged.interrupted || merged.unattempted > 0;
+          const session = sessionResultRef.current;
+          session.attempted = true;
+          if (result.trashDir) session.movedCount += result.report.deletedCount;
+          else session.deletedCount += result.report.deletedCount;
+          session.failedCount += merged.failed;
+          session.unattemptedCount += merged.unattempted;
+          session.interrupted ||= stopped;
           const verb = result.trashDir ? "moved to trash" : "deleted";
           setNotice(
             `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${getUiSummary(merged.state).selectedCount} still queued · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
@@ -978,6 +984,8 @@ export function SweepApp({
             setNotice(`Nothing removed · ${sanitizeTerminalText(error.message)} · queue preserved`);
             return;
           }
+          sessionResultRef.current.attempted = true;
+          sessionResultRef.current.unknownOutcome = true;
           // With no authoritative report, retained rows may already be gone.
           // Require a rescan rather than allowing an automatic destructive retry.
           dispatch({ type: "replace", state: { ...stateRef.current, scanIncomplete: true } });
@@ -1043,7 +1051,7 @@ export function SweepApp({
   }, []);
 
   const confirmSingle = useCallback(() => {
-    const id = pendingSingleId;
+    const id = pendingSingleIdRef.current;
     setPendingSingleId(null);
     if (!id) return;
     flushSync();
@@ -1057,7 +1065,7 @@ export function SweepApp({
       relativePath(stateRef.current.targetDir, candidate.path) || candidate.name,
     );
     runInSessionApply(singlePlan, name);
-  }, [pendingSingleId, plan, runInSessionApply]);
+  }, [plan, runInSessionApply]);
 
   const abortApply = useCallback(() => {
     // The runtime's raw-stdin deadman saw the same ETX byte and scheduled a
@@ -1220,7 +1228,7 @@ export function SweepApp({
         showSidebar,
         scanError: openModalsRef.current.has("scanError") ? scanError : null,
         inspectOpen: openModalsRef.current.has("inspect"),
-        pendingSingle: pendingSingleId !== null,
+        pendingSingle: pendingSingleIdRef.current !== null,
         applying: applyAbortRef.current !== null,
         // Measured list rows once the pane has laid out; the height-minus-
         // chrome estimate only seeds the first frame before a size event.
@@ -1257,9 +1265,7 @@ export function SweepApp({
         abortApply,
         notify: setNotice,
         readState: readFreshState,
-        isConfirmArmed: () =>
-          openModalsRef.current.has("confirm") &&
-          performance.now() - confirmArmedAtRef.current >= CONFIRM_ARM_MS,
+        isConfirmArmed: () => openModalsRef.current.has("confirm") && confirmReadyRef.current,
       },
     );
   });
@@ -1282,12 +1288,12 @@ export function SweepApp({
     if (showInspect && !inspectCandidate) setInspect(false);
   }, [showInspect, inspectCandidate]);
 
-  // Arm the confirm's destructive keys once the dialog has actually painted.
-  // The ref flips to -Inf so the keymap's age check passes immediately; the
-  // 100ms open-time window remains as the fallback if a frame never lands.
+  // Arm only a committed dialog for the current scope; time alone is not consent.
   useEffect(() => {
-    if (pendingApply) confirmArmedAtRef.current = Number.NEGATIVE_INFINITY;
-  }, [pendingApply]);
+    confirmReadyRef.current =
+      pendingApply &&
+      (pendingSingleId === null || state.candidates.some((c) => c.id === pendingSingleId));
+  }, [pendingApply, pendingSingleId, state.candidates]);
 
   // The sidebar unmounts under a narrow terminal; focus must not survive
   // into a pane that no longer exists - the keymap does the same reconcile
@@ -1498,7 +1504,15 @@ export function SweepApp({
       ) : null}
       {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
       {pendingApply ? (
-        pendingSingleCandidate ? (
+        pendingSingleId !== null && !pendingSingleCandidate ? (
+          <Modal tokens={tokens} title=" item unavailable " width={60}>
+            <text
+              content="The reviewed artifact is no longer present. Nothing will be removed."
+              fg={tokens.text}
+            />
+            <text content="n / esc close" fg={tokens.textMuted} />
+          </Modal>
+        ) : pendingSingleCandidate ? (
           <ConfirmOverlay
             tokens={tokens}
             selectedCount={1}
@@ -1557,33 +1571,4 @@ export function SweepApp({
       ) : null}
     </box>
   );
-}
-
-export async function runSweepUi(
-  plan: ScanPlan,
-  options: SweepUiOptions = {},
-): Promise<SweepUiOutcome> {
-  if (options.yes) {
-    return { type: "apply", plan };
-  }
-
-  const session = await openUiSession();
-  try {
-    session.root.render(
-      <UiErrorBoundary>
-        <SweepApp
-          plan={plan}
-          {...(options.dryRun ? { dryRun: true } : {})}
-          {...(options.trash ? { trash: true } : {})}
-          {...(options.engine ? { engine: options.engine } : {})}
-          {...(options.init ? { init: options.init } : {})}
-          onDone={session.finish}
-        />
-      </UiErrorBoundary>,
-    );
-  } catch (error) {
-    session.finish({ type: "abort" });
-    throw error instanceof Error ? error : new Error(String(error));
-  }
-  return await session.done;
 }

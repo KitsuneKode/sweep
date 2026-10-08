@@ -84,3 +84,19 @@ describe("CLI factory", () => {
     expect(helpText).toContain("ui");
   });
 });
+
+test("the UI never claims its honored byte ceiling is ignored", async () => {
+  const proc = Bun.spawn(
+    [process.execPath, import.meta.dir + "/bin.ts", "ui", ".", "--max-size-gb", "600"],
+    { stdout: "pipe", stderr: "pipe" },
+  );
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  expect(exitCode).toBe(2);
+  expect(stdout).toBe("");
+  expect(stderr).toContain("requires an interactive TTY");
+  expect(stderr).not.toContain("--max-size-gb has no effect");
+});

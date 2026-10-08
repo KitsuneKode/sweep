@@ -8,7 +8,7 @@ import {
   sanitizeTerminalText,
 } from "@kitsunekode/sweep-protocol";
 import { writeJson, drainStdout } from "./handlers/shared.js";
-import { EXIT, exitWith, handleFatalError } from "./errors.js";
+import { setFatalErrorJsonMode, EXIT, exitWith, handleFatalError } from "./errors.js";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { handleApply } from "./handlers/apply.js";
 import { handleClean } from "./handlers/clean.js";
@@ -166,7 +166,13 @@ export function makeProgram(): Command {
   // The flag is a bridge: core read sites (engine probe, page-cache drop)
   // check SWEEP_COLD so a TUI rescan honors it without plumbing through
   // every layer.
-  program.hook("preAction", (thisCommand) => {
+  program.hook("preAction", (thisCommand, actionCommand) => {
+    const output = actionCommand.optsWithGlobals<{ json?: boolean; jsonStream?: boolean }>();
+    setFatalErrorJsonMode(
+      Boolean(
+        output.json || output.jsonStream || ["plan", "schema"].includes(actionCommand.name()),
+      ),
+    );
     if (thisCommand.opts<{ cold?: boolean }>().cold === true) {
       process.env.SWEEP_COLD = "1";
     }

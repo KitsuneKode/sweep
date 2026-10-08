@@ -169,3 +169,17 @@ test("an aborted JS scan cannot become a complete programmatic plan", async () =
   ).rejects.toMatchObject({ code: 1 });
   expect(plan.candidates.every((candidate) => existsSync(candidate.path))).toBe(true);
 });
+
+test("resource refusal never arms a journal or creates trash", async () => {
+  const plan = await fixture();
+  plan.summary.estimatedTotalBytes = Number.MAX_SAFE_INTEGER + 1;
+  await expect(executePlanDeletion(plan, "js", { quiet: true, trash: true })).rejects.toMatchObject(
+    {
+      applyOutcome: "not_started",
+      refusalCode: "resource_limit_exceeded",
+    },
+  );
+  expect(plan.candidates.every((candidate) => existsSync(candidate.path))).toBe(true);
+  expect(existsSync(join(process.env.SWEEP_CONFIG_DIR!, "journals"))).toBe(false);
+  expect(readdirSync(plan.targetDir).some((name) => name.startsWith(".sweep-trash-"))).toBe(false);
+});
