@@ -125,6 +125,11 @@ jobs:
       - name: Rust fmt, clippy, and tests via turbo
         run: bunx turbo run "sweep-rust#fmt:check" "sweep-rust#lint" "sweep-rust#test" --continue
 
+      - name: Audit Rust dependencies against RustSec
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit --deny warnings
+
       - name: Build release engine and CLI for Linux qualification
         run: |
           cargo build --release -p sweep-engine-cli --locked

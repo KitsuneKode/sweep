@@ -58,6 +58,10 @@ published by this pass. User data is never used as a destructive test fixture.
   override remove those matches. CI checks critical advisories. Two unpatched
   development-tooling advisories remain visible in the full audit; see
   [dependency security](../.docs/tooling.md#dependency-security).
+- The separate RustSec pass checks 114 locked dependencies, without target
+  filtering or ignored advisories, and reports no vulnerabilities or warnings.
+  CI runs pinned cargo-audit 0.22.2 with warning failures. The receipt records
+  the fetched advisory database commit, not a permanent safety claim.
 
 ## Findings that need qualification or differ from the report
 

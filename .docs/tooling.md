@@ -240,7 +240,17 @@ published patch at the time of this review:
 No Sweep runtime exploit was reproduced for either dependency. They are tracked
 open, without advisory suppression or an unverified replacement. Recheck upstream
 patches and dependency paths before release. This JavaScript audit does not cover
-RustSec; `cargo audit` was not run in this pass.
+RustSec. The separate Cargo audit uses pinned `cargo-audit` 0.22.2 in the Rust CI
+job and fails on warnings as well as vulnerabilities. The local 2026-10-08 run
+checked 114 locked dependencies against database commit
+`b8a1a33e246a0a9a3b5f377248c41a503defec74` (updated October 7) and reported no
+vulnerabilities or warnings. This is an advisory inventory, not a proof of
+application safety. To reproduce:
+
+```bash
+cargo install cargo-audit --version 0.22.2 --locked
+cargo audit --deny warnings
+```
 
 #### Bun TypeScript types
 
