@@ -85,6 +85,9 @@
     "oxlint": "catalog:",
     "turbo": "catalog:"
   },
+  "overrides": {
+    "tinypool": "2.1.2"
+  },
   "devEngines": {
     "packageManager": {
       "name": "bun",

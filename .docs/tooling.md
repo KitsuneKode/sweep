@@ -213,6 +213,35 @@ Shared third-party versions are pinned once in root `package.json` under
 
 Run `bun install` after catalog changes to refresh the lockfile.
 
+#### Dependency security
+
+Run `bun audit --json` for the full advisory inventory. The TypeScript CI job
+runs `bun audit --audit-level critical` after its frozen install; this blocks
+critical advisories, not every severity. Audit failures must remain visible.
+An advisory match alone does not establish a reachable Sweep exploit.
+
+The 2026-10-08 dependency pass updates `shell-quote` to 1.11.0 and overrides
+`tinypool` to 2.1.2. The former is brought in by React devtools; the latter by
+oxfmt 0.45.0, whose exact dependency would otherwise retain the affected release.
+Remove the override when the installed formatter resolves a patched tinypool
+without it, then repeat the frozen install and quality gates. See the
+[shell-quote advisory](https://github.com/advisories/GHSA-pqg4-j6r4-53mv) and
+[tinypool advisory](https://github.com/advisories/GHSA-85c8-ppgw-ccpr).
+
+The full audit still reports two development-tooling dependencies with no
+published patch at the time of this review:
+
+- `braces` 3.0.3, via micromatch in lint-staged/Changesets, has a
+  [high-severity nesting denial of service](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm).
+- `sprintf-js` 1.0.3, via argparse in the js-yaml/Changesets dependency tree,
+  has a [moderate-severity precision denial of service](https://github.com/advisories/GHSA-hp3w-g68c-fv3c).
+  Installed js-yaml imports argparse from its CLI, not its library entry.
+
+No Sweep runtime exploit was reproduced for either dependency. They are tracked
+open, without advisory suppression or an unverified replacement. Recheck upstream
+patches and dependency paths before release. This JavaScript audit does not cover
+RustSec; `cargo audit` was not run in this pass.
+
 #### Bun TypeScript types
 
 Install `@types/bun` (recommended by Bun; shim over canonical `bun-types`).

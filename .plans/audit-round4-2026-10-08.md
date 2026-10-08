@@ -53,6 +53,12 @@ published by this pass. User data is never used as a destructive test fixture.
   and verifies the final success summary/exit while preserving the other queued
   artifact. It is wired into Linux CI.
 
+- A fresh dependency audit found critical shell-quote/tinypool advisories missing
+  from the supplied report. Patched lockfile resolutions and a temporary formatter
+  override remove those matches. CI checks critical advisories. Two unpatched
+  development-tooling advisories remain visible in the full audit; see
+  [dependency security](../.docs/tooling.md#dependency-security).
+
 ## Findings that need qualification or differ from the report
 
 - `buildLiveRows` is already committed. At the baseline, synthetic 50k delivery
@@ -142,3 +148,8 @@ commit is checked again before pushing; exact-commit hosted CI follows the push.
 Store raw
 post-commit receipts under ignored `.scratch/qualification-round4-2026-10-08/`;
 link results when available without pretending future gates have passed.
+
+The source and PTY qualification commits are pushed. Exact-head hosted CI for
+`511cb25e2f74d0e3b884a26c58c5f3e2272ece39` passed all eight jobs:
+[CI receipt](https://github.com/KitsuneKode/sweep/actions/runs/37748807756).
+The dependency follow-up repeats local and hosted gates independently.
