@@ -516,6 +516,18 @@ real filesystem or qualify physical terminal transport. Its input samples are
 sparse observations, not a release p99 guarantee. Do not raise application
 resource limits based on this probe alone.
 
+For focused deletion through a Linux pseudo-terminal after `bun run build` and
+`bun run engine:build`:
+
+```sh
+python3 scripts/smoke-focused-ui.py
+```
+
+This test owns its temporary tree and config directory. It inspects one artifact,
+confirms that exact path, preserves the other queued artifact, and checks that
+quitting after the trusted report delivers a success summary and exit 0. Linux
+CI runs it too; a PTY is not physical terminal or non-Linux qualification.
+
 The Linux CI job runs the 5k live-delivery probe and fails on React update-depth
 warnings, stalled delivery, missing final reconciliation or its resource guard.
 Reported timings are observations, not a portable latency threshold. The

@@ -27,9 +27,9 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
     (root / ".sweeprc").write_text("{}\n")
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
-    env = {**os.environ, "TERM": "xterm-256color", "XDG_CONFIG_HOME": str(root / "config"),
+    env = {**os.environ, "TERM": "xterm-256color", "XDG_CONFIG_HOME": str(root / "config"), "SWEEP_CONFIG_DIR": str(root / "config"),
            "SWEEP_ENGINE_PATH": str(REPO / "target/release/sweep-engine")}
-    proc = subprocess.Popen([bun, "run", "apps/cli/src/bin.ts", "ui", str(root), "--engine", "rust"],
+    proc = subprocess.Popen([bun, "apps/cli/dist/sweep.js", "ui", str(root), "--engine", "rust"],
                             cwd=REPO, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
     os.close(slave)
     output = bytearray()
@@ -51,8 +51,7 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
         return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", output.decode(errors="replace"))
 
     try:
-        wait_until(lambda: "scopes" in text() and "node_modules" in text())
-        time.sleep(0.25)  # let scan completion and cursor placement paint
+        wait_until(lambda: "scan complete:" in text() and "node_modules" in text())
         output.clear()
         os.write(master, b"i")
         # Background rows can repaint in the same frame. Pin the inspector's
@@ -66,16 +65,15 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
         output.clear()
         os.write(master, b"x")
         wait_until(lambda: "Permanently delete" in text())
-        wait_until(lambda: re.search(rf"·\s+{viewed}/node_modules\b", text()) is not None)
+        wait_until(lambda: re.search(rf"·\s*{viewed}/node_modules\b", text()) is not None)
         if not all((root / name / "node_modules").exists() for name in ["alpha", "bravo"]):
             raise RuntimeError("removal occurred before confirmation")
-        time.sleep(0.15)
         os.write(master, b"y")
         wait_until(lambda: not (root / viewed / "node_modules").exists())
         other = "bravo" if viewed == "alpha" else "alpha"
         if not (root / other / "node_modules/file").exists():
             raise RuntimeError("scoped apply deleted the other queued artifact")
-        wait_until(lambda: f"deleted {viewed}/node_modules" in text() and "estimated bytes removed" in text())
+        wait_until(lambda: "1 deleted" in text() and "1 still queued" in text() and "estimated bytes removed" in text())
         os.write(master, b"q")
         deadline = time.monotonic() + 5
         while proc.poll() is None:
@@ -83,10 +81,25 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
                 raise RuntimeError("UI did not exit after its apply receipt")
             if select.select([master], [], [], 0.05)[0]:
                 try:
-                    os.read(master, 65536)
+                    output.extend(os.read(master, 65536))
+                    if len(output) > 1024 * 1024:
+                        raise RuntimeError("PTY output ceiling exceeded")
                 except OSError:
                     break
         proc.wait(timeout=1)
+        while select.select([master], [], [], 0.05)[0]:
+            try:
+                output.extend(os.read(master, 65536))
+                if len(output) > 1024 * 1024:
+                    raise RuntimeError("PTY output ceiling exceeded")
+            except OSError:
+                break
+        if proc.returncode != 0:
+            raise RuntimeError(f"completed UI apply exited {proc.returncode}, expected success")
+        if "Aborted." in text():
+            raise RuntimeError("completed UI apply was reported as aborted")
+        if not re.search(r"1 deleted.*0 moved to trash.*0 failed.*0 unattempted", text()):
+            raise RuntimeError("completed UI session summary was not delivered")
         print(f"ok: inspected {viewed}, confirmed only that artifact, preserved {other}")
     finally:
         if proc.poll() is None:

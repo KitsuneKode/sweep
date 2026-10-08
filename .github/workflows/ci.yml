@@ -136,6 +136,9 @@ jobs:
             --fds 64 --rss-mb 768 --fixture-parent "$RUNNER_TEMP" \
             --output "$RUNNER_TEMP/sweep-resource-stress.json"
 
+      - name: Qualify focused deletion and successful session exit through a Linux PTY
+        run: python3 scripts/smoke-focused-ui.py
+
       - name: Qualify live UI delivery and update stability
         run: bun run packages/ui/benchmarks/stream-render.tsx --candidates 5000
 
@@ -203,7 +206,8 @@ jobs:
 
       # Typecheck + pure-TS tests on every OS. The TUI itself needs a TTY and
       # OpenTUI native FFI (Bun), so it is smoke-checked via unit render tests
-      # only; interactive verification stays manual/local by design.
+      # only here. Linux also has an owned-fixture PTY test in the Rust job;
+      # physical terminal and non-Linux PTY qualification remain separate.
       - name: Typecheck CLI workspaces
         run: bunx turbo run typecheck --filter "@kitsunekode/*"
 

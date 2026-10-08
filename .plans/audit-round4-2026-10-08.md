@@ -2,7 +2,7 @@ Status: in_progress
 Scope: confirmation authority, automation errors, recovery evidence, discovery architecture
 Created: 2026-10-08
 Updated: 2026-10-08
-Commit: uncommitted
+Commit: 3142081cf2e54ebca6d6ae776c6e062be35dfc6e
 
 # Round-four audit reconciliation
 
@@ -47,6 +47,11 @@ published by this pass. User data is never used as a destructive test fixture.
   directory. Removed the unconfigured `SWEEP_ENGINE_FROM_NPM` skip escape.
   A nonempty fixed-mtime file fixture checks absolute bytes, mtime and identity
   from each engine against filesystem ground truth, without golden normalization.
+
+- Linux owned-fixture PTY qualification now uses the built CLI and an explicit
+  private config directory, waits for observable completion instead of sleeps,
+  and verifies the final success summary/exit while preserving the other queued
+  artifact. It is wired into Linux CI.
 
 ## Findings that need qualification or differ from the report
 
@@ -107,13 +112,20 @@ Do not increase budgets merely to make a benchmark pass.
 5. Policy parity inventories for kinds, VCS roots, catalog defaults, risk domains,
    terminal codepoints and direct-native schema bounds. Share TS predicates within
    a language; keep independent cross-language validation and compare behavior.
-6. Test quality: further child watchdogs; protocol fragmentation/UTF-8 and absolute byte/mtime ground truth;
+6. Test quality: further child watchdogs; protocol fragmentation/UTF-8 and
+   additional absolute byte/mtime ground-truth shapes;
    FIFO/socket, case-sensitive siblings, hardlink webs and deep path fixtures.
    Dispatch tests and outcome tests serve different purposes; replace vacuous
    assertions, not every small routing mock.
 7. Engine stall timeout/diagnostics and async availability probes. A stall while
    mutation is possible must yield unknown outcome, never implicit JS fallback.
-8. Compact discovery paging experiment above, followed by long-session and real
+8. Fatal-render teardown qualification: inject a component render failure while
+   an apply is active and after a trusted report. The React error boundary and
+   runtime deadman use a different path from process crash handlers. Prove that
+   cancellation drains independently of the view and a crashed view cannot turn
+   unknown work into an ordinary abort. A session supervisor outside React should
+   own operation/result lifetime if that test exposes a gap.
+9. Compact discovery paging experiment above, followed by long-session and real
    allocated-tree qualification. Current resource ceilings remain enforced.
 
 ## Validation
@@ -124,7 +136,9 @@ trash-choice, errno and journal tests cover the implemented changes.
 The final required `bun run check` passed all 49 tasks. React Doctor 0.9.17
 reports no changed-source issues (its aggregate score is not whole-app clearance).
 Rust checks, installed-package smoke, pack preview and standalone smoke passed.
-Clean-tree release preflight and a complete local ladder follow the commit;
-exact-commit hosted CI follows the authorized push. Store raw
+All nine clean-source local ladder steps passed after source commit 3142081,
+including release preflight. The subsequent PTY/CI/documentation qualification
+commit is checked again before pushing; exact-commit hosted CI follows the push.
+Store raw
 post-commit receipts under ignored `.scratch/qualification-round4-2026-10-08/`;
 link results when available without pretending future gates have passed.
