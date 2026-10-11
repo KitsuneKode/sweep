@@ -39,7 +39,7 @@ is unsafe (no depth guard, follows into the wrong tree) and `npx rimraf` /
 2. Resolve targetDir (absolute path)
 3. Assert guardrails on targetDir            → exit 2 on violation
 4. Load + merge config (defaults ← global ← project .sweeprc ← CLI flags)
-5. Validate patterns (assertSafePattern)      → exit 3 on bad pattern
+5. Validate patterns (assertSafePattern)      → exit 2 on bad pattern
 6. Scan targetDir recursively
    - lstat entries, never follow symlinks
    - dedupe inode aliases (dev,ino), count unreadable dirs as skipped

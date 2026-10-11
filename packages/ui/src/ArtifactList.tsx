@@ -69,8 +69,8 @@ export function ArtifactList({
 
   // Pane padding + borders + scrollbar consume columns; size rows off what remains.
   const listWidth = Math.max(
-    36,
-    (paneWidth ?? Math.max(36, dimensions.width - (dimensions.width >= 72 ? 36 : 6))) - 2,
+    1,
+    (paneWidth ?? Math.max(1, dimensions.width - (dimensions.width >= 72 ? 36 : 6))) - 2,
   );
   const widths = useMemo(() => artifactRowWidths(listWidth), [listWidth]);
   // Age and size bars are relative to what is listed, and only change when the

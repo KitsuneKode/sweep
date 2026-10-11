@@ -24,19 +24,21 @@ export function noteCtrlCHandled(): void {
   }
 }
 
-// A signal/deadman must cooperate with an active apply before tearing down
-// the renderer. Returns false when there is no apply to drain.
-let cancelActiveUiApply: (() => boolean) | undefined;
+// A signal/deadman cooperates with the app before renderer teardown.
+// A close request also preserves completed session results while idle.
+let cancelActiveUiApply: ((closeAfterApply: boolean) => boolean) | undefined;
 
-export function registerUiApplyCancellation(cancel: () => boolean): () => void {
+export function registerUiApplyCancellation(
+  cancel: (closeAfterApply: boolean) => boolean,
+): () => void {
   cancelActiveUiApply = cancel;
   return () => {
     if (cancelActiveUiApply === cancel) cancelActiveUiApply = undefined;
   };
 }
 
-export function requestUiApplyCancellation(): boolean {
-  return cancelActiveUiApply?.() ?? false;
+export function requestUiApplyCancellation(closeAfterApply = false): boolean {
+  return cancelActiveUiApply?.(closeAfterApply) ?? false;
 }
 
 /**
@@ -64,8 +66,8 @@ export async function openUiSession(): Promise<UiSession> {
     cleanedUp = true;
     noteCtrlCHandled();
     process.removeListener("SIGINT", onSignal);
-    process.removeListener("SIGTERM", onSignal);
-    process.removeListener("SIGHUP", onSignal);
+    process.removeListener("SIGTERM", onTerminate);
+    process.removeListener("SIGHUP", onTerminate);
     process.stdin.off("data", onStdinData);
     try {
       root.unmount();
@@ -86,7 +88,13 @@ export async function openUiSession(): Promise<UiSession> {
   };
 
   const onSignal = () => {
-    if (!requestUiApplyCancellation()) finish({ type: "abort" });
+    if (!requestUiApplyCancellation()) onTerminate();
+  };
+
+  const onTerminate = () => {
+    // Closing the terminal requests exit after the apply report settles.
+    // Ctrl-C deliberately keeps an active session open for its receipt.
+    if (!requestUiApplyCancellation(true)) finish({ type: "abort" });
   };
 
   /**
@@ -153,10 +161,10 @@ export async function openUiSession(): Promise<UiSession> {
   };
 
   process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
+  process.on("SIGTERM", onTerminate);
   // SIGHUP = terminal closed: restore alternate-screen/raw mode/mouse
   // capture before exit or the user's shell inherits a mangled terminal.
-  process.on("SIGHUP", onSignal);
+  process.on("SIGHUP", onTerminate);
   process.stdin.on("data", onStdinData);
 
   return { root, finish, done };

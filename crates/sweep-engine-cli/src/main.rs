@@ -107,6 +107,7 @@ fn run() -> Result<(), CliFailure> {
     match arg(1)?.as_deref() {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
+        Some("index") => run_index(),
         Some("--capabilities") => write_json_stdout(
             &serde_json::json!({"applyControl": true, "planIdentity": true, "applyPreparation": true, "applyActivity": true}),
         ),
@@ -125,6 +126,90 @@ fn run() -> Result<(), CliFailure> {
             })
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IndexInit {
+    generation: String,
+    plan: ScanPlan,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum IndexRequest {
+    Query {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        query: sweep_engine::discovery::Query,
+    },
+    Select {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        generation: String,
+        revision: u64,
+        #[serde(rename = "candidateIds")]
+        candidate_ids: Vec<String>,
+        selected: bool,
+    },
+    Close {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+    },
+}
+
+fn read_index_line(reader: &mut impl BufRead, cap: usize) -> Result<Option<String>, CliFailure> {
+    let mut bytes = Vec::new();
+    reader
+        .take((cap + 1) as u64)
+        .read_until(b'\n', &mut bytes)
+        .map_err(|e| CliFailure::failure(format!("index input failed: {e}")))?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    if bytes.len() > cap {
+        return Err(CliFailure::invalid_input("index input byte limit exceeded"));
+    }
+    if bytes.last() != Some(&b'\n') {
+        return Err(CliFailure::invalid_input("incomplete index input line"));
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|_| CliFailure::invalid_input("index input is not UTF-8"))
+}
+
+/// Internal read-only paging experiment. It accepts a review snapshot, never an
+/// apply command. One synchronous query runs at a time; EOF releases the index.
+fn run_index() -> Result<(), CliFailure> {
+    let mut input = BufReader::new(io::stdin().lock());
+    let first = read_index_line(&mut input, 64 * 1024 * 1024)?
+        .ok_or_else(|| CliFailure::invalid_input("index requires a review snapshot"))?;
+    let init: IndexInit = serde_json::from_str(&first)
+        .map_err(|_| CliFailure::invalid_input("invalid index snapshot"))?;
+    drop(first);
+    let mut index = sweep_engine::discovery::DiscoveryIndex::new(
+        init.plan,
+        init.generation,
+        sweep_engine::discovery::MAX_INDEX_BYTES,
+    )
+    .map_err(|error| CliFailure::failure(error.to_string()))?;
+    write_json_line(&serde_json::json!({"type":"index_ready","summary":index.summary()}))
+        .map_err(CliFailure::failure)?;
+    while let Some(line) = read_index_line(&mut input, 64 * 1024)? {
+        let request: IndexRequest = serde_json::from_str(&line)
+            .map_err(|_| CliFailure::invalid_input("invalid index request"))?;
+        let (request_id, result) = match request {
+            IndexRequest::Close { request_id } => {
+                write_json_line(&serde_json::json!({"type":"index_closed","requestId":request_id})).map_err(CliFailure::failure)?;
+                return Ok(());
+            },
+            IndexRequest::Query { request_id, query } => (request_id, index.query(&query, &AtomicBool::new(false)).map(|page| serde_json::json!({"type":"page","requestId":request_id,"page":page}))),
+            IndexRequest::Select { request_id, generation, revision, candidate_ids, selected } => (request_id, index.select(&generation, revision, &candidate_ids, selected).map(|summary| serde_json::json!({"type":"selection","requestId":request_id,"summary":summary}))),
+        };
+        let value = result.unwrap_or_else(|error| serde_json::json!({"type":"index_error","requestId":request_id,"code":"discovery_refused","message":error.to_string()}));
+        write_json_line(&value).map_err(CliFailure::failure)?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]

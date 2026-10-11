@@ -31,7 +31,9 @@ let validateApplyReportFn: ValidateFunction | undefined;
 
 function getAjv(): Ajv2020 {
   if (!ajvInstance) {
-    ajvInstance = new Ajv2020({ allErrors: true, strict: false, validateFormats: false });
+    // Plans/reports are untrusted. Stop at the first error instead of retaining
+    // a diagnostic per malformed element in a large input array.
+    ajvInstance = new Ajv2020({ allErrors: false, strict: false, validateFormats: false });
     ajvInstance.addSchema(PROTOCOL_SHARED_SCHEMA);
   }
   return ajvInstance;
@@ -108,6 +110,8 @@ export function validatePlan(value: unknown): ScanPlan {
     // reaching a different entry. sweep never writes one - a plan carrying
     // it is malformed input, rejected wholesale.
     for (const candidate of plan.candidates) {
+      if (candidate.reasons.some((reason) => reason.length > 1024))
+        throw new PlanValidationError("Invalid scan plan: candidate reason length limit exceeded");
       if (candidate.identity !== undefined && !validFilesystemIdentity(candidate.identity)) {
         throw new PlanValidationError("Invalid scan plan: candidate identity");
       }

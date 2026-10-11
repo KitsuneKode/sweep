@@ -145,7 +145,10 @@ jobs:
             --output "$RUNNER_TEMP/sweep-resource-stress.json"
 
       - name: Qualify focused deletion and successful session exit through a Linux PTY
-        run: python3 scripts/smoke-focused-ui.py
+        run: |
+          python3 scripts/smoke-focused-ui.py
+          python3 scripts/smoke-focused-ui.py --exit-signal SIGHUP
+          python3 scripts/smoke-focused-ui.py --exit-signal SIGTERM
 
       - name: Qualify live UI delivery and update stability
         run: bun run packages/ui/benchmarks/stream-render.tsx --candidates 5000

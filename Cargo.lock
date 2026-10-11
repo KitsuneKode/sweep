@@ -625,6 +625,8 @@ dependencies = [
  "camino",
  "chrono",
  "hex",
+ "serde",
+ "serde_json",
  "sha2",
  "sweep-errors",
  "sweep-fs",

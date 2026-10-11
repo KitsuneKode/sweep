@@ -16,6 +16,7 @@ import {
   visiblePatternRows,
 } from "./state.js";
 import { type ThemeTokens, riskColor } from "./theme.js";
+import { cellWidth, clipCells, padCells } from "./text-cells.js";
 
 function padCount(value: number, width = 2): string {
   return String(value).padStart(width, " ");
@@ -68,7 +69,7 @@ export interface RowMetrics {
 function tailWidth(widths: RowWidths): number {
   const age = widths.ageWidth > 0 ? COLUMN_GAP + widths.ageWidth : 0;
   const bar = widths.barWidth > 0 ? COLUMN_GAP + widths.barWidth : 0;
-  return age + bar + SIZE_GAP + widths.sizeWidth;
+  return age + bar + (widths.sizeWidth > 0 ? SIZE_GAP + widths.sizeWidth : 0);
 }
 
 /** Full character width of a row: rail, marker, name and every trailing column. */
@@ -81,14 +82,14 @@ export function rowTotalWidth(widths: RowWidths): number {
  * Detail is shed with width: the size bar goes first, then the age column.
  */
 export function artifactRowWidths(listWidth: number): RowWidths {
-  const usable = Math.max(24, listWidth - WRAP_SAFETY);
+  const usable = Math.max(ROW_NAME_OFFSET, listWidth - WRAP_SAFETY);
   const shell: RowWidths = {
     nameWidth: 0,
-    sizeWidth: SIZE_COLUMN_WIDTH,
+    sizeWidth: usable >= ROW_NAME_OFFSET + SIZE_GAP + SIZE_COLUMN_WIDTH ? SIZE_COLUMN_WIDTH : 0,
     ageWidth: listWidth >= AGE_MIN_LIST_WIDTH ? AGE_LABEL_WIDTH : 0,
     barWidth: listWidth >= BAR_MIN_LIST_WIDTH ? BAR_COLUMN_WIDTH : 0,
   };
-  return { ...shell, nameWidth: Math.max(12, usable - ROW_NAME_OFFSET - tailWidth(shell)) };
+  return { ...shell, nameWidth: Math.max(0, usable - ROW_NAME_OFFSET - tailWidth(shell)) };
 }
 
 export function relativePath(root: string, path: string): string {
@@ -98,13 +99,12 @@ export function relativePath(root: string, path: string): string {
 }
 
 export function buildListColumnHeader(widths: RowWidths, tokens: ThemeTokens): StyledText {
-  const nameLabel = "Name";
-  const namePad = " ".repeat(Math.max(0, widths.nameWidth - nameLabel.length));
+  const nameLabel = padCells("Name", widths.nameWidth);
   const ageLabel =
     widths.ageWidth > 0 ? `${" ".repeat(COLUMN_GAP)}${"Age".padStart(widths.ageWidth)}` : "";
   const barGap = widths.barWidth > 0 ? " ".repeat(COLUMN_GAP + widths.barWidth) : "";
-  const sizeLabel = "Size".padStart(widths.sizeWidth);
-  return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textDim)(nameLabel)}${namePad}${fg(tokens.textDim)(ageLabel)}${barGap}${" ".repeat(SIZE_GAP)}${fg(tokens.textDim)(sizeLabel)}`;
+  const sizeLabel = padCells("Size", widths.sizeWidth, "right");
+  return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textDim)(nameLabel)}${fg(tokens.textDim)(ageLabel)}${barGap}${" ".repeat(widths.sizeWidth > 0 ? SIZE_GAP : 0)}${fg(tokens.textDim)(sizeLabel)}`;
 }
 
 export function buildListRule(widths: RowWidths, tokens: ThemeTokens): StyledText {
@@ -127,12 +127,17 @@ export function buildGroupHeaderContent(
         ? ` · ${row.selectedCount} queued`
         : ` · ${row.selectedCount} of ${row.itemCount} queued`;
   const total = rowTotalWidth(widths);
-  const labelWidth = Math.max(4, total - 2 - stats.length - queued.length - 1);
+  const status = `${stats}${queued}`;
+  const shownStats = clipCells(
+    cellWidth(status) <= total - 7 ? status : stats,
+    Math.max(0, total - 7),
+  );
+  const labelWidth = Math.max(0, total - 2 - cellWidth(shownStats) - 1);
   const label = truncateScopeLabel(row.label, labelWidth);
   const statsStyled =
     row.selectedCount === 0
-      ? fg(tokens.textDim)(stats)
-      : fg(fullyQueued ? tokens.positive : tokens.textSecondary)(`${stats}${queued}`);
+      ? fg(tokens.textDim)(shownStats)
+      : fg(fullyQueued ? tokens.positive : tokens.textSecondary)(shownStats);
   return t`${glyph} ${bold(fg(tokens.textMuted)(label))} ${statsStyled}`;
 }
 
@@ -210,14 +215,16 @@ export function buildArtifactRowContent(
     const recent = metrics !== undefined && isRecent(candidate.modifiedMs, metrics.now);
     const ageColor = isCurrent ? tokens.selectionText : recent ? tokens.warning : tokens.textDim;
     const age = metrics ? formatAge(candidate.modifiedMs, metrics.now) : "";
-    parts.push(t`${" ".repeat(COLUMN_GAP)}${fg(ageColor)(age.padStart(widths.ageWidth))}`);
+    parts.push(
+      t`${" ".repeat(COLUMN_GAP)}${fg(ageColor)(padCells(age, widths.ageWidth, "right"))}`,
+    );
   }
   if (widths.barWidth > 0) {
     const barColor = isCurrent ? tokens.selectionText : selected ? tokens.accent : tokens.textDim;
     const bar = sizeBar(candidate.estimatedBytes, metrics?.maxBytes ?? 0, widths.barWidth);
     parts.push(t`${" ".repeat(COLUMN_GAP)}${fg(barColor)(bar)}`);
   }
-  parts.push(t`${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}`);
+  if (widths.sizeWidth > 0) parts.push(t`${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}`);
   return joinStyled(parts);
 }
 
@@ -244,17 +251,15 @@ export function splitNameCell(
     return { nameText: truncateEnd(name, width), parentText: "" };
   }
 
-  const minName = Math.min(name.length, Math.max(4, Math.min(name.length, width)));
+  const minName = Math.min(cellWidth(name), width);
   const parentBudget = width - minName - 1;
   if (parentBudget < 4) {
     return { nameText: truncateEnd(name, width), parentText: "" };
   }
 
   const parentShown = truncateMiddle(parent, parentBudget);
-  const nameBudget = width - parentShown.length - 1;
-  const nameShown =
-    name.length <= nameBudget ? name : `${name.slice(0, Math.max(1, nameBudget - 1))}…`;
-  const namePadded = nameShown.padEnd(nameBudget);
+  const nameBudget = width - cellWidth(parentShown) - 1;
+  const namePadded = padCells(name, nameBudget);
   return { nameText: namePadded, parentText: ` ${parentShown}` };
 }
 
@@ -262,12 +267,11 @@ function formatSizeCell(bytes: number, width: number, partial: boolean): string 
   // `~` marks a partial lower bound (unreadable inodes inside the subtree) -
   // pending stubs carry bytes=0 and still render "-" until their size lands.
   const label = bytes > 0 ? `${partial ? "~" : ""}${formatBytes(bytes)}` : partial ? "~0" : "-";
-  return label.padStart(width);
+  return padCells(label, width, "right");
 }
 
 function truncateEnd(value: string, max: number): string {
-  if (value.length <= max) return value.padEnd(max);
-  return `${value.slice(0, Math.max(1, max - 1))}…`;
+  return padCells(value, max);
 }
 
 /**
@@ -278,7 +282,7 @@ function truncateEnd(value: string, max: number): string {
 export function truncateScopeLabel(label: string, max: number): string {
   if (max <= 0) return "";
   label = sanitizeTerminalText(label);
-  if (label.length <= max) return label.padEnd(max);
+  if (cellWidth(label) <= max) return padCells(label, max);
 
   const trailingSlash = label.endsWith("/");
   const segments = label
@@ -287,11 +291,11 @@ export function truncateScopeLabel(label: string, max: number): string {
     .filter((segment) => segment.length > 0);
   if (segments.length >= 2) {
     const tail = `${segments.slice(-2).join("/")}${trailingSlash ? "/" : ""}`;
-    if (tail.length <= max) return tail.padEnd(max);
-    return truncateMiddle(tail, max).padEnd(max);
+    if (cellWidth(tail) <= max) return padCells(tail, max);
+    return padCells(truncateMiddle(tail, max), max);
   }
 
-  return truncateMiddle(label, max).padEnd(max);
+  return padCells(truncateMiddle(label, max), max);
 }
 
 export function formatPatternRow(pattern: string, enabled: boolean): string {
@@ -358,6 +362,10 @@ export function buildHeaderStats(
   const w = width ?? Number.POSITIVE_INFINITY;
   const parts: StyledText[] = [];
 
+  // Put operation modes first; optional counts and diagnostics may clip later.
+  if (dryRun) parts.push(t`${bold(fg(tokens.warning)("DRY RUN"))}`);
+  if (trash) parts.push(t`${bold(fg(tokens.info)("TRASH"))}`);
+
   // Under ~100 cols the found count is the first thing to go - the queue is
   // what a destructive keystroke acts on, so it always survives.
   if (w >= 100) {
@@ -392,15 +400,6 @@ export function buildHeaderStats(
   // on narrow layouts; TRASH/DRY RUN are safety state and never drop.
   if (engine && w >= 110) {
     parts.push(t`${fg(tokens.textDim)(`engine:${engine}`)}`);
-  }
-
-  if (trash) {
-    // Reversible mode changes what apply does - it must be visible before the
-    // confirm dialog, not discovered after it.
-    parts.push(t`${bold(fg(tokens.info)("TRASH"))}`);
-  }
-  if (dryRun) {
-    parts.push(t`${bold(fg(tokens.warning)("DRY RUN"))}`);
   }
 
   return joinStyled(interleave(parts, t`  ${dim("·")}  `));
@@ -443,11 +442,7 @@ function interleave(items: StyledText[], separator: StyledText): StyledText[] {
 }
 
 function truncateMiddle(value: string, max: number): string {
-  if (value.length <= max) return value;
-  if (max <= 3) return value.slice(0, max);
-  const head = Math.ceil((max - 1) / 2);
-  const tail = Math.floor((max - 1) / 2);
-  return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
+  return clipCells(value, max, true);
 }
 
 export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): StyledText {

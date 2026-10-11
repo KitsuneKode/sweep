@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Linux PTY: inspect -> confirm one artifact; never touch an existing project."""
 import fcntl
+import argparse
 import os
 from pathlib import Path
 import pty
@@ -15,6 +16,9 @@ import termios
 import time
 
 REPO = Path(__file__).resolve().parent.parent
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--exit-signal", choices=["SIGHUP", "SIGTERM"])
+options = parser.parse_args()
 bun = shutil.which("bun")
 if not bun:
     raise SystemExit("bun is required")
@@ -74,7 +78,10 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
         if not (root / other / "node_modules/file").exists():
             raise RuntimeError("scoped apply deleted the other queued artifact")
         wait_until(lambda: "1 deleted" in text() and "1 still queued" in text() and "estimated bytes removed" in text())
-        os.write(master, b"q")
+        if options.exit_signal:
+            os.kill(proc.pid, getattr(signal, options.exit_signal))
+        else:
+            os.write(master, b"q")
         deadline = time.monotonic() + 5
         while proc.poll() is None:
             if time.monotonic() >= deadline:
@@ -100,7 +107,9 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
             raise RuntimeError("completed UI apply was reported as aborted")
         if not re.search(r"1 deleted.*0 moved to trash.*0 failed.*0 unattempted", text()):
             raise RuntimeError("completed UI session summary was not delivered")
-        print(f"ok: inspected {viewed}, confirmed only that artifact, preserved {other}")
+        if b"\x1b[?1049l" not in output:
+            raise RuntimeError("alternate screen was not restored before exit")
+        print(f"ok: inspected {viewed}, confirmed only that artifact, preserved {other}, exited via {options.exit_signal or 'q'}")
     finally:
         if proc.poll() is None:
             os.killpg(proc.pid, signal.SIGKILL)

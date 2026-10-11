@@ -42,7 +42,7 @@ Eviction is not a hard quota and does not bound Cargo's target directory.
 Lint/typecheck/read-only JS format checks and bundles use cache. Filesystem tests,
 mutating formatting and native compile/lint checks run fresh, while Cargo retains
 its own incremental compilation. Check the installed Turbo docs before changing
-future flags. A future docs app must build independently of CLI release artifacts.
+future flags. The docs app builds independently of CLI release artifacts.
 
 ## Release boundary
 
@@ -50,4 +50,9 @@ Local checks, hosted platform checks, installed-package tests and registry
 publication are distinct steps. Preview releases should qualify actual packages,
 interrupt receipts and TTY flows on every configured platform before stable
 promotion. Version all native packages with the CLI; do not move published tags.
+Publication requires a clean source checkout and successful main-branch push CI
+for the exact `GITHUB_SHA` at `HEAD`, including direct `npm publish` from `apps/cli`.
+Use the release workflow; a local `npm pack` preview needs no publication credentials.
+If packing is interrupted, run `bun run apps/cli/scripts/postpack.ts` from the
+repository root before retrying. An invalid backup is preserved for inspection.
 Current open qualification is described in [Roadmap](roadmap.md).

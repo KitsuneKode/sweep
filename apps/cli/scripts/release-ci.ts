@@ -1,4 +1,40 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
+export function assertPublicationSource(
+  actualSha: string,
+  qualifiedSha: string | undefined,
+  trackedChanges: string,
+): void {
+  if (!qualifiedSha || actualSha !== qualifiedSha || !/^[a-f0-9]{40}$/.test(actualSha))
+    throw new Error(
+      "Publication requires GITHUB_SHA to match the checked-out commit. Publish through the release workflow after that commit's push CI passes.",
+    );
+  if (trackedChanges.trim())
+    throw new Error(
+      "Publication requires a clean source checkout. Commit and qualify the changes before publishing.",
+    );
+}
+
+export async function requirePublicationCi(repoRoot: string): Promise<void> {
+  if (existsSync(join(repoRoot, "apps/cli/package.json.prepack-backup")))
+    throw new Error(
+      "Restore the interrupted pack with bun run apps/cli/scripts/postpack.ts before starting publication.",
+    );
+  const sha = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 5000,
+  }).trim();
+  const changes = execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  assertPublicationSource(sha, process.env.GITHUB_SHA, changes);
+  await requireQualifiedCi(process.env.GITHUB_REPOSITORY, sha);
+}
 
 interface CiRun {
   databaseId: number;

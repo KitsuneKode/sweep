@@ -1,6 +1,7 @@
 //! Sweep engine library for scan and apply flows.
 
 mod apply;
+pub mod discovery;
 mod guardrails;
 
 use camino::Utf8Path;

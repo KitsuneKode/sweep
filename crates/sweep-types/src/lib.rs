@@ -18,6 +18,42 @@ fn optional_safe_integer<'de, D: serde::Deserializer<'de>>(
     safe_integer(deserializer).map(Some)
 }
 
+fn candidate_reasons<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error> {
+    struct Reasons;
+    impl<'de> serde::de::Visitor<'de> for Reasons {
+        type Value = Vec<String>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("at most 64 reasons, each at most 1024 UTF-16 units")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: A,
+        ) -> Result<Self::Value, A::Error> {
+            let mut values = Vec::new();
+            while values.len() < 64 {
+                let Some(reason) = seq.next_element::<String>()? else {
+                    return Ok(values);
+                };
+                if reason.encode_utf16().count() > 1024 {
+                    return Err(serde::de::Error::custom(
+                        "candidate reason length limit exceeded",
+                    ));
+                }
+                values.push(reason);
+            }
+            if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                return Err(serde::de::Error::custom(
+                    "candidate reason count limit exceeded",
+                ));
+            }
+            Ok(values)
+        }
+    }
+    deserializer.deserialize_seq(Reasons)
+}
+
 // Optional protocol fields may be absent, but the schemas do not permit null.
 fn present_value<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
@@ -188,6 +224,7 @@ struct CandidateInput {
     #[serde(deserialize_with = "artifact_kind")]
     kind: String,
     risk_tier: RiskTier,
+    #[serde(deserialize_with = "candidate_reasons")]
     reasons: Vec<String>,
     selected_by_default: bool,
 }
@@ -378,6 +415,21 @@ mod tests {
             "reasons": [], "selectedByDefault": true
         }]);
         assert!(serde_json::from_value::<ScanPlan>(value.clone()).is_ok());
+        for reasons in [
+            vec![String::new(); 65],
+            vec!["x".repeat(1025)],
+            vec!["😀".repeat(513)],
+        ] {
+            let mut invalid = value.clone();
+            invalid["candidates"][0]["reasons"] = serde_json::json!(reasons);
+            assert!(
+                serde_json::from_value::<ScanPlan>(invalid).is_err(),
+                "oversized reasons"
+            );
+        }
+        let mut boundary = value.clone();
+        boundary["candidates"][0]["reasons"] = serde_json::json!(vec!["😀".repeat(512); 64]);
+        assert!(serde_json::from_value::<ScanPlan>(boundary).is_ok());
         for pointer in [
             "",
             "/summary",

@@ -13,9 +13,18 @@
  * `postpack.ts` restores the original manifest.
  */
 
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { atomicWrite } from "./atomic-write.js";
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(CLI_ROOT, "../..");
@@ -101,13 +110,23 @@ export function assertPublishable(manifest: Record<string, unknown>): void {
 }
 
 function main(): void {
+  if (existsSync(BACKUP))
+    throw new Error(
+      "An interrupted pack left a manifest backup. Run bun run apps/cli/scripts/postpack.ts from the repository root before packing again.",
+    );
   for (const file of ["README.md", "LICENSE"] as const) {
     copyFileSync(join(REPO_ROOT, file), join(CLI_ROOT, file));
   }
 
   const original = readFileSync(MANIFEST, "utf8");
-  // Never overwrite a backup from an interrupted pack; it holds the real manifest.
-  if (!existsSync(BACKUP)) writeFileSync(BACKUP, original);
+  // Exclusive creation preserves the original if another pack starts concurrently.
+  const backupFd = openSync(BACKUP, "wx", 0o600);
+  try {
+    writeFileSync(backupFd, original);
+    fsyncSync(backupFd);
+  } finally {
+    closeSync(backupFd);
+  }
 
   const manifest = JSON.parse(original) as Record<string, unknown>;
   const catalogs = readCatalogs(REPO_ROOT);
@@ -132,7 +151,7 @@ function main(): void {
   }
 
   assertPublishable(manifest);
-  writeFileSync(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+  atomicWrite(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
 
   console.log("prepack: copied README.md and LICENSE, resolved dependencies for publish");
 }

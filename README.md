@@ -1,6 +1,6 @@
 # sweep
 
-> Safe, recursive artifact cleanup for any project tree.
+> Find and remove generated project artifacts.
 
 [![CI](https://github.com/KitsuneKode/sweep/actions/workflows/ci.yml/badge.svg)](https://github.com/KitsuneKode/sweep/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@kitsunekode/sweep)](https://www.npmjs.com/package/@kitsunekode/sweep)
@@ -8,7 +8,7 @@
 
 `sweep` deletes build artifacts - `node_modules`, `dist`, `.next`, `target`, and more - recursively across monorepos, with path validation, protected-root guardrails, and explicit review before cleanup.
 
-Think [`npkill`](https://github.com/voidcosmos/npkill), but monorepo-aware, risk-tiered, scriptable, and with a live TUI that boots instantly and streams results as it scans.
+Like [`npkill`](https://github.com/voidcosmos/npkill), Sweep helps review project cleanup. It also finds build outputs, supports saved plans and automation, and streams discoveries into a terminal UI.
 
 ```
  ◆ sweep                              18 found · 10 queued · 5.8 GB
@@ -191,8 +191,8 @@ Arrows work everywhere; letter keys are speed aliases.
 | `Esc`                              | **walk back one layer**            | never quits - see below                                     |
 | `q` / `Ctrl-C`                     | quit                               | `Ctrl-C` works even inside modals/search                    |
 
-In the confirm dialog, `t` switches between deleting and moving to trash, so the
-reversible option is one key away at the last moment.
+In the confirm dialog, `t` switches between permanent deletion and local trash.
+Trash keeps the occupied storage; restoration requires a manual move.
 
 ### Filter operators
 
@@ -308,8 +308,9 @@ Layered guarantees:
    and why; exit code reflects it. A scan that couldn't read part of the tree
    says so (`N skipped` in the TUI, counts in `scan --json`) instead of looking
    complete.
-7. **Ctrl+C is safe** mid-apply - sweep stops scheduling new deletions, lets
-   in-flight work finish, then reports exactly what was removed.
+7. **Ctrl+C requests cancellation** mid-apply - Sweep stops scheduling new
+   deletions and waits for in-flight work to settle. It does not undo removals.
+   Keep the outcome report; a missing final report means the outcome is unknown.
 
 ### Reversible cleanup (`--trash`)
 

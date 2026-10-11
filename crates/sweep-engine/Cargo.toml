@@ -12,8 +12,10 @@ sweep-types = { path = "../sweep-types" }
 sha2.workspace = true
 hex.workspace = true
 chrono.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 tempfile.workspace = true
 
 [lints]

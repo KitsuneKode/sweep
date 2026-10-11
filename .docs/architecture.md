@@ -116,7 +116,8 @@ See [.docs/workspace-layout.md](workspace-layout.md) for the directory map and
 Native Linux apply opens the approved root and each relative component through
 safe rustix descriptors. `openat2` enforces beneath-root, no-symlink and
 no-mount-crossing resolution; deletion uses descriptor-relative `unlinkat`.
-The iterative remover retains at most 32 directory frames and checks
+The iterative remover retains at most 16 directory handles and 1 MiB of frame
+metadata, reopening ancestors with identity checks as needed. It checks
 cancellation between entries. Missing kernel support fails closed. Errors
 after deletion starts can describe a partially removed artifact.
 

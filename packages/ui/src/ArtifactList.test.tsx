@@ -7,6 +7,48 @@ import { ArtifactList } from "./ArtifactList.js";
 import type { UiDisplayRow } from "./rows.js";
 import { darkTheme } from "./theme.js";
 
+test("a narrow rendered pane keeps sizes visible beside CJK and emoji names", async () => {
+  const candidates: ScanCandidate[] = ["東京の長い成果物".repeat(4), "👩🏽‍💻".repeat(8)].map(
+    (name, i) => ({
+      id: `wide-${i}`,
+      name,
+      path: `/owned/${name}`,
+      kind: "dist",
+      estimatedBytes: 512,
+      entryType: "directory",
+      isSymlink: false,
+      riskTier: "safe",
+      reasons: [],
+      selectedByDefault: false,
+    }),
+  );
+  const setup = await testRender(
+    <ArtifactList
+      rows={candidates.map((c) => ({ kind: "item", candidateId: c.id, groupLabel: "" }))}
+      candidatesById={new Map(candidates.map((c) => [c.id, c]))}
+      selectedIds={new Set()}
+      currentRowIndex={0}
+      focused
+      tokens={darkTheme}
+      paneWidth={30}
+    />,
+    { width: 30, height: 12 },
+  );
+  try {
+    await act(async () => {
+      await setup.renderOnce();
+      await setup.flush();
+    });
+    const frame = setup.captureCharFrame();
+    expect(frame.split("\n").filter((line) => line.includes("512 B"))).toHaveLength(2);
+    expect(frame).toContain("東京");
+    // The terminal sanitizer deliberately spells out ZWJ; width math includes it.
+    expect(frame).toContain("👩🏽\\u200d");
+  } finally {
+    await act(async () => setup.renderer.destroy());
+  }
+});
+
 test("artifact hover survives an unchanged view and clears when its row is removed", async () => {
   const candidates = ["a", "b", "c"].map(
     (id): ScanCandidate => ({

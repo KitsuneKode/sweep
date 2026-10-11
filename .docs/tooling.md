@@ -101,6 +101,16 @@ Root `optionalDependencies` on the CLI package are synced via `bun run sync-engi
 artifacts, then `scripts/publish-release.ts` publishes native packages before
 `@kitsunekode/sweep`. Reusable workflow: `native-engine-release.yml`.
 
+Both the release command and `apps/cli`'s `prepublishOnly` require a clean tracked
+checkout, `GITHUB_SHA` matching `HEAD`, and successful main-branch push CI for that
+exact commit. Direct `npm publish` does not skip those checks. Native payloads
+must have the chosen platform's executable format and architecture, including
+when passed with `--binary`; this header check does not authenticate their code.
+Interrupted packing keeps a manifest backup. Restore it with
+`bun run apps/cli/scripts/postpack.ts` before packing or publishing again.
+Manifest replacements use same-directory staging, file sync and rename. This is
+not a qualification of every filesystem's power-loss behavior.
+
 **Do not** add `native-packages/*` to Bun workspaces - they are publish-time
 artifacts only.
 

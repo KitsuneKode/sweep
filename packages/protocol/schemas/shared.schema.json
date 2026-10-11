@@ -117,8 +117,10 @@
         },
         "reasons": {
           "type": "array",
+          "maxItems": 64,
           "items": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 1024
           }
         },
         "selectedByDefault": {

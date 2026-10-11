@@ -494,6 +494,55 @@ describe("adversarial: committed applying state", () => {
     expect(setup.captureCharFrame()).toContain("Stopping");
   });
 
+  test("terminal close waits for the interrupted report before ending the session", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const { setup, settle, openSingleConfirm, applyCalls, applyResolvers } = await mountWithApply(
+      (outcome) => outcomes.push(outcome),
+    );
+    await openSingleConfirm();
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    await act(async () => {
+      expect(requestUiApplyCancellation(true)).toBe(true);
+    });
+    await settle();
+    expect(applyCalls[0]!.signal.aborted).toBe(true);
+    expect(outcomes).toEqual([]);
+    const id = applyCalls[0]!.plan.selectedCandidateIds[0]!;
+    await act(async () => {
+      applyResolvers[0]!({
+        report: {
+          protocolVersion: "1",
+          targetDir: "/tmp/sweep-ui",
+          selectedCandidateIds: [id],
+          deletedCount: 0,
+          failedCount: 0,
+          totalBytesFreed: 0,
+          failedPaths: [],
+          interrupted: true,
+          outcomes: [{ candidateId: id, status: "unattempted" }],
+        },
+        interrupted: true,
+      });
+      await setup.flush();
+    });
+    await settle();
+    expect(outcomes).toEqual([
+      {
+        type: "done",
+        deletedCount: 0,
+        movedCount: 0,
+        failedCount: 0,
+        unattemptedCount: 1,
+        interrupted: true,
+        unknownOutcome: false,
+      },
+    ]);
+  });
+
   test("clicking stop requests cancellation without dismissing the apply", async () => {
     const outcomes: SweepUiOutcome[] = [];
     const { setup, settle, openSingleConfirm, applyCalls } = await mountWithApply((o) =>
@@ -568,6 +617,66 @@ describe("adversarial: committed applying state", () => {
 });
 
 describe("adversarial: apply resolution state surgery", () => {
+  test("successive link removals with the same name use different candidate ids", async () => {
+    const plan = createPlan();
+    plan.candidates = ["first", "second"].map((group) => ({
+      ...plan.candidates[0]!,
+      id: `cand_${group}`,
+      path: `/tmp/sweep-ui/${group}/target`,
+      name: "target",
+      kind: "target" as const,
+      entryType: "symlink" as const,
+      isSymlink: true,
+      riskTier: "caution" as const,
+      estimatedBytes: 78,
+    }));
+    plan.selectedCandidateIds = plan.candidates.map((candidate) => candidate.id);
+    const { setup, settle, openSingleConfirm, applyCalls, applyResolvers } = await mountWithApply(
+      () => {},
+      undefined,
+      plan,
+    );
+    const completed = new Set<string>();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await openSingleConfirm();
+      expect(setup.captureCharFrame()).toContain("symbolic link");
+      await act(async () => {
+        setup.mockInput.pressKey("y");
+        await setup.flush();
+      });
+      await settle();
+      expect(applyCalls).toHaveLength(attempt + 1);
+      const request = applyCalls[attempt]!.plan;
+      expect(request.selectedCandidateIds).toHaveLength(1);
+      const id = request.selectedCandidateIds[0]!;
+      expect(completed.has(id)).toBe(false);
+      completed.add(id);
+      const candidate = request.candidates.find((entry) => entry.id === id)!;
+      await act(async () => {
+        applyResolvers[attempt]!({
+          report: {
+            protocolVersion: "1",
+            targetDir: plan.targetDir,
+            selectedCandidateIds: [id],
+            deletedCount: 1,
+            failedCount: 0,
+            totalBytesFreed: 78,
+            failedPaths: [],
+            outcomes: [{ candidateId: id, status: "deleted" }],
+          },
+          interrupted: false,
+        });
+        await setup.flush();
+      });
+      await settle();
+      const frame = setup.captureCharFrame();
+      expect(frame).toContain(`${1 - attempt} found`);
+      expect(frame).toContain(`${1 - attempt} still queued`);
+      expect(frame).toContain(`path: ${candidate.path.replace(`${plan.targetDir}/`, "")}`);
+    }
+    expect(completed).toEqual(new Set(plan.selectedCandidateIds));
+  });
+
   test("resolved apply removes the row, clears the modal, restores input", async () => {
     const { setup, settle, openSingleConfirm, applyCalls, applyResolvers } = await mountWithApply(
       () => {},
@@ -733,6 +842,41 @@ test("quitting after a trusted apply reports the session result rather than abor
       unknownOutcome: false,
     },
   ]);
+});
+
+test("terminal close while idle preserves completed session results", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  const { setup, settle, openSingleConfirm, applyCalls, applyResolvers } = await mountWithApply(
+    (outcome) => outcomes.push(outcome),
+  );
+  await openSingleConfirm();
+  await act(async () => {
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  await settle();
+  const id = applyCalls[0]!.plan.selectedCandidateIds[0]!;
+  await act(async () => {
+    applyResolvers[0]!({
+      report: {
+        protocolVersion: "1",
+        targetDir: "/tmp/sweep-ui",
+        selectedCandidateIds: [id],
+        deletedCount: 1,
+        failedCount: 0,
+        totalBytesFreed: 1024,
+        failedPaths: [],
+        outcomes: [{ candidateId: id, status: "deleted" }],
+      },
+      interrupted: false,
+    });
+    await setup.flush();
+  });
+  await settle();
+  await act(async () => {
+    expect(requestUiApplyCancellation(true)).toBe(true);
+  });
+  expect(outcomes[0]).toMatchObject({ type: "done", deletedCount: 1, unknownOutcome: false });
 });
 
 test("quitting after a lost apply report retains the unknown outcome", async () => {

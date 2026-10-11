@@ -80,6 +80,38 @@ async function mount(onDone: (outcome: SweepUiOutcome) => void) {
 }
 
 describe("sweep TUI render", () => {
+  test("inspect wraps a long path rather than hiding its final component", async () => {
+    const plan = createPlan();
+    const rel = `東京/${"long-parent-segment/".repeat(5)}final-reviewed-node_modules`;
+    plan.candidates = [
+      {
+        ...plan.candidates[0]!,
+        name: "final-reviewed-node_modules",
+        path: `${plan.targetDir}/${rel}`,
+      },
+    ];
+    const setup = await testRender(<SweepApp plan={plan} onDone={() => {}} />, {
+      width: 72,
+      height: 36,
+    });
+    teardown = () => setup.renderer.destroy();
+    await act(async () => {
+      await setup.renderOnce();
+      setup.mockInput.pressKey("i");
+    });
+    for (let i = 0; i < 3; i++)
+      await act(async () => {
+        await setup.renderOnce();
+        await setup.flush();
+      });
+    const frame = setup.captureCharFrame();
+    // Capture the rendered multiline field, not a hidden renderable's raw content.
+    const start = frame.indexOf("path");
+    const end = frame.indexOf("size", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(frame.slice(start, end).replace(/[\s│]/g, "")).toContain(rel);
+  });
   test("inspect x confirms exactly the displayed candidate without applying the queue", async () => {
     const outcomes: SweepUiOutcome[] = [];
     const setup = await mount((outcome) => outcomes.push(outcome));

@@ -13,6 +13,7 @@ import {
   truncateScopeLabel,
 } from "./presentation.js";
 import { darkTheme } from "./theme.js";
+import { cellWidth, clipCells } from "./text-cells.js";
 
 function planFixture(): ScanPlan {
   return {
@@ -118,6 +119,26 @@ describe("presentation formatters", () => {
       );
       expect(line.length).toBe(rowTotalWidth(widths));
     }
+  });
+
+  test("wide names, emoji and combining marks preserve the size column in narrow panes", () => {
+    for (const listWidth of [20, 24, 30, 36, 40, 60, 80]) {
+      const widths = artifactRowWidths(listWidth);
+      expect(rowTotalWidth(widths)).toBeLessThanOrEqual(listWidth);
+      for (const name of ["東京の長い成果物".repeat(4), "👩🏽‍💻".repeat(8), "e\u0301".repeat(20)]) {
+        const line = plain(
+          buildArtifactRowContent(candidate({ name }), true, false, widths, darkTheme),
+        );
+        expect(cellWidth(line)).toBe(rowTotalWidth(widths));
+        expect(line.trimEnd().endsWith("512 B")).toBe(true);
+        const cells = splitNameCell(name, "東京/packages/👩🏽‍💻", widths.nameWidth);
+        expect(cellWidth(cells.nameText + cells.parentText)).toBe(widths.nameWidth);
+      }
+    }
+    expect(clipCells("👩🏽‍💻👩🏽‍💻", 3)).toBe("👩🏽‍💻…");
+    expect(clipCells("e\u0301e\u0301e\u0301", 2)).toBe("e\u0301…");
+    expect(clipCells("東京", 1)).toBe("…");
+    expect(clipCells("東京", 0)).toBe("");
   });
 
   test("a row shows its age and a bar scaled to the largest listed artifact", () => {
@@ -280,6 +301,16 @@ describe("buildHeaderStats queue counts", () => {
         ),
       );
       expect(line).toContain("~3.0 KiB");
+    }
+  });
+
+  test("operation modes precede queue counts on narrow layouts", () => {
+    for (const width of [30, 40, 72, 120]) {
+      const line = plain(
+        buildHeaderStats(planFixture(), summary(), darkTheme, true, width, true, "rust"),
+      );
+      expect(line.startsWith("DRY RUN  ·  TRASH")).toBe(true);
+      expect(line.indexOf("TRASH")).toBeLessThan(line.indexOf("queued"));
     }
   });
 

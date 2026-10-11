@@ -386,34 +386,33 @@ describe("core engine", () => {
     expect(existsSync(dir("node_modules"))).toBe(false);
   });
 
-  test.skipIf(
-    process.env.SWEEP_ENGINE_FROM_NPM === "1" ||
-      !NATIVE_AVAILABLE ||
-      !existsSync(resolveRustEngineBinary()),
-  )("applyPlanWithBackend rust reports outside-target paths per entry", async () => {
-    mkdirSync(dir("node_modules"));
-    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
-    const outsidePath = join("/tmp", "sweep-rust-outside-target");
-    const malicious = {
-      ...plan,
-      candidates: [
-        ...plan.candidates,
-        {
-          ...plan.candidates[0]!,
-          id: "cand_outside",
-          path: outsidePath,
-        },
-      ],
-      selectedCandidateIds: [...plan.selectedCandidateIds, "cand_outside"],
-    };
+  test.skipIf(!NATIVE_AVAILABLE || !existsSync(resolveRustEngineBinary()))(
+    "applyPlanWithBackend rust reports outside-target paths per entry",
+    async () => {
+      mkdirSync(dir("node_modules"));
+      const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+      const outsidePath = join("/tmp", "sweep-rust-outside-target");
+      const malicious = {
+        ...plan,
+        candidates: [
+          ...plan.candidates,
+          {
+            ...plan.candidates[0]!,
+            id: "cand_outside",
+            path: outsidePath,
+          },
+        ],
+        selectedCandidateIds: [...plan.selectedCandidateIds, "cand_outside"],
+      };
 
-    const { report } = await applyPlanWithBackend(malicious, "rust");
-    expect(report.failedPaths).toContainEqual(
-      expect.objectContaining({ path: outsidePath, code: "outside_target" }),
-    );
-    expect(existsSync(outsidePath)).toBe(false);
-    expect(existsSync(dir("node_modules"))).toBe(false);
-  });
+      const { report } = await applyPlanWithBackend(malicious, "rust");
+      expect(report.failedPaths).toContainEqual(
+        expect.objectContaining({ path: outsidePath, code: "outside_target" }),
+      );
+      expect(existsSync(outsidePath)).toBe(false);
+      expect(existsSync(dir("node_modules"))).toBe(false);
+    },
+  );
 
   test("scanToPlan handles the seeded large-plan scenario predictably", async () => {
     const fixture = seedScenario("large-plan");

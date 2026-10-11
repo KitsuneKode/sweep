@@ -51,6 +51,33 @@ function validPlan(): ScanPlan {
 }
 
 describe("plan validation", () => {
+  test("malformed metadata produces a bounded first-error diagnostic", () => {
+    const plan = validPlan();
+    const candidate = {
+      ...plan.candidates[0]!,
+      kind: "invalid",
+      riskTier: "invalid",
+      reasons: Array<number>(64).fill(42),
+    };
+    let error: unknown;
+    try {
+      validatePlan({ ...plan, candidates: [candidate] });
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(PlanValidationError);
+    expect((error as Error).message.length).toBeLessThan(1024);
+  });
+  test("saved plans enforce the streamed reason limits, including UTF-16 length", () => {
+    for (const reasons of [Array<string>(65).fill(""), ["x".repeat(1025)], ["😀".repeat(513)]]) {
+      const plan = validPlan();
+      plan.candidates[0]!.reasons = reasons;
+      expect(() => validatePlan(plan)).toThrow(PlanValidationError);
+    }
+    const boundary = validPlan();
+    boundary.candidates[0]!.reasons = Array<string>(64).fill("😀".repeat(512));
+    expect(validatePlan(boundary).candidates[0]!.reasons).toHaveLength(64);
+  });
   test("validatePlan accepts a well-formed plan", () => {
     const plan = validatePlan(validPlan());
     expect(plan.protocolVersion).toBe("1");

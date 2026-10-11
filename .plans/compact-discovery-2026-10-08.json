@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-11T07:23:50.894Z",
+  "runtime": "1.4.2",
+  "platform": "linux",
+  "arch": "x64",
+  "binary": "/home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine",
+  "binarySha256": "0ef709adf8ad3e1ded488f810095f7cbdb7c26fa46e4d0222b4e58298679ae16",
+  "sourceBase": "bda7c822618112b6061a62a34cdfa34c616e8369",
+  "sourceDirty": true,
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "method": "Read-only synthetic metadata, 5k/50k/100k records, 200 sequential discovery-order queries per child. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include NDJSON transport and page decoding; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
+  "results": [
+    {
+      "count": 5000,
+      "initBytes": 1609717,
+      "initMs": 18.980495,
+      "retainedChargeBytes": 2041064,
+      "nativePeakRssBytes": 7905280,
+      "maxReplyBytes": 42838,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 0.6870009999999525,
+        "p95Ms": 1.6123569999999745,
+        "p99Ms": 2.605286000000035
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 0.18628499999999804,
+        "p95Ms": 1.7618620000000078,
+        "p99Ms": 2.811924999999974
+      }
+    },
+    {
+      "count": 50000,
+      "initBytes": 16242211,
+      "initMs": 175.94759400000004,
+      "retainedChargeBytes": 20955612,
+      "nativePeakRssBytes": 59645952,
+      "maxReplyBytes": 42850,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 2.4431509999999435,
+        "p95Ms": 13.889650999999958,
+        "p99Ms": 16.535712000000103
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 1.7243359999999939,
+        "p95Ms": 17.218159999999898,
+        "p99Ms": 23.043907000000104
+      }
+    },
+    {
+      "count": 100000,
+      "initBytes": 32517233,
+      "initMs": 332.606941,
+      "retainedChargeBytes": 42032872,
+      "nativePeakRssBytes": 96452608,
+      "maxReplyBytes": 42855,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 3.9904930000002423,
+        "p95Ms": 25.451792999999725,
+        "p99Ms": 32.15343900000016
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 2.972671999999875,
+        "p95Ms": 26.555398999999852,
+        "p99Ms": 33.14055199999984
+      }
+    }
+  ]
+}

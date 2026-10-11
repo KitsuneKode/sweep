@@ -60,7 +60,7 @@ export function ReviewPane({
   // Artifact pane inner width: total terminal width minus sidebar (if shown),
   // outer padding (2), pane border+padding (4). The panes touch: no gap.
   const artifactPaneInnerWidth = Math.max(
-    36,
+    1,
     dimensions.width - (showSidebar ? sidebarWidth : 0) - 2 - 4,
   );
 

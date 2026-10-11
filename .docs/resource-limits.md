@@ -120,7 +120,8 @@ creation can still fail safely and clean up its owned temporary directory.
 Scans can cross mounted filesystems. Native Linux deletion now opens the root
 once per candidate and resolves relative entries with `openat2` restrictions,
 refusing mount crossings (including same-device bind mounts), symlinked
-ancestors and escape paths. It retains at most 32 directory frames and polls
+ancestors and escape paths. It retains at most 16 directory handles and 1 MiB of
+frame metadata, reopening ancestors with identity checks as needed, and polls
 cancellation within each artifact. Missing kernel support refuses deletion;
 there is no pathname fallback. JS checks a bounded 1 MiB Linux mountinfo snapshot
 before a directory removal or trash move, including nested bind mounts. Actual

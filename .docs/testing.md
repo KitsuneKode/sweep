@@ -454,6 +454,20 @@ records remaining destructive-operation gates and fresh benchmark commands.
 
 ## Installed packages, mounts and long sessions
 
+The read-only compact-index experiment has a separate qualification command:
+
+```sh
+bun run engine:build
+bun run packages/ui/benchmarks/native-index.ts --binary target/release/sweep-engine --output /tmp/sweep-index.json
+```
+
+It compares 600 bounded discovery-order page queries at 5k/50k/100k synthetic
+records with the JS filter. Reports record the binary hash, compiler, transport
+sizes, retained logical charges and native process RSS. The host keeps a reference
+snapshot, so this does not measure total TUI memory, real scanning or deletion.
+The experiment is not wired into the production UI. See the
+[compact-index integration gate](../.plans/compact-discovery-2026-10-08.md).
+
 ```sh
 bun run build
 bun run engine:build

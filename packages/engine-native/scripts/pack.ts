@@ -19,6 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePlatformById, NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 import { defaultBinaryPath } from "./binary-path.js";
+import { assertNativeBinary } from "./binary-format.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const NATIVE_PACKAGES = join(REPO_ROOT, "native-packages");
@@ -90,6 +91,7 @@ if (!existsSync(sourceBinary)) {
   console.error(`error: binary not found: ${sourceBinary}`);
   process.exit(1);
 }
+assertNativeBinary(sourceBinary, platform);
 
 const outDir = join(NATIVE_PACKAGES, platform.id);
 const binDir = join(outDir, "bin");

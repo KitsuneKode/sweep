@@ -29,19 +29,21 @@ close the error dialog.
 These checks reduce risk but do not eliminate every concurrent filesystem race.
 Native Linux removal uses directory descriptors and kernel resolution
 restrictions to refuse symlinked ancestors and mount crossings, including bind
-mounts. It requires `openat2` support and stops at 32 nested directory frames
-rather than retaining unlimited handles. A refusal during recursive removal may
+mounts. It requires `openat2` support and retains at most 16 directory handles
+and 1 MiB of traversal-frame metadata. Deep traversal reopens ancestors through
+the pinned root and rechecks their identities. A refusal during removal may
 leave a partially removed artifact. JS checks the Linux mount table before
 removal; it still uses pathname operations, so this is a preflight snapshot,
 not atomic containment. Other platforms retain their existing removal paths and
 need actual runtime qualification. A leaf name or contents can still change
-near an unlink syscall. Avoid cleaning trees whose
-paths or mounts are being actively replaced. Do not run as administrator merely
+near an unlink syscall. Avoid cleaning trees whose paths or mounts are being
+actively replaced. Do not run as administrator merely
 to bypass a refusal.
 
 ## Delete versus trash
 
-Permanent deletion removes contents. Trash moves selected artifacts into a
+Permanent deletion removes the selected entry and, for a directory, its contents.
+Trash moves selected artifacts into a
 `.sweep-trash-*` directory under the scan target. This is a local holding directory,
 not the desktop recycle bin, and it does not free the occupied storage yet.
 
@@ -51,6 +53,19 @@ restore that payload to the original artifact location.
 Check its original location first: do not overwrite a newly recreated directory.
 There is no documented automatic `undo` command. Remove trash only after you have
 verified the recovered project and no longer need those contents.
+
+## Symbolic links
+
+When the selected artifact is a symbolic link, Sweep removes or moves the link
+itself. It does not traverse or remove the linked directory. A tiny `node_modules`
+or `target` row may therefore represent a link to a much larger directory.
+Inspect the entry type before confirming; the displayed bytes describe the link,
+not the contents at its destination.
+
+Builds, package installs and fixture-generation commands can recreate an entry
+after a successful removal. A rescan describes the filesystem at that time; it
+does not mean an earlier removal failed. Compare the full path and final outcome
+before retrying.
 
 ## Ctrl-C during apply
 

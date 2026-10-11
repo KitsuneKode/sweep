@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { ciQualification } from "./release-ci.js";
+import { assertPublicationSource, ciQualification } from "./release-ci.js";
 
 const sha = "a".repeat(40);
 const run = {
@@ -10,6 +10,14 @@ const run = {
   status: "completed",
   conclusion: "success",
 };
+
+test("direct publication cannot borrow another commit's CI or ignore dirty Rust/docs", () => {
+  expect(() => assertPublicationSource(sha, sha, "")).not.toThrow();
+  expect(() => assertPublicationSource(sha, undefined, "")).toThrow(/release workflow/);
+  expect(() => assertPublicationSource(sha, "b".repeat(40), "")).toThrow(/checked-out commit/);
+  for (const changes of [" M crates/sweep-engine/src/apply.rs", " M docs/users/safety.md"])
+    expect(() => assertPublicationSource(sha, sha, changes)).toThrow(/clean source/);
+});
 
 test("publication requires successful push CI for the exact source commit", () => {
   expect(ciQualification([run], sha)).toBe("passed");

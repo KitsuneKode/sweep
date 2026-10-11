@@ -37,6 +37,25 @@ or slow filesystem; choose a small reproducer first.
 Report bugs at [GitHub issues](https://github.com/KitsuneKode/sweep/issues).
 Include expected behavior, actual behavior and whether any apply was attempted.
 
+## A row remains after cleanup
+
+Read the outcome first. `x` / `d` confirms removal of the focused or inspected
+artifact; Enter opens confirmation for the queue. A single-item result can leave
+other queued items untouched. The cursor then moves to a surviving artifact,
+which may have the same name in another project. Compare full paths with `i`.
+
+A symbolic-link artifact represents the link entry, not the directory it points
+to. Removing it leaves the linked contents intact. Package installs, builds and
+fixture generators can also recreate entries; pause them before cleanup and
+rescan to check what exists now. Sweep's own `fixtures:sync` command recreates
+the `tests/fixtures/risk-mix/target` test link.
+
+If the same full path remains in the current session after an authoritative
+deleted outcome, keep the report and report the discrepancy. Do not repeatedly
+confirm deletion to work around it. Include the command, engine, entry type,
+full-path comparison and any process writing to that tree; redact private paths
+before sharing them.
+
 ## Legal POSIX backslash names under Bun
 
 Some Bun 1.4.2 `realpath` calls fail on a literal backslash in a POSIX name,

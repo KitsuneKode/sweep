@@ -333,6 +333,7 @@ function ConfirmOverlay({
   applyPolicy,
   lowerBound,
   otherQueuedCount,
+  linkOnly,
   feedback,
 }: {
   tokens: ThemeTokens;
@@ -346,11 +347,10 @@ function ConfirmOverlay({
   dryRun?: boolean;
   trash?: boolean;
   otherQueuedCount?: number;
+  linkOnly?: boolean;
   feedback?: string | undefined;
 }) {
-  // The verb has to match what executePlanDeletion will actually do -
-  // "permanently delete" while moving to trash understates nothing, and
-  // "move" while deleting would be a lie the other way.
+  // Confirmation describes the operation, including link-only removal.
   const action = dryRun ? "Preview removal of" : trash ? "Move to trash" : "Permanently delete";
   const dangerous = dangerousCount > 0;
   const accent = dangerous && !trash ? tokens.danger : tokens.accent;
@@ -369,7 +369,7 @@ function ConfirmOverlay({
           {feedback ? <text fg={tokens.info} content={feedback} /> : null}
           {dryRun ? null : (
             <text
-              content={t`${bold(fg(tokens.text)("t"))} ${fg(tokens.textMuted)(trash ? "delete permanently instead" : "move to trash instead (reversible)")}`}
+              content={t`${bold(fg(tokens.text)("t"))} ${fg(tokens.textMuted)(trash ? "delete permanently instead" : "move to trash instead")}`}
             />
           )}
           <text
@@ -388,6 +388,16 @@ function ConfirmOverlay({
       <text
         content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "partial estimate; actual bytes may differ" : "estimated size")}`}
       />
+      {linkOnly ? (
+        <text
+          fg={tokens.warning}
+          content={
+            trash
+              ? "Moves only the symbolic link. Linked contents stay."
+              : "Removes only the symbolic link. Linked contents stay."
+          }
+        />
+      ) : null}
       {otherQueuedCount !== undefined && otherQueuedCount > 0 ? (
         <text
           fg={tokens.textSecondary}
@@ -434,7 +444,9 @@ function ConfirmOverlay({
         <text content={t`${fg(tokens.textDim)(`  …and ${hidden} more`)}`} wrapMode="none" />
       ) : null}
       <text content="" />
-      {dangerous ? (
+      {dryRun ? (
+        <text content={t`${fg(tokens.textDim)("Preview only. No files will be removed.")}`} />
+      ) : dangerous ? (
         <text
           content={t`${fg(trash ? tokens.warning : tokens.danger)(
             trash
@@ -444,10 +456,12 @@ function ConfirmOverlay({
         />
       ) : trash ? (
         <text
-          content={t`${fg(tokens.textDim)("Moves into .sweep-trash-* under the target. Reversible.")}`}
+          content={t`${fg(tokens.textDim)("Local trash; restore manually. Storage remains occupied.")}`}
         />
       ) : (
-        <text content={t`${fg(tokens.textDim)("No dangerous items in this selection.")}`} />
+        <text
+          content={t`${fg(tokens.textDim)("No items classified as dangerous. Permanent deletion has no undo.")}`}
+        />
       )}
     </Modal>
   );
@@ -478,12 +492,18 @@ function InspectOverlay({
   }[candidate.riskTier];
 
   const field = (label: string, value: string | StyledText) => (
-    <box flexDirection="row" height={1} flexShrink={0}>
+    <box flexDirection="row" width="100%" flexShrink={0}>
       <text content={t`${fg(tokens.textDim)(label.padEnd(9))} `} wrapMode="none" />
       {typeof value === "string" ? (
-        <text content={t`${fg(tokens.text)(value)}`} wrapMode="none" />
+        <text
+          content={t`${fg(tokens.text)(value)}`}
+          flexGrow={1}
+          flexShrink={1}
+          minWidth={0}
+          wrapMode="char"
+        />
       ) : (
-        <text content={value} wrapMode="none" />
+        <text content={value} flexGrow={1} flexShrink={1} minWidth={0} wrapMode="char" />
       )}
     </box>
   );
@@ -562,6 +582,7 @@ export function SweepApp({
   // report merges back into the list instead of ending the session.
   const [applying, setApplyingState] = useState<string | null>(null);
   const applyAbortRef = useRef<AbortController | null>(null);
+  const closeAfterApplyRef = useRef(false);
   const [applyProgress, setApplyProgress] = useState<ApplyProgress | null>(null);
   const [showInspect, setShowInspectState] = useState(false);
   const [scanError, setScanErrorState] = useState<string | null>(null);
@@ -915,8 +936,7 @@ export function SweepApp({
     [mutate],
   );
 
-  // Starts from `--trash`, but the confirm dialog can flip it: the last
-  // moment before deleting is exactly when someone wants the reversible option.
+  // The dialog can change the initial --trash mode before confirmation.
   const [trashMode, setTrashMode] = useState(Boolean(trash));
   const trashModeRef = useRef(Boolean(trash));
   const toggleTrash = useCallback(() => {
@@ -975,8 +995,10 @@ export function SweepApp({
           session.unattemptedCount += merged.unattempted;
           session.interrupted ||= stopped;
           const verb = result.trashDir ? "moved to trash" : "deleted";
+          const reviewedPath =
+            scopedPlan.selectedCandidateIds.length === 1 ? ` · path: ${name}` : "";
           setNotice(
-            `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${getUiSummary(merged.state).selectedCount} still queued · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
+            `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${getUiSummary(merged.state).selectedCount} still queued · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${reviewedPath}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
           );
         } catch (error) {
           if (applyAbortRef.current !== controller) return;
@@ -997,6 +1019,7 @@ export function SweepApp({
             applyAbortRef.current = null;
             setApplying(null);
             setApplyProgress(null);
+            if (closeAfterApplyRef.current) finalize({ type: "abort" });
           }
         }
       })();
@@ -1076,8 +1099,13 @@ export function SweepApp({
   }, []);
 
   useEffect(() => {
-    const unregister = registerUiApplyCancellation(() => {
-      if (!applyAbortRef.current) return false;
+    const unregister = registerUiApplyCancellation((closeAfterApply) => {
+      if (!applyAbortRef.current) {
+        if (!closeAfterApply) return false;
+        finalize({ type: "abort" });
+        return true;
+      }
+      closeAfterApplyRef.current ||= closeAfterApply;
       abortApply();
       return true;
     });
@@ -1086,7 +1114,7 @@ export function SweepApp({
       applyAbortRef.current?.abort();
       applyAbortRef.current = null;
     };
-  }, [abortApply]);
+  }, [abortApply, finalize]);
 
   const renderer = useRenderer();
 
@@ -1321,7 +1349,7 @@ export function SweepApp({
     }
     return top.map(
       (candidate) =>
-        `${candidate.riskTier} · ${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidate.estimatedBytes)} · ${sanitizeTerminalText(relativePath(state.targetDir, candidate.path))}`,
+        `${candidate.riskTier}${candidate.isSymlink ? " · link only" : ""} · ${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidate.estimatedBytes)} · ${sanitizeTerminalText(relativePath(state.targetDir, candidate.path))}`,
     );
   }, [pendingApply, pendingSingleId, state.candidates, state.selectedIds, state.targetDir]);
 
@@ -1516,6 +1544,7 @@ export function SweepApp({
           <ConfirmOverlay
             tokens={tokens}
             selectedCount={1}
+            linkOnly={pendingSingleCandidate.isSymlink}
             otherQueuedCount={
               summary.selectedCount - Number(state.selectedIds.has(pendingSingleCandidate.id))
             }
