@@ -36,8 +36,8 @@ export const UNSELECTED_MARK = "○";
 /** Hard-locked rows - neither queued nor queueable. */
 const BLOCKED_MARK = "⊘";
 
-/** Columns consumed before the artifact name: rail + gap + marker + gap. */
-export const ROW_NAME_OFFSET = 4;
+/** Cursor, queue and risk each have a separate cell, followed by a gap. */
+export const ROW_NAME_OFFSET = 6;
 const SIZE_COLUMN_WIDTH = 9;
 const SIZE_GAP = 2;
 /** Extra cells reserved so a scrollbar or wide glyph cannot wrap the row. */
@@ -154,10 +154,7 @@ export function buildArtifactRowContent(
   const colors = riskColor(tokens);
   const rail = isCurrent ? fg(tokens.accent)("▌") : fg(tokens.textDim)(" ");
   const blocked = candidate.riskTier === "blocked";
-  // One status cell carries both facts: shape = queued state, color = risk.
-  // ● accent   queued, safe        ● warning  queued, caution
-  // ● danger   queued, dangerous   ○ dim/tint unselected (tint = its risk)
-  // ⊘          blocked - locked out of queueing entirely
+  // Queue and risk have independent shapes, even on a focused or monochrome row.
   const markShape = blocked ? BLOCKED_MARK : selected ? SELECTED_MARK : UNSELECTED_MARK;
   const markColor = isCurrent
     ? tokens.selectionText
@@ -169,6 +166,9 @@ export function buildArtifactRowContent(
           : tokens.textDim
         : colors[candidate.riskTier];
   const mark = fg(markColor)(markShape);
+  const risk = fg(isCurrent ? tokens.selectionText : colors[candidate.riskTier])(
+    riskGlyph[candidate.riskTier],
+  );
   // The parent path earns its column only when it says something the group
   // header above the row does not already say.
   const parent = root ? artifactParentLabel(root, candidate.path) : "";
@@ -208,7 +208,7 @@ export function buildArtifactRowContent(
       ? t`${fg(nameColor)(nameText)}${fg(parentColor)(parentText)}`
       : t`${fg(nameColor)(nameText)}`;
 
-  const parts = [t`${rail} ${mark} `, nameStyled];
+  const parts = [t`${rail} ${mark} ${risk} `, nameStyled];
   if (widths.ageWidth > 0) {
     // Touched within the week reads as "probably in use": the one age the
     // eye should catch before deleting.
@@ -266,7 +266,10 @@ export function splitNameCell(
 function formatSizeCell(bytes: number, width: number, partial: boolean): string {
   // `~` marks a partial lower bound (unreadable inodes inside the subtree) -
   // pending stubs carry bytes=0 and still render "-" until their size lands.
-  const label = bytes > 0 ? `${partial ? "~" : ""}${formatBytes(bytes)}` : partial ? "~0" : "-";
+  let label = bytes > 0 ? `${partial ? "~" : ""}${formatBytes(bytes)}` : partial ? "~0" : "-";
+  if (cellWidth(label) > width) label = label.replace(" ", "");
+  if (cellWidth(label) > width && bytes > 0)
+    label = `${partial ? "~" : ""}${compactBytesLabel(bytes)}`;
   return padCells(label, width, "right");
 }
 
@@ -362,6 +365,19 @@ export function buildHeaderStats(
   const w = width ?? Number.POSITIVE_INFINITY;
   const parts: StyledText[] = [];
 
+  if (w < 50) {
+    // Fit complete facts; never cut a byte value/unit at the terminal edge.
+    const modes = [dryRun ? "DRY RUN" : "", trash ? "TRASH" : ""].filter(Boolean).join(" · ");
+    const queue = `${summary.selectedCount} queued`;
+    const bytes = `${summary.selectedBytesPartial ? "~" : ""}${compactBytesLabel(summary.selectedBytes)}`;
+    const budget = Math.max(0, w - 5); // outer padding, compact brand and separation
+    const full = [modes, queue, bytes].filter(Boolean).join(" · ");
+    const reduced = [modes, queue].filter(Boolean).join(" · ");
+    const label =
+      cellWidth(full) <= budget ? full : cellWidth(reduced) <= budget ? reduced : modes || queue;
+    return t`${fg(dryRun || trash ? tokens.info : tokens.accent)(label)}`;
+  }
+
   // Put operation modes first; optional counts and diagnostics may clip later.
   if (dryRun) parts.push(t`${bold(fg(tokens.warning)("DRY RUN"))}`);
   if (trash) parts.push(t`${bold(fg(tokens.info)("TRASH"))}`);
@@ -453,9 +469,9 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
     // generic name" explains the toggle better than a bare count ever could.
     const cursor = patternAtCursor(state);
     const detail = cursor
-      ? `  ${dim("·")}  ${sanitizeTerminalText(cursor)}`
+      ? `  ·  ${sanitizeTerminalText(cursor)}`
       : state.patternFilter.length > 0
-        ? `  ${dim("·")}  no matches`
+        ? "  ·  no matches"
         : "";
     return t`${fg(tokens.textMuted)(`${enabled} on · ${visiblePatternRows(state).length} shown`)}${fg(tokens.warning)(dirty)}${fg(tokens.textDim)(detail)}`;
   }
@@ -468,9 +484,13 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
     if (row?.kind === "header") {
       const queued =
         row.selectedCount > 0
-          ? `  ${dim("·")}  ${fg(tokens.positive)(`${row.selectedCount} queued`)}`
+          ? t`  ${dim("·")}  ${fg(tokens.positive)(`${row.selectedCount} queued`)}`
           : "";
-      return t`${fg(tokens.textMuted)(sanitizeTerminalText(row.label))}  ${fg(tokens.textDim)(`${row.itemCount} item${row.itemCount === 1 ? "" : "s"} · ${compactBytesLabel(row.bytes)}`)}${queued}  ${fg(tokens.textDim)(row.collapsed ? "· l/space expands" : "· h/space collapses")}`;
+      return concatStyled(
+        t`${fg(tokens.textMuted)(sanitizeTerminalText(row.label))}  ${fg(tokens.textDim)(`${row.itemCount} item${row.itemCount === 1 ? "" : "s"} · ${compactBytesLabel(row.bytes)}`)}`,
+        ...(queued ? [queued] : []),
+        t`  ${fg(tokens.textDim)(row.collapsed ? "· l/space expands" : "· h/space collapses")}`,
+      );
     }
     return t`${fg(tokens.textDim)("No matching artifacts.")}`;
   }

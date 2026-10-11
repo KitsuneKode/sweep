@@ -27,6 +27,7 @@ import {
 import { ReviewPane } from "./ReviewPane.js";
 import { candidateIndex } from "./candidate-index.js";
 import { ApplyOverlay } from "./ApplyOverlay.js";
+import { MotionContext, motionEnabledFromEnvironment } from "./motion.js";
 import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
@@ -206,6 +207,7 @@ const HELP_APP: ReadonlyArray<HelpRow> = [
   [null, "app"],
   ["tab", "scopes - space queues scope"],
   ["t", "theme dark · light · auto"],
+  ["m", "pause / resume activity animation"],
   ["E", "swap scan engine js · rust"],
   ["q · ctrl-c", "quit · quit now"],
 ];
@@ -496,6 +498,8 @@ function InspectOverlay({
   queued: boolean;
   targetDir: string;
 }) {
+  const { width } = useTerminalDimensions();
+  const compact = width < 48;
   const rel = relativePath(targetDir, candidate.path);
   const riskGlyphColor = {
     safe: tokens.positive,
@@ -505,7 +509,7 @@ function InspectOverlay({
   }[candidate.riskTier];
 
   const field = (label: string, value: string | StyledText) => (
-    <box flexDirection="row" width="100%" flexShrink={0}>
+    <box flexDirection={compact ? "column" : "row"} width="100%" flexShrink={0}>
       <text content={t`${fg(tokens.textDim)(label.padEnd(9))} `} wrapMode="none" />
       {typeof value === "string" ? (
         <text
@@ -522,13 +526,25 @@ function InspectOverlay({
   );
 
   return (
-    <Modal tokens={tokens} title=" artifact " width={64}>
+    <Modal
+      tokens={tokens}
+      title=" artifact "
+      width={64}
+      height={22}
+      footer={
+        <text
+          content={t`${bold(fg(tokens.text)("x / d"))} ${fg(tokens.textMuted)("delete this (confirms)")} · ${bold(fg(tokens.text)("i / esc"))} ${fg(tokens.textMuted)("close")}`}
+          wrapMode="word"
+        />
+      }
+    >
       <box flexDirection="column">
         <text
           content={t`${fg(riskGlyphColor)(riskGlyph[candidate.riskTier])} ${bold(fg(tokens.text)(sanitizeTerminalText(candidate.name)))} ${fg(tokens.textMuted)(candidate.kind)}`}
-          wrapMode="none"
+          wrapMode="char"
         />
         <text content="" />
+        {field("root", sanitizeTerminalText(targetDir))}
         {field("path", sanitizeTerminalText(rel.length > 0 ? rel : candidate.name))}
         {field(
           "size",
@@ -552,16 +568,12 @@ function InspectOverlay({
               <text
                 key={reason}
                 content={t`  ${fg(tokens.textDim)("·")} ${fg(tokens.textSecondary)(sanitizeTerminalText(reason))}`}
-                wrapMode="none"
+                wrapMode="char"
               />
             ))}
           </>
         ) : null}
         <text content="" />
-        <text
-          content={t`${bold(fg(tokens.text)("x / d"))} ${fg(tokens.textMuted)("delete this artifact (confirms)")}    ${bold(fg(tokens.text)("i / esc"))} ${fg(tokens.textMuted)("close")}`}
-          wrapMode="none"
-        />
       </box>
     </Modal>
   );
@@ -580,6 +592,8 @@ export function SweepApp({
 }: SweepAppProps) {
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) => createUiState(p, init));
   const [showHelp, setShowHelpState] = useState(false);
+  const [motionEnabled, setMotionEnabled] = useState(motionEnabledFromEnvironment);
+  const motionEnabledRef = useRef(motionEnabled);
   const [pendingApply, setPendingApplyState] = useState(false);
   // Non-null while the confirm dialog is scoped to one row (x/d): the same
   // dialog renders, but `y` applies only that candidate.
@@ -1282,6 +1296,15 @@ export function SweepApp({
         dismissScanError: () => setScanError(null),
         setInspect,
         toggleTrash,
+        toggleMotion: () => {
+          motionEnabledRef.current = !motionEnabledRef.current;
+          setMotionEnabled(motionEnabledRef.current);
+          setNotice(
+            motionEnabledRef.current
+              ? "Activity animation resumed"
+              : "Activity animation paused · work continues",
+          );
+        },
         exportPlan,
         yankPath,
         applyVisual,
@@ -1419,191 +1442,193 @@ export function SweepApp({
   const roomForChips = dimensions.width >= 100;
 
   return (
-    <box
-      width="100%"
-      height="100%"
-      flexDirection="column"
-      paddingLeft={1}
-      paddingRight={1}
-      paddingTop={0}
-      paddingBottom={0}
-      backgroundColor={tokens.bg}
-    >
-      {/* Header band */}
+    <MotionContext.Provider value={motionEnabled}>
       <box
         width="100%"
-        flexShrink={0}
-        height={1}
-        flexDirection="row"
-        justifyContent="space-between"
-      >
-        <text content={buildBrandLine(tokens, dimensions.width)} wrapMode="none" />
-        <text content={headerStats} wrapMode="none" />
-      </box>
-
-      <box width="100%" flexGrow={1} minHeight={0} flexShrink={1}>
-        <ReviewPane
-          state={state}
-          plan={plan}
-          tokens={tokens}
-          showSidebar={showSidebar}
-          sidebarWidth={sidebarWidth}
-          displayRows={displayRows}
-          visibleItems={visibleItems}
-          candidatesById={candidatesById}
-          onMutate={mutate}
-          onFocusPanel={focusPanel}
-          onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
-          onSubmitPatternDraft={submitPatternDraft}
-          onViewportRows={(rows) => {
-            viewportRowsRef.current = rows;
-          }}
-          {...(state.scanning
-            ? { scanElapsedMs: Math.max(0, performance.now() - scanStartRef.current) }
-            : {})}
-        />
-      </box>
-
-      <box
-        width="100%"
-        height={1}
-        flexShrink={0}
-        flexDirection="row"
+        height="100%"
+        flexDirection="column"
         paddingLeft={1}
+        paddingRight={1}
+        paddingTop={0}
+        paddingBottom={0}
         backgroundColor={tokens.bg}
       >
-        <text
-          content={notice ? t`${fg(tokens.warning)(notice)}` : buildContextLine(state, tokens)}
-          wrapMode="none"
-        />
-      </box>
+        {/* Header band */}
+        <box
+          width="100%"
+          flexShrink={0}
+          height={1}
+          flexDirection="row"
+          justifyContent="space-between"
+        >
+          <text content={buildBrandLine(tokens, dimensions.width)} wrapMode="none" />
+          <text content={headerStats} wrapMode="none" />
+        </box>
 
-      <box
-        width="100%"
-        height={1}
-        flexShrink={0}
-        flexDirection="row"
-        alignItems="center"
-        backgroundColor={tokens.statusBg}
-      >
-        {state.scanning ? (
-          <ScanModeChip tokens={tokens} />
-        ) : state.scanIncomplete ? (
-          <ModeChip label=" INCOMPLETE " tokens={tokens} />
-        ) : (
-          <ModeChip label={` ${modeLabel(state.focus, false, visualActive)} `} tokens={tokens} />
-        )}
-        <box flexGrow={1} flexShrink={0} paddingLeft={1} flexDirection="row">
-          <text content={footerContent} wrapMode="none" />
-          {roomForChips && riskFilterLabel ? (
-            <text
-              content={t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`}
-              wrapMode="none"
-            />
-          ) : null}
-          {roomForChips && scopeFilterLabel ? (
-            <text
-              content={t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`}
-              wrapMode="none"
-            />
-          ) : null}
-          {roomForChips && state.sortBy !== "size" ? (
-            <text
-              content={t`  ${fg(tokens.info)(`· sorted by ${state.sortBy}`)}`}
-              wrapMode="none"
-            />
+        <box width="100%" flexGrow={1} minHeight={0} flexShrink={1}>
+          <ReviewPane
+            state={state}
+            plan={plan}
+            tokens={tokens}
+            showSidebar={showSidebar}
+            sidebarWidth={sidebarWidth}
+            displayRows={displayRows}
+            visibleItems={visibleItems}
+            candidatesById={candidatesById}
+            onMutate={mutate}
+            onFocusPanel={focusPanel}
+            onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
+            onSubmitPatternDraft={submitPatternDraft}
+            onViewportRows={(rows) => {
+              viewportRowsRef.current = rows;
+            }}
+            {...(state.scanning
+              ? { scanElapsedMs: Math.max(0, performance.now() - scanStartRef.current) }
+              : {})}
+          />
+        </box>
+
+        <box
+          width="100%"
+          height={1}
+          flexShrink={0}
+          flexDirection="row"
+          paddingLeft={1}
+          backgroundColor={tokens.bg}
+        >
+          <text
+            content={notice ? t`${fg(tokens.warning)(notice)}` : buildContextLine(state, tokens)}
+            wrapMode="none"
+          />
+        </box>
+
+        <box
+          width="100%"
+          height={1}
+          flexShrink={0}
+          flexDirection="row"
+          alignItems="center"
+          backgroundColor={tokens.statusBg}
+        >
+          {state.scanning ? (
+            <ScanModeChip tokens={tokens} />
+          ) : state.scanIncomplete ? (
+            <ModeChip label=" INCOMPLETE " tokens={tokens} />
+          ) : (
+            <ModeChip label={` ${modeLabel(state.focus, false, visualActive)} `} tokens={tokens} />
+          )}
+          <box flexGrow={1} flexShrink={0} paddingLeft={1} flexDirection="row">
+            <text content={footerContent} wrapMode="none" />
+            {roomForChips && riskFilterLabel ? (
+              <text
+                content={t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`}
+                wrapMode="none"
+              />
+            ) : null}
+            {roomForChips && scopeFilterLabel ? (
+              <text
+                content={t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`}
+                wrapMode="none"
+              />
+            ) : null}
+            {roomForChips && state.sortBy !== "size" ? (
+              <text
+                content={t`  ${fg(tokens.info)(`· sorted by ${state.sortBy}`)}`}
+                wrapMode="none"
+              />
+            ) : null}
+          </box>
+          {roomForTally ? (
+            <box paddingLeft={2} paddingRight={1} flexShrink={1}>
+              <text content={tallyContent} wrapMode="none" />
+            </box>
           ) : null}
         </box>
-        {roomForTally ? (
-          <box paddingLeft={2} paddingRight={1} flexShrink={1}>
-            <text content={tallyContent} wrapMode="none" />
-          </box>
-        ) : null}
-      </box>
 
-      {/*
+        {/*
         Overlay paint order mirrors keymap precedence so the overlay that owns
         input is always the one on top: inspect < help < confirm < scanError
         < applying. Stale flags can coexist for one drain (a modal opened in
         the same burst as a scan error), and painting the higher-precedence
         overlay last keeps "what you see" == "what owns the keys".
       */}
-      {showInspect && inspectCandidate ? (
-        <InspectOverlay
-          tokens={tokens}
-          candidate={inspectCandidate}
-          queued={state.selectedIds.has(inspectCandidate.id)}
-          targetDir={state.targetDir}
-        />
-      ) : null}
-      {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
-      {pendingApply ? (
-        pendingSingleId !== null && !pendingSingleCandidate ? (
-          <Modal tokens={tokens} title=" item unavailable " width={60}>
+        {showInspect && inspectCandidate ? (
+          <InspectOverlay
+            tokens={tokens}
+            candidate={inspectCandidate}
+            queued={state.selectedIds.has(inspectCandidate.id)}
+            targetDir={state.targetDir}
+          />
+        ) : null}
+        {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
+        {pendingApply ? (
+          pendingSingleId !== null && !pendingSingleCandidate ? (
+            <Modal tokens={tokens} title=" item unavailable " width={60}>
+              <text
+                content="The reviewed artifact is no longer present. Nothing will be removed."
+                fg={tokens.text}
+              />
+              <text content="n / esc close" fg={tokens.textMuted} />
+            </Modal>
+          ) : pendingSingleCandidate ? (
+            <ConfirmOverlay
+              tokens={tokens}
+              selectedCount={1}
+              linkOnly={pendingSingleCandidate.isSymlink}
+              otherQueuedCount={
+                summary.selectedCount - Number(state.selectedIds.has(pendingSingleCandidate.id))
+              }
+              feedback={notice?.startsWith("Press y") ? notice : undefined}
+              applyPolicy={scan?.applyPolicy}
+              lowerBound={pendingSingleCandidate.bytesKnown === false}
+              selectedBytes={pendingSingleCandidate.estimatedBytes}
+              dangerousCount={pendingSingleCandidate.riskTier === "dangerous" ? 1 : 0}
+              previewPaths={[
+                sanitizeTerminalText(relativePath(state.targetDir, pendingSingleCandidate.path)),
+              ]}
+              {...(dryRun ? { dryRun: true } : {})}
+              {...(trashModeRef.current ? { trash: true } : {})}
+            />
+          ) : (
+            <ConfirmOverlay
+              tokens={tokens}
+              selectedCount={summary.selectedCount}
+              feedback={notice?.startsWith("Press y") ? notice : undefined}
+              applyPolicy={scan?.applyPolicy}
+              lowerBound={Boolean(summary.selectedBytesPartial)}
+              selectedBytes={summary.selectedBytes}
+              dangerousCount={dangerousSelected}
+              previewPaths={confirmPreview}
+              {...(dryRun ? { dryRun: true } : {})}
+              {...(trashModeRef.current ? { trash: true } : {})}
+            />
+          )
+        ) : null}
+        {scanError ? (
+          <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
             <text
-              content="The reviewed artifact is no longer present. Nothing will be removed."
+              // Engine errors arrive prefixed ("error: ...") - redundant inside a
+              // dialog already titled "scan error".
+              content={sanitizeTerminalText(scanError.replace(/^[Ee]rror:\s*/, ""))}
               fg={tokens.text}
             />
-            <text content="n / esc close" fg={tokens.textMuted} />
+            <text content="" />
+            <text
+              content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("esc"))} ${fg(tokens.textMuted)("dismiss")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
+            />
           </Modal>
-        ) : pendingSingleCandidate ? (
-          <ConfirmOverlay
+        ) : null}
+        {applying !== null ? (
+          <ApplyOverlay
             tokens={tokens}
-            selectedCount={1}
-            linkOnly={pendingSingleCandidate.isSymlink}
-            otherQueuedCount={
-              summary.selectedCount - Number(state.selectedIds.has(pendingSingleCandidate.id))
-            }
-            feedback={notice?.startsWith("Press y") ? notice : undefined}
-            applyPolicy={scan?.applyPolicy}
-            lowerBound={pendingSingleCandidate.bytesKnown === false}
-            selectedBytes={pendingSingleCandidate.estimatedBytes}
-            dangerousCount={pendingSingleCandidate.riskTier === "dangerous" ? 1 : 0}
-            previewPaths={[
-              sanitizeTerminalText(relativePath(state.targetDir, pendingSingleCandidate.path)),
-            ]}
-            {...(dryRun ? { dryRun: true } : {})}
-            {...(trashModeRef.current ? { trash: true } : {})}
+            name={applying}
+            progress={applyProgress}
+            targetDir={state.targetDir}
+            trash={trashMode}
+            onCancel={abortApply}
           />
-        ) : (
-          <ConfirmOverlay
-            tokens={tokens}
-            selectedCount={summary.selectedCount}
-            feedback={notice?.startsWith("Press y") ? notice : undefined}
-            applyPolicy={scan?.applyPolicy}
-            lowerBound={Boolean(summary.selectedBytesPartial)}
-            selectedBytes={summary.selectedBytes}
-            dangerousCount={dangerousSelected}
-            previewPaths={confirmPreview}
-            {...(dryRun ? { dryRun: true } : {})}
-            {...(trashModeRef.current ? { trash: true } : {})}
-          />
-        )
-      ) : null}
-      {scanError ? (
-        <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
-          <text
-            // Engine errors arrive prefixed ("error: ...") - redundant inside a
-            // dialog already titled "scan error".
-            content={sanitizeTerminalText(scanError.replace(/^[Ee]rror:\s*/, ""))}
-            fg={tokens.text}
-          />
-          <text content="" />
-          <text
-            content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("esc"))} ${fg(tokens.textMuted)("dismiss")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
-          />
-        </Modal>
-      ) : null}
-      {applying !== null ? (
-        <ApplyOverlay
-          tokens={tokens}
-          name={applying}
-          progress={applyProgress}
-          targetDir={state.targetDir}
-          trash={trashMode}
-          onCancel={abortApply}
-        />
-      ) : null}
-    </box>
+        ) : null}
+      </box>
+    </MotionContext.Provider>
   );
 }

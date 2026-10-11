@@ -180,3 +180,20 @@ completed artifact operations, not files or bytes inside a directory; final
 success requires the authoritative report. Esc, Ctrl+C and the visible stop
 control request cancellation, keep the session open and wait for the report.
 Cancellation does not restore contents already removed.
+
+## Color and activity
+
+Queue markers and risk glyphs occupy separate cells. Focus does not hide risk;
+NO_COLOR uses a neutral palette without removing shape or text cues. Text tokens
+are tested at 4.5:1 on canvas, dialog, hover and soft-selection backgrounds.
+Focus borders and rails are tested at 3:1 against adjacent row surfaces.
+
+Keyboard navigation, disclosures and confirmation have no transition delay.
+Activity loaders use 160 ms brightness steps only while active. A nonempty
+SWEEP_REDUCED_MOTION value of 1 or true starts them paused, and m toggles animation
+in the session, including during apply. Text inputs retain printable m. Pausing
+releases decorative intervals; progress, elapsed time and stop controls remain.
+
+Inspect keeps actions outside the detail scroller. Long paths and reasons wrap;
+narrow terminals stack field labels above values. Byte columns compact numbers
+before shortening a unit; incomplete estimates keep their ~ marker.

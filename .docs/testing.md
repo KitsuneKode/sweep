@@ -499,6 +499,25 @@ The resource harness records CPU affinity and samples descendants spawned by
 any runtime thread. Its RSS watchdog terminates only its owned process group;
 it is qualification tooling, not a production RAM limiter.
 
+### Read-only terminal review preview
+
+```sh
+bun run packages/ui/benchmarks/review-preview.tsx
+```
+
+F1–F5 switch Demo, Worst, Empty, One and Huge data. Huge has 10,000 rows;
+Worst includes mixed risk, long Unicode paths and synthetic 600 GiB estimates.
+The harness creates no files and connects to no apply engine. Confirming its
+dry run returns to the preview. Use `i` to inspect, `m` to pause activity and
+`q` to quit.
+
+`packages/ui/src/review-stress.test.tsx` checks the native rendered output at
+30, 40, 72, 120 and 180 columns, including narrow inspection and a clickable
+stop control. `motion.test.tsx` checks interval cleanup. `theme.test.ts`
+checks text, focus and selection contrast in dark, light and neutral modes.
+These checks qualify rendering and input; synthetic byte labels do not qualify
+large filesystem scans or deletion.
+
 ### Rendered UI latency
 
 ```sh

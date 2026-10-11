@@ -144,6 +144,8 @@ export interface KeymapActions {
   setInspect?: (open: boolean) => void;
   /** Flip "move to trash instead of deleting" inside the confirm dialog. */
   toggleTrash?: () => void;
+  /** Pause/resume decorative activity without stopping the operation. */
+  toggleMotion?: () => void;
   /** Write the reviewed plan (current queue) to a JSON file. */
   exportPlan?: () => void;
   /** Copy the cursor row's path to the clipboard. */
@@ -220,6 +222,23 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     actions.finalize({ type: "abort" });
+    return;
+  }
+
+  // Text inputs retain printable m. Overlays and running work may pause their
+  // activity without changing consent, selection, or cancellation state.
+  if (
+    key.name === "m" &&
+    !key.ctrl &&
+    !key.meta &&
+    (ctx.applying ||
+      pendingApply ||
+      showHelp ||
+      inspectOpen ||
+      scanError ||
+      (state.focus !== "search" && state.focus !== "patternInput"))
+  ) {
+    actions.toggleMotion?.();
     return;
   }
 

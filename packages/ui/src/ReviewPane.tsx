@@ -20,6 +20,7 @@ import {
 } from "./state.js";
 import { FILTER_HINT, filterAdvice } from "./filter-query.js";
 import type { ThemeTokens } from "./theme.js";
+import { cellWidth, clipCells } from "./text-cells.js";
 
 export interface ReviewPaneProps {
   state: SweepUiState;
@@ -233,17 +234,17 @@ function formatElapsed(ms: number): string {
   return `${minutes}m ${Math.round((ms - minutes * 60_000) / 1000)}s`;
 }
 
-/** Keep the tail of a path - the deep dir is the informative part. */
+/** Keep both root context and the leaf; the inspector exposes the full path. */
 function tailPath(dir: string, max: number): string {
   const clean = sanitizeTerminalText(dir);
-  if (clean.length <= max) return clean;
-  return "\u2026" + clean.slice(clean.length - (max - 1));
+  if (cellWidth(clean) <= max) return clean;
+  // Keep graphemes whole. The inspector exposes the full path.
+  return clipCells(clean, max, true);
 }
 
 /**
- * Empty-but-scanning state. The dot matrix is the only thing on screen that
- * proves the process is alive before the first artifact lands, so it gets the
- * centre of the pane rather than a line of ellipses.
+ * Empty discovery keeps work and stop instructions visible even when activity
+ * animation is paused. No full-tree completion percentage is known yet.
  */
 function ScanningPanel({
   tokens,
@@ -258,7 +259,7 @@ function ScanningPanel({
     <box flexGrow={1} justifyContent="center" alignItems="center" padding={2} gap={1}>
       <DotMatrix tokens={tokens} pattern="pulseRings" />
       <text content="" />
-      <text content="Scanning for artifacts" fg={tokens.text} wrapMode="none" />
+      <text content="Scanning for artifacts" fg={tokens.text} wrapMode="word" />
       <text
         content={
           currentDir !== null
@@ -272,9 +273,9 @@ function ScanningPanel({
       />
       <text content="" />
       <text
-        content="Results stream in as they are found · ctrl-c to stop"
+        content="Ctrl+C stop · m pause / resume animation"
         fg={tokens.textDim}
-        wrapMode="none"
+        wrapMode="word"
       />
     </box>
   );

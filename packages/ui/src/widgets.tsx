@@ -4,6 +4,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DOT_GRID, dotFrame, dotRamp, dotStrip, type DotPattern } from "./dot-matrix.js";
 import type { ThemeTokens } from "./theme.js";
+import { useMotionEnabled } from "./motion.js";
 
 /**
  * Full-screen scrim + centered dialog. Children render inside a rounded,
@@ -66,8 +67,8 @@ export function Modal({
         borderColor={titleColor ?? tokens.borderFocus}
         title={` ${title} `}
         backgroundColor={tokens.surface}
-        paddingX={3}
-        paddingY={1}
+        paddingX={modalWidth < 44 ? 1 : 2}
+        paddingY={maxHeight < 12 ? 0 : 1}
         flexDirection="column"
       >
         <scrollbox
@@ -111,17 +112,18 @@ export function ModeChip({ label, tokens }: { label: string; tokens: ThemeTokens
   );
 }
 
-/** ~16fps frame counter. Only ticks while `active`, so idle costs nothing. */
-export function useDotFrame(active = true, intervalMs = 60): number {
+/** Activity changes at 6 Hz; paused/idle loaders allocate no interval. */
+export function useDotFrame(active = true, intervalMs = 160): number {
   const [frame, setFrame] = useState(0);
+  const enabled = useMotionEnabled();
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || !enabled) return;
     const timer = setInterval(() => setFrame((value) => value + 1), intervalMs);
     return () => clearInterval(timer);
-  }, [active, intervalMs]);
+  }, [active, enabled, intervalMs]);
 
-  return active ? frame : 0;
+  return active && enabled ? frame : 0;
 }
 
 /** The dot itself. Fixed glyph, animated brightness - the dots never move. */
@@ -144,7 +146,8 @@ export function DotMatrix({
   frame?: number;
 }) {
   const internal = useDotFrame(active && frame === undefined);
-  const current = frame ?? internal;
+  const enabled = useMotionEnabled();
+  const current = enabled ? (frame ?? internal) : 0;
   const ramp = useMemo(() => dotRamp(tokens.meterTrack, tokens.accent), [tokens]);
   const grid = useMemo(() => dotFrame(pattern, current), [pattern, current]);
 
@@ -191,7 +194,8 @@ export function DotStrip({
   bright?: string;
 }) {
   const internal = useDotFrame(active && frame === undefined);
-  const current = frame ?? internal;
+  const enabled = useMotionEnabled();
+  const current = enabled ? (frame ?? internal) : 0;
   const ramp = useMemo(
     () => dotRamp(dim ?? tokens.meterTrack, bright ?? tokens.accent),
     [tokens, dim, bright],

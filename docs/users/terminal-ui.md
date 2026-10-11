@@ -10,8 +10,10 @@ sweep ui .
 ```
 
 The left pane narrows the current scope. The right pane lists matched artifacts.
-Results appear while scanning, then sizes fill in. A queued dot means selected;
-it does not mean deleted. A size prefixed with `~` is incomplete or approximate.
+Results appear while scanning, then sizes fill in. A filled dot means queued;
+it does not mean deleted. The next symbol shows risk: `✓` safe, `!` caution,
+`✗` dangerous, and `⊘` blocked. Risk and queue state remain distinct when a row
+is focused or color is disabled. A size prefixed with `~` is incomplete or approximate.
 An `INCOMPLETE` scan cannot apply or export a cleanup plan.
 
 The sidebar separates items from bytes: `535 of 3,192 items queued` can be
@@ -28,8 +30,9 @@ a reminder; it does not confirm a destructive operation.
 
 While applying, Sweep shows preparation, completed artifact operations,
 elapsed time and the active path. A large directory can remain at `0 of 1`
-completed artifacts while work continues inside it. The activity loader keeps
-moving. Supported native Linux engines also show successful entries removed
+completed artifacts while work continues inside it. Press `m` to pause or resume
+loader animation; counts, elapsed time and cancellation continue either way.
+Supported native Linux engines also show successful entries removed
 inside that artifact, including files, directories and symlinks. This count
 is not a byte percentage or an estimate of physical disk space reclaimed.
 Other backends show elapsed activity without inventing a per-file count.
@@ -62,6 +65,7 @@ queued items outside that view.
 | `u`                 | Unqueue everything, including hidden artifacts     |
 | `U` (Shift-U)       | Unqueue visible artifacts; keep hidden selections  |
 | `o`                 | Cycle size, name and age sort                      |
+| `m`                 | Pause or resume activity animation                 |
 | `r`                 | Rescan, including current pattern edits            |
 | `p`                 | Open the pattern catalog                           |
 | `S`                 | Save the current queue as a plan                   |
@@ -73,6 +77,26 @@ queued items outside that view.
 Arrow keys are the primary navigation. Vim-style aliases are available in help.
 Mouse wheel moves the cursor as well as the viewport. The scrollbar supports
 seeking; an item cannot stay selected off-screen because the viewport moved alone.
+
+## Color and motion preferences
+
+Sweep uses the terminal's font and size. Theme selection (`t`) cycles dark,
+light and automatic backgrounds. A nonempty `NO_COLOR` environment variable
+uses neutral colors; symbols and labels still identify risk, focus and queue state.
+
+To start with loader animation paused:
+
+```sh
+SWEEP_REDUCED_MOTION=1 sweep ui .
+```
+
+PowerShell uses `$env:SWEEP_REDUCED_MOTION = '1'` before running `sweep ui .`.
+The `m` key changes only the current session's animation preference. It also
+works during confirmation and deletion. Search and pattern inputs keep `m`
+as ordinary text. Keyboard navigation, queue changes and dialogs appear instantly.
+
+The inspector shows the scan root and artifact path separately, wraps long
+values and keeps its action hints visible. Page Up / Page Down scroll its details.
 
 ## Remove just the item you inspected
 

@@ -5,6 +5,7 @@ import { useTerminalDimensions } from "@opentui/react";
 import { buildMeter, relativePath } from "./presentation.js";
 import { DotStrip, Modal } from "./widgets.js";
 import type { ThemeTokens } from "./theme.js";
+import { useMotionEnabled } from "./motion.js";
 
 /** Percentages describe completed candidate operations, never bytes within a tree. */
 export function ApplyOverlay({
@@ -23,6 +24,7 @@ export function ApplyOverlay({
   onCancel: () => void;
 }) {
   const { width } = useTerminalDimensions();
+  const motionEnabled = useMotionEnabled();
   const stopping = progress?.stage === "stopping";
   const preparing = progress?.stage === "preparing";
   const total = progress?.selectedCount ?? 0;
@@ -56,18 +58,29 @@ export function ApplyOverlay({
       height={17}
       footer={
         <>
-          <box height={1} onMouseDown={onCancel}>
+          <box height={1} backgroundColor={tokens.selectionSoftBg} onMouseDown={onCancel}>
             <text
               content={
                 stopping
-                  ? "Stopping · waiting for in-flight work and report"
-                  : "esc / ctrl-c stop · click here to stop"
+                  ? "Stopping · awaiting report"
+                  : width < 40
+                    ? "Esc stop"
+                    : "Esc / Ctrl+C stop · click to stop"
               }
               fg={tokens.warning}
               wrapMode="none"
             />
           </box>
-          <text content="Completed deletions are not undone." fg={tokens.textMuted} />
+          <text
+            content="Completed deletions are not undone."
+            fg={tokens.textMuted}
+            wrapMode="word"
+          />
+          <text
+            content={motionEnabled ? "m pause animation" : "m resume animation"}
+            fg={tokens.textMuted}
+            wrapMode="word"
+          />
         </>
       }
     >

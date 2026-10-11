@@ -33,13 +33,9 @@ export interface ThemeTokens {
 }
 
 /**
- * Helio palette - ported from helio's shadcn-style tokens (lib/theme.ts).
- * Structure in neutral charcoal; meaning in restrained semantic color;
- * identity in muted sage green (oklch 0.633 0.031 155 ≈ #7c9082).
- * Risk tiers: safe = sage, caution = amber, dangerous = red, blocked = slate.
- * Caution is amber, not olive: an olive sat about 7 ΔE from safe sage and the
- * two tiers read as one color. textDim stays at 4.5:1 or better on surfaces,
- * since it styles real information (column headers, scope sizes).
+ * Charcoal surfaces with sage focus and separate warning/danger roles.
+ * Text tokens cover the canvas, dialog, hover and soft-selection surfaces.
+ * Focused rows use selectionText; risk shapes remain visible without color.
  */
 export const darkTheme: ThemeTokens = {
   bg: "#0a0a0a",
@@ -51,13 +47,13 @@ export const darkTheme: ThemeTokens = {
   text: "#f5f5f5",
   textSecondary: "#c9c9c9",
   textMuted: "#a0a0a0",
-  textDim: "#808080",
-  accent: "#7c9082",
+  textDim: "#919191",
+  accent: "#829788",
   accentContrast: "#0a0a0a",
   positive: "#8b9d83",
   warning: "#d9a94f",
-  danger: "#ef4444",
-  blocked: "#6b7280",
+  danger: "#f26363",
+  blocked: "#9198a3",
   info: "#93a0b4",
   selectionBg: "#36443a",
   selectionText: "#f5f5f5",
@@ -75,18 +71,18 @@ export const lightTheme: ThemeTokens = {
   surfaceInset: "#f4f3ef",
   border: "#e8e6e1",
   borderSoft: "#0000000f",
-  borderFocus: "#7c9082",
+  borderFocus: "#506658",
   text: "#1a1f2e",
   textSecondary: "#474f60",
   textMuted: "#5b6372",
-  textDim: "#686f7c",
-  accent: "#7c9082",
-  accentContrast: "#141824",
-  positive: "#597564",
-  warning: "#8a6212",
-  danger: "#c73e3a",
+  textDim: "#616875",
+  accent: "#506658",
+  accentContrast: "#ffffff",
+  positive: "#4f6959",
+  warning: "#835b0b",
+  danger: "#b63532",
   blocked: "#5b6472",
-  info: "#56718b",
+  info: "#4e6680",
   selectionBg: "#bfc9bb",
   selectionText: "#1a1f2e",
   selectionSoftBg: "#e3e8e0",
@@ -111,10 +107,47 @@ function terminalPrefersDark(): boolean {
   return true;
 }
 
+/** NO_COLOR removes hue; contrast, focus, queue shapes and risk labels remain. */
 export function resolveTheme(mode: ThemeMode): ThemeTokens {
-  if (mode === "dark") return darkTheme;
-  if (mode === "light") return lightTheme;
-  return terminalPrefersDark() ? darkTheme : lightTheme;
+  const theme =
+    mode === "dark"
+      ? darkTheme
+      : mode === "light"
+        ? lightTheme
+        : terminalPrefersDark()
+          ? darkTheme
+          : lightTheme;
+  if (!process.env.NO_COLOR) return theme;
+  const dark = theme === darkTheme;
+  const text = dark ? "#f5f5f5" : "#1f1f1f";
+  const secondary = dark ? "#c9c9c9" : "#474747";
+  const muted = dark ? "#a0a0a0" : "#5b5b5b";
+  return {
+    ...theme,
+    bg: dark ? "#0a0a0a" : "#f7f7f7",
+    surfaceInset: dark ? "#0f0f0f" : "#f3f3f3",
+    border: dark ? "#2a2a2a" : "#e6e6e6",
+    accent: dark ? "#c9c9c9" : "#474747",
+    accentContrast: dark ? "#0a0a0a" : "#ffffff",
+    borderFocus: dark ? "#c9c9c9" : "#474747",
+    positive: text,
+    warning: text,
+    danger: text,
+    blocked: muted,
+    info: secondary,
+    text,
+    textSecondary: secondary,
+    textMuted: muted,
+    textDim: dark ? "#919191" : "#616161",
+    selectionBg: dark ? "#3a3a3a" : "#c5c5c5",
+    selectionText: dark ? "#f5f5f5" : "#1f1f1f",
+    selectionSoftBg: dark ? "#252525" : "#e5e5e5",
+    hoverBg: dark ? "#1a1a1a" : "#ededed",
+    headerText: dark ? "#d4d4d4" : "#303030",
+    overlayBackdrop: dark ? "#0a0a0acc" : "#1f1f1f55",
+    statusBg: dark ? "#0f0f0f" : "#fafafa",
+    meterTrack: dark ? "#1a1a1a" : "#e6e6e6",
+  };
 }
 
 export function cycleThemeMode(mode: ThemeMode): ThemeMode {

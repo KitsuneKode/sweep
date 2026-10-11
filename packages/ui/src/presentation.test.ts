@@ -7,12 +7,14 @@ import {
   buildArtifactRowContent,
   buildGroupHeaderContent,
   buildHeaderStats,
+  buildContextLine,
   relativePath,
   rowTotalWidth,
   splitNameCell,
   truncateScopeLabel,
 } from "./presentation.js";
 import { darkTheme } from "./theme.js";
+import { createUiState, setFocus } from "./state.js";
 import { cellWidth, clipCells } from "./text-cells.js";
 
 function planFixture(): ScanPlan {
@@ -65,6 +67,19 @@ function plain(text: { chunks: Array<{ text: string }> }): string {
 }
 
 describe("presentation formatters", () => {
+  test("pattern and queued group context never stringify style objects", () => {
+    const plan = planFixture();
+    const entry = candidate();
+    plan.candidates = [entry];
+    plan.selectedCandidateIds = [entry.id];
+    const state = createUiState(plan);
+    const pattern = plain(buildContextLine(setFocus(state, "patterns"), darkTheme));
+    expect(pattern).toContain("·");
+    expect(pattern).not.toContain("[object");
+    const group = plain(buildContextLine({ ...state, rowIndex: 0 }, darkTheme));
+    expect(group).toContain("1 queued");
+    expect(group).not.toContain("[object");
+  });
   test("relativePath strips the scan root prefix", () => {
     const root = join(tmpdir(), "project");
     const target = join(root, "node_modules");
@@ -90,6 +105,29 @@ describe("presentation formatters", () => {
     expect(plain(buildArtifactRowContent(candidate(), false, false, widths, darkTheme))).toContain(
       "○",
     );
+  });
+
+  test("risk has a separate shape on every queued and focused row", () => {
+    for (const [riskTier, glyph] of [
+      ["safe", "✓"],
+      ["caution", "!"],
+      ["dangerous", "✗"],
+      ["blocked", "⊘"],
+    ] as const) {
+      for (const current of [true, false]) {
+        const line = plain(
+          buildArtifactRowContent(
+            candidate({ riskTier }),
+            riskTier !== "blocked",
+            current,
+            artifactRowWidths(30),
+            darkTheme,
+          ),
+        );
+        expect(line).toContain(`${riskTier === "blocked" ? "⊘" : "●"} ${glyph}`);
+        expect(cellWidth(line)).toBeLessThanOrEqual(30);
+      }
+    }
   });
 
   test("age and size bar columns appear with room and shed with width", () => {
@@ -309,9 +347,31 @@ describe("buildHeaderStats queue counts", () => {
       const line = plain(
         buildHeaderStats(planFixture(), summary(), darkTheme, true, width, true, "rust"),
       );
-      expect(line.startsWith("DRY RUN  ·  TRASH")).toBe(true);
-      expect(line.indexOf("TRASH")).toBeLessThan(line.indexOf("queued"));
+      expect(line).toMatch(/^DRY RUN\s+·\s+TRASH/);
+      if (line.includes("queued"))
+        expect(line.indexOf("TRASH")).toBeLessThan(line.indexOf("queued"));
+      if (width < 50) expect(cellWidth(line)).toBeLessThanOrEqual(width - 5);
     }
+  });
+
+  test("narrow headers and partial size cells keep the whole amount and unit", () => {
+    const partial = candidate({ estimatedBytes: 600 * 1024 ** 3, bytesKnown: false });
+    const row = plain(
+      buildArtifactRowContent(partial, true, true, artifactRowWidths(24), darkTheme),
+    );
+    expect(row).toContain("~600.0GiB");
+    expect(row).not.toMatch(/G…/);
+    const header = plain(
+      buildHeaderStats(
+        planFixture(),
+        summary({ selectedBytes: 600 * 1024 ** 3, selectedBytesPartial: true }),
+        darkTheme,
+        false,
+        30,
+      ),
+    );
+    expect(header).toContain("~600GiB");
+    expect(cellWidth(header)).toBeLessThanOrEqual(25);
   });
 
   test("reports the queue plainly when all of it is on screen", () => {

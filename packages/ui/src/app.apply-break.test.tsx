@@ -576,9 +576,10 @@ describe("adversarial: committed applying state", () => {
     });
     await settle();
     const lines = setup.captureCharFrame().split("\n");
-    const y = lines.findIndex((line) => line.includes("click here to stop"));
+    const y = lines.findIndex((line) => line.includes("click to stop"));
     expect(y).toBeGreaterThanOrEqual(0);
-    const x = lines[y]!.indexOf("esc / ctrl-c");
+    const x = lines[y]!.indexOf("Esc / Ctrl+C");
+    expect(x).toBeGreaterThanOrEqual(0);
     await act(async () => {
       await setup.mockMouse.click(x, y);
       await setup.flush();
@@ -816,6 +817,59 @@ test("uncapped confirmation remains explicit without inventing an over-limit ref
   expect(frame).toContain("No byte ceiling");
   expect(frame).not.toContain("Over the limit");
   expect(frame).toContain("Permanently delete");
+});
+
+test("pausing activity during apply keeps its scope and leaves cancellation responsive", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  const { setup, settle, openSingleConfirm, applyCalls, applyResolvers } = await mountWithApply(
+    (outcome) => outcomes.push(outcome),
+  );
+  await openSingleConfirm();
+  await act(async () => {
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  await settle();
+  expect(applyCalls).toHaveLength(1);
+  const request = applyCalls[0]!;
+  const ids = [...request.plan.selectedCandidateIds];
+  await act(async () => {
+    setup.mockInput.pressKey("m");
+    setup.mockInput.pressKey("m");
+    await setup.flush();
+  });
+  await settle();
+  expect(applyCalls).toHaveLength(1);
+  expect(request.plan.selectedCandidateIds).toEqual(ids);
+  expect(request.signal.aborted).toBe(false);
+  expect(outcomes).toEqual([]);
+  await act(async () => {
+    setup.mockInput.pressKey("m");
+    setup.mockInput.pressCtrlC();
+    await setup.flush();
+  });
+  await settle();
+  expect(request.signal.aborted).toBe(true);
+  expect(outcomes).toEqual([]);
+  await act(async () => {
+    applyResolvers[0]!({
+      interrupted: true,
+      report: {
+        protocolVersion: "1",
+        targetDir: request.plan.targetDir,
+        selectedCandidateIds: ids,
+        deletedCount: 0,
+        failedCount: 0,
+        totalBytesFreed: 0,
+        failedPaths: [],
+        outcomes: ids.map((candidateId) => ({ candidateId, status: "unattempted" as const })),
+      },
+    });
+    await setup.flush();
+  });
+  await settle();
+  expect(setup.captureCharFrame()).toContain("1 unattempted");
+  expect(applyCalls).toHaveLength(1);
 });
 
 test("quitting after a trusted apply reports the session result rather than abort", async () => {

@@ -1,10 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { darkTheme, lightTheme, resolveTheme, type ThemeTokens } from "./theme.js";
 
 describe("resolveTheme", () => {
   const original = process.env.COLORFGBG;
+  const originalNoColor = process.env.NO_COLOR;
+  beforeEach(() => {
+    delete process.env.NO_COLOR;
+  });
 
   afterEach(() => {
+    if (originalNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = originalNoColor;
     if (original === undefined) {
       delete process.env.COLORFGBG;
     } else {
@@ -25,6 +31,24 @@ describe("resolveTheme", () => {
     expect(resolveTheme("auto")).toEqual(lightTheme);
     process.env.COLORFGBG = "0;0";
     expect(resolveTheme("auto")).toEqual(darkTheme);
+  });
+
+  test("nonempty NO_COLOR removes hue in both themes without erasing focus", () => {
+    process.env.NO_COLOR = "1";
+    for (const mode of ["dark", "light"] as const) {
+      const theme = resolveTheme(mode);
+      for (const [key, color] of Object.entries(theme)) {
+        const components = color.slice(1, 7).match(/../g)!;
+        expect(components[0], key).toBe(components[1]);
+        expect(components[1], key).toBe(components[2]);
+      }
+      expect(contrast(theme.textDim, theme.selectionSoftBg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(theme.selectionText, theme.selectionBg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(theme.borderFocus, theme.selectionBg)).toBeGreaterThanOrEqual(3);
+      expect(contrast(theme.accentContrast, theme.accent)).toBeGreaterThanOrEqual(4.5);
+    }
+    process.env.NO_COLOR = "";
+    expect(resolveTheme("dark")).toBe(darkTheme);
   });
 });
 
@@ -53,7 +77,13 @@ describe.each([
   ["light", lightTheme],
 ] as [string, ThemeTokens][])("%s theme contrast", (_name, theme) => {
   test("informational text stays at WCAG AA on every surface", () => {
-    const surfaces = [theme.bg, theme.surface, theme.surfaceInset];
+    const surfaces = [
+      theme.bg,
+      theme.surface,
+      theme.surfaceInset,
+      theme.hoverBg,
+      theme.selectionSoftBg,
+    ];
     const informational = [
       theme.text,
       theme.textSecondary,
@@ -63,6 +93,8 @@ describe.each([
       theme.warning,
       theme.danger,
       theme.info,
+      theme.accent,
+      theme.blocked,
     ];
     for (const surface of surfaces) {
       for (const color of informational) {
@@ -73,5 +105,12 @@ describe.each([
 
   test("mode chip label is readable on the accent block", () => {
     expect(contrast(theme.accentContrast, theme.accent)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test("selected text and the focus rail remain readable", () => {
+    expect(contrast(theme.selectionText, theme.selectionBg)).toBeGreaterThanOrEqual(4.5);
+    for (const surface of [theme.bg, theme.surface, theme.hoverBg, theme.selectionBg]) {
+      expect(contrast(theme.borderFocus, surface)).toBeGreaterThanOrEqual(3);
+    }
   });
 });

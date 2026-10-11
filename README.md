@@ -188,6 +188,7 @@ Arrows work everywhere; letter keys are speed aliases.
 | `p`                                | pattern editor                     | grouped catalog; `/` finds, `a` adds, `w` writes `.sweeprc` |
 | `r`                                | rescan from disk                   | honors pattern edits; safe mid-scan                         |
 | `t`                                | theme                              | dark · light · auto                                         |
+| `m`                                | activity animation                 | pause · resume; work and cancellation continue              |
 | `Esc`                              | **walk back one layer**            | never quits - see below                                     |
 | `q` / `Ctrl-C`                     | quit                               | `Ctrl-C` works even inside modals/search                    |
 
@@ -338,12 +339,13 @@ disk-reclaim measurement or a lifetime counter.
 
 ## Environment variables
 
-| Variable            | Purpose                                                             |
-| ------------------- | ------------------------------------------------------------------- |
-| `SWEEP_CONFIG_DIR`  | Overrides the config dir (`config.json`, `history.jsonl` live here) |
-| `SWEEP_ENGINE_PATH` | Points `--engine rust` / `auto` at a custom `sweep-engine` binary   |
-| `SWEEP_COLD`        | `1` = `--cold` behavior without the flag (dev cold-start runs)      |
-| `NO_COLOR`          | Disables all color output (same effect as `--no-color`)             |
+| Variable               | Purpose                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------- |
+| `SWEEP_CONFIG_DIR`     | Overrides the config dir (`config.json`, `history.jsonl` live here)              |
+| `SWEEP_ENGINE_PATH`    | Points `--engine rust` / `auto` at a custom `sweep-engine` binary                |
+| `SWEEP_COLD`           | `1` = `--cold` behavior without the flag (dev cold-start runs)                   |
+| `NO_COLOR`             | Disables all color output (same effect as `--no-color`)                          |
+| `SWEEP_REDUCED_MOTION` | `1` or `true` starts TUI loader animation paused; `m` changes it for the session |
 
 ---
 

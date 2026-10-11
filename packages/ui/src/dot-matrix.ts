@@ -1,10 +1,8 @@
 /**
  * Dot-matrix loaders, after dot-matrix-animations.vercel.app.
  *
- * Same construction as the reference: a fixed grid of dots, one shared pulse
- * curve, and a per-dot delay map. Nothing moves - every dot sits still and only
- * its brightness animates, which is what keeps the figure readable at 5x5 and
- * costs nothing to redraw in a terminal.
+ * A fixed grid, shared pulse curve and per-dot delay map. Only brightness
+ * changes; widgets own the timer and reduced-motion preference.
  */
 
 export const DOT_GRID = 5;
@@ -14,7 +12,7 @@ export const DOT_LEVELS = 4;
 
 export type DotPattern = "pulseRings" | "wave" | "scan" | "spiral";
 
-/** Frames in one full cycle. At 16fps this is a ~1.5s loop. */
+/** Frames in one cycle. With the widget's 160 ms step, a cycle takes 3.84 s. */
 export const DOT_CYCLE = 24;
 
 /**
