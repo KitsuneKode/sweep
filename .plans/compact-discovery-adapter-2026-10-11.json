@@ -1,0 +1,115 @@
+{
+  "date": "2026-10-11T12:23:09.794Z",
+  "runtime": "1.4.2",
+  "platform": "linux",
+  "arch": "x64",
+  "binary": "/home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine",
+  "binarySha256": "0ef709adf8ad3e1ded488f810095f7cbdb7c26fa46e4d0222b4e58298679ae16",
+  "sourceBase": "5da21499d48d2f7fdc01d42ad786a22784abbd3e",
+  "sourceDirty": true,
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "method": "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include the production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
+  "results": [
+    {
+      "count": 5000,
+      "compactPaths": false,
+      "status": "qualified",
+      "initBytes": 1609805,
+      "initMs": 275.891605,
+      "retainedChargeBytes": 2041064,
+      "nativePeakRssBytes": 8171520,
+      "hostRetainedChargeBytes": 1575560,
+      "maxReplyBytes": 42882,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 2.38969800000001,
+        "p95Ms": 5.954236000000037,
+        "p99Ms": 8.742273999999952
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 0.2838759999999638,
+        "p95Ms": 2.681242999999995,
+        "p99Ms": 3.729475999999977
+      }
+    },
+    {
+      "count": 50000,
+      "compactPaths": false,
+      "status": "qualified",
+      "initBytes": 16242298,
+      "initMs": 830.806489,
+      "retainedChargeBytes": 20955612,
+      "nativePeakRssBytes": 59199488,
+      "hostRetainedChargeBytes": 15955560,
+      "maxReplyBytes": 42892,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 5.681764999999359,
+        "p95Ms": 28.07159000000047,
+        "p99Ms": 38.456818999999996
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 3.0472399999998743,
+        "p95Ms": 25.89772700000003,
+        "p99Ms": 30.801682000000255
+      }
+    },
+    {
+      "count": 100000,
+      "compactPaths": false,
+      "status": "refused_before_spawn",
+      "reason": "Scan resource limit exceeded (maxRetainedBytes); scan is incomplete. Scan a smaller subtree."
+    },
+    {
+      "count": 100000,
+      "compactPaths": true,
+      "status": "qualified",
+      "initBytes": 27742963,
+      "initMs": 1431.1105180000004,
+      "retainedChargeBytes": 29374726,
+      "nativePeakRssBytes": 88543232,
+      "hostRetainedChargeBytes": 27008048,
+      "maxReplyBytes": 36879,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 6.224631000000045,
+        "p95Ms": 33.21432399999958,
+        "p99Ms": 42.13129200000003
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 4.352512999999817,
+        "p95Ms": 32.64035799999874,
+        "p99Ms": 48.70083100000011
+      }
+    }
+  ],
+  "replacements": [
+    {
+      "generation": 0,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    },
+    {
+      "generation": 1,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    },
+    {
+      "generation": 2,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    }
+  ]
+}

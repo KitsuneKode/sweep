@@ -8,11 +8,12 @@
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import { testRender as nativeTestRender } from "@opentui/react/test-utils";
-import { act } from "react";
-import { SweepApp, type SweepUiOutcome } from "./app.js";
+import { act, useState } from "react";
+import { SweepApp, UiErrorBoundary, type SweepUiOutcome } from "./app.js";
 import type { UiApplyRequest, UiApplyResult } from "./outcome.js";
 import type { UiScanControl } from "./streaming.js";
 import { requestUiApplyCancellation } from "./runtime.js";
+import { UiOperationSession } from "./operation-session.js";
 import { BoxRenderable } from "@opentui/core";
 
 // Match production signal ownership: renderer teardown must follow an app
@@ -112,11 +113,30 @@ async function mountWithApply(
       });
     },
   };
-  const setup = await testRender(<SweepApp plan={fixturePlan} scan={control} onDone={onDone} />, {
-    width: 120,
-    height: 32,
-    exitOnCtrlC: false,
-  });
+  const operations = new UiOperationSession();
+  let failView!: () => void;
+  function CrashProbe() {
+    const [failed, setFailed] = useState(false);
+    failView = () => setFailed(true);
+    if (failed) throw new Error("Injected view failure");
+    return null;
+  }
+  const setup = await testRender(
+    <UiErrorBoundary
+      onError={(error) => {
+        operations.viewFailed(error);
+        void operations.close({ type: "abort" }).then(onDone);
+      }}
+    >
+      <CrashProbe />
+      <SweepApp plan={fixturePlan} scan={control} operations={operations} onDone={onDone} />
+    </UiErrorBoundary>,
+    {
+      width: 120,
+      height: 32,
+      exitOnCtrlC: false,
+    },
+  );
   teardown = () => setup.renderer.destroy();
   await act(async () => {
     await setup.renderOnce();
@@ -139,6 +159,7 @@ async function mountWithApply(
   };
   return {
     setup,
+    failView,
     settle,
     openSingleConfirm,
     applyCalls,
@@ -901,4 +922,95 @@ test("quitting after a lost apply report retains the unknown outcome", async () 
   });
   await settle();
   expect(outcomes[0]).toMatchObject({ type: "done", deletedCount: 0, unknownOutcome: true });
+});
+
+describe("apply receipts survive rendering failures", () => {
+  test("a failed view cancels and drains the active apply without losing its receipt", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const { setup, settle, openSingleConfirm, failView, applyCalls, applyResolvers } =
+      await mountWithApply((outcome) => outcomes.push(outcome));
+    await openSingleConfirm();
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    expect(applyCalls).toHaveLength(1);
+    await act(async () => {
+      failView();
+    });
+    await settle();
+    expect(applyCalls[0]!.signal.aborted).toBe(true);
+    expect(outcomes).toEqual([]);
+    const request = applyCalls[0]!;
+    await act(async () => {
+      applyResolvers[0]!({
+        interrupted: true,
+        report: {
+          protocolVersion: "1",
+          targetDir: request.plan.targetDir,
+          selectedCandidateIds: request.plan.selectedCandidateIds,
+          deletedCount: 1,
+          failedCount: 0,
+          totalBytesFreed: 1024,
+          failedPaths: [],
+          outcomes: [{ candidateId: request.plan.selectedCandidateIds[0]!, status: "deleted" }],
+        },
+      });
+    });
+    await settle();
+    expect(outcomes).toEqual([
+      {
+        type: "done",
+        deletedCount: 1,
+        movedCount: 0,
+        failedCount: 0,
+        unattemptedCount: 0,
+        interrupted: true,
+        unknownOutcome: false,
+        viewError: "Injected view failure",
+      },
+    ]);
+  });
+
+  test("a view failure after a completed apply preserves known outcomes", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const { setup, settle, openSingleConfirm, failView, applyCalls, applyResolvers } =
+      await mountWithApply((outcome) => outcomes.push(outcome));
+    await openSingleConfirm();
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    const request = applyCalls[0]!;
+    await act(async () => {
+      applyResolvers[0]!({
+        interrupted: false,
+        report: {
+          protocolVersion: "1",
+          targetDir: request.plan.targetDir,
+          selectedCandidateIds: request.plan.selectedCandidateIds,
+          deletedCount: 1,
+          failedCount: 0,
+          totalBytesFreed: 1024,
+          failedPaths: [],
+          outcomes: [{ candidateId: request.plan.selectedCandidateIds[0]!, status: "deleted" }],
+        },
+      });
+    });
+    await settle();
+    await act(async () => {
+      failView();
+    });
+    await settle();
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({
+      type: "done",
+      deletedCount: 1,
+      unknownOutcome: false,
+      interrupted: false,
+      viewError: "Injected view failure",
+    });
+  });
 });

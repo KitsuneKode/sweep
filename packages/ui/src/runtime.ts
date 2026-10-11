@@ -2,12 +2,15 @@ import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
 import { releaseUiCaches } from "./state/store.js";
 import type { SweepUiOutcome } from "./outcome.js";
+import { UiOperationSession } from "./operation-session.js";
 
 export interface UiSession {
   root: ReturnType<typeof createRoot>;
   /** Idempotent: restores the terminal, then resolves the session promise. */
   finish: (outcome: SweepUiOutcome) => void;
   done: Promise<SweepUiOutcome>;
+  operations: UiOperationSession;
+  viewFailed: (error: unknown) => void;
 }
 
 // The raw-stdin deadman below fires on a timer so the keymap - which sees
@@ -55,7 +58,9 @@ export async function openUiSession(): Promise<UiSession> {
   });
 
   const root = createRoot(renderer);
+  const operations = new UiOperationSession();
   let cleanedUp = false;
+  let finishing = false;
   let resolveDone!: (outcome: SweepUiOutcome) => void;
   const done = new Promise<SweepUiOutcome>((resolvePromise) => {
     resolveDone = resolvePromise;
@@ -83,8 +88,12 @@ export async function openUiSession(): Promise<UiSession> {
   };
 
   const finish = (outcome: SweepUiOutcome) => {
-    cleanup();
-    resolveDone(outcome);
+    if (finishing) return;
+    finishing = true;
+    void operations.close(outcome).then((finalOutcome) => {
+      cleanup();
+      resolveDone(finalOutcome);
+    });
   };
 
   const onSignal = () => {
@@ -167,5 +176,14 @@ export async function openUiSession(): Promise<UiSession> {
   process.on("SIGHUP", onTerminate);
   process.stdin.on("data", onStdinData);
 
-  return { root, finish, done };
+  return {
+    root,
+    finish,
+    done,
+    operations,
+    viewFailed(error) {
+      operations.viewFailed(error);
+      finish({ type: "abort" });
+    },
+  };
 }

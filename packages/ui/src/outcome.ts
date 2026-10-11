@@ -13,6 +13,8 @@ export type SweepUiOutcome =
       unattemptedCount: number;
       interrupted: boolean;
       unknownOutcome: boolean;
+      /** View failure is separate from uncertainty about filesystem outcomes. */
+      viewError?: string;
     };
 
 /**

@@ -150,6 +150,11 @@ jobs:
           python3 scripts/smoke-focused-ui.py --exit-signal SIGHUP
           python3 scripts/smoke-focused-ui.py --exit-signal SIGTERM
 
+      - name: Qualify terminal close during active native removal
+        run: |
+          python3 scripts/smoke-active-ui.py --exit-signal SIGHUP
+          python3 scripts/smoke-active-ui.py --exit-signal SIGTERM
+
       - name: Qualify live UI delivery and update stability
         run: bun run packages/ui/benchmarks/stream-render.tsx --candidates 5000
 

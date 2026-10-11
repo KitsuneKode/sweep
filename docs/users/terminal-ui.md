@@ -143,3 +143,9 @@ A known size refusal or lock conflict removes nothing and keeps the queue; reduc
 the queue, adjust the reviewed ceiling, or inspect the held session. An unknown
 outcome still requires a rescan. Ctrl-C stops scheduling without rolling back
 completed deletions.
+
+If the interactive view fails during removal, Sweep stops scheduling work and
+waits for the engine's report before closing the terminal. The exit summary keeps
+known deletion counts and reports the view failure. If the engine report is also
+unavailable, it marks the filesystem outcome unknown; inspect the recovery journal
+and disk before retrying.

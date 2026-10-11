@@ -1,12 +1,12 @@
 /** Read-only synthetic index qualification; never scans or removes filesystem entries. */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { DiscoveryIndexSession } from "@kitsunekode/sweep-core/discovery-index";
 import { compileFilter } from "../src/filter-query.js";
 
 const args = process.argv.slice(2);
@@ -36,42 +36,17 @@ const filters = [
   "kind:target\u0085!risk:blocked",
 ];
 
-interface Summary {
-  generation: string;
-  revision: number;
-  candidateCount: number;
-  selectedCount: number;
-  retainedBytes: number;
-}
-interface Page {
-  generation: string;
-  revision: number;
-  matchingCount: number;
-  matchingBytes: number;
-  matchingBytesPartial: boolean;
-  nextOffset: number | null;
-  candidates: ScanCandidate[];
-  summary: Summary;
-}
-interface Reply {
-  type: string;
-  requestId?: number;
-  page?: Page;
-  summary?: Summary;
-  message?: string;
-}
-
-function snapshot(count: number): ScanPlan {
-  const targetDir = join(tmpdir(), "sweep-readonly-index-fixture");
+function snapshot(count: number, compactPaths = false): ScanPlan {
+  const targetDir = join(tmpdir(), compactPaths ? "si" : "sweep-readonly-index-fixture");
   const candidates: ScanCandidate[] = Array.from({ length: count }, (_, index) => {
     const name = index % 2 ? "target" : "node_modules";
     const isSymlink = index % 13 === 0;
     return {
-      id: `cand_index_${index}`,
+      id: compactPaths ? index.toString(36) : `cand_index_${index}`,
       path: join(
         targetDir,
         `group-${Math.floor(index / 100)}`,
-        `project-${index}${index % 11 === 0 ? "-東京" : ""}`,
+        `${compactPaths ? index.toString(36) : `project-${index}`}${index % 11 === 0 ? "-東京" : ""}`,
         name,
       ),
       name,
@@ -110,89 +85,6 @@ function snapshot(count: number): ScanPlan {
   };
 }
 
-function client() {
-  const child = spawn(binary, ["index"], { stdio: "pipe" });
-  let carry = "";
-  let replyBytes = 0;
-  let maxReplyBytes = 0;
-  let stderr = "";
-  let pending:
-    | {
-        resolve: (reply: Reply) => void;
-        reject: (error: Error) => void;
-        timer: ReturnType<typeof setTimeout>;
-      }
-    | undefined;
-  const exit = new Promise<number | null>((done) => child.once("exit", done));
-  const fail = (error: Error) => {
-    if (pending) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-      pending = undefined;
-    }
-  };
-  child.once("error", fail);
-  child.stdin.on("error", fail);
-  child.once("close", () => fail(new Error(`Index closed before a reply: ${stderr}`)));
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => {
-    stderr = (stderr + chunk).slice(-4096);
-  });
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    replyBytes += Buffer.byteLength(chunk);
-    if (replyBytes > 1024 * 1024) {
-      fail(new Error("Index reply exceeds 1 MiB"));
-      child.kill("SIGKILL");
-      return;
-    }
-    carry += chunk;
-    const end = carry.indexOf("\n");
-    if (end < 0) return;
-    if (!pending || end !== carry.length - 1) {
-      fail(new Error("Unexpected or multiple index replies"));
-      child.kill("SIGKILL");
-      return;
-    }
-    const line = carry.slice(0, end);
-    carry = "";
-    maxReplyBytes = Math.max(maxReplyBytes, replyBytes);
-    replyBytes = 0;
-    const waiting = pending;
-    pending = undefined;
-    clearTimeout(waiting.timer);
-    try {
-      waiting.resolve(JSON.parse(line) as Reply);
-    } catch {
-      waiting.reject(new Error("Invalid JSON index reply"));
-    }
-  });
-  const send = (message: unknown) => {
-    assert.equal(pending, undefined, "only one request may be outstanding");
-    return new Promise<Reply>((done, reject) => {
-      const timer = setTimeout(() => {
-        fail(new Error("Index reply timeout"));
-        child.kill("SIGKILL");
-      }, 30_000);
-      pending = { resolve: done, reject, timer };
-      child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
-        if (error) fail(error);
-      });
-    });
-  };
-  return {
-    child,
-    send,
-    exit,
-    get maxReplyBytes() {
-      return maxReplyBytes;
-    },
-    close() {
-      child.kill("SIGKILL");
-    },
-  };
-}
-
 function latency(samples: number[]) {
   const sorted = [...samples].sort((a, b) => a - b);
   const percentile = (fraction: number) => sorted[Math.ceil(sorted.length * fraction) - 1]!;
@@ -205,23 +97,33 @@ function latency(samples: number[]) {
 }
 
 const results = [];
-for (const count of [5000, 50000, 100000]) {
-  const plan = snapshot(count);
+for (const { count, compactPaths } of [
+  { count: 5000, compactPaths: false },
+  { count: 50000, compactPaths: false },
+  { count: 100000, compactPaths: false },
+  { count: 100000, compactPaths: true },
+]) {
+  const plan = snapshot(count, compactPaths);
   const selectedIds = new Set(plan.selectedCandidateIds);
   const context = { selectedIds, now };
-  const generation = `benchmark-${count}`;
-  const channel = client();
   const started = performance.now();
+  let channel: DiscoveryIndexSession;
   try {
-    const initBytes = Buffer.byteLength(JSON.stringify({ generation, plan })) + 1;
-    assert.ok(initBytes <= 64 * 1024 * 1024);
-    const ready = await channel.send({ generation, plan });
+    channel = await DiscoveryIndexSession.open(plan, { command: [binary] });
+  } catch (error) {
+    if (error instanceof Error && error.name === "ResourceLimitError") {
+      results.push({ count, compactPaths, status: "refused_before_spawn", reason: error.message });
+      continue;
+    }
+    throw error;
+  }
+  try {
+    const initBytes = Buffer.byteLength(JSON.stringify(plan)) + 128;
     const initMs = performance.now() - started;
-    assert.equal(ready.type, "index_ready");
-    assert.equal(ready.summary?.candidateCount, count);
-    assert.equal(ready.summary?.selectedCount, selectedIds.size);
-    assert.ok(ready.summary!.retainedBytes <= 64 * 1024 * 1024);
-    let requestId = 0;
+    const ready = channel.summary;
+    assert.equal(ready.candidateCount, count);
+    assert.equal(ready.selectedCount, selectedIds.size);
+    assert.ok(ready.retainedBytes <= 64 * 1024 * 1024);
     const nativeMs = [];
     const jsMs = [];
     for (let sample = 0; sample < 200; sample++) {
@@ -235,26 +137,9 @@ for (const count of [5000, 50000, 100000]) {
       const expected = matching.slice(offset, offset + 128);
       jsMs.push(performance.now() - jsStart);
       const queryStart = performance.now();
-      const reply = await channel.send({
-        type: "query",
-        requestId: ++requestId,
-        query: {
-          generation,
-          revision: 0,
-          filter,
-          scope: null,
-          risk: null,
-          order: "discovery",
-          offset,
-          limit: 128,
-          now,
-        },
-      });
+      const page = await channel.query({ filter, offset, limit: 128, now });
       nativeMs.push(performance.now() - queryStart);
-      assert.equal(reply.type, "page", reply.message);
-      assert.equal(reply.requestId, requestId);
-      const page = reply.page!;
-      assert.equal(page.generation, generation);
+      assert.equal(page.generation, ready.generation);
       assert.equal(page.revision, 0);
       assert.equal(page.matchingCount, matching.length);
       assert.equal(page.summary.selectedCount, selectedIds.size, "paging cannot change selection");
@@ -274,27 +159,75 @@ for (const count of [5000, 50000, 100000]) {
     }
     let nativePeakRssBytes: number | null = null;
     if (process.platform === "linux") {
-      const status = await readFile(`/proc/${channel.child.pid}/status`, "utf8");
+      const status = await readFile(`/proc/${channel.diagnostics.pid}/status`, "utf8");
       const kib = /^VmHWM:\s+(\d+)\s+kB$/m.exec(status)?.[1];
       if (kib) nativePeakRssBytes = Number(kib) * 1024;
     }
-    const closed = await channel.send({ type: "close", requestId: ++requestId });
-    assert.equal(closed.type, "index_closed");
-    channel.child.stdin.end();
-    assert.equal(await channel.exit, 0);
     results.push({
       count,
+      compactPaths,
+      status: "qualified",
       initBytes,
       initMs,
-      retainedChargeBytes: ready.summary!.retainedBytes,
+      retainedChargeBytes: ready.retainedBytes,
       nativePeakRssBytes,
-      maxReplyBytes: channel.maxReplyBytes,
+      hostRetainedChargeBytes: channel.diagnostics.hostRetainedChargeBytes,
+      maxReplyBytes: channel.diagnostics.maxReplyBytes,
       nativeRoundTrip: latency(nativeMs),
       jsFilterAndSlice: latency(jsMs),
     });
   } finally {
-    channel.close();
+    await channel.close();
+    assert.equal(channel.diagnostics.retainedWitnessCount, 0);
   }
+}
+
+const replacements = [];
+for (let generation = 0; generation < 3; generation++) {
+  const plan = snapshot(50000);
+  const baselineFds = process.platform === "linux" ? (await readdir("/proc/self/fd")).length : null;
+  const channel = await DiscoveryIndexSession.open(plan, { command: [binary] });
+  const pid = channel.diagnostics.pid;
+  const farId = plan.candidates[40002]!.id;
+  try {
+    await channel.select([farId], true);
+    for (const offset of [0, 128, 40000]) {
+      const page = await channel.query({ offset, limit: 128, now });
+      assert.equal(page.summary.selectedCount, 51);
+      assert.equal(channel.isSelected(farId), true);
+    }
+    const exported = await channel.snapshot();
+    assert.deepEqual(
+      new Set(exported.selectedCandidateIds),
+      new Set([...plan.selectedCandidateIds, farId]),
+    );
+    assert.equal(exported.candidates.length, 51);
+  } finally {
+    await channel.close();
+  }
+  const afterFds = process.platform === "linux" ? (await readdir("/proc/self/fd")).length : null;
+  assert.equal(channel.diagnostics.retainedWitnessCount, 0);
+  assert.equal(channel.diagnostics.hostRetainedChargeBytes, 0);
+  if (baselineFds !== null && afterFds !== null)
+    assert.ok(afterFds <= baselineFds + 2, "replacement leaked pipe descriptors");
+  if (pid) {
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      alive = false;
+    }
+    assert.equal(alive, false, "closed read-only child is still alive");
+  }
+  replacements.push({
+    generation,
+    records: 50000,
+    exportedSelectedCount: 51,
+    baselineFds,
+    afterFds,
+    reaped: true,
+  });
 }
 
 const report = JSON.stringify(
@@ -312,8 +245,9 @@ const report = JSON.stringify(
       execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim().length > 0,
     rustc: execFileSync("rustc", ["--version"], { encoding: "utf8" }).trim(),
     method:
-      "Read-only synthetic metadata, 5k/50k/100k records, 200 sequential discovery-order queries per child. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include NDJSON transport and page decoding; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
+      "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include the production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
     results,
+    replacements,
   },
   null,
   2,

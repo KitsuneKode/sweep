@@ -30,6 +30,7 @@ import { ApplyOverlay } from "./ApplyOverlay.js";
 import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
+import { UiOperationSession } from "./operation-session.js";
 import { writePlanExport } from "./plan-export.js";
 import { noteCtrlCHandled, registerUiApplyCancellation } from "./runtime.js";
 import {
@@ -103,9 +104,10 @@ export interface SweepAppProps {
   /** When present, the app boots into a live scan and fills in as results stream. */
   scan?: UiScanControl;
   initiallyScanning?: boolean;
+  operations?: UiOperationSession;
 }
 
-function styledContentFallback(message: string): ReactNode {
+function styledContentFallback(message: string, closing: boolean): ReactNode {
   // Renders when the app crashed before (or without) theme context - always
   // uses the dark palette directly rather than resolving a mode.
   return (
@@ -120,18 +122,25 @@ function styledContentFallback(message: string): ReactNode {
         content={t`${bold(fg(darkTheme.danger)("◆ sweep"))} ${fg(darkTheme.textMuted)("hit an error in the interactive view")}`}
       />
       <text content="" />
-      <text content={sanitizeTerminalText(message)} fg={darkTheme.text} />
+      <text content={sanitizeTerminalText(message).slice(0, 4096)} fg={darkTheme.text} />
       <text content="" />
       <text
-        content="Press Ctrl+C to exit (the keymap died with this view)."
+        content={
+          closing
+            ? "Closing the view; waiting for any active apply report."
+            : "Press Ctrl+C to exit."
+        }
         fg={darkTheme.textDim}
       />
     </box>
   );
 }
 
-export class UiErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
-  constructor(props: { children: ReactNode }) {
+export class UiErrorBoundary extends Component<
+  { children: ReactNode; onError?: (error: Error) => void },
+  { error: Error | null }
+> {
+  constructor(props: { children: ReactNode; onError?: (error: Error) => void }) {
     super(props);
     this.state = { error: null };
   }
@@ -140,9 +149,13 @@ export class UiErrorBoundary extends Component<{ children: ReactNode }, { error:
     return { error };
   }
 
+  override componentDidCatch(error: Error): void {
+    this.props.onError?.(error);
+  }
+
   override render(): ReactNode {
     if (this.state.error) {
-      return styledContentFallback(this.state.error.message);
+      return styledContentFallback(this.state.error.message, this.props.onError !== undefined);
     }
     return this.props.children;
   }
@@ -563,6 +576,7 @@ export function SweepApp({
   init,
   scan,
   initiallyScanning,
+  operations: suppliedOperations,
 }: SweepAppProps) {
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) => createUiState(p, init));
   const [showHelp, setShowHelpState] = useState(false);
@@ -883,25 +897,16 @@ export function SweepApp({
   const dangerousSelected = useMemo(() => countSelectedDangerous(state), [state]);
   const candidatesById = useMemo(() => candidateIndex(state.candidates), [state.candidates]);
 
-  const sessionResultRef = useRef({
-    attempted: false,
-    deletedCount: 0,
-    movedCount: 0,
-    failedCount: 0,
-    unattemptedCount: 0,
-    interrupted: false,
-    unknownOutcome: false,
-  });
+  const [operations] = useState(() => suppliedOperations ?? new UiOperationSession());
   const finalizedRef = useRef(false);
   const finalize = useCallback(
     (outcome: SweepUiOutcome) => {
       if (finalizedRef.current) return;
       finalizedRef.current = true;
       abortRef.current?.abort();
-      const { attempted, ...result } = sessionResultRef.current;
-      onDone(outcome.type === "abort" && attempted ? { type: "done", ...result } : outcome);
+      onDone(operations.outcome(outcome));
     },
-    [onDone],
+    [onDone, operations],
   );
 
   const requestApply = useCallback(() => {
@@ -948,7 +953,7 @@ export function SweepApp({
     (scopedPlan: ScanPlan, name: string) => {
       // This ref closes the scheduling gate synchronously, before another key
       // in this stdin drain can confirm, quit, rescan or mutate the queue.
-      if (applyAbortRef.current) return;
+      if (applyAbortRef.current || operations.closing) return;
       const requestedTrash = trashModeRef.current;
       const applyFn = scan?.apply;
       if (!applyFn) {
@@ -970,30 +975,28 @@ export function SweepApp({
       });
       setApplying(name);
       void (async () => {
+        let receivedReport = false;
         try {
-          const result = await applyFn({
-            plan: scopedPlan,
-            trash: requestedTrash,
-            signal: controller.signal,
-            onProgress: (progress) => {
-              if (applyAbortRef.current !== controller) return;
-              setApplyProgress({
-                ...progress,
-                stage: controller.signal.aborted ? "stopping" : progress.stage,
-              });
+          const result = await operations.run(
+            {
+              plan: scopedPlan,
+              trash: requestedTrash,
+              signal: controller.signal,
+              onProgress: (progress) => {
+                if (applyAbortRef.current !== controller) return;
+                setApplyProgress({
+                  ...progress,
+                  stage: controller.signal.aborted ? "stopping" : progress.stage,
+                });
+              },
             },
-          });
+            applyFn,
+          );
+          receivedReport = true;
           if (applyAbortRef.current !== controller) return;
           const merged = mergeApplyReport(stateRef.current, result.report);
           dispatch({ type: "replace", state: merged.state });
           const stopped = result.interrupted || merged.interrupted || merged.unattempted > 0;
-          const session = sessionResultRef.current;
-          session.attempted = true;
-          if (result.trashDir) session.movedCount += result.report.deletedCount;
-          else session.deletedCount += result.report.deletedCount;
-          session.failedCount += merged.failed;
-          session.unattemptedCount += merged.unattempted;
-          session.interrupted ||= stopped;
           const verb = result.trashDir ? "moved to trash" : "deleted";
           const reviewedPath =
             scopedPlan.selectedCandidateIds.length === 1 ? ` · path: ${name}` : "";
@@ -1002,12 +1005,15 @@ export function SweepApp({
           );
         } catch (error) {
           if (applyAbortRef.current !== controller) return;
+          if (receivedReport) {
+            operations.viewFailed(error);
+            finalize({ type: "abort" });
+            return;
+          }
           if (isApplyRefusedError(error)) {
             setNotice(`Nothing removed · ${sanitizeTerminalText(error.message)} · queue preserved`);
             return;
           }
-          sessionResultRef.current.attempted = true;
-          sessionResultRef.current.unknownOutcome = true;
           // With no authoritative report, retained rows may already be gone.
           // Require a rescan rather than allowing an automatic destructive retry.
           dispatch({ type: "replace", state: { ...stateRef.current, scanIncomplete: true } });
@@ -1024,7 +1030,7 @@ export function SweepApp({
         }
       })();
     },
-    [scan, finalize, dryRun],
+    [scan, finalize, dryRun, operations],
   );
 
   const applyPlan = useCallback(() => {

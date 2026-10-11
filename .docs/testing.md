@@ -462,7 +462,10 @@ bun run packages/ui/benchmarks/native-index.ts --binary target/release/sweep-eng
 ```
 
 It compares 600 bounded discovery-order page queries at 5k/50k/100k synthetic
-records with the JS filter. Reports record the binary hash, compiler, transport
+records with the JS filter through the validated host adapter. Normal paths at
+100k hit the saved-plan retained budget; a separate compact-path fixture fits.
+Three additional 50k generations check selection, explicit export, child reaping
+and descriptor cleanup. Reports record refusals, binary hash, compiler, transport
 sizes, retained logical charges and native process RSS. The host keeps a reference
 snapshot, so this does not measure total TUI memory, real scanning or deletion.
 The experiment is not wired into the production UI. See the
@@ -562,3 +565,23 @@ gate or allocated 200–600 GiB workload qualification. `du` is benchmark contex
 not an active scanner backend. The [50k rendered UI probe](benchmarks/ui-render-50k-2026-10-07.json)
 measures navigation/painting across three synthetic sessions; live streaming,
 filtering and expanded large sidebars require separate qualification.
+
+Linux active-apply terminal-close qualification uses owned temporary artifacts:
+
+```sh
+python3 scripts/smoke-active-ui.py --exit-signal SIGHUP
+python3 scripts/smoke-active-ui.py --exit-signal SIGTERM
+```
+
+The script observes removal before signaling the host, then checks the committed
+journal, outcome counts, exit status, untouched queued sibling and alternate-screen
+restoration. A completed candidate may race cancellation; the journal, disk and
+exit must agree either way. CI runs both probes. They do not qualify blocked
+filesystem syscalls or prove latency on low-end hardware.
+
+OpenTUI render tests inject a view failure during and after apply. The session
+owner must preserve host-validated receipts after the component unmounts, drain
+active cancellation and report a view failure separately from unknown disk state.
+Platform unit tests also check leaf and interior directory links (Windows
+junctions), preserving contents outside the reviewed root. This coverage does not
+qualify attached volumes or concurrent mount/path replacement.

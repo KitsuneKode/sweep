@@ -36,6 +36,44 @@ afterEach(() => {
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
+for (const backend of ["js", "rust"] as const) {
+  for (const shape of ["leaf", "interior"] as const) {
+    test.skipIf(backend === "rust" && !NATIVE_AVAILABLE)(
+      `${backend}: ${shape} directory link removal preserves contents outside the target`,
+      async () => {
+        const project = dir("project");
+        const external = dir("external");
+        mkdirSync(project);
+        mkdirSync(external);
+        writeFileSync(join(external, "keep"), "outside the reviewed root");
+        const artifact = join(project, "node_modules");
+        if (shape === "interior") {
+          mkdirSync(artifact);
+          writeFileSync(join(artifact, "owned"), "owned");
+        }
+        // Junction creation does not need Windows symlink privileges. A
+        // creation failure fails qualification rather than skipping coverage.
+        symlinkSync(
+          external,
+          shape === "leaf" ? artifact : join(artifact, "link"),
+          process.platform === "win32" ? "junction" : "dir",
+        );
+        const { plan } = await scanToPlan(project, DEFAULT_CONFIG);
+        const candidate = plan.candidates.find((c) => c.path === artifact);
+        expect(candidate).toBeDefined();
+        plan.selectedCandidateIds = [candidate!.id];
+        plan.summary.selectedCount = 1;
+        const { report } = await applyPlanWithBackend(plan, backend);
+        expect(report.deletedCount).toBe(1);
+        expect(report.failedCount).toBe(0);
+        expect(report.outcomes).toEqual([{ candidateId: candidate!.id, status: "deleted" }]);
+        expect(existsSync(artifact)).toBe(false);
+        expect(readFileSync(join(external, "keep"), "utf8")).toBe("outside the reviewed root");
+      },
+    );
+  }
+}
+
 test.skipIf(process.platform !== "linux" || !NATIVE_AVAILABLE)(
   "rust: active artifact removal activity reaches the host without changing outcome accounting",
   async () => {

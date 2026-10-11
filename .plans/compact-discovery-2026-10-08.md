@@ -2,7 +2,7 @@ Status: in_progress
 Scope: compact native discovery experiment, session failure handling, public writing
 Created: 2026-10-08
 Updated: 2026-10-11
-Commit: checkpoint based on bda7c82; see git history
+Commit: checkpoint based on 5da2149; see git history
 
 # Compact discovery and follow-up patches
 
@@ -53,7 +53,8 @@ Saved-plan export remains subject to its existing resource and file-size limits.
   Ruling: qualify a read-only adapter first; keep default UI integration gated.
 - No additional subagents. Tests use owned fixtures; no user data is deleted.
 - Implemented: compact index, bounded internal NDJSON command, atomic revisioned
-  selection and a benchmark client. The production host adapter remains open.
+  selection and a benchmark client. A validated host adapter now owns transport,
+  candidate fingerprints, selection receipts, explicit export and child teardown.
 - Added native snapshot/queue/cancellation/Unicode/page-budget regressions and
   JS/native filtering comparisons. Filter whitespace follows JavaScript's BOM
   and NEL semantics; page accounting includes array overhead before materializing
@@ -78,13 +79,39 @@ Saved-plan export remains subject to its existing resource and file-size limits.
 
 ## Remaining work
 
-1. Implement a validated production host adapter, including malformed/fragmented
-   replies, bounded waits and generation replacement. The benchmark client is
-   not a production adapter.
+1. Host adapter implemented and exercised by the benchmark. Default UI integration
+   remains gated: the current reducers retain and aggregate all candidates.
 2. Replace UI reducers with aggregate/page consumers before evicting candidates.
    Qualify queue persistence, ordering, saved-plan export and repeated sessions.
-3. Qualify active SIGHUP/SIGTERM with the real engine and view failures during
-   removal. Keep the journal authoritative if the view disappears.
+3. Active SIGHUP/SIGTERM are now qualified locally on owned Linux PTY fixtures and
+   wired into CI. Injected render failures before, during and after apply preserve
+   receipts in a session owner outside React. Physical terminal and non-Linux
+   active-signal qualification remain open.
 4. Continue macOS/Windows mount/path replacement qualification, overlapping-root
    coordination and bounded journal/extraction retention. No new guarantee is
    made for these surfaces or allocated 200–600 GiB trees.
+
+## Follow-up checkpoint
+
+- `DiscoveryIndexSession` retains compact candidate fingerprints and explicit queue
+  witnesses. Pages are immutable and bounded to 256 records / 1 MiB. UTF-8
+  fragments, changed metadata, wrong request/generation/revision, false queue
+  receipts, repeated export rows, timeout, cancellation and torn EOF fail closed.
+  Exported plans own their nested objects; caller mutation cannot rewrite the
+  review generation. Closing reaps the child and releases witnesses.
+- The benchmark now uses this adapter, including its validation cost. At 100k,
+  ordinary paths hit the existing 128 MiB plan charge ceiling before spawn.
+  Compact paths fit. This is a scale boundary, not a reason to raise the ceiling.
+  The [adapter report](compact-discovery-adapter-2026-10-11.json) records both
+  outcomes, plus repeated 50k generation replacement and descriptor cleanup.
+- A UI operation session records host-validated results before handing them to
+  React. Render failure requests cancellation and drains the report; it is a
+  view error (exit 4), separate from unknown filesystem outcomes. Known successful
+  deletes stay known even if rendering fails afterward.
+- Cross-platform unit coverage now explicitly exercises leaf directory links and
+  interior directory links, using junctions on Windows. Both engines must preserve
+  external contents and report exactly the reviewed candidate. Mounted volumes
+  and concurrent ancestor replacement remain separate qualification gaps.
+- Available project filesystem space is about 32 GiB. No allocated 200–600 GiB
+  corpus can be qualified here. No sparse-file test is presented as that evidence,
+  and the user's existing corpus was not touched.

@@ -264,7 +264,7 @@ export async function runSweepUiStreaming(
 
   try {
     session.root.render(
-      <UiErrorBoundary>
+      <UiErrorBoundary onError={session.viewFailed}>
         <SweepApp
           plan={emptyPlan(options.targetDir, options.selectionPolicy)}
           engine={options.engine}
@@ -273,13 +273,13 @@ export async function runSweepUiStreaming(
           {...(options.init ? { init: options.init } : {})}
           initiallyScanning
           scan={makeControl()}
+          operations={session.operations}
           onDone={session.finish}
         />
       </UiErrorBoundary>,
     );
   } catch (error) {
-    session.finish({ type: "abort" });
-    throw error instanceof Error ? error : new Error(String(error));
+    session.viewFailed(error);
   }
   return await session.done;
 }

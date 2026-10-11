@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 
 import { fileURLToPath } from "node:url";
 import type { ApplyReport, CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { CATALOG_PATTERNS, DEFAULT_PATTERN_SET } from "@kitsunekode/sweep-core/catalog";
 import { isColdRequested, tryDropPageCache } from "@kitsunekode/sweep-core/cold";
 import { GuardrailError, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
@@ -226,13 +227,15 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       console.log(
         `${outcome.deletedCount} deleted · ${outcome.movedCount} moved to trash · ${outcome.failedCount} failed · ${outcome.unattemptedCount} unattempted`,
       );
+      if (outcome.viewError)
+        console.error(`Interactive view failed: ${sanitizeTerminalText(outcome.viewError)}`);
       if (outcome.unknownOutcome)
         console.error(
           "An apply outcome is unknown. Inspect disk and the recovery journal before retrying.",
         );
       await drainStdout();
       exitWith(
-        outcome.unknownOutcome || outcome.failedCount > 0
+        outcome.viewError || outcome.unknownOutcome || outcome.failedCount > 0
           ? EXIT.FAILURE
           : outcome.interrupted
             ? EXIT.ABORTED

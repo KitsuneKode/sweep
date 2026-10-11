@@ -265,6 +265,9 @@ Both engines re-validate before deleting:
   subtree and refunds live sizing reservations on exit. A blocked filesystem
   syscall cannot be interrupted by that flag. Native covered-outcome alias keys
   are frozen before deletion; removing a parent cannot change report identity.
+  The TUI session owns apply receipts outside React. View failure cancels and
+  drains active work before terminal teardown; it cannot erase a trusted report
+  or turn into an ordinary user abort.
   Direct native apply also handles Unix SIGINT/SIGTERM cooperatively. The
   non-control command flushes its JSON partition and exits 1 on interruption;
   the control command returns its terminal report for the host to interpret.
