@@ -173,7 +173,9 @@ test("10,000 folders mount only a viewport and preserve the cursor through seeki
     -1,
   );
   await act(async () => {
-    await setup.mockMouse.click(x, bottom - 1);
+    // In a three-cell rail, the two-cell thumb occupies bottom - 1.
+    // Seek through the last track cell rather than grabbing the thumb.
+    await setup.mockMouse.click(x, bottom);
     await setup.flush();
   });
   await act(async () => {

@@ -136,6 +136,14 @@ async function open(scenario = "good", source = plan(), timeoutMs = 2000) {
   return session;
 }
 
+// Await pipe I/O before invoking matchers. Bun's Windows rejection matcher
+// can stall an already-open child pipe until the adapter watchdog fires.
+async function rejection(promise: Promise<unknown>): Promise<unknown> {
+  const error: unknown = await promise.catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(Error);
+  return error;
+}
+
 test("pages are immutable, split UTF-8 survives, and queued IDs survive page eviction", async () => {
   const source = plan(600);
   const session = await open("split", source);
@@ -220,7 +228,9 @@ for (const scenario of [
 ]) {
   test(`malformed peer closes the generation (${scenario})`, async () => {
     const session = await open(scenario);
-    await expect(session.query({ limit: 2 })).rejects.toBeInstanceOf(Error);
+    expect(await rejection(session.query({ limit: 2 }))).toMatchObject({
+      code: scenario === "truncated" ? "discovery_closed" : "discovery_protocol",
+    });
     await session.close();
     await expect(session.query()).rejects.toBeInstanceOf(Error);
     const pid = Number(readFileSync(join(root, `${scenario}.pid`), "utf8"));
@@ -230,15 +240,15 @@ for (const scenario of [
 
 test("refuses false queue receipts and repeated export pages", async () => {
   const session = await open("bad-selection");
-  await expect(session.select([plan().candidates[1]!.id], true)).rejects.toMatchObject({
+  expect(await rejection(session.select([plan().candidates[1]!.id], true))).toMatchObject({
     code: "discovery_protocol",
   });
   const repeated = await open("repeat-export", plan(600));
-  await expect(repeated.snapshot("all")).rejects.toMatchObject({ code: "discovery_protocol" });
+  expect(await rejection(repeated.snapshot("all"))).toMatchObject({ code: "discovery_protocol" });
 });
 
 test("startup refuses a false aggregate and reaps its child", async () => {
-  await expect(DiscoveryIndexSession.open(plan(), options("bad-ready"))).rejects.toMatchObject({
+  expect(await rejection(DiscoveryIndexSession.open(plan(), options("bad-ready")))).toMatchObject({
     code: "discovery_protocol",
   });
   const pid = Number(readFileSync(join(root, "bad-ready.pid"), "utf8"));
