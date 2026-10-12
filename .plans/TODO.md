@@ -13,6 +13,11 @@
 
 ## Next
 
+- [ ] Integrate the production TUI with the bounded page owner after completing
+      scope/group aggregates, cursor ordering and progressive generation handover.
+      [Paged review ownership](paged-review-2026-10-12.md) implements cached totals,
+      explicit single-item plans and trusted outcome retirement; it remains gated.
+
 - [ ] Close [round-four audit reconciliation](audit-round4-2026-10-08.md):
       confirmation authority, error contract, session truth and recovery evidence;
       compact discovery paging and platform race qualification remain separate.

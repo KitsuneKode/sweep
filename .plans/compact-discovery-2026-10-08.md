@@ -1,7 +1,7 @@
 Status: in_progress
 Scope: compact native discovery experiment, session failure handling, public writing
 Created: 2026-10-08
-Updated: 2026-10-11
+Updated: 2026-10-12
 Commit: checkpoint based on 5da2149; see git history
 
 # Compact discovery and follow-up patches
@@ -115,3 +115,11 @@ Saved-plan export remains subject to its existing resource and file-size limits.
 - Available project filesystem space is about 32 GiB. No allocated 200–600 GiB
   corpus can be qualified here. No sparse-file test is presented as that evidence,
   and the user's existing corpus was not touched.
+
+- [Paged review ownership](paged-review-2026-10-12.md) now caches native active
+  and queued aggregates, including independent partial-size and risk counters.
+  Revisioned retirement updates only review metadata. The UI page owner retains
+  one page, prepares single-row plans without touching the queue, and retires only
+  complete outcome partitions. A metadata failure preserves known apply counts
+  while invalidating the incomplete review generation. Production integration
+  still needs scope/group ordering, bulk-action contracts and streaming handover.

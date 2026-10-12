@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-12T09:57:31.473Z",
+  "runtime": "1.4.2",
+  "reviewOwner": "PagedReviewSession",
+  "platform": "linux",
+  "arch": "x64",
+  "binary": "/home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine",
+  "binarySha256": "b67a06619f188a39ab67bc2cfac4c40f356df345580a5080bf7321993575b999",
+  "sourceBase": "2b025d173b02559a0d405a2a91874417c94a67b4",
+  "sourceDirty": true,
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "method": "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include the bounded UI page owner, production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, synthetic outcome retirement, remaining-queue export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
+  "results": [
+    {
+      "count": 5000,
+      "compactPaths": false,
+      "status": "qualified",
+      "initBytes": 1609805,
+      "initMs": 91.4462,
+      "retainedChargeBytes": 2041064,
+      "nativePeakRssBytes": 8093696,
+      "hostRetainedChargeBytes": 1575560,
+      "maxReplyBytes": 42953,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 1.2195020000000056,
+        "p95Ms": 2.139188000000047,
+        "p99Ms": 2.666052000000036
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 0.15933999999998605,
+        "p95Ms": 1.2850010000000225,
+        "p99Ms": 1.4021099999999933
+      }
+    },
+    {
+      "count": 50000,
+      "compactPaths": false,
+      "status": "qualified",
+      "initBytes": 16242298,
+      "initMs": 376.079647,
+      "retainedChargeBytes": 20955612,
+      "nativePeakRssBytes": 59551744,
+      "hostRetainedChargeBytes": 15955560,
+      "maxReplyBytes": 42963,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 3.1472530000000916,
+        "p95Ms": 11.423114999999598,
+        "p99Ms": 48.850920000000315
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 1.7203640000000178,
+        "p95Ms": 17.058596000000307,
+        "p99Ms": 30.950103000000126
+      }
+    },
+    {
+      "count": 100000,
+      "compactPaths": false,
+      "status": "refused_before_spawn",
+      "reason": "Scan resource limit exceeded (maxRetainedBytes); scan is incomplete. Scan a smaller subtree."
+    },
+    {
+      "count": 100000,
+      "compactPaths": true,
+      "status": "qualified",
+      "initBytes": 27742963,
+      "initMs": 2160.014624,
+      "retainedChargeBytes": 29374726,
+      "nativePeakRssBytes": 88776704,
+      "hostRetainedChargeBytes": 27008048,
+      "maxReplyBytes": 36950,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 4.524805000000015,
+        "p95Ms": 20.88350300000002,
+        "p99Ms": 23.913002999999662
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 2.9964429999999993,
+        "p95Ms": 25.97047300000031,
+        "p99Ms": 28.031741999999213
+      }
+    }
+  ],
+  "replacements": [
+    {
+      "generation": 0,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "retiredRows": 2,
+      "remainingSelectedCount": 49,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    },
+    {
+      "generation": 1,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "retiredRows": 2,
+      "remainingSelectedCount": 49,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    },
+    {
+      "generation": 2,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "retiredRows": 2,
+      "remainingSelectedCount": 49,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    }
+  ]
+}

@@ -462,14 +462,18 @@ bun run packages/ui/benchmarks/native-index.ts --binary target/release/sweep-eng
 ```
 
 It compares 600 bounded discovery-order page queries at 5k/50k/100k synthetic
-records with the JS filter through the validated host adapter. Normal paths at
+records with the JS filter through the bounded page owner and validated host adapter. Normal paths at
 100k hit the saved-plan retained budget; a separate compact-path fixture fits.
-Three additional 50k generations check selection, explicit export, child reaping
-and descriptor cleanup. Reports record refusals, binary hash, compiler, transport
+Three additional 50k generations check selection, explicit export, synthetic
+outcome retirement, remaining-queue export, child reaping and descriptor cleanup.
+Retirement changes review metadata only; these reports do not delete files.
+Reports record refusals, binary hash, compiler, transport
 sizes, retained logical charges and native process RSS. The host keeps a reference
 snapshot, so this does not measure total TUI memory, real scanning or deletion.
 The experiment is not wired into the production UI. See the
 [compact-index integration gate](../.plans/compact-discovery-2026-10-08.md).
+The [paged-review checkpoint](../.plans/paged-review-2026-10-12.md) records cached
+active/queued aggregates, single-item scope and interrupted-report qualification.
 
 ```sh
 bun run build

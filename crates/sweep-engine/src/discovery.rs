@@ -59,6 +59,7 @@ pub struct IndexSummary {
     pub selected_count: usize,
     pub selected_bytes: u64,
     pub selected_bytes_partial: bool,
+    pub selected_risk_counts: RiskCounts,
     pub risk_counts: RiskCounts,
     /// Logical accounting for permanent storage, not process RSS.
     pub retained_bytes: usize,
@@ -142,6 +143,7 @@ impl Builder {
     }
 }
 struct Record {
+    active: bool,
     parent: Span,
     leaf: Span,
     name: Span,
@@ -167,8 +169,13 @@ pub struct DiscoveryIndex {
     by_id: HashMap<String, usize>,
     selected: Vec<bool>,
     total_bytes: u64,
-    partial: bool,
+    candidate_count: usize,
+    partial_count: usize,
     risk_counts: RiskCounts,
+    selected_count: usize,
+    selected_bytes: u64,
+    selected_partial_count: usize,
+    selected_risk_counts: RiskCounts,
     charged: usize,
 }
 
@@ -180,6 +187,15 @@ fn add_bytes(total: u64, bytes: u64) -> Result<u64> {
         .checked_add(bytes)
         .filter(|n| *n <= SAFE_INTEGER)
         .ok_or(DiscoveryError("index byte counter overflow"))
+}
+
+fn risk_counter(counts: &mut RiskCounts, risk: RiskTier) -> &mut u32 {
+    match risk {
+        RiskTier::Safe => &mut counts.safe,
+        RiskTier::Caution => &mut counts.caution,
+        RiskTier::Dangerous => &mut counts.dangerous,
+        RiskTier::Blocked => &mut counts.blocked,
+    }
 }
 
 impl DiscoveryIndex {
@@ -213,7 +229,7 @@ impl DiscoveryIndex {
         let mut records = Vec::with_capacity(plan.candidates.len());
         let mut by_id = HashMap::with_capacity(plan.candidates.len());
         let mut total_bytes = 0;
-        let mut partial = false;
+        let mut partial_count = 0;
         let mut risk_counts = RiskCounts::default();
         for candidate in plan.candidates {
             if candidate.id.is_empty()
@@ -263,6 +279,7 @@ impl DiscoveryIndex {
                 reasons.push(builder.intern(reason)?);
             }
             let record = Record {
+                active: true,
                 parent: builder.intern(parent)?,
                 leaf: builder.intern(leaf)?,
                 name: builder.intern(&candidate.entry.name)?,
@@ -283,7 +300,7 @@ impl DiscoveryIndex {
                 return Err(DiscoveryError("invalid candidate time"));
             }
             total_bytes = add_bytes(total_bytes, record.bytes)?;
-            partial |= record.known == Some(false);
+            partial_count += usize::from(record.known == Some(false));
             match record.risk {
                 RiskTier::Safe => risk_counts.safe += 1,
                 RiskTier::Caution => risk_counts.caution += 1,
@@ -294,6 +311,7 @@ impl DiscoveryIndex {
             records.push(record);
         }
         let selected = vec![false; records.len()];
+        let candidate_count = records.len();
         let mut index = Self {
             generation,
             revision: 0,
@@ -302,8 +320,13 @@ impl DiscoveryIndex {
             by_id,
             selected,
             total_bytes,
-            partial,
+            candidate_count,
+            partial_count,
             risk_counts,
+            selected_count: 0,
+            selected_bytes: 0,
+            selected_partial_count: 0,
+            selected_risk_counts: RiskCounts::default(),
             charged: builder.charged,
         };
         // Initial selection is explicit; selectedByDefault is only display metadata.
@@ -319,25 +342,16 @@ impl DiscoveryIndex {
     }
 
     pub fn summary(&self) -> IndexSummary {
-        let mut count = 0;
-        let mut bytes = 0;
-        let mut partial = false;
-        for (record, selected) in self.records.iter().zip(&self.selected) {
-            if *selected {
-                count += 1;
-                bytes += record.bytes;
-                partial |= record.known == Some(false);
-            }
-        }
         IndexSummary {
             generation: self.generation.clone(),
             revision: self.revision,
-            candidate_count: self.records.len(),
+            candidate_count: self.candidate_count,
             estimated_bytes: self.total_bytes,
-            bytes_partial: self.partial,
-            selected_count: count,
-            selected_bytes: bytes,
-            selected_bytes_partial: partial,
+            bytes_partial: self.partial_count > 0,
+            selected_count: self.selected_count,
+            selected_bytes: self.selected_bytes,
+            selected_bytes_partial: self.selected_partial_count > 0,
+            selected_risk_counts: self.selected_risk_counts.clone(),
             risk_counts: self.risk_counts.clone(),
             retained_bytes: self.charged,
         }
@@ -350,6 +364,9 @@ impl DiscoveryIndex {
                 .by_id
                 .get(id)
                 .ok_or(DiscoveryError("unknown candidate ID"))?;
+            if !self.records[position].active {
+                return Err(DiscoveryError("retired candidate cannot be queued"));
+            }
             if selected && self.records[position].risk == RiskTier::Blocked {
                 return Err(DiscoveryError("blocked candidate cannot be queued"));
             }
@@ -357,10 +374,71 @@ impl DiscoveryIndex {
         }
         let mut changed = false;
         for position in positions {
-            changed |= self.selected[position] != selected;
-            self.selected[position] = selected;
+            if self.selected[position] != selected {
+                changed = true;
+                self.set_selected(position, selected);
+            }
         }
         Ok(changed)
+    }
+
+    fn set_selected(&mut self, position: usize, selected: bool) {
+        let record = &self.records[position];
+        let partial = usize::from(record.known == Some(false));
+        let risk = risk_counter(&mut self.selected_risk_counts, record.risk);
+        if selected {
+            self.selected_count += 1;
+            self.selected_bytes += record.bytes;
+            self.selected_partial_count += partial;
+            *risk += 1;
+        } else {
+            self.selected_count -= 1;
+            self.selected_bytes -= record.bytes;
+            self.selected_partial_count -= partial;
+            *risk -= 1;
+        }
+        self.selected[position] = selected;
+    }
+
+    /// Retire only IDs accounted for by a caller's trusted apply report.
+    /// This mutates review metadata, never the filesystem. Validate the entire
+    /// bounded batch before changing any row or aggregate.
+    pub fn retire(
+        &mut self,
+        generation: &str,
+        revision: u64,
+        ids: &[String],
+    ) -> Result<IndexSummary> {
+        self.check_revision(generation, revision)?;
+        if ids.len() > MAX_PAGE_RECORDS || self.revision >= SAFE_INTEGER {
+            return Err(DiscoveryError(
+                "retirement batch or revision limit exceeded",
+            ));
+        }
+        let mut positions = Vec::with_capacity(ids.len());
+        for id in ids {
+            let position = *self
+                .by_id
+                .get(id)
+                .ok_or(DiscoveryError("unknown candidate ID"))?;
+            if !self.records[position].active || positions.contains(&position) {
+                return Err(DiscoveryError("duplicate or retired candidate ID"));
+            }
+            positions.push(position);
+        }
+        for &position in &positions {
+            if self.selected[position] {
+                self.set_selected(position, false);
+            }
+            let record = &mut self.records[position];
+            record.active = false;
+            self.candidate_count -= 1;
+            self.total_bytes -= record.bytes;
+            self.partial_count -= usize::from(record.known == Some(false));
+            *risk_counter(&mut self.risk_counts, record.risk) -= 1;
+        }
+        self.revision += u64::from(!positions.is_empty());
+        Ok(self.summary())
     }
 
     pub fn select(
@@ -436,6 +514,9 @@ impl DiscoveryIndex {
         for (position, record) in self.records.iter().enumerate() {
             if position % 256 == 0 && cancelled.load(Ordering::Acquire) {
                 return Err(DiscoveryError("discovery query cancelled"));
+            }
+            if !record.active {
+                continue;
             }
             let scope = self.strings.get(record.scope);
             if query.scope.as_ref().is_some_and(|wanted| {

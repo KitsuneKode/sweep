@@ -63,10 +63,12 @@ let init, revision = 0, selected, requestCount = 0;
 function summary() {
   const cs = init.plan.candidates, queued = cs.filter(c => selected.has(c.id));
   const riskCounts = {safe:0,caution:0,dangerous:0,blocked:0};
+  const selectedRiskCounts = {safe:0,caution:0,dangerous:0,blocked:0};
   for(const c of cs) riskCounts[c.riskTier]++;
+  for(const c of queued) selectedRiskCounts[c.riskTier]++;
   return {generation:init.generation, revision, candidateCount:cs.length,
     estimatedBytes:cs.reduce((n,c)=>n+c.estimatedBytes,0), bytesPartial:cs.some(c=>c.bytesKnown===false),
-    selectedCount:queued.length, selectedBytes:queued.reduce((n,c)=>n+c.estimatedBytes,0), selectedBytesPartial:queued.some(c=>c.bytesKnown===false), riskCounts, retainedBytes:1024};
+    selectedCount:queued.length, selectedBytes:queued.reduce((n,c)=>n+c.estimatedBytes,0), selectedBytesPartial:queued.some(c=>c.bytesKnown===false), selectedRiskCounts, riskCounts, retainedBytes:1024};
 }
 async function emit(value) {
   const bytes = Buffer.from(JSON.stringify(value)+"\n");
@@ -88,10 +90,18 @@ for await (const line of createInterface({input:process.stdin})) {
   if(!init) {
     init=m; selected=new Set(m.plan.selectedCandidateIds);
     const s=summary(); if(scenario==="bad-ready") s.selectedCount++;
+    if(scenario==="bad-queued-risks") s.selectedRiskCounts.safe++;
     await emit({type:"index_ready",summary:s}); continue;
   }
   requestCount++;
   if(scenario==="stall") continue;
+  if(m.type==="retire") {
+    init.plan.candidates=init.plan.candidates.filter(c=>!m.candidateIds.includes(c.id));
+    for(const id of m.candidateIds) selected.delete(id);
+    if(m.candidateIds.length) revision++;
+    const s=summary(); if(scenario==="bad-retirement") s.estimatedBytes++;
+    await emit({type:"retired",requestId:m.requestId,summary:s}); continue;
+  }
   if(m.type==="select") {
     let changed=false;
     for(const id of m.candidateIds) { changed ||= selected.has(id)!==m.selected; if(m.selected) selected.add(id); else selected.delete(id); }
@@ -181,6 +191,7 @@ test("selection is atomic, explicit, idempotent and independently accounted", as
   expect(changed.selectedCount).toBe(2);
   expect(changed.selectedBytes).toBe(201);
   expect(changed.selectedBytesPartial).toBe(true);
+  expect(changed.selectedRiskCounts).toEqual({ safe: 2, caution: 0, dangerous: 0, blocked: 0 });
   expect((await session.select([source.candidates[1]!.id], true)).revision).toBe(changed.revision);
   expect((await session.select([source.candidates[1]!.id], false)).selectedBytesPartial).toBe(
     false,
@@ -196,6 +207,81 @@ test("caller mutation after open cannot change a reviewed snapshot", async () =>
   expect((await session.query({ limit: 1 })).candidates[0]!.path).toBe(
     join(root, "project-0", "node_modules"),
   );
+});
+
+test("retirement is independently accounted and removes only explicit active IDs", async () => {
+  const source = plan();
+  const session = await open("good", source);
+  await session.select([source.candidates[1]!.id], true);
+  const before = session.summary;
+  await rejection(session.retire([source.candidates[0]!.id, "missing"]));
+  expect(session.summary).toEqual(before);
+  const summary = await session.retire([source.candidates[1]!.id]);
+  expect(summary.candidateCount).toBe(2);
+  expect(summary.estimatedBytes).toBe(202);
+  expect(summary.bytesPartial).toBe(false);
+  expect(summary.selectedCount).toBe(1);
+  expect(summary.selectedBytesPartial).toBe(false);
+  expect(summary.selectedRiskCounts.safe).toBe(1);
+  expect((await session.snapshot("all")).candidates.map((row) => row.id)).toEqual([
+    source.candidates[0]!.id,
+    source.candidates[2]!.id,
+  ]);
+  await rejection(session.select([source.candidates[1]!.id], true));
+  await rejection(session.retire([source.candidates[1]!.id]));
+});
+
+test("a forged retirement receipt closes the generation", async () => {
+  const session = await open("bad-retirement");
+  expect(await rejection(session.retire([plan().candidates[0]!.id]))).toMatchObject({
+    code: "discovery_protocol",
+  });
+  expect(() => session.summary).toThrow();
+  expect(session.diagnostics.retainedWitnessCount).toBe(0);
+});
+
+test("queued risk totals are validated during initialization", async () => {
+  expect(await rejection(open("bad-queued-risks"))).toMatchObject({ code: "discovery_protocol" });
+});
+
+test("candidate plans are detached and never substitute or mutate the queue", async () => {
+  const source = plan();
+  const session = await open();
+  const row = (await session.query({ offset: 1, limit: 1 })).candidates[0]!;
+  const single = session.planForCandidate(row);
+  expect(single.selectedCandidateIds).toEqual([source.candidates[1]!.id]);
+  expect(single.candidates).toHaveLength(1);
+  expect(session.summary.selectedCount).toBe(1);
+  expect(session.isSelected(row.id)).toBe(false);
+  const unknown = structuredClone(single);
+  unknown.selectedCandidateIds = ["missing"];
+  expect(() => session.assertReviewedPlan(unknown)).toThrow();
+  const duplicate = structuredClone(single);
+  duplicate.candidates.push(duplicate.candidates[0]!);
+  expect(() => session.assertReviewedPlan(duplicate)).toThrow();
+  single.candidates[0]!.reasons.push("changed");
+  expect(() => session.assertReviewedPlan(single)).toThrow();
+  expect(() =>
+    session.planForCandidate({ ...row, path: join(root, "other", "node_modules") }),
+  ).toThrow();
+  await session.retire([row.id]);
+  expect(() => session.planForCandidate(row)).toThrow();
+});
+
+test("caller mutation of a pending selection or retirement batch cannot change its receipt", async () => {
+  const source = plan();
+  const session = await open();
+  const ids = [source.candidates[1]!.id];
+  const selection = session.select(ids, true);
+  ids[0] = source.candidates[2]!.id;
+  await selection;
+  expect(session.isSelected(source.candidates[1]!.id)).toBe(true);
+  const retirementIds = [source.candidates[0]!.id];
+  const retired = session.retire(retirementIds);
+  retirementIds[0] = source.candidates[1]!.id;
+  await retired;
+  expect(session.summary.selectedCount).toBe(1);
+  expect(session.isSelected(source.candidates[1]!.id)).toBe(true);
 });
 
 test("an exported plan owns its nested objects and cannot rewrite later exports", async () => {

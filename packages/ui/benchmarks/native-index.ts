@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { DiscoveryIndexSession } from "@kitsunekode/sweep-core/discovery-index";
 import { compileFilter } from "../src/filter-query.js";
+import { PagedReviewSession } from "../src/paged-review.js";
 
 const args = process.argv.slice(2);
 const binaryFlag = args.indexOf("--binary");
@@ -117,6 +118,7 @@ for (const { count, compactPaths } of [
     }
     throw error;
   }
+  const review = new PagedReviewSession(channel);
   try {
     const initBytes = Buffer.byteLength(JSON.stringify(plan)) + 128;
     const initMs = performance.now() - started;
@@ -137,7 +139,7 @@ for (const { count, compactPaths } of [
       const expected = matching.slice(offset, offset + 128);
       jsMs.push(performance.now() - jsStart);
       const queryStart = performance.now();
-      const page = await channel.query({ filter, offset, limit: 128, now });
+      const page = (await review.load({ filter, offset, limit: 128, now })).page!;
       nativeMs.push(performance.now() - queryStart);
       assert.equal(page.generation, ready.generation);
       assert.equal(page.revision, 0);
@@ -177,7 +179,7 @@ for (const { count, compactPaths } of [
       jsFilterAndSlice: latency(jsMs),
     });
   } finally {
-    await channel.close();
+    await review.close();
     assert.equal(channel.diagnostics.retainedWitnessCount, 0);
   }
 }
@@ -187,23 +189,46 @@ for (let generation = 0; generation < 3; generation++) {
   const plan = snapshot(50000);
   const baselineFds = process.platform === "linux" ? (await readdir("/proc/self/fd")).length : null;
   const channel = await DiscoveryIndexSession.open(plan, { command: [binary] });
+  const review = new PagedReviewSession(channel);
   const pid = channel.diagnostics.pid;
   const farId = plan.candidates[40002]!.id;
   try {
-    await channel.select([farId], true);
+    await review.select([farId], true);
     for (const offset of [0, 128, 40000]) {
-      const page = await channel.query({ offset, limit: 128, now });
+      const page = (await review.load({ offset, limit: 128, now })).page!;
       assert.equal(page.summary.selectedCount, 51);
       assert.equal(channel.isSelected(farId), true);
     }
-    const exported = await channel.snapshot();
+    const exported = await review.prepareQueue();
     assert.deepEqual(
       new Set(exported.selectedCandidateIds),
       new Set([...plan.selectedCandidateIds, farId]),
     );
     assert.equal(exported.candidates.length, 51);
+    const removed = new Set(exported.selectedCandidateIds.slice(0, 2));
+    await review.reconcile(exported, {
+      protocolVersion: "1",
+      targetDir: exported.targetDir,
+      selectedCandidateIds: [...exported.selectedCandidateIds],
+      deletedCount: 2,
+      failedCount: 0,
+      failedPaths: [],
+      totalBytesFreed: exported.candidates
+        .filter((candidate) => removed.has(candidate.id))
+        .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
+      outcomes: exported.selectedCandidateIds.map((candidateId) => ({
+        candidateId,
+        status: removed.has(candidateId) ? "deleted" : "unattempted",
+      })),
+    });
+    assert.equal(review.view.summary.candidateCount, 49998);
+    assert.equal(review.view.summary.selectedCount, 49);
+    assert.equal(review.lastReceipt?.deletedCount, 2);
+    const remaining = await review.prepareQueue();
+    assert.deepEqual(remaining.selectedCandidateIds, exported.selectedCandidateIds.slice(2));
+    assert.equal((await review.load({ limit: 128, now })).page!.candidates.length, 128);
   } finally {
-    await channel.close();
+    await review.close();
   }
   const afterFds = process.platform === "linux" ? (await readdir("/proc/self/fd")).length : null;
   assert.equal(channel.diagnostics.retainedWitnessCount, 0);
@@ -224,6 +249,8 @@ for (let generation = 0; generation < 3; generation++) {
     generation,
     records: 50000,
     exportedSelectedCount: 51,
+    retiredRows: 2,
+    remainingSelectedCount: 49,
     baselineFds,
     afterFds,
     reaped: true,
@@ -234,6 +261,7 @@ const report = JSON.stringify(
   {
     date: new Date().toISOString(),
     runtime: Bun.version,
+    reviewOwner: "PagedReviewSession",
     platform: process.platform,
     arch: process.arch,
     binary,
@@ -245,7 +273,7 @@ const report = JSON.stringify(
       execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim().length > 0,
     rustc: execFileSync("rustc", ["--version"], { encoding: "utf8" }).trim(),
     method:
-      "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include the production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
+      "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include the bounded UI page owner, production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, synthetic outcome retirement, remaining-queue export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
     results,
     replacements,
   },

@@ -252,3 +252,80 @@ fn escaped_metadata_obeys_the_actual_serialized_page_budget() {
     let json = serde_json::to_vec(&page).unwrap_or_else(|e| panic!("serialize: {e}"));
     assert!(json.len() < sweep_engine::discovery::MAX_PAGE_BYTES);
 }
+
+#[test]
+fn retirement_updates_global_totals_and_cannot_be_requeued() {
+    let mut plan = snapshot(7);
+    plan.selected_candidate_ids = vec!["candidate-1".to_owned(), "candidate-2".to_owned()];
+    let mut index = DiscoveryIndex::new(plan, "generation-one".to_owned(), 64 * 1024 * 1024)
+        .unwrap_or_else(|e| panic!("index: {e}"));
+    let before = index.summary();
+    assert_eq!(before.selected_risk_counts.safe, 2);
+    let summary = index
+        .retire("generation-one", 0, &["candidate-2".to_owned()])
+        .unwrap_or_else(|e| panic!("retire: {e}"));
+    assert_eq!(summary.candidate_count, 6);
+    assert_eq!(summary.estimated_bytes, before.estimated_bytes - 256);
+    assert!(!summary.bytes_partial);
+    assert!(!summary.selected_bytes_partial);
+    assert_eq!(summary.selected_count, 1);
+    assert_eq!(summary.selected_bytes, 128);
+    assert_eq!(summary.selected_risk_counts.safe, 1);
+    assert_eq!(summary.risk_counts.safe, 5);
+    assert_eq!(
+        summary.retained_bytes, before.retained_bytes,
+        "retention stays conservative"
+    );
+    assert!(index.query(&query(), &AtomicBool::new(false)).is_err());
+    let mut request = query();
+    request.revision = 1;
+    request.limit = 7;
+    let page = index
+        .query(&request, &AtomicBool::new(false))
+        .unwrap_or_else(|e| panic!("page: {e}"));
+    assert_eq!(page.matching_count, 6);
+    assert!(page
+        .candidates
+        .iter()
+        .all(|candidate| candidate.id != "candidate-2"));
+    assert!(index
+        .select("generation-one", 1, &["candidate-2".to_owned()], true)
+        .is_err());
+    assert!(index
+        .retire("generation-one", 1, &["candidate-2".to_owned()])
+        .is_err());
+    assert_eq!(index.summary().revision, 1);
+}
+
+#[test]
+fn retirement_validates_whole_batch_and_unknown_or_duplicate_ids_leave_totals_intact() {
+    let mut index = DiscoveryIndex::new(snapshot(7), "generation-one".to_owned(), 64 * 1024 * 1024)
+        .unwrap_or_else(|e| panic!("index: {e}"));
+    for ids in [
+        vec!["candidate-0".to_owned(), "missing".to_owned()],
+        vec!["candidate-0".to_owned(); 2],
+        vec!["candidate-0".to_owned(); MAX_PAGE_RECORDS + 1],
+    ] {
+        assert!(index.retire("generation-one", 0, &ids).is_err());
+        assert_eq!(index.summary().candidate_count, 7);
+        assert_eq!(index.summary().revision, 0);
+    }
+    assert!(index.retire("other-generation", 0, &[]).is_err());
+    assert_eq!(
+        index
+            .retire("generation-one", 0, &[])
+            .unwrap_or_else(|e| panic!("retire: {e}"))
+            .revision,
+        0
+    );
+    for i in 0..7 {
+        index
+            .retire("generation-one", i, &[format!("candidate-{i}")])
+            .unwrap_or_else(|e| panic!("retire: {e}"));
+    }
+    let summary = index.summary();
+    assert_eq!(summary.candidate_count, 0);
+    assert_eq!(summary.estimated_bytes, 0);
+    assert!(!summary.bytes_partial);
+    assert_eq!(summary.risk_counts.safe + summary.risk_counts.blocked, 0);
+}

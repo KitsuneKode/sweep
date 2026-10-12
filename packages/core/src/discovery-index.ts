@@ -39,6 +39,7 @@ export interface DiscoverySummary {
   readonly selectedCount: number;
   readonly selectedBytes: number;
   readonly selectedBytesPartial: boolean;
+  readonly selectedRiskCounts: Readonly<RiskCounts>;
   readonly riskCounts: Readonly<RiskCounts>;
   readonly retainedBytes: number;
 }
@@ -68,7 +69,7 @@ interface Witness {
   digest: string;
   bytes: number;
   partial: boolean;
-  blocked: boolean;
+  risk: RiskTier;
   selected: boolean;
 }
 
@@ -122,6 +123,7 @@ export class DiscoveryIndexSession {
   private frameBytes = 0;
   private maxReplyBytes = 0;
   private selectedPartialCount = 0;
+  private partialCount = 0;
   private stderr = "";
   private failure: Error | undefined;
   private nextId = 0;
@@ -144,8 +146,10 @@ export class DiscoveryIndexSession {
     private readonly hostRetainedChargeBytes: number,
     private readonly signal?: AbortSignal,
   ) {
-    for (const witness of witnesses.values())
+    for (const witness of witnesses.values()) {
+      if (witness.partial) this.partialCount++;
       if (witness.selected && witness.partial) this.selectedPartialCount++;
+    }
     this.abort = () =>
       this.fail(new DiscoveryIndexError("discovery_closed", "Discovery generation cancelled"));
     this.onError = (error) =>
@@ -193,7 +197,7 @@ export class DiscoveryIndexSession {
             ? ["type", "summary"]
             : envelope.type === "page"
               ? ["type", "requestId", "page"]
-              : envelope.type === "selection"
+              : envelope.type === "selection" || envelope.type === "retired"
                 ? ["type", "requestId", "summary"]
                 : envelope.type === "index_error"
                   ? ["type", "requestId", "code", "message"]
@@ -269,6 +273,7 @@ export class DiscoveryIndexSession {
       selectedCount: 0,
       selectedBytes: 0,
       selectedBytesPartial: false,
+      selectedRiskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
       riskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
     };
     let charged = 0;
@@ -292,7 +297,7 @@ export class DiscoveryIndexSession {
         digest: digest(c),
         bytes: c.estimatedBytes,
         partial: c.bytesKnown === false,
-        blocked: c.riskTier === "blocked",
+        risk: c.riskTier,
         selected: queued,
       });
       totals.estimatedBytes = checkedBytes(totals.estimatedBytes, c.estimatedBytes);
@@ -300,6 +305,7 @@ export class DiscoveryIndexSession {
       totals.riskCounts[c.riskTier]++;
       if (queued) {
         totals.selectedCount++;
+        totals.selectedRiskCounts[c.riskTier]++;
         totals.selectedBytes = checkedBytes(totals.selectedBytes, c.estimatedBytes);
         totals.selectedBytesPartial ||= c.bytesKnown === false;
       }
@@ -442,10 +448,12 @@ export class DiscoveryIndexSession {
       "selectedCount",
       "selectedBytes",
       "selectedBytesPartial",
+      "selectedRiskCounts",
       "riskCounts",
       "retainedBytes",
     ]);
     const risks = object(s.riskCounts, ["safe", "caution", "dangerous", "blocked"]);
+    const queuedRisks = object(s.selectedRiskCounts, ["safe", "caution", "dangerous", "blocked"]);
     if (
       s.generation !== this.generation ||
       s.revision !== revision ||
@@ -458,6 +466,9 @@ export class DiscoveryIndexSession {
       s.selectedBytesPartial !== expected.selectedBytesPartial ||
       Object.keys(expected.riskCounts).some(
         (key) => risks[key] !== expected.riskCounts[key as RiskTier],
+      ) ||
+      Object.keys(expected.selectedRiskCounts).some(
+        (key) => queuedRisks[key] !== expected.selectedRiskCounts[key as RiskTier],
       )
     )
       throw new DiscoveryIndexError(
@@ -467,6 +478,7 @@ export class DiscoveryIndexSession {
     return Object.freeze({
       ...s,
       riskCounts: Object.freeze({ ...risks }),
+      selectedRiskCounts: Object.freeze({ ...queuedRisks }),
     }) as unknown as DiscoverySummary;
   }
 
@@ -581,31 +593,33 @@ export class DiscoveryIndexSession {
   }
 
   async select(ids: readonly string[], selected: boolean): Promise<DiscoverySummary> {
+    const candidateIds = [...ids];
     const before = this.summary;
-    const unique = new Set(ids);
+    const unique = new Set(candidateIds);
     if (
-      ids.length > MAX_PAGE ||
-      unique.size !== ids.length ||
+      candidateIds.length > MAX_PAGE ||
+      unique.size !== candidateIds.length ||
       typeof selected !== "boolean" ||
-      ids.some(
+      candidateIds.some(
         (id) =>
           typeof id !== "string" ||
           !this.witnesses.has(id) ||
-          (selected && this.witnesses.get(id)!.blocked),
+          (selected && this.witnesses.get(id)!.risk === "blocked"),
       )
     )
       throw new DiscoveryIndexError(
         "discovery_refused",
         "Selection requires at most 256 distinct, eligible reviewed IDs",
       );
-    const expected = { ...before };
+    const expected = { ...before, selectedRiskCounts: { ...before.selectedRiskCounts } };
     let partialCount = this.selectedPartialCount;
     let changed = false;
-    for (const id of ids) {
+    for (const id of candidateIds) {
       const witness = this.witnesses.get(id)!;
       if (witness.selected === selected) continue;
       changed = true;
       expected.selectedCount += selected ? 1 : -1;
+      expected.selectedRiskCounts[witness.risk] += selected ? 1 : -1;
       expected.selectedBytes += (selected ? 1 : -1) * witness.bytes;
       if (witness.partial) partialCount += selected ? 1 : -1;
     }
@@ -614,7 +628,7 @@ export class DiscoveryIndexSession {
     const reply = await this.request("select", {
       generation: before.generation,
       revision: before.revision,
-      candidateIds: ids,
+      candidateIds: candidateIds,
       selected,
     });
     try {
@@ -625,12 +639,113 @@ export class DiscoveryIndexSession {
         );
       this.latest = this.checkSummary(reply.summary, revision, expected);
       this.selectedPartialCount = partialCount;
-      for (const id of ids) this.witnesses.get(id)!.selected = selected;
+      for (const id of candidateIds) this.witnesses.get(id)!.selected = selected;
       return this.latest;
     } catch (error) {
       this.fail(error as Error);
       throw error;
     }
+  }
+
+  /** Review metadata only. Callers retire IDs from an authoritative outcome
+   * partition, never from a progress event, missing path or evicted page. */
+  async retire(ids: readonly string[]): Promise<DiscoverySummary> {
+    const candidateIds = [...ids];
+    const before = this.summary;
+    if (
+      candidateIds.length > MAX_PAGE ||
+      new Set(candidateIds).size !== candidateIds.length ||
+      candidateIds.some((id) => typeof id !== "string" || !this.witnesses.has(id))
+    )
+      throw new DiscoveryIndexError(
+        "discovery_refused",
+        "Retirement requires at most 256 distinct active IDs",
+      );
+    const expected = {
+      ...before,
+      riskCounts: { ...before.riskCounts },
+      selectedRiskCounts: { ...before.selectedRiskCounts },
+    };
+    let partialCount = this.partialCount;
+    let selectedPartialCount = this.selectedPartialCount;
+    for (const id of candidateIds) {
+      const witness = this.witnesses.get(id)!;
+      expected.candidateCount--;
+      expected.estimatedBytes -= witness.bytes;
+      expected.riskCounts[witness.risk]--;
+      if (witness.partial) partialCount--;
+      if (witness.selected) {
+        expected.selectedCount--;
+        expected.selectedBytes -= witness.bytes;
+        expected.selectedRiskCounts[witness.risk]--;
+        if (witness.partial) selectedPartialCount--;
+      }
+    }
+    expected.bytesPartial = partialCount > 0;
+    expected.selectedBytesPartial = selectedPartialCount > 0;
+    const reply = await this.request("retire", {
+      generation: before.generation,
+      revision: before.revision,
+      candidateIds: candidateIds,
+    });
+    try {
+      if (reply.type !== "retired")
+        throw new DiscoveryIndexError(
+          "discovery_protocol",
+          "Expected a discovery retirement receipt",
+        );
+      this.latest = this.checkSummary(
+        reply.summary,
+        before.revision + Number(candidateIds.length > 0),
+        expected,
+      );
+      this.partialCount = partialCount;
+      this.selectedPartialCount = selectedPartialCount;
+      for (const id of candidateIds) this.witnesses.delete(id);
+      return this.latest;
+    } catch (error) {
+      this.fail(error as Error);
+      throw error;
+    }
+  }
+
+  /** Construct an explicit single-row plan without changing the global queue. */
+  planForCandidate(candidate: ScanCandidate): ScanPlan {
+    this.summary; // Closed generations cannot authorize a fresh review plan.
+    const witness = this.witnesses.get(candidate.id);
+    if (!witness || witness.risk === "blocked" || digest(candidate) !== witness.digest)
+      throw new DiscoveryIndexError(
+        "discovery_refused",
+        "Candidate is no longer part of this review generation",
+      );
+    return this.constructPlan([candidate], [candidate.id]);
+  }
+
+  /** Bind a host-validated explicit apply plan to this active review generation. */
+  assertReviewedPlan(plan: ScanPlan): void {
+    this.summary;
+    validatePlan(plan);
+    const candidateIds = new Set(plan.candidates.map((candidate) => candidate.id));
+    const selectedIds = new Set(plan.selectedCandidateIds);
+    const targetIdentity = (identity: ScanPlan["targetIdentity"]) =>
+      identity ? JSON.stringify([identity.platform, identity.device, identity.inode]) : null;
+    if (
+      plan.targetDir !== this.header.targetDir ||
+      targetIdentity(plan.targetIdentity) !== targetIdentity(this.header.targetIdentity) ||
+      candidateIds.size !== plan.candidates.length ||
+      selectedIds.size !== plan.selectedCandidateIds.length ||
+      plan.selectedCandidateIds.some((id) => !candidateIds.has(id) || !this.witnesses.has(id)) ||
+      plan.candidates.some((candidate) => {
+        const witness = this.witnesses.get(candidate.id);
+        return !witness || digest(candidate) !== witness.digest;
+      })
+    )
+      throw new DiscoveryIndexError(
+        "discovery_refused",
+        "Apply plan does not belong to this active review generation",
+      );
+    if (plan.selectedCandidateIds.some((id) => this.witnesses.get(id)?.risk === "blocked"))
+      throw new DiscoveryIndexError("discovery_refused", "Blocked candidate cannot be applied");
   }
 
   /** Export an explicit plan, reconstructing only the requested candidate set. */
@@ -679,13 +794,20 @@ export class DiscoveryIndexSession {
       );
       throw this.failure;
     }
+    const selectedCandidateIds = candidates.filter((c) => this.isSelected(c.id)).map((c) => c.id);
+    return this.constructPlan(candidates, selectedCandidateIds);
+  }
+
+  private constructPlan(
+    candidates: readonly ScanCandidate[],
+    selectedCandidateIds: string[],
+  ): ScanPlan {
     const riskCounts = { safe: 0, caution: 0, dangerous: 0, blocked: 0 };
     let total = 0;
     for (const c of candidates) {
       riskCounts[c.riskTier]++;
       total = checkedBytes(total, c.estimatedBytes);
     }
-    const selectedCandidateIds = candidates.filter((c) => this.isSelected(c.id)).map((c) => c.id);
     const plan = {
       ...this.header,
       candidates,

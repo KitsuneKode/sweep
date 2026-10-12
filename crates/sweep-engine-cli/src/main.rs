@@ -152,6 +152,14 @@ enum IndexRequest {
         candidate_ids: Vec<String>,
         selected: bool,
     },
+    Retire {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        generation: String,
+        revision: u64,
+        #[serde(rename = "candidateIds")]
+        candidate_ids: Vec<String>,
+    },
     Close {
         #[serde(rename = "requestId")]
         request_id: u32,
@@ -205,6 +213,7 @@ fn run_index() -> Result<(), CliFailure> {
             },
             IndexRequest::Query { request_id, query } => (request_id, index.query(&query, &AtomicBool::new(false)).map(|page| serde_json::json!({"type":"page","requestId":request_id,"page":page}))),
             IndexRequest::Select { request_id, generation, revision, candidate_ids, selected } => (request_id, index.select(&generation, revision, &candidate_ids, selected).map(|summary| serde_json::json!({"type":"selection","requestId":request_id,"summary":summary}))),
+            IndexRequest::Retire { request_id, generation, revision, candidate_ids } => (request_id, index.retire(&generation, revision, &candidate_ids).map(|summary| serde_json::json!({"type":"retired","requestId":request_id,"summary":summary}))),
         };
         let value = result.unwrap_or_else(|error| serde_json::json!({"type":"index_error","requestId":request_id,"code":"discovery_refused","message":error.to_string()}));
         write_json_line(&value).map_err(CliFailure::failure)?;
