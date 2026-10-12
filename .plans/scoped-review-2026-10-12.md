@@ -54,3 +54,11 @@ The production TUI still uses its full candidate store. Bounded hierarchy/group
 pages, stable cursor lookup, filtered/range bulk actions and progressive handover
 remain before default activation. The scope API deliberately ignores the current
 text filter; visible-only actions must keep using their explicit reviewed IDs.
+The existing sidebar toggle also preserves deliberately queued dangerous rows
+when toggled off. It must keep that behavior during handover; an explicit scope
+clear is a different action and clears every queued risk tier.
+
+Production UI review reproduced a separate notice bug: toggling a partially
+queued scope reported every eligible row as newly queued. The follow-up counts
+only additions, preserves the queue and dangerous-row policy, and checks both
+queueing and toggling off in a regression. State/row suite: 95 passing tests.

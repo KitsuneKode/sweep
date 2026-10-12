@@ -959,6 +959,30 @@ describe("sweep ui state", () => {
   });
 
   describe("toggleScopeSelection", () => {
+    test("partially queued scopes report only newly queued items", () => {
+      const plan = createPlan();
+      plan.candidates.push({
+        ...plan.candidates[0]!,
+        id: "cand_extra",
+        path: "/tmp/sweep-ui/.next",
+        name: ".next",
+        kind: ".next",
+        riskTier: "caution",
+        selectedByDefault: false,
+      });
+      const base = clearSelection(createUiState(plan));
+      const state = { ...base, selectedIds: new Set(["cand_safe", "cand_dangerous"]) };
+      const result = toggleScopeSelection(state, "");
+      expect(result.queued).toBe(1);
+      expect(result.unqueued).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect([...result.state.selectedIds]).toEqual(["cand_safe", "cand_dangerous", "cand_extra"]);
+      const off = toggleScopeSelection(result.state, "");
+      expect(off.queued).toBe(0);
+      expect(off.unqueued).toBe(2);
+      expect([...off.state.selectedIds]).toEqual(["cand_dangerous"]);
+    });
+
     test("null scope queues safe and caution, never dangerous or blocked", () => {
       const state = clearSelection(createUiState(createPlan()));
       const result = toggleScopeSelection(state, null);

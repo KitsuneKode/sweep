@@ -978,14 +978,18 @@ export function toggleScopeSelection(
   const selectedIds = new Set(state.selectedIds);
   const allSelected = eligible.every((candidate) => selectedIds.has(candidate.id));
   const selectionTouched = new Set(state.selectionTouched);
+  let newlyQueued = 0;
   for (const candidate of eligible) {
     selectionTouched.add(candidate.id);
     if (allSelected) selectedIds.delete(candidate.id);
-    else selectedIds.add(candidate.id);
+    else {
+      if (!selectedIds.has(candidate.id)) newlyQueued++;
+      selectedIds.add(candidate.id);
+    }
   }
   return {
     state: { ...state, selectedIds, selectionTouched },
-    queued: allSelected ? 0 : eligible.length,
+    queued: newlyQueued,
     unqueued: allSelected ? eligible.length : 0,
     skipped,
   };
