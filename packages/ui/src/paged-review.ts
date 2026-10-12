@@ -67,7 +67,12 @@ export class PagedReviewSession {
       throw new DiscoveryIndexError("discovery_busy", "A review request is already running");
     this.busy = true;
     try {
-      return await operation();
+      const result = await operation();
+      // A terminal close or native failure may land after the last reply but
+      // before the operation's caller resumes. Never deliver a fresh plan then.
+      this.assertOpen();
+      this.index.summary;
+      return result;
     } catch (error) {
       // A native protocol/transport failure poisons the generation. Release its
       // page too; ordinary local refusals keep the last verified review usable.

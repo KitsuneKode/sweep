@@ -1,12 +1,12 @@
 {
-  "date": "2026-10-12T09:57:31.473Z",
+  "date": "2026-10-12T10:53:22.794Z",
   "runtime": "1.4.2",
   "reviewOwner": "PagedReviewSession",
   "platform": "linux",
   "arch": "x64",
   "binary": "/home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine",
-  "binarySha256": "b67a06619f188a39ab67bc2cfac4c40f356df345580a5080bf7321993575b999",
-  "sourceBase": "2b025d173b02559a0d405a2a91874417c94a67b4",
+  "binarySha256": "daa6f3b13f254cd6831daec6806748956782d1fd4051596dd23b4731503128ce",
+  "sourceBase": "c4fb93f28ab3dbe6732cff913d774b48c8c6f203",
   "sourceDirty": true,
   "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
   "method": "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include the bounded UI page owner, production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, synthetic outcome retirement, remaining-queue export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
@@ -16,22 +16,22 @@
       "compactPaths": false,
       "status": "qualified",
       "initBytes": 1609805,
-      "initMs": 91.4462,
+      "initMs": 90.980546,
       "retainedChargeBytes": 2041064,
-      "nativePeakRssBytes": 8093696,
+      "nativePeakRssBytes": 8028160,
       "hostRetainedChargeBytes": 1575560,
       "maxReplyBytes": 42953,
       "nativeRoundTrip": {
         "samples": 200,
-        "p50Ms": 1.2195020000000056,
-        "p95Ms": 2.139188000000047,
-        "p99Ms": 2.666052000000036
+        "p50Ms": 1.0284399999999891,
+        "p95Ms": 1.8962950000000092,
+        "p99Ms": 2.2420379999999795
       },
       "jsFilterAndSlice": {
         "samples": 200,
-        "p50Ms": 0.15933999999998605,
-        "p95Ms": 1.2850010000000225,
-        "p99Ms": 1.4021099999999933
+        "p50Ms": 0.13599800000000073,
+        "p95Ms": 1.1663450000000353,
+        "p99Ms": 1.544717999999989
       }
     },
     {
@@ -39,22 +39,22 @@
       "compactPaths": false,
       "status": "qualified",
       "initBytes": 16242298,
-      "initMs": 376.079647,
+      "initMs": 346.838097,
       "retainedChargeBytes": 20955612,
-      "nativePeakRssBytes": 59551744,
+      "nativePeakRssBytes": 58679296,
       "hostRetainedChargeBytes": 15955560,
       "maxReplyBytes": 42963,
       "nativeRoundTrip": {
         "samples": 200,
-        "p50Ms": 3.1472530000000916,
-        "p95Ms": 11.423114999999598,
-        "p99Ms": 48.850920000000315
+        "p50Ms": 2.8491750000000593,
+        "p95Ms": 9.880347000000029,
+        "p99Ms": 11.032375000000002
       },
       "jsFilterAndSlice": {
         "samples": 200,
-        "p50Ms": 1.7203640000000178,
-        "p95Ms": 17.058596000000307,
-        "p99Ms": 30.950103000000126
+        "p50Ms": 1.4606230000001688,
+        "p95Ms": 13.905385000000024,
+        "p99Ms": 15.538297000000057
       }
     },
     {
@@ -68,22 +68,22 @@
       "compactPaths": true,
       "status": "qualified",
       "initBytes": 27742963,
-      "initMs": 2160.014624,
+      "initMs": 656.140903,
       "retainedChargeBytes": 29374726,
-      "nativePeakRssBytes": 88776704,
+      "nativePeakRssBytes": 86220800,
       "hostRetainedChargeBytes": 27008048,
       "maxReplyBytes": 36950,
       "nativeRoundTrip": {
         "samples": 200,
-        "p50Ms": 4.524805000000015,
-        "p95Ms": 20.88350300000002,
-        "p99Ms": 23.913002999999662
+        "p50Ms": 4.390541000000667,
+        "p95Ms": 21.778803000000153,
+        "p99Ms": 23.55284500000016
       },
       "jsFilterAndSlice": {
         "samples": 200,
-        "p50Ms": 2.9964429999999993,
-        "p95Ms": 25.97047300000031,
-        "p99Ms": 28.031741999999213
+        "p50Ms": 3.118127000000186,
+        "p95Ms": 24.646788000000015,
+        "p99Ms": 27.917492999999922
       }
     }
   ],

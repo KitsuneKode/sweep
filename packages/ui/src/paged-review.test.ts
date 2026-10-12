@@ -314,3 +314,62 @@ test.skipIf(!available)(
     expect((await owner.prepareQueue()).selectedCandidateIds).toEqual([ids[2]!]);
   },
 );
+
+test.skipIf(!available)(
+  "nested scopes use one separator namespace and never include prefix siblings",
+  async () => {
+    const source = snapshot(4);
+    source.candidates[0]!.path = join(source.targetDir, "a", "b", "node_modules");
+    source.candidates[1]!.path = join(source.targetDir, "a", "c", "node_modules");
+    source.candidates[2]!.path = join(source.targetDir, "ab", "node_modules");
+    const { owner } = await open(source);
+    await owner.load({ scope: "a" });
+    expect(owner.view.page?.candidates.map((row) => row.id)).toEqual(
+      source.selectedCandidateIds.slice(0, 2),
+    );
+    expect(owner.view.summary.selectedCount).toBe(3);
+    await owner.load({ scope: "a/b" });
+    expect(owner.view.page?.candidates.map((row) => row.id)).toEqual([source.candidates[0]!.id]);
+    expect(owner.view.queuedCandidateIds).toEqual([source.candidates[0]!.id]);
+    if (process.platform === "win32") {
+      await owner.load({ scope: "a\\b" });
+      expect(owner.view.page?.candidates[0]!.id).toBe(source.candidates[0]!.id);
+    }
+    await owner.load({ scope: "ab" });
+    expect(owner.view.page?.candidates.map((row) => row.id)).toEqual([source.candidates[2]!.id]);
+  },
+);
+
+test.skipIf(!available || process.platform === "win32")(
+  "POSIX backslash names do not become nested scope keys",
+  async () => {
+    const source = snapshot(4);
+    source.candidates[0]!.path = join(source.targetDir, "a\\b", "node_modules");
+    source.candidates[1]!.path = join(source.targetDir, "a", "b", "node_modules");
+    const { owner } = await open(source);
+    await owner.load({ scope: "a\\b" });
+    expect(owner.view.page?.candidates.map((row) => row.id)).toEqual([source.candidates[0]!.id]);
+    await owner.load({ scope: "a/b" });
+    expect(owner.view.page?.candidates.map((row) => row.id)).toEqual([source.candidates[1]!.id]);
+  },
+);
+
+test.skipIf(!available)(
+  "closing after export but before delivery cannot return a fresh apply plan",
+  async () => {
+    const { owner, index } = await open();
+    const snapshot = index.snapshot.bind(index);
+    const delayed = spyOn(index, "snapshot").mockImplementation(async (mode) => {
+      const plan = await snapshot(mode);
+      await owner.close();
+      return plan;
+    });
+    try {
+      expect(await reject(owner.prepareQueue())).toMatchObject({ code: "discovery_closed" });
+      expect(index.diagnostics.retainedWitnessCount).toBe(0);
+      expect(owner.lastReceipt).toBeNull();
+    } finally {
+      delayed.mockRestore();
+    }
+  },
+);

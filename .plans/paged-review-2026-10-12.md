@@ -48,7 +48,7 @@ No existing user corpus is scanned or deleted by qualification fixtures.
   parent without adding a second deletion to the receipt. A poisoned
   native session also releases the page. Filesystem apply still belongs to the
   existing guarded engine and external operation owner.
-- Focused adapter/owner suite: 37 passing tests. Rust discovery suite: 8 passing
+- Focused adapter/owner suite: 40 passing tests. Rust discovery suite: 8 passing
   tests. `bun run rust:check` and `bun run check` passed before the final document
   update; rerun check and the clean-source verification ladder before push.
 
@@ -59,10 +59,10 @@ and reaped children. No source fixture paths were created or removed.
 
 | Synthetic metadata     | Native logical storage                             | Native peak RSS | Page round-trip p99 |
 | ---------------------- | -------------------------------------------------- | --------------- | ------------------- |
-| 5,000 ordinary paths   | 1.9 MiB                                            | 7.7 MiB         | 2.7 ms              |
-| 50,000 ordinary paths  | 20.0 MiB                                           | 56.8 MiB        | 48.9 ms             |
+| 5,000 ordinary paths   | 1.9 MiB                                            | 7.7 MiB         | 2.2 ms              |
+| 50,000 ordinary paths  | 20.0 MiB                                           | 56.0 MiB        | 11.0 ms             |
 | 100,000 ordinary paths | Refused by saved-plan retained budget before spawn | —               | —                   |
-| 100,000 compact paths  | 28.0 MiB                                           | 84.7 MiB        | 23.9 ms             |
+| 100,000 compact paths  | 28.0 MiB                                           | 82.2 MiB        | 23.6 ms             |
 
 These timings include transport, validation and the page owner. Native peak RSS
 includes snapshot parsing/build. The benchmark holds a full reference plan in
@@ -78,3 +78,20 @@ the production UI; this checkpoint does not enable native paging by default.
 - Native render/long-session evidence before default activation, preserving current
   locale-aware name ordering or documenting an explicit replacement.
 - Mount/path races and real allocated large-tree testing remain separate gates.
+
+## Platform scope follow-up
+
+The initial checkpoint c4fb93f passed all nine local gates and all eight hosted
+jobs. A subsequent platform review found that nested scope matching assumed
+forward slashes while Windows records could retain native backslashes. The index
+now normalizes Windows scope keys and requests to forward slashes, preserves
+literal POSIX backslashes, and excludes prefix siblings such as a versus ab.
+Native library tests cover platform-specific expectations; page-owner tests use
+actual platform-native path spellings through the subprocess. The raw benchmark
+was refreshed for the follow-up binary. Hosted Windows execution remains a gate
+for that follow-up; Linux success alone does not qualify its Windows branch.
+
+The same follow-up closes a delivery race: if the generation closes after a
+snapshot has validated but before its caller resumes, the page owner rejects
+that completion instead of returning a fresh apply plan. The regression uses
+a real export and deterministic close at this seam, not a timing-dependent sleep.

@@ -1,6 +1,7 @@
 //! Read-only compact review snapshots. This index cannot remove files or
 //! authorize an apply; callers still construct and validate an explicit plan.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use sweep_types::{
@@ -182,6 +183,18 @@ pub struct DiscoveryIndex {
 fn separator(c: char) -> bool {
     c == '/' || cfg!(windows) && c == '\\'
 }
+// UI scope keys use '/'. Backslashes remain literal directory-name characters
+// on POSIX, but both native Windows separators map to this scope namespace.
+fn normalize_scope(value: &str) -> Cow<'_, str> {
+    #[cfg(windows)]
+    {
+        Cow::Owned(value.replace('\\', "/"))
+    }
+    #[cfg(not(windows))]
+    {
+        Cow::Borrowed(value)
+    }
+}
 fn add_bytes(total: u64, bytes: u64) -> Result<u64> {
     total
         .checked_add(bytes)
@@ -262,6 +275,7 @@ impl DiscoveryIndex {
             let scope = relative
                 .rsplit_once(separator)
                 .map_or("", |(s, _)| s.trim_start_matches(separator));
+            let scope = normalize_scope(scope);
             builder.charge(
                 candidate.id.len() + candidate.reasons.len() * std::mem::size_of::<Span>(),
             )?;
@@ -285,7 +299,7 @@ impl DiscoveryIndex {
                 name: builder.intern(&candidate.entry.name)?,
                 id: builder.append(&candidate.id)?,
                 kind: builder.intern(&candidate.kind)?,
-                scope: builder.intern(scope)?,
+                scope: builder.intern(&scope)?,
                 identity,
                 reasons,
                 bytes: candidate.entry.estimated_bytes,
@@ -508,6 +522,7 @@ impl DiscoveryIndex {
             .filter(|term| !term.is_empty())
             .map(str::to_owned)
             .collect();
+        let wanted_scope = query.scope.as_deref().map(normalize_scope);
         let mut matches = Vec::new();
         let mut matching_bytes = 0;
         let mut matching_partial = false;
@@ -519,7 +534,7 @@ impl DiscoveryIndex {
                 continue;
             }
             let scope = self.strings.get(record.scope);
-            if query.scope.as_ref().is_some_and(|wanted| {
+            if wanted_scope.as_deref().is_some_and(|wanted| {
                 !wanted.is_empty()
                     && scope != wanted
                     && !scope

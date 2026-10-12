@@ -137,7 +137,23 @@ fn filters_scopes_unknown_times_and_cancellation_are_explicit() {
             .query(&request, &AtomicBool::new(false))
             .unwrap_or_else(|e| panic!("page: {e}"))
             .matching_count,
-        1
+        if cfg!(windows) { 2 } else { 1 }
+    );
+    request.scope = Some("a".to_owned());
+    assert_eq!(
+        index
+            .query(&request, &AtomicBool::new(false))
+            .unwrap_or_else(|e| panic!("parent scope: {e}"))
+            .matching_count,
+        if cfg!(windows) { 2 } else { 1 }
+    );
+    request.scope = Some("a/b".to_owned());
+    assert_eq!(
+        index
+            .query(&request, &AtomicBool::new(false))
+            .unwrap_or_else(|e| panic!("slash scope: {e}"))
+            .matching_count,
+        if cfg!(windows) { 2 } else { 1 }
     );
     request.scope = None;
     request.filter = "kind:dist >128B !risk:blocked".to_owned();
