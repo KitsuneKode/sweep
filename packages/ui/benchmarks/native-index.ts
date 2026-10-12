@@ -159,6 +159,51 @@ for (const { count, compactPaths } of [
         matching.some((candidate) => candidate.bytesKnown === false),
       );
     }
+    const scopeStarted = performance.now();
+    const scope = await review.scopeSummary("group-2");
+    const scopeRows = plan.candidates.filter((row) =>
+      row.path.startsWith(
+        join(plan.targetDir, "group-2") + (process.platform === "win32" ? "\\" : "/"),
+      ),
+    );
+    assert.equal(scope.candidateCount, scopeRows.length);
+    assert.equal(
+      scope.estimatedBytes,
+      scopeRows.reduce((sum, row) => sum + row.estimatedBytes, 0),
+    );
+    assert.equal(
+      scope.bytesPartial,
+      scopeRows.some((row) => row.bytesKnown === false),
+    );
+    assert.equal((await review.scopeSummary("")).candidateCount, 0);
+    const bulkMs = [];
+    const eligible = plan.candidates.filter(
+      (row) => row.riskTier !== "blocked" && row.riskTier !== "dangerous",
+    );
+    for (const selected of [false, true, false]) {
+      const start = performance.now();
+      await review.selectScope(null, selected);
+      bulkMs.push(performance.now() - start);
+      assert.equal(review.view.summary.selectedCount, selected ? eligible.length : 0);
+      assert.equal(
+        review.view.summary.selectedBytes,
+        selected ? eligible.reduce((sum, row) => sum + row.estimatedBytes, 0) : 0,
+      );
+      assert.equal(review.view.summary.selectedRiskCounts.blocked, 0);
+      assert.equal(
+        review.view.summary.selectedBytesPartial,
+        selected && eligible.some((row) => row.bytesKnown === false),
+      );
+      assert.equal(review.view.page, null);
+    }
+    await review.select([...selectedIds], true);
+    assert.equal(review.view.summary.selectedCount, selectedIds.size);
+    const scopedActions = {
+      scopeRecords: scopeRows.length,
+      globalQueueRecords: eligible.length,
+      globalClearQueueClearMs: bulkMs,
+      totalMs: performance.now() - scopeStarted,
+    };
     let nativePeakRssBytes: number | null = null;
     if (process.platform === "linux") {
       const status = await readFile(`/proc/${channel.diagnostics.pid}/status`, "utf8");
@@ -177,6 +222,7 @@ for (const { count, compactPaths } of [
       maxReplyBytes: channel.diagnostics.maxReplyBytes,
       nativeRoundTrip: latency(nativeMs),
       jsFilterAndSlice: latency(jsMs),
+      scopedActions,
     });
   } finally {
     await review.close();
@@ -273,7 +319,7 @@ const report = JSON.stringify(
       execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim().length > 0,
     rustc: execFileSync("rustc", ["--version"], { encoding: "utf8" }).trim(),
     method:
-      "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Native timings include the bounded UI page owner, production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, synthetic outcome retirement, remaining-queue export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
+      "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Scoped totals are compared with reference paths; global clear/queue/clear actions verify counts, bytes and partial markers without exporting candidates or ID batches. Bulk timings are individual observations, not percentile qualification. Native timings include the bounded UI page owner, production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, synthetic outcome retirement, remaining-queue export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
     results,
     replacements,
   },

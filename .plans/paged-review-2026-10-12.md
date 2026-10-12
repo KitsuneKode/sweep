@@ -88,8 +88,9 @@ now normalizes Windows scope keys and requests to forward slashes, preserves
 literal POSIX backslashes, and excludes prefix siblings such as a versus ab.
 Native library tests cover platform-specific expectations; page-owner tests use
 actual platform-native path spellings through the subprocess. The raw benchmark
-was refreshed for the follow-up binary. Hosted Windows execution remains a gate
-for that follow-up; Linux success alone does not qualify its Windows branch.
+was refreshed for the follow-up binary. Follow-up 38b8949 passed all nine local
+gates and [all eight hosted jobs](https://github.com/KitsuneKode/sweep/actions/runs/38240039561),
+including Windows. This qualifies those metadata tests, not non-Linux mount races.
 
 The same follow-up closes a delivery race: if the generation closes after a
 snapshot has validated but before its caller resumes, the page owner rejects

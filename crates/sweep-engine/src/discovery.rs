@@ -202,6 +202,27 @@ fn add_bytes(total: u64, bytes: u64) -> Result<u64> {
         .ok_or(DiscoveryError("index byte counter overflow"))
 }
 
+fn checked_scope(scope: Option<&str>) -> Result<Option<Cow<'_, str>>> {
+    let scope = scope.map(normalize_scope);
+    if scope.as_deref().is_some_and(|s| {
+        s.len() > 32_768
+            || (!s.is_empty() && s.split('/').any(|p| p.is_empty() || p == "." || p == ".."))
+    }) {
+        return Err(DiscoveryError("invalid review scope"));
+    }
+    Ok(scope)
+}
+
+fn within_scope(scope: &str, wanted: Option<&str>) -> bool {
+    wanted.is_none_or(|wanted| {
+        scope == wanted
+            || (!wanted.is_empty()
+                && scope
+                    .strip_prefix(wanted)
+                    .is_some_and(|rest| rest.starts_with('/')))
+    })
+}
+
 fn risk_counter(counts: &mut RiskCounts, risk: RiskTier) -> &mut u32 {
     match risk {
         RiskTier::Safe => &mut counts.safe,
@@ -371,6 +392,77 @@ impl DiscoveryIndex {
         }
     }
 
+    /// None is the whole generation; the empty key is only the target root.
+    /// A scope includes descendants, never similarly prefixed siblings.
+    pub fn scope_summary(
+        &self,
+        generation: &str,
+        revision: u64,
+        scope: Option<&str>,
+    ) -> Result<IndexSummary> {
+        self.check_revision(generation, revision)?;
+        let wanted = checked_scope(scope)?;
+        let mut summary = self.summary();
+        summary.candidate_count = 0;
+        summary.estimated_bytes = 0;
+        summary.bytes_partial = false;
+        summary.selected_count = 0;
+        summary.selected_bytes = 0;
+        summary.selected_bytes_partial = false;
+        summary.risk_counts = RiskCounts::default();
+        summary.selected_risk_counts = RiskCounts::default();
+        for (position, record) in self.records.iter().enumerate() {
+            if !record.active || !within_scope(self.strings.get(record.scope), wanted.as_deref()) {
+                continue;
+            }
+            summary.candidate_count += 1;
+            summary.estimated_bytes += record.bytes;
+            summary.bytes_partial |= record.known == Some(false);
+            *risk_counter(&mut summary.risk_counts, record.risk) += 1;
+            if self.selected[position] {
+                summary.selected_count += 1;
+                summary.selected_bytes += record.bytes;
+                summary.selected_bytes_partial |= record.known == Some(false);
+                *risk_counter(&mut summary.selected_risk_counts, record.risk) += 1;
+            }
+        }
+        Ok(summary)
+    }
+
+    /// Atomic metadata-only bulk change with constant temporary storage. A caller
+    /// must explicitly include dangerous rows; blocked rows are never queueable.
+    pub fn select_scope(
+        &mut self,
+        generation: &str,
+        revision: u64,
+        scope: Option<&str>,
+        selected: bool,
+        include_dangerous: bool,
+    ) -> Result<IndexSummary> {
+        self.check_revision(generation, revision)?;
+        let wanted = checked_scope(scope)?;
+        if self.revision >= SAFE_INTEGER {
+            return Err(DiscoveryError("discovery revision overflow"));
+        }
+        let mut changed = false;
+        for position in 0..self.records.len() {
+            let record = &self.records[position];
+            if !record.active
+                || !within_scope(self.strings.get(record.scope), wanted.as_deref())
+                || (selected
+                    && (record.risk == RiskTier::Blocked
+                        || (!include_dangerous && record.risk == RiskTier::Dangerous)))
+                || self.selected[position] == selected
+            {
+                continue;
+            }
+            self.set_selected(position, selected);
+            changed = true;
+        }
+        self.revision += u64::from(changed);
+        Ok(self.summary())
+    }
+
     fn select_inner(&mut self, ids: &[String], selected: bool) -> Result<bool> {
         let mut positions = Vec::new();
         for id in ids {
@@ -522,7 +614,7 @@ impl DiscoveryIndex {
             .filter(|term| !term.is_empty())
             .map(str::to_owned)
             .collect();
-        let wanted_scope = query.scope.as_deref().map(normalize_scope);
+        let wanted_scope = checked_scope(query.scope.as_deref())?;
         let mut matches = Vec::new();
         let mut matching_bytes = 0;
         let mut matching_partial = false;
@@ -534,13 +626,8 @@ impl DiscoveryIndex {
                 continue;
             }
             let scope = self.strings.get(record.scope);
-            if wanted_scope.as_deref().is_some_and(|wanted| {
-                !wanted.is_empty()
-                    && scope != wanted
-                    && !scope
-                        .strip_prefix(wanted)
-                        .is_some_and(|rest| rest.starts_with('/'))
-            }) || query.risk.is_some_and(|wanted| wanted != record.risk)
+            if !within_scope(scope, wanted_scope.as_deref())
+                || query.risk.is_some_and(|wanted| wanted != record.risk)
             {
                 continue;
             }

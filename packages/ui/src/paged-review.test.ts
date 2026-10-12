@@ -373,3 +373,88 @@ test.skipIf(!available)(
     }
   },
 );
+
+test.skipIf(!available)(
+  "scope actions include hidden rows, distinguish root and exclude prefix siblings",
+  async () => {
+    const source = snapshot(600);
+    source.selectedCandidateIds = [];
+    source.summary.selectedCount = 0;
+    for (let i = 0; i < source.candidates.length; i++) {
+      const row = source.candidates[i]!;
+      row.path = join(
+        source.targetDir,
+        i === 0 ? "" : i < 500 ? "a/nested" : "ab",
+        `node_modules-${i}`,
+      );
+      row.riskTier =
+        i === 599 ? "blocked" : i === 598 ? "dangerous" : i === 597 ? "caution" : "safe";
+    }
+    source.summary.riskCounts = { safe: 597, caution: 1, dangerous: 1, blocked: 1 };
+    const { owner } = await open(source);
+    await owner.load({ limit: 1 });
+    expect((await owner.scopeSummary("a")).candidateCount).toBe(499);
+    expect((await owner.scopeSummary("")).candidateCount).toBe(1);
+    expect((await owner.scopeSummary(null)).candidateCount).toBe(600);
+    await owner.load({ scope: "", limit: 1 });
+    expect(owner.view.page?.matchingCount).toBe(1);
+    expect(owner.view.page?.candidates[0]!.id).toBe(source.candidates[0]!.id);
+    await owner.load({ scope: "a", limit: 1 });
+    expect(owner.view.page?.matchingCount).toBe(499);
+    await owner.selectScope("a", true);
+    expect(owner.view.page).toBeNull();
+    expect(owner.view.summary.selectedCount).toBe(499);
+    expect((await owner.scopeSummary("ab")).selectedCount).toBe(0);
+    await owner.selectScope(null, true);
+    expect(owner.view.summary.selectedCount).toBe(598);
+    expect(owner.view.summary.selectedRiskCounts).toEqual({
+      safe: 597,
+      caution: 1,
+      dangerous: 0,
+      blocked: 0,
+    });
+    const revision = owner.view.summary.revision;
+    await owner.selectScope(null, true);
+    expect(owner.view.summary.revision).toBe(revision);
+    await owner.selectScope("ab", true, true);
+    expect(owner.view.summary.selectedCount).toBe(599);
+    expect((await owner.prepareQueue()).selectedCandidateIds).toHaveLength(599);
+    await owner.selectScope("a", false);
+    expect(owner.view.summary.selectedCount).toBe(100);
+    expect(owner.view.summary.selectedBytesPartial).toBe(false);
+    const before = owner.view.summary;
+    await expect(owner.selectScope("a/", true)).rejects.toMatchObject({
+      code: "discovery_refused",
+    });
+    expect(owner.view.summary).toEqual(before);
+    await owner.selectScope(null, false);
+    expect(owner.view.summary.selectedCount).toBe(0);
+    expect(owner.view.summary.selectedBytes).toBe(0);
+    expect((await owner.scopeSummary("ab")).selectedCount).toBe(0);
+  },
+);
+
+test.skipIf(!available)(
+  "scope separators preserve literal POSIX names and normalize Windows keys",
+  async () => {
+    const source = snapshot(3);
+    source.selectedCandidateIds = [];
+    source.summary.selectedCount = 0;
+    source.candidates[0]!.path = join(source.targetDir, "東京😀", "nested", "node_modules");
+    source.candidates[1]!.path = join(source.targetDir, "東京😀\\nested", "node_modules");
+    source.candidates[2]!.path = join(source.targetDir, "東京😀x", "node_modules");
+    const { owner } = await open(source);
+    expect((await owner.scopeSummary("東京😀")).candidateCount).toBe(
+      process.platform === "win32" ? 2 : 1,
+    );
+    expect((await owner.scopeSummary("東京😀\\nested")).candidateCount).toBe(
+      process.platform === "win32" ? 2 : 1,
+    );
+    expect((await owner.scopeSummary("東京😀/nested")).candidateCount).toBe(
+      process.platform === "win32" ? 2 : 1,
+    );
+    await owner.selectScope("東京😀", true);
+    expect(owner.view.summary.selectedCount).toBe(process.platform === "win32" ? 2 : 1);
+    expect((await owner.scopeSummary("東京😀x")).selectedCount).toBe(0);
+  },
+);

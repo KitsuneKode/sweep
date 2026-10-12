@@ -57,11 +57,12 @@ function plan(count = 3): ScanPlan {
 const peer = String.raw`
 import { createInterface } from "node:readline";
 import { writeFileSync } from "node:fs";
+import { dirname, relative } from "node:path";
 const scenario = process.argv[2];
 writeFileSync(process.argv[3], String(process.pid));
 let init, revision = 0, selected, requestCount = 0;
-function summary() {
-  const cs = init.plan.candidates, queued = cs.filter(c => selected.has(c.id));
+function summary(cs = init.plan.candidates) {
+  const queued = cs.filter(c => selected.has(c.id));
   const riskCounts = {safe:0,caution:0,dangerous:0,blocked:0};
   const selectedRiskCounts = {safe:0,caution:0,dangerous:0,blocked:0};
   for(const c of cs) riskCounts[c.riskTier]++;
@@ -95,6 +96,26 @@ for await (const line of createInterface({input:process.stdin})) {
   }
   requestCount++;
   if(scenario==="stall") continue;
+  if(m.type==="scope" || m.type==="select_scope") {
+    const scoped=init.plan.candidates.filter(c=> {
+      let key=relative(init.plan.targetDir,dirname(c.path));
+      if(process.platform==="win32") key=key.replaceAll("\\", "/");
+      return m.scope===null || key===m.scope || (m.scope!=="" && key.startsWith(m.scope+"/"));
+    });
+    if(m.type==="scope") {
+      const totals=summary(scoped); if(scenario==="bad-scope") totals.candidateCount++;
+      await emit({type:"scope",requestId:m.requestId,totals,summary:summary()}); continue;
+    }
+    let changed=false;
+    for(const c of scoped) {
+      if(m.selected && (c.riskTier==="blocked" || (!m.includeDangerous && c.riskTier==="dangerous"))) continue;
+      changed ||= selected.has(c.id)!==m.selected;
+      if(m.selected) selected.add(c.id); else selected.delete(c.id);
+    }
+    if(changed) revision++;
+    const s=summary(); if(scenario==="bad-scope-selection") s.selectedBytes++;
+    await emit({type:"selection",requestId:m.requestId,summary:s}); continue;
+  }
   if(m.type==="retire") {
     init.plan.candidates=init.plan.candidates.filter(c=>!m.candidateIds.includes(c.id));
     for(const id of m.candidateIds) selected.delete(id);
@@ -152,6 +173,11 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
   const error: unknown = await promise.catch((error: unknown) => error);
   expect(error).toBeInstanceOf(Error);
   return error;
+}
+
+function expectReaped(path: string): void {
+  const pid = Number(readFileSync(path, "utf8"));
+  expect(() => process.kill(pid, 0)).toThrow();
 }
 
 test("pages are immutable, split UTF-8 survives, and queued IDs survive page eviction", async () => {
@@ -405,4 +431,70 @@ test("closing does not turn a previously queued ID into an unqueued answer", asy
   expect(session.isSelected(source.selectedCandidateIds[0]!)).toBe(true);
   await session.close();
   expect(() => session.isSelected(source.selectedCandidateIds[0]!)).toThrow("closed");
+});
+
+test("scope totals and bulk receipts are independently verified", async () => {
+  const session = await open();
+  const scope = await session.scopeSummary("project-0");
+  expect(scope.candidateCount).toBe(1);
+  expect(scope.selectedBytes).toBe(100);
+  expect(Object.isFrozen(scope.selectedRiskCounts)).toBe(true);
+  const total = session.summary;
+  expect((await session.scopeSummary("missing")).candidateCount).toBe(0);
+  expect(session.summary).toEqual(total);
+  await session.selectScope(null, true);
+  expect(session.summary.selectedCount).toBe(2);
+  expect(session.summary.selectedBytesPartial).toBe(true);
+  await session.retire([plan().candidates[1]!.id]);
+  expect((await session.scopeSummary("project-1")).candidateCount).toBe(0);
+  expect((await session.scopeSummary(null)).bytesPartial).toBe(false);
+  for (const scenario of ["bad-scope", "bad-scope-selection"]) {
+    const bad = await open(scenario);
+    expect(
+      await rejection(
+        scenario === "bad-scope" ? bad.scopeSummary("project-0") : bad.selectScope(null, true),
+      ),
+    ).toMatchObject({ code: "discovery_protocol" });
+    expect(() => bad.summary).toThrow();
+    await bad.close();
+    expectReaped(join(root, `${scenario}.pid`));
+  }
+});
+
+test("a valid reviewed row from the wrong scope or risk cannot enter the page", async () => {
+  for (const query of [
+    { scope: "project-1", limit: 1 },
+    { risk: "blocked" as const, limit: 1 },
+  ]) {
+    const session = await open();
+    expect(await rejection(session.query(query))).toMatchObject({ code: "discovery_protocol" });
+    expect(() => session.summary).toThrow();
+    await session.close();
+    expectReaped(join(root, "good.pid"));
+  }
+});
+
+test("scope preparation owns the request across yields and cancellation", async () => {
+  const source = plan(600);
+  const session = await DiscoveryIndexSession.open(source, options());
+  sessions.push(session);
+  const bulk = session.selectScope(null, true);
+  await expect(session.selectScope(null, false)).rejects.toMatchObject({ code: "discovery_busy" });
+  await expect(session.select([source.candidates[0]!.id], false)).rejects.toMatchObject({
+    code: "discovery_busy",
+  });
+  await expect(session.query()).rejects.toMatchObject({ code: "discovery_busy" });
+  await bulk;
+  expect(session.summary.selectedCount).toBe(599);
+  expect(session.summary.revision).toBe(1);
+  const before = session.summary;
+  await expect(session.selectScope("../outside", true)).rejects.toMatchObject({
+    code: "discovery_refused",
+  });
+  expect(session.summary).toEqual(before);
+  const pending = session.selectScope(null, false);
+  const rejected = rejection(pending);
+  await session.close();
+  expect(await rejected).toMatchObject({ code: "discovery_closed" });
+  expectReaped(join(root, "good.pid"));
 });

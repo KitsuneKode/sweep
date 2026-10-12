@@ -345,3 +345,58 @@ fn retirement_validates_whole_batch_and_unknown_or_duplicate_ids_leave_totals_in
     assert!(!summary.bytes_partial);
     assert_eq!(summary.risk_counts.safe + summary.risk_counts.blocked, 0);
 }
+
+#[test]
+fn scope_bulk_changes_are_atomic_and_keep_hidden_rows_and_root_distinct(
+) -> Result<(), sweep_engine::discovery::DiscoveryError> {
+    let mut plan = snapshot(600);
+    for (i, candidate) in plan.candidates.iter_mut().enumerate() {
+        let scope = if i == 0 {
+            ""
+        } else if i < 500 {
+            "a/nested/"
+        } else {
+            "ab/"
+        };
+        candidate.entry.path = format!("/owned/project/{scope}node_modules-{i}");
+        candidate.risk_tier = match i {
+            599 => RiskTier::Blocked,
+            598 => RiskTier::Dangerous,
+            597 => RiskTier::Caution,
+            _ => RiskTier::Safe,
+        };
+    }
+    let mut index = DiscoveryIndex::new(plan, "g".into(), 64 * 1024 * 1024)?;
+    assert_eq!(index.scope_summary("g", 0, Some(""))?.candidate_count, 1);
+    let a = index.scope_summary("g", 0, Some("a"))?;
+    assert_eq!(a.candidate_count, 499);
+    assert!(a.bytes_partial);
+    let selected = index.select_scope("g", 0, Some("a"), true, false)?;
+    assert_eq!(selected.selected_count, 499);
+    assert_eq!(selected.revision, 1);
+    assert_eq!(index.scope_summary("g", 1, Some("ab"))?.selected_count, 0);
+    assert!(index.select_scope("g", 1, Some("a/"), true, true).is_err());
+    assert!(index.select_scope("wrong", 1, None, false, false).is_err());
+    assert!(index.select_scope("g", 0, None, false, false).is_err());
+    assert_eq!(index.summary().selected_count, 499);
+    let all = index.select_scope("g", 1, None, true, false)?;
+    assert_eq!(all.selected_count, 598);
+    assert_eq!(all.selected_risk_counts.dangerous, 0);
+    assert_eq!(index.select_scope("g", 2, None, true, false)?.revision, 2);
+    let dangerous = index.select_scope("g", 2, Some("ab"), true, true)?;
+    assert_eq!(dangerous.selected_count, 599);
+    assert_eq!(dangerous.selected_risk_counts.blocked, 0);
+    index.retire("g", 3, &["candidate-2".into()])?;
+    let a = index.scope_summary("g", 4, Some("a"))?;
+    assert_eq!(a.candidate_count, 498);
+    assert!(!a.bytes_partial);
+    assert!(!a.selected_bytes_partial);
+    let clear = index.select_scope("g", 4, None, false, false)?;
+    assert_eq!(clear.selected_count, 0);
+    assert_eq!(clear.selected_bytes, 0);
+    assert_eq!(clear.selected_risk_counts.dangerous, 0);
+    let none = index.scope_summary("g", 5, Some("missing"))?;
+    assert_eq!(none.candidate_count, 0);
+    assert_eq!(none.selected_count, 0);
+    Ok(())
+}

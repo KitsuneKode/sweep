@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { setImmediate } from "node:timers/promises";
+import { dirname, relative } from "node:path";
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { hasCanonicalPathSpelling, isPathWithinRoot } from "./guardrails.js";
@@ -71,6 +72,23 @@ interface Witness {
   partial: boolean;
   risk: RiskTier;
   selected: boolean;
+  scope: string;
+}
+
+function normalizedScope(scope: string | null): string | null {
+  if (scope === null) return null;
+  if (typeof scope !== "string")
+    throw new DiscoveryIndexError("discovery_refused", "Invalid review scope");
+  const key = process.platform === "win32" ? scope.replaceAll("\\", "/") : scope;
+  if (
+    Buffer.byteLength(key) > 32_768 ||
+    (key !== "" && key.split("/").some((part) => !part || part === "." || part === ".."))
+  )
+    throw new DiscoveryIndexError("discovery_refused", "Invalid review scope");
+  return key;
+}
+function withinScope(key: string, scope: string | null): boolean {
+  return scope === null || key === scope || (scope !== "" && key.startsWith(`${scope}/`));
 }
 
 function digest(c: ScanCandidate): string {
@@ -118,6 +136,7 @@ interface Pending {
 
 /** One read-only native generation. A broken peer closes it; there is no apply or fallback. */
 export class DiscoveryIndexSession {
+  private preparingScope = false;
   private pending: Pending | undefined;
   private chunks: Uint8Array[] = [];
   private frameBytes = 0;
@@ -190,18 +209,28 @@ export class DiscoveryIndexSession {
         this.chunks = [];
         this.frameBytes = 0;
         const value: unknown = JSON.parse(text);
-        const envelope = object(value, ["type", "requestId", "summary", "page", "code", "message"]);
+        const envelope = object(value, [
+          "type",
+          "requestId",
+          "summary",
+          "totals",
+          "page",
+          "code",
+          "message",
+        ]);
         const reply = object(
           value,
           envelope.type === "index_ready"
             ? ["type", "summary"]
             : envelope.type === "page"
               ? ["type", "requestId", "page"]
-              : envelope.type === "selection" || envelope.type === "retired"
-                ? ["type", "requestId", "summary"]
-                : envelope.type === "index_error"
-                  ? ["type", "requestId", "code", "message"]
-                  : ["type", "requestId"],
+              : envelope.type === "scope"
+                ? ["type", "requestId", "summary", "totals"]
+                : envelope.type === "selection" || envelope.type === "retired"
+                  ? ["type", "requestId", "summary"]
+                  : envelope.type === "index_error"
+                    ? ["type", "requestId", "code", "message"]
+                    : ["type", "requestId"],
         );
         const waiting = this.pending;
         this.pending = undefined;
@@ -263,6 +292,7 @@ export class DiscoveryIndexSession {
     if (snapshot.candidates.length > MAX_RECORDS)
       throw new DiscoveryIndexError("discovery_refused", "Discovery candidate limit exceeded");
     const witnesses = new Map<string, Witness>();
+    const scopes = new Map<string, string>();
     const selected = new Set(snapshot.selectedCandidateIds);
     if (selected.size !== snapshot.selectedCandidateIds.length)
       throw new DiscoveryIndexError("discovery_refused", "Duplicate initial selected ID");
@@ -278,7 +308,14 @@ export class DiscoveryIndexSession {
     };
     let charged = 0;
     for (const c of snapshot.candidates) {
-      charged += 256 + c.id.length * 4;
+      const scopeKey = normalizedScope(relative(snapshot.targetDir, dirname(c.path)))!;
+      let scope = scopes.get(scopeKey);
+      if (scope === undefined) {
+        scope = scopeKey;
+        scopes.set(scopeKey, scope);
+        charged += 96 + scope.length * 4;
+      }
+      charged += 272 + c.id.length * 4;
       if (
         charged > MAX_HOST_CHARGE ||
         !c.id ||
@@ -299,6 +336,7 @@ export class DiscoveryIndexSession {
         partial: c.bytesKnown === false,
         risk: c.riskTier,
         selected: queued,
+        scope,
       });
       totals.estimatedBytes = checkedBytes(totals.estimatedBytes, c.estimatedBytes);
       totals.bytesPartial ||= c.bytesKnown === false;
@@ -406,7 +444,13 @@ export class DiscoveryIndexSession {
     });
   }
 
-  private async request(type: string, payload: object): Promise<Record<string, unknown>> {
+  private async request(
+    type: string,
+    payload: object,
+    preparedScope = false,
+  ): Promise<Record<string, unknown>> {
+    if (this.preparingScope && !preparedScope)
+      throw new DiscoveryIndexError("discovery_busy", "A scope request is already running");
     const requestId = ++this.nextId;
     if (requestId > 0xffff_ffff)
       throw new DiscoveryIndexError("discovery_refused", "Discovery request counter exhausted");
@@ -488,7 +532,7 @@ export class DiscoveryIndexSession {
       generation: summary.generation,
       revision: summary.revision,
       filter: options.filter ?? "",
-      scope: options.scope ?? null,
+      scope: normalizedScope(options.scope ?? null),
       risk: options.risk ?? null,
       order: options.order ?? "discovery",
       offset: options.offset ?? 0,
@@ -556,6 +600,8 @@ export class DiscoveryIndexSession {
         if (
           !witness ||
           ids.has(c.id) ||
+          !withinScope(witness.scope, query.scope) ||
+          (query.risk !== null && witness.risk !== query.risk) ||
           !hasCanonicalPathSpelling(c.path) ||
           !isPathWithinRoot(c.path, this.header.targetDir) ||
           digest(c) !== witness.digest
@@ -589,6 +635,128 @@ export class DiscoveryIndexSession {
           : new DiscoveryIndexError("discovery_protocol", "Invalid candidate in discovery page"),
       );
       throw this.failure;
+    }
+  }
+
+  /** null includes all scopes; "" includes only artifacts directly in the root. */
+  async scopeSummary(scope: string | null): Promise<DiscoverySummary> {
+    return this.scopeRequest(normalizedScope(scope));
+  }
+
+  /** Metadata-only bulk action, independent of the visible page or text filter.
+   * Clearing includes dangerous rows; queueing them requires explicit inclusion. */
+  async selectScope(
+    scope: string | null,
+    selected: boolean,
+    includeDangerous = false,
+  ): Promise<DiscoverySummary> {
+    if (typeof selected !== "boolean" || typeof includeDangerous !== "boolean")
+      throw new DiscoveryIndexError("discovery_refused", "Invalid scope selection policy");
+    return this.scopeRequest(normalizedScope(scope), { selected, includeDangerous });
+  }
+
+  private async scopeRequest(
+    scope: string | null,
+    change?: { selected: boolean; includeDangerous: boolean },
+  ): Promise<DiscoverySummary> {
+    const before = this.summary;
+    if (this.pending || this.preparingScope)
+      throw new DiscoveryIndexError("discovery_busy", "A discovery request is already running");
+    this.preparingScope = true;
+    try {
+      const expected = change
+        ? {
+            ...before,
+            riskCounts: { ...before.riskCounts },
+            selectedRiskCounts: { ...before.selectedRiskCounts },
+          }
+        : {
+            ...before,
+            candidateCount: 0,
+            estimatedBytes: 0,
+            bytesPartial: false,
+            selectedCount: 0,
+            selectedBytes: 0,
+            selectedBytesPartial: false,
+            riskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
+            selectedRiskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
+          };
+      let partialCount = change ? this.selectedPartialCount : 0;
+      let changed = false;
+      let visited = 0;
+      const eligible = (w: Witness) =>
+        withinScope(w.scope, scope) &&
+        (!change?.selected ||
+          (w.risk !== "blocked" && (change.includeDangerous || w.risk !== "dangerous")));
+      // Yield without releasing request ownership. No candidates or whole-scope ID
+      // batch are reconstructed, even for a global queue of 100k rows.
+      for (const witness of this.witnesses.values()) {
+        if (eligible(witness)) {
+          if (change) {
+            if (witness.selected !== change.selected) {
+              const delta = change.selected ? 1 : -1;
+              changed = true;
+              expected.selectedCount += delta;
+              expected.selectedBytes += delta * witness.bytes;
+              expected.selectedRiskCounts[witness.risk] += delta;
+              if (witness.partial) partialCount += delta;
+            }
+          } else {
+            expected.candidateCount++;
+            expected.estimatedBytes += witness.bytes;
+            expected.bytesPartial ||= witness.partial;
+            expected.riskCounts[witness.risk]++;
+            if (witness.selected) {
+              expected.selectedCount++;
+              expected.selectedBytes += witness.bytes;
+              expected.selectedRiskCounts[witness.risk]++;
+              if (witness.partial) partialCount++;
+            }
+          }
+        }
+        if (++visited % 256 === 0) {
+          await setImmediate();
+          this.summary; // Cancel/close invalidates preparation before transport.
+        }
+      }
+      expected.selectedBytesPartial = partialCount > 0;
+      const revision = before.revision + Number(changed);
+      const reply = await this.request(
+        change ? "select_scope" : "scope",
+        {
+          generation: before.generation,
+          revision: before.revision,
+          scope,
+          ...change,
+        },
+        true,
+      );
+      try {
+        if (reply.type !== (change ? "selection" : "scope"))
+          throw new DiscoveryIndexError("discovery_protocol", "Expected a scope receipt");
+        const summary = this.checkSummary(reply.summary, revision, change ? expected : before);
+        const totals = change ? summary : this.checkSummary(reply.totals, revision, expected);
+        if (
+          summary.retainedBytes !== before.retainedBytes ||
+          totals.retainedBytes !== before.retainedBytes
+        )
+          throw new DiscoveryIndexError(
+            "discovery_protocol",
+            "Scope receipt changed retention accounting",
+          );
+        if (change) {
+          for (const witness of this.witnesses.values())
+            if (eligible(witness)) witness.selected = change.selected;
+          this.selectedPartialCount = partialCount;
+        }
+        this.latest = summary;
+        return totals;
+      } catch (error) {
+        this.fail(error as Error);
+        throw error;
+      }
+    } finally {
+      this.preparingScope = false;
     }
   }
 

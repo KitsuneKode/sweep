@@ -17,6 +17,8 @@
       scope/group aggregates, cursor ordering and progressive generation handover.
       [Paged review ownership](paged-review-2026-10-12.md) implements cached totals,
       explicit single-item plans and trusted outcome retirement; it remains gated.
+      [Scoped review authority](scoped-review-2026-10-12.md) adds scope totals and
+      atomic global/scoped queue changes; bounded hierarchy/group pages remain open.
 
 - [ ] Close [round-four audit reconciliation](audit-round4-2026-10-08.md):
       confirmation authority, error contract, session truth and recovery evidence;

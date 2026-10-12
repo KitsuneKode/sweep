@@ -113,6 +113,25 @@ export class PagedReviewSession {
     return this.run(() => this.index.snapshot());
   }
 
+  /** Authoritative scope totals include rows outside the retained page. */
+  async scopeSummary(scope: string | null): Promise<DiscoverySummary> {
+    return this.run(() => this.index.scopeSummary(scope));
+  }
+
+  /** A scope action intentionally includes hidden rows and ignores the text filter.
+   * null clears/queues all scopes; the empty key means the target root alone. */
+  async selectScope(
+    scope: string | null,
+    selected: boolean,
+    includeDangerous = false,
+  ): Promise<PagedReviewView> {
+    await this.run(async () => {
+      await this.index.selectScope(scope, selected, includeDangerous);
+      this.page = null;
+    });
+    return this.view;
+  }
+
   prepareSingle(id: string): ScanPlan {
     this.assertOpen();
     if (this.busy || !this.page || this.page.revision !== this.index.summary.revision)

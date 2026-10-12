@@ -466,6 +466,9 @@ records with the JS filter through the bounded page owner and validated host ada
 100k hit the saved-plan retained budget; a separate compact-path fixture fits.
 Three additional 50k generations check selection, explicit export, synthetic
 outcome retirement, remaining-queue export, child reaping and descriptor cleanup.
+Scope totals are checked against reference paths. Global clear/queue/clear actions
+check hidden-row counts, bytes and partial markers without exporting candidates or
+whole-queue ID batches. Their recorded timings are individual observations.
 Retirement changes review metadata only; these reports do not delete files.
 Reports record refusals, binary hash, compiler, transport
 sizes, retained logical charges and native process RSS. The host keeps a reference
@@ -474,6 +477,8 @@ The experiment is not wired into the production UI. See the
 [compact-index integration gate](../.plans/compact-discovery-2026-10-08.md).
 The [paged-review checkpoint](../.plans/paged-review-2026-10-12.md) records cached
 active/queued aggregates, single-item scope and interrupted-report qualification.
+The [scoped-review checkpoint](../.plans/scoped-review-2026-10-12.md) adds verified
+scope totals and atomic bulk queue changes, including root-only scope semantics.
 
 ```sh
 bun run build

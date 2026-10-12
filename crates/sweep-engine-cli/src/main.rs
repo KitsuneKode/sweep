@@ -135,6 +135,15 @@ struct IndexInit {
     plan: ScanPlan,
 }
 
+// Unlike a defaulted Option field, this requires an explicit null (all scopes)
+// or key. A missing scope must never silently turn into a global bulk action.
+fn required_index_scope<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum IndexRequest {
@@ -159,6 +168,25 @@ enum IndexRequest {
         revision: u64,
         #[serde(rename = "candidateIds")]
         candidate_ids: Vec<String>,
+    },
+    Scope {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        generation: String,
+        revision: u64,
+        #[serde(deserialize_with = "required_index_scope")]
+        scope: Option<String>,
+    },
+    SelectScope {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        generation: String,
+        revision: u64,
+        #[serde(deserialize_with = "required_index_scope")]
+        scope: Option<String>,
+        selected: bool,
+        #[serde(rename = "includeDangerous")]
+        include_dangerous: bool,
     },
     Close {
         #[serde(rename = "requestId")]
@@ -214,6 +242,8 @@ fn run_index() -> Result<(), CliFailure> {
             IndexRequest::Query { request_id, query } => (request_id, index.query(&query, &AtomicBool::new(false)).map(|page| serde_json::json!({"type":"page","requestId":request_id,"page":page}))),
             IndexRequest::Select { request_id, generation, revision, candidate_ids, selected } => (request_id, index.select(&generation, revision, &candidate_ids, selected).map(|summary| serde_json::json!({"type":"selection","requestId":request_id,"summary":summary}))),
             IndexRequest::Retire { request_id, generation, revision, candidate_ids } => (request_id, index.retire(&generation, revision, &candidate_ids).map(|summary| serde_json::json!({"type":"retired","requestId":request_id,"summary":summary}))),
+            IndexRequest::Scope { request_id, generation, revision, scope } => (request_id, index.scope_summary(&generation, revision, scope.as_deref()).map(|totals| serde_json::json!({"type":"scope","requestId":request_id,"totals":totals,"summary":index.summary()}))),
+            IndexRequest::SelectScope { request_id, generation, revision, scope, selected, include_dangerous } => (request_id, index.select_scope(&generation, revision, scope.as_deref(), selected, include_dangerous).map(|summary| serde_json::json!({"type":"selection","requestId":request_id,"summary":summary}))),
         };
         let value = result.unwrap_or_else(|error| serde_json::json!({"type":"index_error","requestId":request_id,"code":"discovery_refused","message":error.to_string()}));
         write_json_line(&value).map_err(CliFailure::failure)?;
@@ -971,6 +1001,25 @@ fn write_json_line_to<T: Serialize, W: Write>(value: &T, writer: &mut W) -> Resu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scope_actions_require_explicit_scope_and_policy() -> Result<(), serde_json::Error> {
+        let mut input = serde_json::json!({
+            "type":"select_scope", "requestId":1, "generation":"g", "revision":0,
+            "selected":true, "includeDangerous":false
+        });
+        assert!(serde_json::from_value::<super::IndexRequest>(input.clone()).is_err());
+        input["scope"] = serde_json::Value::Null;
+        let _: super::IndexRequest = serde_json::from_value(input.clone())?;
+        input["scope"] = serde_json::json!("");
+        let _: super::IndexRequest = serde_json::from_value(input.clone())?;
+        input
+            .as_object_mut()
+            .ok_or_else(|| serde::de::Error::custom("fixture must be an object"))?
+            .remove("includeDangerous");
+        assert!(serde_json::from_value::<super::IndexRequest>(input).is_err());
+        Ok(())
+    }
+
     #[test]
     fn misspelled_scan_limits_are_rejected() -> Result<(), serde_json::Error> {
         let input = serde_json::json!({

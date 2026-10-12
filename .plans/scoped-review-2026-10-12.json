@@ -1,0 +1,140 @@
+{
+  "date": "2026-10-12T14:52:21.574Z",
+  "runtime": "1.4.2",
+  "reviewOwner": "PagedReviewSession",
+  "platform": "linux",
+  "arch": "x64",
+  "binary": "/home/kitsunekode/Projects/cli-tools/sweep/target/release/sweep-engine",
+  "binarySha256": "250aaf2d5b5a68d64f792ea3d359da1d35c435d90d7e9ee5d2a7fa6a34e65df2",
+  "sourceBase": "38b89494099a69d92e12ffc900b59a743cde0234",
+  "sourceDirty": true,
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "method": "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Scoped totals are compared with reference paths; global clear/queue/clear actions verify counts, bytes and partial markers without exporting candidates or ID batches. Bulk timings are individual observations, not percentile qualification. Native timings include the bounded UI page owner, production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, synthetic outcome retirement, remaining-queue export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
+  "results": [
+    {
+      "count": 5000,
+      "compactPaths": false,
+      "status": "qualified",
+      "initBytes": 1609805,
+      "initMs": 170.466021,
+      "retainedChargeBytes": 2041064,
+      "nativePeakRssBytes": 8220672,
+      "hostRetainedChargeBytes": 2552580,
+      "maxReplyBytes": 42953,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 1.849964,
+        "p95Ms": 3.544464000000005,
+        "p99Ms": 4.760968999999989
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 0.23973699999999099,
+        "p95Ms": 1.7886899999999741,
+        "p99Ms": 2.694012999999984
+      },
+      "scopedActions": {
+        "scopeRecords": 100,
+        "globalQueueRecords": 4705,
+        "globalClearQueueClearMs": [0.6907739999999194, 0.5578140000000076, 0.4280639999999494],
+        "totalMs": 5.259104999999977
+      }
+    },
+    {
+      "count": 50000,
+      "compactPaths": false,
+      "status": "qualified",
+      "initBytes": 16242298,
+      "initMs": 418.92599599999994,
+      "retainedChargeBytes": 20955612,
+      "nativePeakRssBytes": 58949632,
+      "hostRetainedChargeBytes": 26121672,
+      "maxReplyBytes": 42963,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 2.8336809999998422,
+        "p95Ms": 10.541623000000072,
+        "p99Ms": 11.209125000000085
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 1.2314790000000357,
+        "p95Ms": 13.561464999999771,
+        "p99Ms": 14.662300999999843
+      },
+      "scopedActions": {
+        "scopeRecords": 100,
+        "globalQueueRecords": 47058,
+        "globalClearQueueClearMs": [2.66991599999983, 2.7920140000001084, 2.50678199999993],
+        "totalMs": 29.716955000000326
+      }
+    },
+    {
+      "count": 100000,
+      "compactPaths": false,
+      "status": "refused_before_spawn",
+      "reason": "Scan resource limit exceeded (maxRetainedBytes); scan is incomplete. Scan a smaller subtree."
+    },
+    {
+      "count": 100000,
+      "compactPaths": true,
+      "status": "qualified",
+      "initBytes": 27742963,
+      "initMs": 760.1186669999997,
+      "retainedChargeBytes": 29374726,
+      "nativePeakRssBytes": 85921792,
+      "hostRetainedChargeBytes": 43681188,
+      "maxReplyBytes": 36950,
+      "nativeRoundTrip": {
+        "samples": 200,
+        "p50Ms": 4.45149500000025,
+        "p95Ms": 21.198703000000023,
+        "p99Ms": 23.806039000000055
+      },
+      "jsFilterAndSlice": {
+        "samples": 200,
+        "p50Ms": 2.5824469999997746,
+        "p95Ms": 27.19426199999998,
+        "p99Ms": 31.32629999999972
+      },
+      "scopedActions": {
+        "scopeRecords": 100,
+        "globalQueueRecords": 94117,
+        "globalClearQueueClearMs": [3.451933000000281, 5.403919999999744, 3.7368619999997463],
+        "totalMs": 54.5292300000001
+      }
+    }
+  ],
+  "replacements": [
+    {
+      "generation": 0,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "retiredRows": 2,
+      "remainingSelectedCount": 49,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    },
+    {
+      "generation": 1,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "retiredRows": 2,
+      "remainingSelectedCount": 49,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    },
+    {
+      "generation": 2,
+      "records": 50000,
+      "exportedSelectedCount": 51,
+      "retiredRows": 2,
+      "remainingSelectedCount": 49,
+      "baselineFds": 8,
+      "afterFds": 8,
+      "reaped": true
+    }
+  ]
+}
