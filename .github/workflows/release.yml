@@ -81,7 +81,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: needs.release-intent.outputs.needs_native_build == 'true'
         with:
           name: native-packages-all
@@ -96,7 +96,7 @@ jobs:
       # configured" and never starts the OIDC exchange - which is what failed
       # the 0.3.0 release with ENEEDAUTH. Node 24 carries npm 11.x; OIDC needs
       # npm >= 11.5.1.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -161,7 +161,7 @@ jobs:
         id: release
         if: steps.changesets.outputs.run == 'true'
         # Action v1 supports our CLI v2; action v2 requires CLI v3.
-        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           version: bun run version
           publish: bun run scripts/publish-release.ts
