@@ -5,10 +5,11 @@
  * engine (the binary embeds it) - the caller's `unless` guard skips when
  * absent.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { removeOwnedTempDirectory } from "./temporary-directory.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const dir = mkdtempSync(join(tmpdir(), "sweep-verify-standalone-"));
@@ -24,8 +25,11 @@ try {
       stderr: "inherit",
     });
     const code = await proc.exited;
-    if (code !== 0) process.exit(code);
+    if (code !== 0) {
+      process.exitCode = code;
+      break;
+    }
   }
 } finally {
-  rmSync(dir, { recursive: true, force: true });
+  await removeOwnedTempDirectory(dir);
 }
