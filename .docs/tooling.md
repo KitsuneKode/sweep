@@ -309,3 +309,21 @@ Test layout, prompts, and engine parity: [.docs/testing.md](testing.md).
 docs build cache key. Unset builds stay unindexable without canonical URLs.
 Content changes in root `docs/` invalidate this workspace's build/test inputs.
 Website tasks have no dependency on CLI bundles or native engine outputs.
+
+## Native scan profiling
+
+Run `bun scripts/profile-native-scan.ts <target> --runs 3` for a read-only
+comparison of one-shot and streamed native scans. It records every sample,
+first-candidate delivery, final delivery, directory counts and estimated bytes.
+It uses the resolved project configuration and the normal Rust engine resolver.
+No apply, cache drop or fixture generation runs.
+
+These timings include child startup and host validation. The tail after the last
+candidate can include unfinished engine work; it is not isolated host CPU time.
+UI rendering needs a separate terminal measurement. Keep workloads sequential,
+report cache conditions, and compare directory counts and bytes because active
+builds can change the tree between samples.
+
+Rust already runs discovery and sizing concurrently in bounded pools. Measure
+filesystem I/O and host delivery before changing worker counts. Scan throughput
+must not remove apply-time identity checks, mount restrictions or resource caps.

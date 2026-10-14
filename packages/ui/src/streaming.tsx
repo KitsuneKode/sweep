@@ -190,12 +190,13 @@ export async function runSweepUiStreaming(
         const candidate = candidateFromEntry(entry);
         recordCount++;
         batcher.record(candidate.id, candidate);
+        return candidate;
       };
       const recordSized = (entry: ScanEntry) => {
-        if (signal.aborted) return;
-        sizedIds.add(candidateFromEntry(entry).id);
+        const candidate = record(entry);
+        if (!candidate) return;
+        sizedIds.add(candidate.id);
         reportProgress(scannedDirs, skippedDirs, currentDir);
-        record(entry);
       };
 
       try {

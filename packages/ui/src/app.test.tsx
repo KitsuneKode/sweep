@@ -2,6 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { testRender as nativeTestRender } from "@opentui/react/test-utils";
 import { act } from "react";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { KeyCodes } from "@opentui/core/testing";
 import type { ViewPreferences } from "./view-preferences.js";
 import { SweepApp, type SweepUiOutcome } from "./app.js";
@@ -61,12 +64,14 @@ function createPlan(): ScanPlan {
 }
 
 let teardown: (() => void) | null = null;
+const configRoots: string[] = [];
 
 afterEach(async () => {
   await act(async () => {
     teardown?.();
     teardown = null;
   });
+  for (const root of configRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 async function mount(onDone: (outcome: SweepUiOutcome) => void) {
@@ -82,6 +87,176 @@ async function mount(onDone: (outcome: SweepUiOutcome) => void) {
 }
 
 describe("sweep TUI render", () => {
+  test("pattern saves review the file, reject stale content and preserve other settings", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-config-review-"));
+    configRoots.push(root);
+    const path = join(root, ".sweeprc");
+    const original = JSON.stringify({ maxSizeGB: 3, ignore: ["keep"] });
+    writeFileSync(path, original);
+    const source = createPlan();
+    source.targetDir = root;
+    source.candidates = source.candidates.map((item) => ({ ...item, path: join(root, item.name) }));
+    const setup = await testRender(<SweepApp plan={source} onDone={() => {}} />, {
+      width: 100,
+      height: 28,
+    });
+    teardown = () => setup.renderer.destroy();
+    const paint = async () =>
+      act(async () => {
+        await setup.flush();
+        await setup.renderOnce();
+      });
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey("p");
+      await setup.flush();
+    });
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey("w");
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Save cleanup patterns?");
+    expect(readFileSync(path, "utf8")).toBe(original);
+    const newer = JSON.stringify({ maxSizeGB: 1, ignore: ["newer"], depth: 4 });
+    writeFileSync(path, newer);
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await paint();
+    expect(readFileSync(path, "utf8")).toBe(newer);
+    expect(setup.captureCharFrame()).toContain("changed since review");
+    await act(async () => {
+      setup.mockInput.pressKey("W");
+      await setup.flush();
+    });
+    await paint();
+    expect(readFileSync(path, "utf8")).toBe(newer);
+    const lines = setup.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("y Save patterns"));
+    expect(y).toBeGreaterThanOrEqual(0);
+    await act(async () => {
+      await setup.mockMouse.click(lines[y]!.indexOf("y Save patterns") + 1, y);
+      await setup.flush();
+    });
+    await paint();
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    expect(saved.maxSizeGB).toBe(1);
+    expect(saved.ignore).toEqual(["newer"]);
+    expect(saved.depth).toBe(4);
+    expect(setup.captureCharFrame()).toContain("other settings kept");
+  });
+
+  test("a scan error preempts a pattern save without saving or losing the review", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-save-preemption-"));
+    configRoots.push(root);
+    const path = join(root, ".sweeprc");
+    const original = '{"ignore":["keep"]}';
+    writeFileSync(path, original);
+    const source = createPlan();
+    source.targetDir = root;
+    let hooks: UiScanHooks | undefined;
+    const control: UiScanControl = {
+      start: async (h) => {
+        hooks = h;
+      },
+      syncPatterns: () => {},
+      setEngine: () => true,
+    };
+    const setup = await testRender(
+      <SweepApp plan={source} scan={control} initiallyScanning onDone={() => {}} />,
+      { width: 100, height: 28 },
+    );
+    teardown = () => setup.renderer.destroy();
+    const paint = async () =>
+      act(async () => {
+        await setup.flush();
+        await setup.renderOnce();
+      });
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey("p");
+      await setup.flush();
+    });
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey("w");
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Save cleanup patterns?");
+    await act(async () => {
+      hooks?.onError(new Error("scan preempted save"));
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("scan preempted save");
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await paint();
+    expect(readFileSync(path, "utf8")).toBe(original);
+    await act(async () => {
+      setup.mockInput.pressKey("n");
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Save cleanup patterns?");
+    expect(setup.captureCharFrame()).not.toContain("scan preempted save");
+    await act(async () => {
+      setup.mockInput.pressKey("n");
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).not.toContain("Save cleanup patterns?");
+    expect(readFileSync(path, "utf8")).toBe(original);
+  });
+
+  test("closing action search returns typing to the original filter without overwriting it", async () => {
+    const setup = await mount(() => {});
+    const paint = async () =>
+      act(async () => {
+        await setup.flush();
+        await setup.renderOnce();
+      });
+    await act(async () => {
+      setup.mockInput.pressKey("/");
+      await setup.flush();
+    });
+    await paint();
+    await act(async () => {
+      await setup.mockInput.typeText("node");
+      await setup.flush();
+    });
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey("k", { ctrl: true });
+      await setup.flush();
+    });
+    await paint();
+    await act(async () => {
+      await setup.mockInput.typeText("theme");
+      await setup.flush();
+    });
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey("k", { ctrl: true });
+      await setup.flush();
+    });
+    await paint();
+    await act(async () => {
+      await setup.mockInput.typeText("_");
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("node_");
+    expect(setup.captureCharFrame()).not.toContain("nodetheme");
+  });
+
   test("Ctrl+K searches actions without running background shortcuts", async () => {
     const outcomes: SweepUiOutcome[] = [];
     const setup = await mount((result) => outcomes.push(result));

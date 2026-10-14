@@ -15,3 +15,22 @@ test("mount path escapes are decoded and malformed snapshots refuse checking", (
   expect(() => assertNoMountsWithin("/fixture/a b", mounts)).toThrow("mounted filesystem");
   expect(() => mountPointsFromInfo("not mountinfo")).toThrow("mount table");
 });
+
+test("mount policy rejects ancestor mounts crossed below an explicitly selected root", () => {
+  const mounts = ["/", "/fixture", "/fixture/alias", "/other"];
+  expect(() => assertNoMountsWithin("/fixture/alias/pkg/node_modules", mounts, "/fixture")).toThrow(
+    "mounted filesystem",
+  );
+  expect(() =>
+    assertNoMountsWithin("/fixture/alias/pkg/tsconfig.tsbuildinfo", mounts, "/fixture"),
+  ).toThrow("mounted filesystem");
+  // Explicitly choosing a root on a mounted filesystem does not cross its
+  // boundary. This keeps mounted workspaces usable without traversing mounts
+  // introduced beneath the reviewed root.
+  expect(() =>
+    assertNoMountsWithin("/fixture/alias/pkg/node_modules", mounts, "/fixture/alias"),
+  ).not.toThrow();
+  expect(() =>
+    assertNoMountsWithin("/fixture/alias-other/node_modules", mounts, "/fixture"),
+  ).not.toThrow();
+});

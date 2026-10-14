@@ -62,6 +62,36 @@ describe("handleKeymap", () => {
     };
   }
 
+  test("modified letters cannot clear, queue, change mode, write config or confirm", () => {
+    for (const focus of ["list", "sidebar", "patterns"] as const) {
+      for (const name of ["s", "w", "t", "a", "x", "y", "r", "p", "o"])
+        for (const modifier of ["ctrl", "meta"] as const) {
+          const actions = makeActions();
+          actions.writeSweeprc = mock(() => {});
+          actions.requestSingleApply = mock(() => {});
+          handleKeymap(
+            makeContext({
+              state: { ...createUiState(mockPlan()), focus },
+              key: { name, [modifier]: true },
+            }),
+            actions,
+          );
+          expect(actions.mutate).not.toHaveBeenCalled();
+          expect(actions.writeSweeprc).not.toHaveBeenCalled();
+          expect(actions.requestSingleApply).not.toHaveBeenCalled();
+          expect(actions.focusPanel).not.toHaveBeenCalled();
+        }
+    }
+    for (const modifier of ["ctrl", "meta"] as const) {
+      const actions = makeActions();
+      handleKeymap(
+        makeContext({ pendingApply: true, key: { name: "y", [modifier]: true } }),
+        actions,
+      );
+      expect(actions.applyPlan).not.toHaveBeenCalled();
+    }
+  });
+
   describe("Ctrl+C", () => {
     // Raw mode means no SIGINT reaches the process, so if a mode swallows this
     // chord there is no way out of `sweep ui` at all. Every mode must honour it.

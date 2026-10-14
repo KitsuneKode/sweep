@@ -32,8 +32,10 @@ restrictions to refuse symlinked ancestors and mount crossings, including bind
 mounts. It requires `openat2` support and retains at most 16 directory handles
 and 1 MiB of traversal-frame metadata. Deep traversal reopens ancestors through
 the pinned root and rechecks their identities. A refusal during removal may
-leave a partially removed artifact. JS checks the Linux mount table before
-removal; it still uses pathname operations, so this is a preflight snapshot,
+leave a partially removed artifact. JS checks the Linux mount table for mounts
+inside a candidate and boundaries crossed below the chosen scan root. A mounted
+workspace can be chosen explicitly as that root. JS still uses pathname
+operations, so this is a preflight snapshot,
 not atomic containment. Other platforms retain their existing removal paths and
 need actual runtime qualification. A leaf name or contents can still change
 near an unlink syscall. Avoid cleaning trees whose paths or mounts are being

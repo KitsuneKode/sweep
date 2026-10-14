@@ -521,6 +521,7 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
 /** Which key hints the statusline should show. Modals own the footer too. */
 export type FooterContext =
   | { kind: "confirm" }
+  | { kind: "configSave" }
   | { kind: "help" }
   | { kind: "inspect" }
   | { kind: "visual" }
@@ -553,6 +554,10 @@ export function buildFooterHints(
   if (context.kind === "confirm") {
     // One hint per distinct action - "n cancel · esc back" says one thing twice.
     return t`${key("y")} ${hint("confirm")}${sep}${key("n/esc")} ${hint("cancel")}${sep}${key("t")} ${hint("trash")}${sep}${key("ctrl-c")} ${hint("quit")}`;
+  }
+
+  if (context.kind === "configSave") {
+    return t`${key("y")} ${hint("save patterns")}${sep}${key("n/esc")} ${hint("cancel")}`;
   }
 
   if (context.kind === "help") {

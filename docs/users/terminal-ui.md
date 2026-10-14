@@ -84,6 +84,9 @@ queued items outside that view.
 | `q` / Ctrl-C        | Quit; during apply, request cancellation           |
 
 Arrow keys are the primary navigation. Vim-style aliases are available in help.
+Modified letters do not activate plain-letter actions: Ctrl+S does not queue
+items, and Ctrl+Y does not confirm removal. Text inputs retain their editing
+chords. Ctrl+U / Ctrl+D page lists; Ctrl+C cancels active work.
 Mouse wheel moves the cursor as well as the viewport. The scrollbar supports
 seeking; an item cannot stay selected off-screen because the viewport moved alone.
 

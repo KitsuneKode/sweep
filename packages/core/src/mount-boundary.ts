@@ -36,10 +36,23 @@ export function readLinuxMountPoints(): string[] {
 }
 
 /** Snapshot preflight only; JS has no descriptor-relative recursive remover. */
-export function assertNoMountsWithin(candidate: string, mounts: readonly string[]): void {
-  if (mounts.some((mount) => isPathWithinRoot(mount, candidate)))
+export function assertNoMountsWithin(
+  candidate: string,
+  mounts: readonly string[],
+  containmentRoot?: string,
+): void {
+  if (
+    mounts.some(
+      (mount) =>
+        isPathWithinRoot(mount, candidate) ||
+        (containmentRoot !== undefined &&
+          mount !== containmentRoot &&
+          isPathWithinRoot(mount, containmentRoot) &&
+          isPathWithinRoot(candidate, mount)),
+    )
+  )
     throw Object.assign(
-      new Error("candidate contains a mounted filesystem; refusing recursive removal"),
+      new Error("candidate crosses or contains a mounted filesystem; refusing removal"),
       { code: "EOUTSIDE" },
     );
 }

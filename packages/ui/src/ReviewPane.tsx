@@ -37,6 +37,8 @@ export interface ReviewPaneProps {
   onToggleSelection: (candidateId: string) => void;
   /** Enter on the pattern pane's add line. */
   onSubmitPatternDraft: () => void;
+  onSavePatterns?: () => void;
+  onInspectPattern?: (pattern: string) => void;
   /** Measured artifact-pane viewport height for real page steps. */
   onViewportRows?: (rows: number) => void;
   onToggleScopeQueue?: (scope: string | null) => void;
@@ -56,6 +58,8 @@ export function ReviewPane({
   onFocusPanel,
   onToggleSelection,
   onSubmitPatternDraft,
+  onSavePatterns,
+  onInspectPattern,
   onViewportRows,
   scanElapsedMs,
   onToggleScopeQueue,
@@ -211,6 +215,8 @@ export function ReviewPane({
             paneWidth={artifactPaneInnerWidth}
             onMutate={onMutate}
             onSubmitDraft={onSubmitPatternDraft}
+            {...(onSavePatterns ? { onSave: onSavePatterns } : {})}
+            {...(onInspectPattern ? { onInspect: onInspectPattern } : {})}
           />
         ) : emptyScan ? (
           <ScanningPanel

@@ -393,6 +393,7 @@ export async function clean(
         if (afterBegin.dev !== current.dev || afterBegin.ino !== current.ino) {
           throw new Error("entry was replaced before the destructive operation");
         }
+        let realParent: string | undefined;
         if (containmentRequired) {
           // Fail closed: a supplied root that no longer resolves means the
           // canonical checks cannot run at all - refuse rather than follow.
@@ -433,7 +434,7 @@ export async function clean(
           // Shrink the validate-then-delete race: if an ancestor directory was
           // swapped for a symlink after revalidation, the canonical parent no
           // longer lands under the root - refuse rather than follow.
-          const realParent = realpathSync(dirname(entry.path));
+          realParent = realpathSync(dirname(entry.path));
           if (!isPathWithinRoot(realParent, realContainmentRoot)) {
             throw Object.assign(new Error(`parent resolves outside containment root`), {
               code: "EOUTSIDE",
@@ -445,8 +446,15 @@ export async function clean(
             });
           }
         }
-        if (process.platform === "linux" && nowType === "directory" && !entry.isSymlink) {
-          assertNoMountsWithin(realpathSync(entry.path), readLinuxMountPoints());
+        if (process.platform === "linux") {
+          // Resolve ancestors without following the leaf. A candidate below a
+          // same-device bind mount crosses a boundary even if the candidate
+          // itself contains no mounts. Files and links need this check too.
+          const mountedPath = join(
+            realParent ?? realpathSync(dirname(entry.path)),
+            basename(entry.path),
+          );
+          assertNoMountsWithin(mountedPath, readLinuxMountPoints(), realContainmentRoot);
         }
         if (options.trashDir && options.trashRoot) {
           const destination = await moveToTrash(

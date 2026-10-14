@@ -44,6 +44,9 @@ function normalizeKey(path: string): string {
 }
 
 function markSymlinkAliases(candidates: ScanCandidate[]): ScanCandidate[] {
+  if (!candidates.some((candidate) => candidate.isSymlink)) return candidates;
+  if (!candidates.some((candidate) => !candidate.isSymlink && candidate.entryType === "directory"))
+    return candidates;
   // Index directory candidates once under BOTH spellings - canonical and
   // lexical (the lexical key covers a dir whose own canonicalize failed and
   // fell back). The old shape was O(symlinks x dirs) with a fresh

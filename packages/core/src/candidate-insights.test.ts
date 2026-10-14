@@ -1,5 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import * as fs from "node:fs";
+import { candidateFromEntry } from "./planner.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
@@ -25,6 +27,32 @@ function candidate(
 }
 
 describe("enrichCandidates", () => {
+  test("streamed entries and alias-free collections do not resolve filesystem paths", () => {
+    const lookup = spyOn(fs, "realpathSync");
+    try {
+      const entry = candidate({
+        id: "one",
+        path: "/repo/node_modules",
+        name: "node_modules",
+        estimatedBytes: 200_000_000,
+      });
+      expect(candidateFromEntry(entry).riskTier).toBe("safe");
+      const enriched = enrichCandidates([
+        entry,
+        candidate({
+          id: "two",
+          path: "/repo/web/node_modules",
+          name: "node_modules",
+          estimatedBytes: 100,
+        }),
+      ]);
+      expect(enriched[1]?.reasons).toContain(WORKSPACE_STUB_REASON);
+      expect(lookup).not.toHaveBeenCalled();
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
   test("marks tiny peer node_modules as workspace stubs when a primary install exists", () => {
     const root = candidate({
       id: "root",

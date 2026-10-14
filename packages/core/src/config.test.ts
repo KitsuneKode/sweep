@@ -1,5 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,6 +21,7 @@ import {
   validateProjectConfigFile,
   writeInitSweeprc,
   writeProjectSweeprc,
+  projectSweeprcRevision,
   isIgnoredEntry,
 } from "./config.js";
 
@@ -209,6 +220,64 @@ describe("writeProjectSweeprc", () => {
 
     expect(writeProjectSweeprc(configPath, delta, true)).toBe("updated");
     expect(JSON.parse(readFileSync(configPath, "utf-8")).patterns).toContain("dist");
+  });
+
+  test("a reviewed update refuses changed or removed config without replacing it", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    const path = dir("project", ".sweeprc");
+    writeFileSync(path, JSON.stringify({ maxSizeGB: 3, ignore: ["keep"] }));
+    const revision = projectSweeprcRevision(path)!;
+    const newer = JSON.stringify({ maxSizeGB: 1, ignore: ["newer"] });
+    writeFileSync(path, newer);
+    expect(() => writeProjectSweeprc(path, delta, true, revision)).toThrow("changed since review");
+    expect(readFileSync(path, "utf8")).toBe(newer);
+    rmSync(path);
+    expect(() => writeProjectSweeprc(path, delta, true, revision)).toThrow("changed since review");
+  });
+
+  test("a missing config has no revision; a non-regular config still refuses", () => {
+    const path = dir(".sweeprc");
+    expect(projectSweeprcRevision(path)).toBeNull();
+    mkdirSync(path);
+    expect(() => projectSweeprcRevision(path)).toThrow("not a regular file");
+  });
+
+  test("exclusive creation preserves a config installed after the existence check", () => {
+    const path = dir(".sweeprc");
+    const newer = '{"ignore":["important"]}\n';
+    const link = fs.linkSync;
+    const publication = spyOn(fs, "linkSync").mockImplementation((source, destination) => {
+      writeFileSync(path, newer);
+      return link(source, destination);
+    });
+    try {
+      expect(writeProjectSweeprc(path, delta)).toBe("exists");
+      expect(readFileSync(path, "utf8")).toBe(newer);
+      expect(fs.readdirSync(tmpDir)).toEqual([".sweeprc"]);
+    } finally {
+      publication.mockRestore();
+    }
+  });
+
+  test.skipIf(process.platform === "win32")("an update keeps existing config permissions", () => {
+    const path = dir(".sweeprc");
+    writeFileSync(path, "{}");
+    chmodSync(path, 0o640);
+    expect(writeProjectSweeprc(path, delta, true, projectSweeprcRevision(path)!)).toBe("updated");
+    expect(statSync(path).mode & 0o777).toBe(0o640);
+  });
+
+  test("unsupported exclusive installation leaves no partial config and explains recovery", () => {
+    const path = dir(".sweeprc");
+    const publication = spyOn(fs, "linkSync").mockImplementation(() => {
+      throw Object.assign(new Error("hardlinks unsupported"), { code: "ENOTSUP" });
+    });
+    try {
+      expect(() => writeProjectSweeprc(path, delta)).toThrow("Create an empty .sweeprc");
+      expect(fs.readdirSync(tmpDir)).toEqual([]);
+    } finally {
+      publication.mockRestore();
+    }
   });
 
   test("a forced update preserves fields the pattern pane does not own", () => {

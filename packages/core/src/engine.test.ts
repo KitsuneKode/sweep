@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
+  linkSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  statSync,
   renameSync,
   symlinkSync,
   rmSync,
@@ -37,6 +39,31 @@ afterEach(() => {
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
 for (const backend of ["js", "rust"] as const) {
+  test.skipIf(backend === "rust" && !NATIVE_AVAILABLE)(
+    `${backend}: selected hardlinks do not remove or rewrite unselected copies`,
+    async () => {
+      const project = dir("project");
+      const artifact = join(project, "app-a", "node_modules");
+      const other = join(project, "app-b", "node_modules");
+      const external = dir("keep");
+      mkdirSync(artifact, { recursive: true });
+      mkdirSync(other, { recursive: true });
+      writeFileSync(external, "shared contents must survive");
+      linkSync(external, join(artifact, "shared"));
+      linkSync(external, join(other, "shared"));
+      const { plan } = await scanToPlan(project, DEFAULT_CONFIG);
+      const selected = plan.candidates.find((c) => c.path === artifact)!;
+      expect(selected).toBeDefined();
+      plan.selectedCandidateIds = [selected.id];
+      plan.summary.selectedCount = 1;
+      const { report } = await applyPlanWithBackend(plan, backend);
+      expect(report.outcomes).toEqual([{ candidateId: selected.id, status: "deleted" }]);
+      expect(existsSync(artifact)).toBe(false);
+      expect(readFileSync(external, "utf8")).toBe("shared contents must survive");
+      expect(readFileSync(join(other, "shared"), "utf8")).toBe("shared contents must survive");
+      expect(statSync(external).nlink).toBe(2);
+    },
+  );
   for (const shape of ["leaf", "interior"] as const) {
     test.skipIf(backend === "rust" && !NATIVE_AVAILABLE)(
       `${backend}: ${shape} directory link removal preserves contents outside the target`,

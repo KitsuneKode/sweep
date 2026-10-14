@@ -68,4 +68,54 @@ with tempfile.TemporaryDirectory(prefix='sweep-mounts-', dir=repo / 'target') as
             results.append({'engine': engine, 'exit': apply.returncode, 'failedCount': report['failedCount'], 'outsideSentinelPreserved': True, 'sameDeviceBindMount': True})
         finally:
             subprocess.run(['umount', str(destination)], check=True)
-print(json.dumps({'scope': 'Private Linux namespace, owned nested same-device bind mounts, actual CLI scan/save/apply', 'results': results}, indent=2))
+    for engine in ['rust', 'js']:
+        for kind in ['directory', 'file']:
+            root = owned / (engine + '-ancestor-' + kind)
+            outside = owned / (engine + '-ancestor-outside-' + kind)
+            alias = root / 'alias'
+            alias.mkdir(parents=True)
+            (outside / 'pkg').mkdir(parents=True)
+            (outside / 'keep').write_text('outside sentinel')
+            name = 'node_modules' if kind == 'directory' else 'tsconfig.tsbuildinfo'
+            source = outside / 'pkg' / name
+            if kind == 'directory':
+                source.mkdir()
+                (source / 'payload').write_text('selected payload')
+            else:
+                source.write_text('selected payload')
+            subprocess.run(['mount', '--bind', str(outside), str(alias)], check=True)
+            try:
+                env = {**os.environ, 'SWEEP_CONFIG_DIR': str(owned / 'config'),
+                       'SWEEP_ENGINE_PATH': str(repo / 'target/release/sweep-engine')}
+                cli = ['node', str(repo / 'apps/cli/dist/sweep.js')]
+                def scan_apply(target, label):
+                    scan = subprocess.run(cli + ['scan', str(target), '--engine', engine, '--json'],
+                                          env=env, capture_output=True, text=True, check=True)
+                    plan = owned / (engine + '-' + kind + '-' + label + '.json')
+                    plan.write_text(scan.stdout)
+                    parsed = json.loads(scan.stdout)
+                    if len(parsed['selectedCandidateIds']) != 1:
+                        raise RuntimeError('ancestor fixture did not select one candidate: ' + scan.stdout)
+                    return subprocess.run(cli + ['apply', '--plan', str(plan), '--engine', engine, '--yes', '--json'],
+                                          env=env, capture_output=True, text=True)
+                refused = scan_apply(root, 'crossing')
+                payload = source / 'payload' if kind == 'directory' else source
+                if not payload.exists() or payload.read_text() != 'selected payload':
+                    raise RuntimeError(engine + ' crossed an ancestor bind mount for ' + kind)
+                report = json.loads(refused.stdout)
+                if refused.returncode == 0 or report.get('failedCount') != 1:
+                    raise RuntimeError(engine + ' did not refuse ancestor mount: ' + refused.stdout)
+                # A mounted workspace may be chosen explicitly as the root.
+                # Only a mount crossed below that root must refuse removal.
+                allowed = scan_apply(alias / 'pkg', 'explicit-root')
+                if allowed.returncode != 0 or json.loads(allowed.stdout).get('deletedCount') != 1 or source.exists():
+                    raise RuntimeError(engine + ' refused explicit mounted root: ' + allowed.stderr + allowed.stdout)
+                if (outside / 'keep').read_text() != 'outside sentinel':
+                    raise RuntimeError(engine + ' changed an unselected sentinel')
+                results.append({'engine': engine, 'candidateKind': kind,
+                                'ancestorSameDeviceMountRefused': True,
+                                'explicitMountedRootAllowed': True,
+                                'outsideSentinelPreserved': True})
+            finally:
+                subprocess.run(['umount', str(alias)], check=True)
+print(json.dumps({'scope': 'Private Linux namespace, owned nested/ancestor same-device bind mounts and explicit mounted roots, actual CLI scan/save/apply', 'results': results}, indent=2))

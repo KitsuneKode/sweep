@@ -35,6 +35,7 @@ export interface KeyInput {
   ctrl?: boolean;
   shift?: boolean;
   meta?: boolean;
+  preventDefault?: () => void;
 }
 
 const DEFAULT_PAGE_ROWS = 12;
@@ -163,8 +164,10 @@ export interface KeymapActions {
   abortApply?: () => void;
   /** Queue or unqueue the scope under the sidebar cursor, then report skips. */
   applyScopeToggle?: () => void;
+  /** Show the full pattern under the cursor. */
+  inspectPattern?: () => void;
   /** Persist the pattern pane's edits as a project .sweeprc (w key). */
-  writeSweeprc?: (overwrite: boolean) => void;
+  writeSweeprc?: () => void;
   /** Commit the add-pattern draft (enter on the pattern input in add mode). */
   submitPatternDraft?: () => void;
   /** Flash a one-line notice for a keypress that deliberately does nothing. */
@@ -209,6 +212,7 @@ export interface KeymapContext {
 /** Dispatch keyboard input by modal state and focused panel. */
 export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   const { key, state, showHelp, pendingApply, showSidebar, scanError, inspectOpen } = ctx;
+  const isEnter = key.name === "return" || key.name === "enter";
 
   // Quit is checked before every other branch. The terminal is in raw mode, so
   // no SIGINT is generated for us: if a modal or the filter input swallows this
@@ -224,6 +228,21 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     }
     actions.finalize({ type: "abort" });
     return;
+  }
+
+  // Modifiers never alias a printable command. Input editing keeps its native
+  // chords; elsewhere only the explicitly documented navigation/review chords run.
+  if (key.ctrl || key.meta) {
+    const paneOwnsInput = !ctx.applying && !pendingApply && !showHelp && !inspectOpen && !scanError;
+    const editing = paneOwnsInput && (state.focus === "search" || state.focus === "patternInput");
+    const navigation =
+      paneOwnsInput &&
+      !key.meta &&
+      key.ctrl &&
+      (["u", "d"].includes(key.name ?? "") ||
+        (isEnter && (state.focus === "list" || state.focus === "sidebar")));
+    const confirmHint = pendingApply && !key.meta && isEnter;
+    if (!editing && !navigation && !confirmHint) return;
   }
 
   // Text inputs retain printable m. Overlays and running work may pause their
@@ -276,7 +295,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (pendingApply) {
-    if (key.name === "return" || key.name === "enter") {
+    if (isEnter) {
       actions.notify?.("Press y to confirm, or n / Esc to cancel");
       return;
     }
@@ -329,7 +348,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.requestInspectedApply?.();
       return;
     }
-    if (key.name === "i" || key.name === "escape" || key.name === "q" || key.name === "return") {
+    if (key.name === "i" || key.name === "escape" || key.name === "q" || isEnter) {
       actions.setInspect?.(false);
     }
     return;
@@ -337,20 +356,23 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
 
   if (state.focus === "search") {
     if (key.name === "escape") {
+      key.preventDefault?.();
       actions.mutate((s) => setFilter(s, ""));
       actions.focusPanel("list");
       return;
     }
     if (
-      key.name === "return" ||
+      isEnter ||
       key.name === "down" ||
       (key.name === "n" && key.ctrl) ||
       (key.name === "j" && key.ctrl)
     ) {
+      key.preventDefault?.();
       actions.focusPanel("list");
       return;
     }
     if (isTab || isShiftTab) {
+      key.preventDefault?.();
       actions.focusPanel(nextFocus(state.focus, showSidebar, isShiftTab));
     }
     return;
@@ -360,10 +382,12 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   // the search box, keystrokes must never reach the artifact actions below.
   if (state.focus === "patternInput") {
     if (key.name === "escape") {
+      key.preventDefault?.();
       actions.mutate((s) => escapeStep(s) ?? s);
       return;
     }
-    if (key.name === "return") {
+    if (isEnter) {
+      key.preventDefault?.();
       // Same owner as the search box: the keymap, not the <input>'s onSubmit.
       // submitPatternDraft is idempotent if the input also emits onSubmit.
       if (state.patternInputMode === "add") {
@@ -374,6 +398,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (isTab || isShiftTab) {
+      key.preventDefault?.();
       actions.mutate((s) => setPatternInput(s, null));
       actions.focusPanel(nextFocus("patterns", showSidebar, isShiftTab));
     }
@@ -479,7 +504,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   // that isn't rendered.
   if (
     (state.focus === "list" || state.focus === "sidebar") &&
-    ((key.ctrl && (key.name === "return" || key.name === "enter")) || key.name === "ctrl+enter")
+    ((key.ctrl && isEnter) || key.name === "ctrl+enter")
   ) {
     actions.requestApply();
     return;
@@ -529,7 +554,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.mutate((s) => moveSidebarCursor(s, 1));
       return;
     }
-    if (key.name === "return" || key.name === "enter") {
+    if (isEnter) {
       actions.mutate((s) => applySidebarScope(s));
       return;
     }
@@ -551,6 +576,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (state.focus === "patterns") {
+    if (key.name === "i") {
+      actions.inspectPattern?.();
+      return;
+    }
     if (isCtrlU) {
       actions.mutate((s) => setPatternIndex(s, s.patternIndex - pageRows(ctx)));
       return;
@@ -575,7 +604,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.mutate((s) => setPatternIndex(s, s.patternIndex + 1));
       return;
     }
-    if (key.name === "space" || key.name === "return") {
+    if (key.name === "space" || isEnter) {
       const pattern = patternAtCursor(actions.readState?.() ?? state);
       if (pattern) actions.mutate((s) => togglePattern(s, pattern));
       return;
@@ -598,12 +627,8 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     // Shift+W is checked before plain w (same convention as S/s above).
-    if (key.name === "W" || (key.name === "w" && key.shift)) {
-      actions.writeSweeprc?.(true);
-      return;
-    }
-    if (key.name === "w") {
-      actions.writeSweeprc?.(false);
+    if (key.name === "w" || key.name === "W") {
+      actions.writeSweeprc?.();
       return;
     }
     // Anything else is swallowed: pane-local focus means artifact keys must
@@ -665,7 +690,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
         break;
     }
 
-    if (key.name === "return" || key.name === "enter") {
+    if (isEnter) {
       // Mouse clicks can park the cursor on a group header - enter there means
       // "fold this group" (same as space/l), never the destructive dialog.
       // Read post-commit rows: a same-burst cursor move must not misclassify

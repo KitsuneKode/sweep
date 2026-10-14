@@ -11,7 +11,11 @@ import { basename, join } from "node:path";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { isColdRequested } from "@kitsunekode/sweep-core/cold";
-import { writeProjectSweeprc } from "@kitsunekode/sweep-core/config";
+import {
+  writeProjectSweeprc,
+  projectSweeprcRevision,
+  type ProjectSweeprcDelta,
+} from "@kitsunekode/sweep-core/config";
 import { assertSafePattern, isApplyRefusedError } from "@kitsunekode/sweep-core/guardrails";
 import {
   Component,
@@ -65,6 +69,7 @@ import {
   setScanning,
   setScanCurrentDir,
   sweeprcPayload,
+  patternAtCursor,
   toggleSelectionById,
   toggleSidebarScopeSelection,
   toggleScopeSelection,
@@ -192,7 +197,7 @@ const HELP_QUEUE: ReadonlyArray<HelpRow> = [
   ["v", "visual range - space queues"],
   ["a · s", "queue visible · safe"],
   ["u / U", "clear entire queue / visible only"],
-  ["x · d", "delete just this row"],
+  ["x · d", "review this item’s removal"],
   ["ctrl+enter", "review queue (always confirms)"],
 ];
 
@@ -212,17 +217,17 @@ const HELP_PATTERNS: ReadonlyArray<HelpRow> = [
   ["space", "toggle pattern"],
   ["/", "filter the catalog"],
   ["a · d", "add · remove custom"],
-  ["w / W", "write .sweeprc (W force)"],
+  ["w / W", "save patterns (review existing config)"],
   ["r", "rescan with new set"],
 ];
 
 const HELP_APP: ReadonlyArray<HelpRow> = [
   [null, "app"],
-  ["tab", "scopes - space queues scope"],
+  ["tab", "switch panes"],
   ["t", "theme dark · light · auto"],
   ["m", "pause / resume activity animation"],
   ["E", "swap scan engine js · rust"],
-  ["q · ctrl-c", "quit · quit now"],
+  ["q · ctrl-c", "quit · stop active cleanup"],
 ];
 
 // Two columns split as move+queue+app | view+patterns so both land near the
@@ -693,6 +698,15 @@ export function SweepApp({
   );
   const [showHelp, setShowHelpState] = useState(false);
   const [showMenu, setShowMenuState] = useState(false);
+  type ConfigSave = { path: string; delta: ProjectSweeprcDelta; revision: string };
+  const [configSave, setConfigSave] = useState<ConfigSave | null>(null);
+  const configSaveRef = useRef<ConfigSave | null>(null);
+  const configSaveReadyRef = useRef(false);
+  const [patternInfo, setPatternInfo] = useState<string | null>(null);
+  useEffect(() => {
+    configSaveReadyRef.current = configSave !== null;
+  }, [configSave]);
+
   const [folderInfo, setFolderInfo] = useState<{
     path: string;
     count: number;
@@ -760,7 +774,9 @@ export function SweepApp({
     | "scanError"
     | "applying"
     | "menu"
-    | "folderInfo";
+    | "folderInfo"
+    | "configSave"
+    | "patternInfo";
   const openModalsRef = useRef(new Set<ModalKind>());
   const openModal = (kind: ModalKind): boolean => {
     if (openModalsRef.current.size > 0) return false;
@@ -1468,26 +1484,60 @@ export function SweepApp({
     setNotice(`added "${sanitizeTerminalText(draft)}" - r rescans with it`);
   }, []);
 
-  /**
-   * `w` in the pattern pane persists the current toggle set as a project
-   * .sweeprc. An existing file is never clobbered silently - plain w reports
-   * it, shift-W overwrites deliberately.
-   */
-  const writeSweeprc = useCallback((overwrite: boolean) => {
-    const s = readFreshState();
-    const configPath = join(s.targetDir, ".sweeprc");
+  const closeConfigSave = () => {
+    configSaveReadyRef.current = false;
+    configSaveRef.current = null;
+    closeModal("configSave");
+    setConfigSave(null);
+  };
+  const confirmConfigSave = () => {
+    const captured = configSaveRef.current;
+    if (!captured || !configSaveReadyRef.current || !openModalsRef.current.has("configSave"))
+      return;
+    if (renderer.width < 40 || renderer.height < 12) return;
+    closeConfigSave();
     try {
-      const result = writeProjectSweeprc(configPath, sweeprcPayload(s), overwrite);
-      if (result === "exists") {
-        setNotice(".sweeprc already exists - shift-W overwrites it");
-      } else {
-        setNotice(`${result === "updated" ? "updated" : "wrote"} .sweeprc`);
-      }
+      writeProjectSweeprc(captured.path, captured.delta, true, captured.revision);
+      setNotice("Saved patterns to .sweeprc · other settings kept");
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      setNotice(`couldn't write .sweeprc: ${sanitizeTerminalText(reason)}`);
+      setNotice(
+        `Patterns not saved · ${sanitizeTerminalText(error instanceof Error ? error.message : String(error))}`,
+      );
     }
-  }, []);
+  };
+  const writeSweeprc = () => {
+    if (openModalsRef.current.size > 0) return;
+    const s = readFreshState();
+    const path = join(s.targetDir, ".sweeprc");
+    const delta = sweeprcPayload(s);
+    try {
+      const result = writeProjectSweeprc(path, delta);
+      if (result === "exists") {
+        const revision = projectSweeprcRevision(path);
+        if (revision === null) {
+          setNotice("Config changed; choose Save again to review it");
+          return;
+        }
+        if (!openModal("configSave")) return;
+        const captured = { path, delta: structuredClone(delta), revision };
+        configSaveReadyRef.current = false;
+        configSaveRef.current = captured;
+        setConfigSave(captured);
+      } else setNotice("Saved patterns to .sweeprc");
+    } catch (error) {
+      setNotice(
+        `Patterns not saved · ${sanitizeTerminalText(error instanceof Error ? error.message : String(error))}`,
+      );
+    }
+  };
+  const inspectPattern = (pattern?: string) => {
+    const selected = pattern ?? patternAtCursor(readFreshState());
+    if (selected && openModal("patternInfo")) setPatternInfo(selected);
+  };
+  const closePatternInfo = () => {
+    closeModal("patternInfo");
+    setPatternInfo(null);
+  };
 
   const closeFolderInfo = () => {
     closeModal("folderInfo");
@@ -1499,6 +1549,7 @@ export function SweepApp({
     setInspect(false);
     requestSingleApply(id);
   };
+  const editingPatterns = state.focus === "patterns" || state.focus === "patternInput";
   const menuCommands = [
     {
       label: `Review queue (${summary.selectedCount})`,
@@ -1510,7 +1561,7 @@ export function SweepApp({
       label: "Inspect current item",
       shortcut: "i",
       run: () => setInspect(true),
-      disabled: !getCurrentCandidate(state),
+      disabled: editingPatterns || !getCurrentCandidate(state),
     },
     {
       label: "Review removal of current item",
@@ -1519,6 +1570,7 @@ export function SweepApp({
       disabled:
         state.scanning ||
         state.scanIncomplete ||
+        editingPatterns ||
         !getCurrentCandidate(state) ||
         getCurrentCandidate(state)?.riskTier === "blocked",
     },
@@ -1526,7 +1578,7 @@ export function SweepApp({
       label: "Queue safe items in this view",
       shortcut: "s",
       run: () => mutate(selectSafeOnly),
-      disabled: false,
+      disabled: editingPatterns,
     },
     {
       label: "Clear whole queue",
@@ -1538,13 +1590,13 @@ export function SweepApp({
       label: "Clear queue in this view",
       shortcut: "Shift+U",
       run: () => mutate(clearVisibleSelection),
-      disabled: summary.visibleSelectedCount === 0,
+      disabled: editingPatterns || summary.visibleSelectedCount === 0,
     },
     {
       label: "Queue safe and caution items in this view",
       shortcut: "a",
       run: () => mutate((s) => selectVisible(s, false)),
-      disabled: false,
+      disabled: editingPatterns,
     },
     { label: "Filter items", shortcut: "/", run: () => focusPanel("search"), disabled: false },
     {
@@ -1582,13 +1634,26 @@ export function SweepApp({
       label: "Copy current item path",
       shortcut: "y",
       run: yankPath,
-      disabled: !getCurrentCandidate(state),
+      disabled: editingPatterns || !getCurrentCandidate(state),
     },
     {
       label: "Save queue as a plan",
       shortcut: "Shift+S",
       run: exportPlan,
       disabled: state.scanning || state.scanIncomplete || summary.selectedCount === 0,
+    },
+    {
+      label: "Save cleanup patterns",
+      shortcut: "w",
+      run: writeSweeprc,
+      disabled:
+        !editingPatterns || (state.focus === "patternInput" && state.patternInputMode === "add"),
+    },
+    {
+      label: "Inspect current pattern",
+      shortcut: "i",
+      run: () => inspectPattern(),
+      disabled: !editingPatterns || !patternAtCursor(state),
     },
     { label: "Scan again", shortcut: "r", run: requestRescan, disabled: !scan },
     {
@@ -1644,7 +1709,24 @@ export function SweepApp({
   };
 
   useKeyboard((key) => {
-    if (openModalsRef.current.has("folderInfo")) {
+    const preempted =
+      openModalsRef.current.has("scanError") || openModalsRef.current.has("applying");
+    if (
+      !preempted &&
+      (openModalsRef.current.has("configSave") || openModalsRef.current.has("patternInfo"))
+    ) {
+      key.preventDefault();
+      const saving = openModalsRef.current.has("configSave");
+      const close = saving ? closeConfigSave : closePatternInfo;
+      if ((key.name === "c" && key.ctrl) || key.name === "ctrl+c") {
+        noteCtrlCHandled();
+        close();
+        finalize({ type: "abort" });
+      } else if (["escape", "q", "n"].includes(key.name)) close();
+      else if (saving && key.name === "y" && !key.ctrl && !key.meta) confirmConfigSave();
+      return;
+    }
+    if (!preempted && openModalsRef.current.has("folderInfo")) {
       key.preventDefault();
       if ((key.name === "c" && key.ctrl) || key.name === "ctrl+c") {
         noteCtrlCHandled();
@@ -1653,13 +1735,16 @@ export function SweepApp({
       } else if (["escape", "q"].includes(key.name)) closeFolderInfo();
       return;
     }
-    if (openModalsRef.current.has("menu")) {
+    if (!preempted && openModalsRef.current.has("menu")) {
       if ((key.name === "c" && key.ctrl) || key.name === "ctrl+c") {
         key.preventDefault();
         noteCtrlCHandled();
         setMenu(false);
         finalize({ type: "abort" });
-      } else if (["escape", "f2"].includes(key.name) || (key.ctrl && key.name === "k")) {
+      } else if (
+        ["escape", "f2"].includes(key.name) ||
+        (key.ctrl && !key.meta && key.name === "k")
+      ) {
         key.preventDefault();
         setMenu(false);
       } else if (
@@ -1679,7 +1764,10 @@ export function SweepApp({
       }
       return;
     }
-    if ((key.name === "f2" || (key.ctrl && key.name === "k")) && openModalsRef.current.size === 0) {
+    if (
+      (key.name === "f2" || (key.ctrl && !key.meta && key.name === "k")) &&
+      openModalsRef.current.size === 0
+    ) {
       key.preventDefault();
       setMenu(true);
       return;
@@ -1728,6 +1816,7 @@ export function SweepApp({
         applyVisual,
         applyScopeToggle,
         writeSweeprc,
+        inspectPattern: () => inspectPattern(),
         submitPatternDraft,
         requestSingleApply,
         requestInspectedApply: reviewInspected,
@@ -1841,13 +1930,17 @@ export function SweepApp({
         ? { kind: "scanError" }
         : pendingApply
           ? { kind: "confirm" }
-          : showInspect
-            ? { kind: "inspect" }
-            : showHelp
+          : configSave
+            ? { kind: "configSave" }
+            : patternInfo !== null || folderInfo !== null || showMenu
               ? { kind: "help" }
-              : visualActive
-                ? { kind: "visual" }
-                : { kind: "pane", focus: state.focus };
+              : showInspect
+                ? { kind: "inspect" }
+                : showHelp
+                  ? { kind: "help" }
+                  : visualActive
+                    ? { kind: "visual" }
+                    : { kind: "pane", focus: state.focus };
 
   const footerContent = buildFooterHints(footerContext, tokens, {
     ...(dryRun ? { dryRun: true } : {}),
@@ -1939,6 +2032,8 @@ export function SweepApp({
             onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
             onToggleScopeQueue={applyScopeToggle}
             onSubmitPatternDraft={submitPatternDraft}
+            onSavePatterns={writeSweeprc}
+            onInspectPattern={inspectPattern}
             onViewportRows={(rows) => {
               viewportRowsRef.current = rows;
             }}
@@ -2046,6 +2141,80 @@ export function SweepApp({
                 fg={tokens.warning}
                 wrapMode="word"
               />
+            ) : null}
+          </Modal>
+        ) : null}
+        {patternInfo !== null ? (
+          <Modal
+            tokens={tokens}
+            title=" Pattern details "
+            width={60}
+            footer={<ActionButton tokens={tokens} label="Esc Close" onPress={closePatternInfo} />}
+          >
+            <text content={sanitizeTerminalText(patternInfo)} fg={tokens.text} wrapMode="word" />
+            <text
+              content="Matches artifact names inside the scanned tree."
+              fg={tokens.textMuted}
+              wrapMode="word"
+            />
+          </Modal>
+        ) : null}
+        {configSave ? (
+          <Modal
+            tokens={tokens}
+            title=" Save cleanup patterns? "
+            width={60}
+            height={20}
+            footer={
+              <box flexDirection="row" flexWrap="wrap" gap={1}>
+                <ActionButton
+                  tokens={tokens}
+                  label="y Save patterns"
+                  disabled={dimensions.width < 40 || dimensions.height < 12}
+                  onPress={confirmConfigSave}
+                />
+                <ActionButton tokens={tokens} label="n / Esc Cancel" onPress={closeConfigSave} />
+              </box>
+            }
+          >
+            <text
+              content={sanitizeTerminalText(configSave.path)}
+              fg={tokens.text}
+              wrapMode="word"
+            />
+            <text
+              content="Updates patterns and disabledPatterns only. Other settings are kept."
+              fg={tokens.textMuted}
+              wrapMode="word"
+            />
+            <text content="Extra patterns:" fg={tokens.text} />
+            {configSave.delta.patterns.length ? (
+              configSave.delta.patterns.map((pattern) => (
+                <text
+                  key={`on-${pattern}`}
+                  content={sanitizeTerminalText(pattern)}
+                  fg={tokens.textSecondary}
+                  wrapMode="word"
+                />
+              ))
+            ) : (
+              <text content="None; built-in defaults remain." fg={tokens.textSecondary} />
+            )}
+            <text content="Disabled defaults:" fg={tokens.text} />
+            {configSave.delta.disabledPatterns.length ? (
+              configSave.delta.disabledPatterns.map((pattern) => (
+                <text
+                  key={`off-${pattern}`}
+                  content={sanitizeTerminalText(pattern)}
+                  fg={tokens.textSecondary}
+                  wrapMode="word"
+                />
+              ))
+            ) : (
+              <text content="None." fg={tokens.textSecondary} />
+            )}
+            {dimensions.width < 40 || dimensions.height < 12 ? (
+              <text content="Resize to 40 columns and 12 rows to review." fg={tokens.warning} />
             ) : null}
           </Modal>
         ) : null}

@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import {
   existsSync,
+  linkSync,
   constants,
   closeSync,
   fstatSync,
@@ -263,14 +265,27 @@ export interface ProjectSweeprcDelta {
   disabledPatterns: string[];
 }
 
+/** Bounded, no-follow content revision for an explicit pattern-save review. */
+export function projectSweeprcRevision(configPath: string): string | null {
+  try {
+    return createHash("sha256").update(readConfigText(configPath)).digest("hex");
+  } catch (error) {
+    const cause = error instanceof ConfigParseError ? error.cause : error;
+    if ((cause as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 /**
  * Write a project `.sweeprc` holding the pattern delta.
  *
  * Safety contract - same as writeInitSweeprc, plus no-clobber by default:
  * - refuses to write through a symlink (dangling included),
  * - returns "exists" unless `force` is passed (the TUI asks first),
- * - writes to a sibling temp file then renames, so a crash mid-write never
- *   leaves a torn config,
+ * - prepares a complete sibling file, then installs it exclusively for new
+ *   files or renames it over an explicitly reviewed existing file,
+ * - checks content revisions before updating; this detects stale reviews,
+ *   but does not lock out unrelated editors racing the final rename,
  * - read-modify-write on overwrite: the pane only owns `patterns` and
  *   `disabledPatterns`, so an existing file's `ignore`, `maxSizeGB`, `depth`,
  *   or unrecognized fields are preserved verbatim instead of silently
@@ -281,8 +296,10 @@ export function writeProjectSweeprc(
   configPath: string,
   delta: ProjectSweeprcDelta,
   force = false,
+  expectedRevision?: string,
 ): "created" | "exists" | "updated" {
   let existed = false;
+  let mode = 0o600;
   try {
     const stat = lstatSync(configPath);
     if (stat.isSymbolicLink()) {
@@ -290,7 +307,9 @@ export function writeProjectSweeprc(
         `${configPath} is a symlink - refusing to write through it. Remove it first.`,
       );
     }
+    if (!stat.isFile()) throw new ConfigParseError(`${configPath} is not a regular file`);
     existed = true;
+    mode = stat.mode & 0o777;
     if (!force) return "exists";
   } catch (err) {
     if (err instanceof ConfigParseError) throw err;
@@ -300,11 +319,16 @@ export function writeProjectSweeprc(
 
   // Start from whatever the existing file holds so overwrite only ever
   // replaces the two fields the pattern editor owns.
+  if (!existed && expectedRevision !== undefined)
+    throw new ConfigParseError(".sweeprc changed since review. Review the pattern save again.");
   const doc: Record<string, unknown> = {};
+  let originalRevision: string | null = null;
   if (existed) {
     let raw: unknown;
     try {
-      raw = JSON.parse(readConfigText(configPath));
+      const text = readConfigText(configPath);
+      originalRevision = createHash("sha256").update(text).digest("hex");
+      raw = JSON.parse(text);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new ConfigParseError(
@@ -312,6 +336,8 @@ export function writeProjectSweeprc(
         { cause: err },
       );
     }
+    if (expectedRevision !== undefined && originalRevision !== expectedRevision)
+      throw new ConfigParseError(".sweeprc changed since review. Review the pattern save again.");
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       throw new ConfigParseError(
         `Refusing to overwrite ${configPath}: existing config must be a JSON object`,
@@ -345,6 +371,7 @@ export function writeProjectSweeprc(
       writeFileSync(candidatePath, `${JSON.stringify(doc, null, 2)}\n`, {
         encoding: "utf-8",
         flag: "wx",
+        mode,
       });
       tmpPath = candidatePath;
       break;
@@ -356,7 +383,23 @@ export function writeProjectSweeprc(
     throw new ConfigParseError(`could not create a temp file next to ${configPath}`);
   }
   try {
-    renameSync(tmpPath, configPath);
+    if (existed) {
+      if (projectSweeprcRevision(configPath) !== originalRevision)
+        throw new ConfigParseError(".sweeprc changed while saving. Review the pattern save again.");
+      renameSync(tmpPath, configPath);
+    } else {
+      // Installing a complete file must not replace one created since the
+      // initial existence check. Hard-link publication is atomic and exclusive.
+      try {
+        linkSync(tmpPath, configPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") return "exists";
+        throw new ConfigParseError(
+          "Cannot create .sweeprc exclusively on this filesystem. Create an empty .sweeprc in your editor, then save patterns again.",
+          { cause: error },
+        );
+      }
+    }
   } finally {
     try {
       unlinkSync(tmpPath);
