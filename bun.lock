@@ -21,7 +21,7 @@
     },
     "apps/cli": {
       "name": "@kitsunekode/sweep",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "bin": {
         "sweep": "dist/sweep.js",
       },
@@ -40,11 +40,11 @@
         "typescript": "catalog:",
       },
       "optionalDependencies": {
-        "@kitsunekode/sweep-engine-darwin-64": "0.3.1",
-        "@kitsunekode/sweep-engine-darwin-arm64": "0.3.1",
-        "@kitsunekode/sweep-engine-linux-64": "0.3.1",
-        "@kitsunekode/sweep-engine-linux-arm64": "0.3.1",
-        "@kitsunekode/sweep-engine-windows-64": "0.3.1",
+        "@kitsunekode/sweep-engine-darwin-64": "0.4.0",
+        "@kitsunekode/sweep-engine-darwin-arm64": "0.4.0",
+        "@kitsunekode/sweep-engine-linux-64": "0.4.0",
+        "@kitsunekode/sweep-engine-linux-arm64": "0.4.0",
+        "@kitsunekode/sweep-engine-windows-64": "0.4.0",
       },
       "peerDependencies": {
         "@opentui/core": "^0.2.16",

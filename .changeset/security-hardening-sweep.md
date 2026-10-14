@@ -1,7 +1,0 @@
----
-"@kitsunekode/sweep": patch
----
-
-Harden the destructive and config paths: trash moves now verify the real destination stays inside the real trash dir (a preexisting symlink in the layout can no longer redirect a rename outside), `.sweeprc` must be a bounded regular file (a FIFO no longer hangs the scan, oversized configs are rejected), pattern strings and merged lists are length-bounded so a hostile repo config cannot burn scan CPU, `du` invocation uses `--` so dash-leading paths cannot be parsed as options on either engine, and the Rust engine subprocess output is byte-capped. Release binaries now ship `.sha256` sidecars and `install.sh` verifies the checksum before running.
-
-Apply now treats plan files as untrusted input on both engines: the plan target itself, dot-segment/case-variant spellings of it, and paths inside VCS metadata (`.git`, `.svn`, `.hg`, `.bzr`) are refused per entry as `protected_path` failures instead of being trusted to the plan's `riskTier`, while legitimate entries still apply and `--json` always emits a report. Confirmation prompts and declines moved to stderr so `--json` stdout stays machine-readable, `sweep init --force` refuses to write through a symlinked `.sweeprc`, symlink candidates report link size rather than target size, `?` is a single-character glob on both engines, and the engine subprocess reads a bounded stdin. Dev runs now resolve the workspace `target/` build before the installed optional engine package, so local Rust changes are what tests actually exercise.
