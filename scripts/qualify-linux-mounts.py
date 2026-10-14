@@ -75,6 +75,11 @@ with tempfile.TemporaryDirectory(prefix='sweep-mounts-', dir=repo / 'target') as
             alias = root / 'alias'
             alias.mkdir(parents=True)
             (outside / 'pkg').mkdir(parents=True)
+            # CI may use a privileged private namespace when user namespaces
+            # are disabled. Keep discovery on fixture-owned configs instead of
+            # inheriting the checkout's differently owned project config.
+            (root / '.sweeprc').write_text('{}')
+            (outside / 'pkg' / '.sweeprc').write_text('{}')
             (outside / 'keep').write_text('outside sentinel')
             name = 'node_modules' if kind == 'directory' else 'tsconfig.tsbuildinfo'
             source = outside / 'pkg' / name
@@ -90,7 +95,9 @@ with tempfile.TemporaryDirectory(prefix='sweep-mounts-', dir=repo / 'target') as
                 cli = ['node', str(repo / 'apps/cli/dist/sweep.js')]
                 def scan_apply(target, label):
                     scan = subprocess.run(cli + ['scan', str(target), '--engine', engine, '--json'],
-                                          env=env, capture_output=True, text=True, check=True)
+                                          env=env, capture_output=True, text=True, timeout=30)
+                    if scan.returncode != 0:
+                        raise RuntimeError(engine + ' ' + label + ' scan failed: ' + scan.stderr)
                     plan = owned / (engine + '-' + kind + '-' + label + '.json')
                     plan.write_text(scan.stdout)
                     parsed = json.loads(scan.stdout)

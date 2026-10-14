@@ -208,6 +208,21 @@ describe("writeProjectSweeprc", () => {
     expect(loaded.patterns).not.toContain("coverage");
   });
 
+  test("a new nested pattern config preserves inherited project settings", () => {
+    mkdirSync(dir("project", "nested"), { recursive: true });
+    const parent = dir("project", ".sweeprc");
+    const original = JSON.stringify({ ignore: ["keep"], maxSizeGB: 2, depth: 3 });
+    writeFileSync(parent, original);
+    const before = loadConfig(dir("project", "nested"));
+    expect(writeProjectSweeprc(dir("project", "nested", ".sweeprc"), delta)).toBe("created");
+    const after = loadConfig(dir("project", "nested"));
+    expect(after.ignore).toEqual(before.ignore);
+    expect(after.maxSizeGB).toBe(before.maxSizeGB);
+    expect(after.depth).toBe(before.depth);
+    expect(after.patterns).toContain("dist");
+    expect(readFileSync(parent, "utf8")).toBe(original);
+  });
+
   test("refuses to clobber an existing file without force; force updates", () => {
     mkdirSync(dir("project"), { recursive: true });
     writeConfig(dir("project"), { maxSizeGB: 3 });

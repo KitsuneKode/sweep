@@ -344,6 +344,11 @@ export function writeProjectSweeprc(
       );
     }
     Object.assign(doc, raw);
+  } else {
+    // A new nearest-project config shadows the ancestor project layer.
+    // Carry its fields forward so saving patterns cannot silently drop
+    // inherited ignores, depth or a byte ceiling on the next invocation.
+    Object.assign(doc, findProjectConfig(dirname(configPath)) ?? {});
   }
 
   // Delta fields: absent means "use defaults", so an empty edited set removes

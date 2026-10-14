@@ -84,6 +84,8 @@ In the UI, `p` opens the catalog. Names focus a pattern; its checkbox toggles it
 Choose **Details** to read a long pattern, **Add** to enter one, or **Save** (`w`)
 to save your edits to `.sweeprc`. If the file exists, Sweep asks you to review
 the pattern changes before saving. `W` opens the same review. Other settings,
-such as ignores, scan depth and byte limits, are kept. If another editor changes
+such as ignores, scan depth and byte limits, are kept. A new nested config also
+keeps settings inherited from its nearest ancestor project config, which remains
+unchanged. If another editor changes
 the file after review, Sweep refuses the save; review it again. This check does
 not lock the file against an editor racing the final replacement.
