@@ -58,6 +58,8 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
 
     try:
         wait_until(lambda: "scan complete:" in text() and "node_modules" in text())
+        os.write(master, b"s")
+        wait_until(lambda: "Review queue (2)" in text())
         output.clear()
         os.write(master, b"i")
         # Background rows can repaint in the same frame. Pin the inspector's

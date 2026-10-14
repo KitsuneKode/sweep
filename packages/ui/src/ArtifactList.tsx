@@ -333,7 +333,8 @@ const HeaderRow = memo(function HeaderRow({
       flexShrink={0}
       overflow="hidden"
       {...(rowBg ? { backgroundColor: rowBg } : {})}
-      onMouseDown={() => {
+      onMouseDown={(event: MouseEvent) => {
+        if (event.button !== 0 || event.isDragging) return;
         onToggleGroup?.(row.groupKey);
         onSetCursor?.(index);
       }}
@@ -384,6 +385,8 @@ const ItemRow = memo(function ItemRow({
   onToggleSelection,
   onHover,
 }: ItemRowProps) {
+  const element = useRef<BoxRenderable | null>(null);
+  const queuePress = useRef(false);
   const rowBg = isCurrent
     ? focused
       ? tokens.selectionBg
@@ -402,19 +405,38 @@ const ItemRow = memo(function ItemRow({
     // `onMouseLeave` event in OpenTUI; `out` is it.
     onMouseOver: () => onHover(index, true),
     onMouseMove: () => onHover(index, true),
-    onMouseOut: () => onHover(index, false),
-    // First click moves the cursor; clicking the focused row toggles it.
-    onMouseDown: () => {
-      if (isCurrent) {
-        onToggleSelection?.(candidate.id);
-      } else {
-        onSetCursor?.(index);
-      }
+    onMouseOut: () => {
+      queuePress.current = false;
+      onHover(index, false);
+    },
+    onMouseDown: (event: MouseEvent) => {
+      queuePress.current = false;
+      if (event.button !== 0 || event.isDragging) return;
+      const box = element.current;
+      queuePress.current = box !== null && event.x >= box.x + 2 && event.x < box.x + 5;
+      if (queuePress.current) event.preventDefault();
+      onSetCursor?.(index);
+    },
+    onMouseDrag: () => {
+      queuePress.current = false;
+    },
+    onMouseUp: (event: MouseEvent) => {
+      const box = element.current;
+      const activate =
+        queuePress.current &&
+        event.button === 0 &&
+        box !== null &&
+        event.x >= box.x + 2 &&
+        event.x < box.x + 5 &&
+        event.y === box.y;
+      queuePress.current = false;
+      if (activate) onToggleSelection?.(candidate.id);
     },
   } as BoxProps;
 
   return (
     <box
+      ref={element}
       width="100%"
       height={1}
       flexGrow={0}

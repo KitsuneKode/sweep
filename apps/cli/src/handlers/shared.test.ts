@@ -118,6 +118,31 @@ test("fresh-size refusal completes the armed journal with every entry unattempte
   expect(plan.candidates.every((candidate) => existsSync(candidate.path))).toBe(true);
 });
 
+test("an unavailable engine leaves a complete unattempted journal and releases its lock", async () => {
+  const plan = await fixture();
+  const previousEngine = process.env.SWEEP_ENGINE_PATH;
+  process.env.SWEEP_ENGINE_PATH = join(plan.targetDir, "missing-engine");
+  try {
+    await expect(executePlanDeletion(plan, "rust", { quiet: true })).rejects.toMatchObject({
+      applyOutcome: "not_started",
+      refusalCode: "engine_unavailable",
+    });
+    const journals = join(process.env.SWEEP_CONFIG_DIR!, "journals");
+    const { recoverApplyJournal } = await import("@kitsunekode/sweep-core/apply-session");
+    const recovered = recoverApplyJournal(join(journals, readdirSync(journals)[0]!));
+    expect(recovered.complete).toBe(true);
+    expect(recovered.candidates).toHaveLength(plan.selectedCandidateIds.length);
+    expect(recovered.candidates.every((candidate) => candidate.status === "unattempted")).toBe(
+      true,
+    );
+    expect(plan.candidates.every((candidate) => existsSync(candidate.path))).toBe(true);
+    expect(existsSync(join(process.env.SWEEP_CONFIG_DIR!, "apply.lock"))).toBe(false);
+  } finally {
+    if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+    else process.env.SWEEP_ENGINE_PATH = previousEngine;
+  }
+});
+
 test("cancelling fresh sizing returns an authoritative unattempted partition", async () => {
   const plan = await fixture();
   const controller = new AbortController();

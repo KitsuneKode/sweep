@@ -80,7 +80,8 @@ export const ScrollbarColumn = memo(function ScrollbarColumn({
   const press = useCallback(
     (event: MouseEvent) => {
       const track = trackRef.current;
-      if (!track || rowCount <= 0 || !onSeek) return;
+      if (!track || rowCount <= 0 || !onSeek || event.button !== 0) return;
+      event.stopPropagation();
       event.preventDefault();
       const rel = event.y - track.screenY;
       const inThumb = rel >= model.thumbTop && rel < model.thumbTop + model.thumbHeight;
@@ -103,15 +104,13 @@ export const ScrollbarColumn = memo(function ScrollbarColumn({
       if (!track || rowCount <= 0 || !onSeek) return;
       const rel = event.y - track.screenY;
       const grab = grabOffsetRef.current;
-      // No press before this drag (OpenTUI fires drag without a down on some
-      // paths) - treat it like a track press.
-      if (grab === null) {
-        onSeek(rowAtPointer(rel));
-        return;
-      }
+      // Only a left-button press on this lane can start a seek gesture.
+      if (grab === null) return;
+      event.preventDefault();
+      event.stopPropagation();
       onSeek(rowAtThumbTop(rel - grab));
     },
-    [rowCount, rowAtPointer, rowAtThumbTop, onSeek],
+    [rowCount, rowAtThumbTop, onSeek],
   );
 
   const release = useCallback(() => {
@@ -130,6 +129,7 @@ export const ScrollbarColumn = memo(function ScrollbarColumn({
     <box
       ref={trackRef}
       width={1}
+      height={height}
       flexShrink={0}
       flexDirection="column"
       overflow="hidden"
@@ -141,6 +141,8 @@ export const ScrollbarColumn = memo(function ScrollbarColumn({
       {lines.map((inThumb, index) => (
         <text
           key={`sb-${index}`}
+          height={1}
+          flexShrink={0}
           // "░" for the track so it reads as a lane, not a second pane border.
           content={t`${fg(inThumb ? tokens.accent : tokens.textDim)(inThumb ? "█" : "░")}`}
           wrapMode="none"

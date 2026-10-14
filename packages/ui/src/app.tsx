@@ -27,6 +27,9 @@ import {
 import { ReviewPane } from "./ReviewPane.js";
 import { candidateIndex } from "./candidate-index.js";
 import { ApplyOverlay } from "./ApplyOverlay.js";
+import { ActionButton } from "./ActionButton.js";
+import { captureReviewedApply } from "./reviewed-apply.js";
+import type { ViewPreferences } from "./view-preferences.js";
 import { MotionContext, motionEnabledFromEnvironment } from "./motion.js";
 import { handleKeymap } from "./keymap.js";
 import { darkTheme } from "./theme.js";
@@ -50,13 +53,11 @@ import {
   addCustomPattern,
   applyUiSelection,
   applyVisualRange,
-  countSelectedDangerous,
   createUiState,
   finalizeScan,
   getCurrentCandidate,
   getUiSummary,
   mergeApplyReport,
-  planForCandidateIds,
   resetForRescan,
   rescanConfigFromState,
   setFocus,
@@ -66,16 +67,25 @@ import {
   sweeprcPayload,
   toggleSelectionById,
   toggleSidebarScopeSelection,
+  toggleScopeSelection,
   toggleSortBy,
   setScannedDirs,
   setSkippedDirs,
   upsertCandidates,
+  clearSelection,
+  clearVisibleSelection,
+  selectVisible,
+  setFilter,
+  setRiskFilter,
+  selectSafeOnly,
+  setScopeFilter,
+  setThemeMode,
   visualRange,
   type SweepUiInitOptions,
   type SweepUiState,
 } from "./state.js";
 import { getVisibleCandidates } from "./state/selectors.js";
-import { resolveTheme, type ThemeTokens } from "./theme.js";
+import { cycleThemeMode, resolveTheme, type ThemeTokens } from "./theme.js";
 import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
 import type { UiScanControl } from "./streaming.js";
 
@@ -106,6 +116,8 @@ export interface SweepAppProps {
   scan?: UiScanControl;
   initiallyScanning?: boolean;
   operations?: UiOperationSession;
+  preferences?: ViewPreferences;
+  onPreferencesChange?: (value: ViewPreferences) => void;
 }
 
 function styledContentFallback(message: string, closing: boolean): ReactNode {
@@ -181,7 +193,7 @@ const HELP_QUEUE: ReadonlyArray<HelpRow> = [
   ["a · s", "queue visible · safe"],
   ["u / U", "clear entire queue / visible only"],
   ["x · d", "delete just this row"],
-  ["enter", "apply queue (always confirms)"],
+  ["ctrl+enter", "review queue (always confirms)"],
 ];
 
 const HELP_VIEW: ReadonlyArray<HelpRow> = [
@@ -189,7 +201,8 @@ const HELP_VIEW: ReadonlyArray<HelpRow> = [
   ["/", "filter list · tab cycles panes"],
   ["1 - 4", "risk filter"],
   ["o", "sort size · name · age"],
-  ["i", "inspect row"],
+  ["enter · i", "open item details"],
+  ["ctrl-k / F2", "search actions and settings"],
   ["y", "copy row path"],
   ["S", "save queue as a plan"],
 ];
@@ -350,6 +363,14 @@ function ConfirmOverlay({
   otherQueuedCount,
   linkOnly,
   feedback,
+  onConfirm,
+  onCancel,
+  onToggleTrash,
+  outsideViewCount = 0,
+  directoryCount = 0,
+  canConfirm = true,
+  onOverrideSizeLimit,
+  sizeLimitOverridden = false,
 }: {
   tokens: ThemeTokens;
   selectedCount: number;
@@ -364,6 +385,14 @@ function ConfirmOverlay({
   otherQueuedCount?: number;
   linkOnly?: boolean;
   feedback?: string | undefined;
+  onConfirm: () => void;
+  onCancel: () => void;
+  onToggleTrash: () => void;
+  outsideViewCount?: number;
+  directoryCount?: number;
+  canConfirm?: boolean;
+  onOverrideSizeLimit?: (() => void) | undefined;
+  sizeLimitOverridden?: boolean;
 }) {
   // Confirmation describes the operation, including link-only removal.
   const action = dryRun ? "Preview removal of" : trash ? "Move to trash" : "Permanently delete";
@@ -375,21 +404,44 @@ function ConfirmOverlay({
   return (
     <Modal
       tokens={tokens}
-      title={dangerous ? " ⚠ apply " : " apply "}
+      title={`${dangerous ? "⚠ " : ""}${dryRun ? "Preview" : trash ? "Move" : "Delete"} ${selectedCount} item${selectedCount === 1 ? "" : "s"}${trash && !dryRun ? " to trash" : ""}`}
       titleColor={accent}
       width={56}
-      height={selectedCount === 1 && !dangerous ? 18 : 22}
+      height={
+        applyPolicy && applyPolicy.maxSizeGB !== null
+          ? 24
+          : selectedCount === 1 && !dangerous
+            ? 18
+            : 22
+      }
       footer={
         <>
           {feedback ? <text fg={tokens.info} content={feedback} /> : null}
           {dryRun ? null : (
-            <text
-              content={t`${bold(fg(tokens.text)("t"))} ${fg(tokens.textMuted)(trash ? "delete permanently instead" : "move to trash instead")}`}
+            <ActionButton
+              tokens={tokens}
+              label={trash ? "t Delete permanently instead" : "t Move to trash instead"}
+              onPress={onToggleTrash}
             />
           )}
-          <text
-            content={t`${bold(fg(tokens.text)("y"))} ${fg(tokens.textMuted)("confirm")}    ${bold(fg(tokens.text)("n"))}${fg(tokens.textMuted)(" / esc cancel")}`}
-          />
+          {onOverrideSizeLimit ? (
+            <ActionButton
+              tokens={tokens}
+              label={sizeLimitOverridden ? "f Restore size ceiling" : "f Override size ceiling"}
+              onPress={onOverrideSizeLimit}
+              disabled={!canConfirm}
+            />
+          ) : null}
+          <box flexDirection="row" flexWrap="wrap">
+            <ActionButton
+              tokens={tokens}
+              label={dryRun ? "y Preview" : trash ? "y Move to trash" : "y Delete"}
+              danger={!trash && !dryRun}
+              disabled={!canConfirm}
+              onPress={onConfirm}
+            />
+            <ActionButton tokens={tokens} label="n / Esc Cancel" onPress={onCancel} />
+          </box>
         </>
       }
     >
@@ -397,12 +449,31 @@ function ConfirmOverlay({
         fg={tokens.textMuted}
         content={otherQueuedCount === undefined ? "Apply the queued selection" : "Only this item"}
       />
+      {outsideViewCount > 0 ? (
+        <text
+          fg={tokens.info}
+          content={`${outsideViewCount} queued item${outsideViewCount === 1 ? " is" : "s are"} outside the current view.`}
+        />
+      ) : null}
+      {directoryCount > 0 ? (
+        <text content="Selected folders include everything inside them." fg={tokens.textMuted} />
+      ) : null}
       <text
         content={t`${bold(fg(accent)(`${action} ${selectedCount} item${selectedCount === 1 ? "" : "s"}`))}`}
       />
       <text
         content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "partial estimate; actual bytes may differ" : "estimated size")}`}
       />
+      {shown.map((path) => (
+        <text
+          key={path}
+          content={t`${fg(tokens.textDim)("·")} ${fg(tokens.textSecondary)(path)}`}
+          wrapMode="word"
+        />
+      ))}
+      {hidden > 0 ? (
+        <text content={t`${fg(tokens.textDim)(`  …and ${hidden} more`)}`} wrapMode="none" />
+      ) : null}
       {linkOnly ? (
         <text
           fg={tokens.warning}
@@ -420,7 +491,7 @@ function ConfirmOverlay({
         />
       ) : null}
       <text content="" />
-      {applyPolicy ? (
+      {applyPolicy && (applyPolicy.maxSizeGB !== null || applyPolicy.forceLarge) ? (
         <text
           fg={
             applyPolicy.forceLarge || applyPolicy.maxSizeGB !== null
@@ -429,7 +500,9 @@ function ConfirmOverlay({
           }
           content={
             applyPolicy.forceLarge
-              ? "Size ceiling bypass enabled (--force-large)."
+              ? sizeLimitOverridden
+                ? "Size ceiling overridden for this review only."
+                : "Size ceiling bypass enabled (--force-large)."
               : applyPolicy.maxSizeGB === null
                 ? "No byte ceiling"
                 : `Size ceiling: ${applyPolicy.maxSizeGB} GiB; checked again before removal.`
@@ -445,18 +518,15 @@ function ConfirmOverlay({
             fg={tokens.warning}
             content="Over the limit. Reduce the queue or raise maxSizeGB in .sweeprc."
           />
-          <text fg={tokens.warning} content="Restart override: --force-large --yes" />
+          <text
+            fg={tokens.warning}
+            content={
+              onOverrideSizeLimit
+                ? "Choose Override size ceiling for this review, then confirm."
+                : "Restart override: --force-large --yes"
+            }
+          />
         </box>
-      ) : null}
-      {shown.map((path) => (
-        <text
-          key={path}
-          content={t`${fg(tokens.textDim)("·")} ${fg(tokens.textSecondary)(path)}`}
-          wrapMode="word"
-        />
-      ))}
-      {hidden > 0 ? (
-        <text content={t`${fg(tokens.textDim)(`  …and ${hidden} more`)}`} wrapMode="none" />
       ) : null}
       <text content="" />
       {dryRun ? (
@@ -492,11 +562,15 @@ function InspectOverlay({
   candidate,
   queued,
   targetDir,
+  onClose,
+  onReview,
 }: {
   tokens: ThemeTokens;
   candidate: ScanCandidate;
   queued: boolean;
   targetDir: string;
+  onClose: () => void;
+  onReview: () => void;
 }) {
   const { width } = useTerminalDimensions();
   const compact = width < 48;
@@ -532,10 +606,15 @@ function InspectOverlay({
       width={64}
       height={22}
       footer={
-        <text
-          content={t`${bold(fg(tokens.text)("x / d"))} ${fg(tokens.textMuted)("delete this (confirms)")} · ${bold(fg(tokens.text)("i / esc"))} ${fg(tokens.textMuted)("close")}`}
-          wrapMode="word"
-        />
+        <box flexDirection="row" flexWrap="wrap">
+          <ActionButton
+            tokens={tokens}
+            label="x Review removal"
+            onPress={onReview}
+            disabled={candidate.riskTier === "blocked"}
+          />
+          <ActionButton tokens={tokens} label="Esc Close" onPress={onClose} />
+        </box>
       }
     >
       <box flexDirection="column">
@@ -560,6 +639,19 @@ function InspectOverlay({
             ? `${candidate.entryType} (link only, target never scanned)`
             : candidate.entryType,
         )}
+        <text
+          content={
+            candidate.isSymlink
+              ? "Only the link is removed. Its destination stays."
+              : candidate.kind === "node_modules"
+                ? "Dependencies will need reinstalling. Check for local changes inside this folder."
+                : candidate.kind === "target"
+                  ? "Generated Cargo output can be rebuilt. The next build may take longer."
+                  : "Check that you can recreate these contents before removing them."
+          }
+          fg={tokens.textSecondary}
+          wrapMode="word"
+        />
         {candidate.reasons.length > 0 ? (
           <>
             <text content="" />
@@ -589,12 +681,46 @@ export function SweepApp({
   scan,
   initiallyScanning,
   operations: suppliedOperations,
+  preferences,
+  onPreferencesChange,
 }: SweepAppProps) {
-  const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) => createUiState(p, init));
+  const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) =>
+    createUiState(p, {
+      ...(preferences ? { themeMode: preferences.themeMode, sortBy: preferences.sortBy } : {}),
+      ...init,
+      startUnselected: init?.startUnselected ?? true,
+    }),
+  );
   const [showHelp, setShowHelpState] = useState(false);
-  const [motionEnabled, setMotionEnabled] = useState(motionEnabledFromEnvironment);
+  const [showMenu, setShowMenuState] = useState(false);
+  const [folderInfo, setFolderInfo] = useState<{
+    path: string;
+    count: number;
+    queued: number;
+    scanning: boolean;
+  } | null>(null);
+  const [menuCursor, setMenuCursor] = useState(0);
+  const menuCursorRef = useRef(0);
+  const [menuQuery, setMenuQuery] = useState("");
+  const menuQueryRef = useRef("");
+  const [motionEnabled, setMotionEnabled] = useState(
+    () => motionEnabledFromEnvironment() && (preferences?.motionEnabled ?? true),
+  );
   const motionEnabledRef = useRef(motionEnabled);
+  useEffect(() => {
+    onPreferencesChange?.({
+      version: 1,
+      themeMode: state.themeMode,
+      sortBy: state.sortBy,
+      motionEnabled,
+    });
+  }, [state.themeMode, state.sortBy, motionEnabled, onPreferencesChange]);
   const [pendingApply, setPendingApplyState] = useState(false);
+  const [reviewedApply, setReviewedApply] = useState<ScanPlan | null>(null);
+  const reviewedApplyRef = useRef<ScanPlan | null>(null);
+  const [sizeLimitOverridden, setSizeLimitOverridden] = useState(false);
+  const sizeLimitOverrideRef = useRef(false);
+  const [reviewedOutsideView, setReviewedOutsideView] = useState(0);
   // Non-null while the confirm dialog is scoped to one row (x/d): the same
   // dialog renders, but `y` applies only that candidate.
   const [pendingSingleId, setPendingSingleIdState] = useState<string | null>(null);
@@ -627,7 +753,14 @@ export function SweepApp({
    * underneath it, letting an unseen `y` delete. The mask is written in the
    * setter call itself, so a second open in the same drain sees the first.
    */
-  type ModalKind = "help" | "confirm" | "inspect" | "scanError" | "applying";
+  type ModalKind =
+    | "help"
+    | "confirm"
+    | "inspect"
+    | "scanError"
+    | "applying"
+    | "menu"
+    | "folderInfo";
   const openModalsRef = useRef(new Set<ModalKind>());
   const openModal = (kind: ModalKind): boolean => {
     if (openModalsRef.current.size > 0) return false;
@@ -712,12 +845,38 @@ export function SweepApp({
         setNotice("finish this dialog first");
         return false;
       }
+      sizeLimitOverrideRef.current = false;
+      setSizeLimitOverridden(false);
+      try {
+        const fresh = readFreshState();
+        const captured = captureReviewedApply(
+          plan,
+          fresh,
+          pendingSingleIdRef.current === null ? fresh.selectedIds : [pendingSingleIdRef.current],
+        );
+        reviewedApplyRef.current = captured;
+        setReviewedApply(captured);
+        const visibleIds = new Set(getVisibleCandidates(fresh).map((candidate) => candidate.id));
+        setReviewedOutsideView(
+          captured.candidates.filter((candidate) => !visibleIds.has(candidate.id)).length,
+        );
+      } catch (error) {
+        closeModal("confirm");
+        setPendingSingleId(null);
+        setNotice(sanitizeTerminalText(error instanceof Error ? error.message : String(error)));
+        return false;
+      }
       setPendingApplyState(true);
       setNotice(null);
     } else {
       closeModal("confirm");
       setPendingApplyState(false);
       setPendingSingleId(null);
+      reviewedApplyRef.current = null;
+      setReviewedApply(null);
+      setReviewedOutsideView(0);
+      sizeLimitOverrideRef.current = false;
+      setSizeLimitOverridden(false);
     }
     return true;
   };
@@ -908,7 +1067,6 @@ export function SweepApp({
 
   const visibleItems = useMemo(() => getVisibleCandidates(state), [state]);
   const displayRows = useMemo(() => buildDisplayRows(state), [state]);
-  const dangerousSelected = useMemo(() => countSelectedDangerous(state), [state]);
   const candidatesById = useMemo(() => candidateIndex(state.candidates), [state.candidates]);
 
   const [operations] = useState(() => suppliedOperations ?? new UiOperationSession());
@@ -923,7 +1081,7 @@ export function SweepApp({
     [onDone, operations],
   );
 
-  const requestApply = useCallback(() => {
+  const requestApply = () => {
     // Branch on post-commit state: a same-burst toggle/selection key can be
     // queued-but-unapplied, and gating on the stale snapshot either wrongly
     // refuses ("nothing queued") or opens a confirm showing older counts.
@@ -939,14 +1097,14 @@ export function SweepApp({
       return;
     }
     if (getUiSummary(s).selectedCount === 0) {
-      setNotice("nothing queued · Space queues this item · x deletes just this item");
+      setNotice("Queue is empty · choose Queue safe items, or Space for one item");
       return;
     }
     // Every apply deletes real files - the confirm gate is not reserved for
     // dangerous tiers. The dialog tones down (no red banner) when nothing
     // dangerous is queued, but it is always there.
     setPendingApply(true);
-  }, []);
+  };
 
   const focusPanel = useCallback(
     (focus: SweepUiState["focus"]) => {
@@ -963,15 +1121,42 @@ export function SweepApp({
     setTrashMode(trashModeRef.current);
   }, []);
 
+  const toggleSizeLimitOverride = () => {
+    if (
+      !openModalsRef.current.has("confirm") ||
+      !confirmReadyRef.current ||
+      renderer.width < 40 ||
+      renderer.height < 12
+    )
+      return;
+    if (
+      !scan?.applyPolicy ||
+      scan.applyPolicy.maxSizeGB === null ||
+      scan.applyPolicy.forceLarge ||
+      dryRun
+    ) {
+      setNotice("This review has no configurable size ceiling");
+      return;
+    }
+    sizeLimitOverrideRef.current = !sizeLimitOverrideRef.current;
+    setSizeLimitOverridden(sizeLimitOverrideRef.current);
+  };
+
   const runInSessionApply = useCallback(
     (scopedPlan: ScanPlan, name: string) => {
       // This ref closes the scheduling gate synchronously, before another key
       // in this stdin drain can confirm, quit, rescan or mutate the queue.
       if (applyAbortRef.current || operations.closing) return;
       const requestedTrash = trashModeRef.current;
+      const requestedSizeOverride = sizeLimitOverrideRef.current;
       const applyFn = scan?.apply;
       if (!applyFn) {
-        finalize({ type: "apply", plan: scopedPlan, trash: requestedTrash });
+        finalize({
+          type: "apply",
+          plan: scopedPlan,
+          trash: requestedTrash,
+          ...(requestedSizeOverride ? { overrideSizeLimit: true } : {}),
+        });
         return;
       }
       if (dryRun) {
@@ -995,6 +1180,7 @@ export function SweepApp({
             {
               plan: scopedPlan,
               trash: requestedTrash,
+              ...(requestedSizeOverride ? { overrideSizeLimit: true } : {}),
               signal: controller.signal,
               onProgress: (progress) => {
                 if (applyAbortRef.current !== controller) return;
@@ -1050,17 +1236,18 @@ export function SweepApp({
   const applyPlan = useCallback(() => {
     const fresh = readFreshState();
     if (fresh.scanning || fresh.scanIncomplete) return;
-    const selectedPlan = applyUiSelection(plan, fresh);
+    const selectedPlan = reviewedApplyRef.current;
+    if (!selectedPlan || pendingSingleIdRef.current !== null) return;
     if (selectedPlan.selectedCandidateIds.length === 0) return;
     runInSessionApply(selectedPlan, `${selectedPlan.selectedCandidateIds.length} queued artifacts`);
-  }, [plan, runInSessionApply]);
+  }, [runInSessionApply]);
 
   /**
    * `x`/`d` on a row: confirm an apply scoped to exactly that candidate.
    * Same gates as the queued apply - a running or incomplete scan means the
    * row under the cursor is not the row the engine would see.
    */
-  const requestSingleApply = useCallback((inspectedId?: string) => {
+  const requestSingleApply = (inspectedId?: string) => {
     // Flush first: j+x in one stdin drain must scope the dialog to the row
     // the cursor actually lands on, not the pre-move row.
     const s = readFreshState();
@@ -1080,7 +1267,7 @@ export function SweepApp({
       // Header rows and empty lists land here - x is per-artifact only.
       setNotice(
         inspectedId === undefined
-          ? "x deletes one artifact - space queues, enter applies the queue"
+          ? "x reviews one artifact · Space queues · Ctrl+Enter reviews the queue"
           : "viewed artifact is no longer present - nothing to delete",
       );
       return;
@@ -1091,7 +1278,7 @@ export function SweepApp({
     }
     setPendingSingleId(candidate.id);
     if (!setPendingApply(true)) setPendingSingleId(null);
-  }, []);
+  };
 
   const confirmSingle = useCallback(() => {
     const id = pendingSingleIdRef.current;
@@ -1103,12 +1290,44 @@ export function SweepApp({
       setNotice("row already left the list - nothing to delete");
       return;
     }
-    const singlePlan = planForCandidateIds(plan, stateRef.current, [id]);
+    const singlePlan = reviewedApplyRef.current;
+    if (
+      !singlePlan ||
+      singlePlan.selectedCandidateIds.length !== 1 ||
+      singlePlan.selectedCandidateIds[0] !== id
+    ) {
+      setNotice("Reviewed item is unavailable; nothing will be removed");
+      return;
+    }
     const name = sanitizeTerminalText(
-      relativePath(stateRef.current.targetDir, candidate.path) || candidate.name,
+      relativePath(singlePlan.targetDir, singlePlan.candidates[0]!.path) ||
+        singlePlan.candidates[0]!.name,
     );
     runInSessionApply(singlePlan, name);
-  }, [plan, runInSessionApply]);
+  }, [runInSessionApply]);
+
+  const confirmReviewedApply = () => {
+    if (renderer.width < 40 || renderer.height < 12) {
+      setNotice("Resize to at least 40 columns and 12 rows to review before confirming");
+      return;
+    }
+    if (!openModalsRef.current.has("confirm") || !confirmReadyRef.current || applyAbortRef.current)
+      return;
+    if (pendingSingleIdRef.current !== null) confirmSingle();
+    else applyPlan();
+    setPendingApply(false);
+  };
+
+  const setMenu = (open: boolean) => {
+    if (open) {
+      if (!openModal("menu")) return;
+      menuCursorRef.current = 0;
+      menuQueryRef.current = "";
+      setMenuQuery("");
+      setMenuCursor(0);
+    } else closeModal("menu");
+    setShowMenuState(open);
+  };
 
   const abortApply = useCallback(() => {
     // The runtime's raw-stdin deadman saw the same ETX byte and scheduled a
@@ -1194,13 +1413,17 @@ export function SweepApp({
     else setNotice(`nothing queueable in that range${skipped}`);
   }, []);
 
-  const applyScopeToggle = useCallback(() => {
+  const applyScopeToggle = useCallback((scopeKey?: string | null) => {
+    if (openModalsRef.current.size > 0) return;
     let result: ReturnType<typeof toggleSidebarScopeSelection> | undefined;
     flushSync(() => {
       dispatch({
         type: "mutate",
         fn: (s) => {
-          const r = toggleSidebarScopeSelection(s);
+          const r =
+            scopeKey === undefined
+              ? toggleSidebarScopeSelection(s)
+              : toggleScopeSelection(s, scopeKey);
           result = r;
           return r.state;
         },
@@ -1208,9 +1431,9 @@ export function SweepApp({
     });
     if (!result) return;
     const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
-    if (result.queued > 0) setNotice(`queued ${result.queued} in scope${skipped}`);
-    else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued} in scope${skipped}`);
-    else setNotice(`nothing queueable in that scope${skipped}`);
+    if (result.queued > 0) setNotice(`queued ${result.queued} in folder${skipped}`);
+    else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued} in folder${skipped}`);
+    else setNotice(`nothing queueable in that folder${skipped}`);
   }, []);
 
   /**
@@ -1266,7 +1489,201 @@ export function SweepApp({
     }
   }, []);
 
+  const closeFolderInfo = () => {
+    closeModal("folderInfo");
+    setFolderInfo(null);
+  };
+  const reviewInspected = () => {
+    const id = inspectedIdRef.current;
+    if (!id) return;
+    setInspect(false);
+    requestSingleApply(id);
+  };
+  const menuCommands = [
+    {
+      label: `Review queue (${summary.selectedCount})`,
+      shortcut: "Ctrl+Enter",
+      run: requestApply,
+      disabled: state.scanning || state.scanIncomplete || summary.selectedCount === 0,
+    },
+    {
+      label: "Inspect current item",
+      shortcut: "i",
+      run: () => setInspect(true),
+      disabled: !getCurrentCandidate(state),
+    },
+    {
+      label: "Review removal of current item",
+      shortcut: "x",
+      run: () => requestSingleApply(),
+      disabled:
+        state.scanning ||
+        state.scanIncomplete ||
+        !getCurrentCandidate(state) ||
+        getCurrentCandidate(state)?.riskTier === "blocked",
+    },
+    {
+      label: "Queue safe items in this view",
+      shortcut: "s",
+      run: () => mutate(selectSafeOnly),
+      disabled: false,
+    },
+    {
+      label: "Clear whole queue",
+      shortcut: "u",
+      run: () => mutate(clearSelection),
+      disabled: summary.selectedCount === 0,
+    },
+    {
+      label: "Clear queue in this view",
+      shortcut: "Shift+U",
+      run: () => mutate(clearVisibleSelection),
+      disabled: summary.visibleSelectedCount === 0,
+    },
+    {
+      label: "Queue safe and caution items in this view",
+      shortcut: "a",
+      run: () => mutate((s) => selectVisible(s, false)),
+      disabled: false,
+    },
+    { label: "Filter items", shortcut: "/", run: () => focusPanel("search"), disabled: false },
+    {
+      label: "Clear search and risk filters",
+      shortcut: "",
+      run: () => mutate((s) => setFilter(setRiskFilter(s, "all"), "")),
+      disabled: false,
+    },
+    {
+      label: "Browse all folders",
+      shortcut: "",
+      run: () => mutate((s) => setScopeFilter(s, null)),
+      disabled: false,
+    },
+    {
+      label: "Current folder details",
+      shortcut: "",
+      run: () => {
+        if (!openModal("folderInfo")) return;
+        const fresh = readFreshState();
+        const visible = getVisibleCandidates(fresh);
+        setFolderInfo({
+          path:
+            fresh.scopeFilter === null || fresh.scopeFilter === ""
+              ? fresh.targetDir
+              : join(fresh.targetDir, fresh.scopeFilter),
+          count: visible.length,
+          queued: visible.filter((item) => fresh.selectedIds.has(item.id)).length,
+          scanning: fresh.scanning,
+        });
+      },
+      disabled: false,
+    },
+    {
+      label: "Copy current item path",
+      shortcut: "y",
+      run: yankPath,
+      disabled: !getCurrentCandidate(state),
+    },
+    {
+      label: "Save queue as a plan",
+      shortcut: "Shift+S",
+      run: exportPlan,
+      disabled: state.scanning || state.scanIncomplete || summary.selectedCount === 0,
+    },
+    { label: "Scan again", shortcut: "r", run: requestRescan, disabled: !scan },
+    {
+      label: "Edit cleanup patterns",
+      shortcut: "p",
+      run: () => focusPanel("patterns"),
+      disabled: false,
+    },
+    {
+      label: `Sort by ${state.sortBy === "size" ? "name" : state.sortBy === "name" ? "oldest first" : "largest first"}`,
+      shortcut: "o",
+      run: () => mutate(toggleSortBy),
+      disabled: false,
+    },
+    {
+      label: `Use ${cycleThemeMode(state.themeMode)} theme`,
+      shortcut: "t",
+      run: () => mutate((s) => setThemeMode(s, cycleThemeMode(s.themeMode))),
+      disabled: false,
+    },
+    {
+      label: `Activity animation: ${motionEnabled ? "on" : "paused"}`,
+      shortcut: "m",
+      run: () => {
+        motionEnabledRef.current = !motionEnabledRef.current;
+        setMotionEnabled(motionEnabledRef.current);
+      },
+      disabled: false,
+    },
+    { label: "Help and shortcuts", shortcut: "?", run: () => setShowHelp(true), disabled: false },
+  ];
+  const matchingCommands = (query: string) => {
+    const terms = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+    return menuCommands.filter((command) => {
+      const text = `${command.label} ${command.shortcut}`.toLocaleLowerCase();
+      return terms.every((term) => text.includes(term));
+    });
+  };
+  const filteredCommands = matchingCommands(menuQuery);
+  const updateMenuQuery = (value: string) => {
+    menuQueryRef.current = value.slice(0, 128);
+    menuCursorRef.current = 0;
+    setMenuQuery(menuQueryRef.current);
+    setMenuCursor(0);
+  };
+  const runMenuCommand = (index: number) => {
+    // A query change cannot activate a command from the preceding painted list.
+    if (!showMenu || menuQueryRef.current !== menuQuery) return;
+    const command = filteredCommands[index];
+    if (!openModalsRef.current.has("menu") || !command || command.disabled) return;
+    setMenu(false);
+    command.run();
+  };
+
   useKeyboard((key) => {
+    if (openModalsRef.current.has("folderInfo")) {
+      key.preventDefault();
+      if ((key.name === "c" && key.ctrl) || key.name === "ctrl+c") {
+        noteCtrlCHandled();
+        closeFolderInfo();
+        finalize({ type: "abort" });
+      } else if (["escape", "q"].includes(key.name)) closeFolderInfo();
+      return;
+    }
+    if (openModalsRef.current.has("menu")) {
+      if ((key.name === "c" && key.ctrl) || key.name === "ctrl+c") {
+        key.preventDefault();
+        noteCtrlCHandled();
+        setMenu(false);
+        finalize({ type: "abort" });
+      } else if (["escape", "f2"].includes(key.name) || (key.ctrl && key.name === "k")) {
+        key.preventDefault();
+        setMenu(false);
+      } else if (
+        ["return", "enter"].includes(key.name) &&
+        dimensions.height >= 10 &&
+        dimensions.width >= 28
+      ) {
+        key.preventDefault();
+        runMenuCommand(menuCursorRef.current);
+      } else if (["up", "down", "tab"].includes(key.name)) {
+        key.preventDefault();
+        const count = matchingCommands(menuQueryRef.current).length;
+        if (count === 0) return;
+        const delta = key.name === "up" || (key.name === "tab" && key.shift) ? -1 : 1;
+        menuCursorRef.current = (menuCursorRef.current + delta + count) % count;
+        setMenuCursor(menuCursorRef.current);
+      }
+      return;
+    }
+    if ((key.name === "f2" || (key.ctrl && key.name === "k")) && openModalsRef.current.size === 0) {
+      key.preventDefault();
+      setMenu(true);
+      return;
+    }
     handleKeymap(
       {
         key,
@@ -1296,6 +1713,7 @@ export function SweepApp({
         dismissScanError: () => setScanError(null),
         setInspect,
         toggleTrash,
+        toggleSizeLimitOverride,
         toggleMotion: () => {
           motionEnabledRef.current = !motionEnabledRef.current;
           setMotionEnabled(motionEnabledRef.current);
@@ -1312,17 +1730,16 @@ export function SweepApp({
         writeSweeprc,
         submitPatternDraft,
         requestSingleApply,
-        requestInspectedApply: () => {
-          const id = inspectedIdRef.current;
-          if (!id) return;
-          setInspect(false);
-          requestSingleApply(id);
-        },
+        requestInspectedApply: reviewInspected,
         confirmSingle,
         abortApply,
         notify: setNotice,
         readState: readFreshState,
-        isConfirmArmed: () => openModalsRef.current.has("confirm") && confirmReadyRef.current,
+        isConfirmArmed: () =>
+          openModalsRef.current.has("confirm") &&
+          confirmReadyRef.current &&
+          renderer.width >= 40 &&
+          renderer.height >= 12,
       },
     );
   });
@@ -1365,8 +1782,8 @@ export function SweepApp({
     // of sorting the entire queue on every stream batch or keypress.
     const priority = { dangerous: 3, caution: 2, safe: 1, blocked: 0 };
     const top: ScanCandidate[] = [];
-    for (const candidate of state.candidates) {
-      if (!state.selectedIds.has(candidate.id) || candidate.riskTier === "blocked") continue;
+    for (const candidate of reviewedApply?.candidates ?? []) {
+      if (candidate.riskTier === "blocked") continue;
       const index = top.findIndex(
         (other) =>
           priority[candidate.riskTier] > priority[other.riskTier] ||
@@ -1378,9 +1795,9 @@ export function SweepApp({
     }
     return top.map(
       (candidate) =>
-        `${candidate.riskTier}${candidate.isSymlink ? " · link only" : ""} · ${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidate.estimatedBytes)} · ${sanitizeTerminalText(relativePath(state.targetDir, candidate.path))}`,
+        `${candidate.riskTier}${candidate.isSymlink ? " · link only" : ""} · ${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidate.estimatedBytes)} · ${sanitizeTerminalText(relativePath(reviewedApply!.targetDir, candidate.path))}`,
     );
-  }, [pendingApply, pendingSingleId, state.candidates, state.selectedIds, state.targetDir]);
+  }, [pendingApply, pendingSingleId, reviewedApply]);
 
   const headerStats = buildHeaderStats(
     plan,
@@ -1413,7 +1830,9 @@ export function SweepApp({
   const visualActive = state.focus === "list" && visualRange(state) !== null;
 
   const pendingSingleCandidate =
-    pendingSingleId === null ? undefined : candidatesById.get(pendingSingleId);
+    pendingSingleId === null || !candidatesById.has(pendingSingleId)
+      ? undefined
+      : reviewedApply?.candidates.find((c) => c.id === pendingSingleId);
 
   const footerContext: FooterContext =
     applying !== null
@@ -1440,6 +1859,23 @@ export function SweepApp({
   // of the statusline entirely; the hints are the part that must survive.
   const roomForTally = dimensions.width >= 84;
   const roomForChips = dimensions.width >= 100;
+  const menuHeight = Math.min(22, Math.max(1, dimensions.height - 2));
+  const menuPageSize = Math.max(
+    1,
+    Math.min(
+      Math.max(1, filteredCommands.length),
+      menuHeight - 2 - (menuHeight < 12 ? 0 : 2) - 3 - 2,
+    ),
+  );
+  const menuTop = Math.floor(menuCursor / menuPageSize) * menuPageSize;
+  const moveMenuPage = (direction: -1 | 1) => {
+    if (!openModalsRef.current.has("menu")) return;
+    menuCursorRef.current = Math.max(
+      0,
+      Math.min(Math.max(0, filteredCommands.length - 1), menuTop + direction * menuPageSize),
+    );
+    setMenuCursor(menuCursorRef.current);
+  };
 
   return (
     <MotionContext.Provider value={motionEnabled}>
@@ -1465,6 +1901,29 @@ export function SweepApp({
           <text content={headerStats} wrapMode="none" />
         </box>
 
+        {dimensions.height >= 12 ? (
+          <box height={1} flexShrink={0} flexDirection="row" gap={1}>
+            <ActionButton tokens={tokens} label="Ctrl+K Actions" onPress={() => setMenu(true)} />
+            {dimensions.width >= 54 ? (
+              <>
+                {dimensions.width >= 64 ? (
+                  <ActionButton
+                    tokens={tokens}
+                    label="Queue safe items"
+                    onPress={() => mutate(selectSafeOnly)}
+                  />
+                ) : null}
+                <ActionButton
+                  tokens={tokens}
+                  label={`Review queue (${summary.selectedCount})`}
+                  onPress={requestApply}
+                  disabled={state.scanning || state.scanIncomplete || summary.selectedCount === 0}
+                />
+              </>
+            ) : null}
+          </box>
+        ) : null}
+
         <box width="100%" flexGrow={1} minHeight={0} flexShrink={1}>
           <ReviewPane
             state={state}
@@ -1478,6 +1937,7 @@ export function SweepApp({
             onMutate={mutate}
             onFocusPanel={focusPanel}
             onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
+            onToggleScopeQueue={applyScopeToggle}
             onSubmitPatternDraft={submitPatternDraft}
             onViewportRows={(rows) => {
               viewportRowsRef.current = rows;
@@ -1517,7 +1977,7 @@ export function SweepApp({
           ) : (
             <ModeChip label={` ${modeLabel(state.focus, false, visualActive)} `} tokens={tokens} />
           )}
-          <box flexGrow={1} flexShrink={0} paddingLeft={1} flexDirection="row">
+          <box flexGrow={1} minWidth={0} flexShrink={1} paddingLeft={1} flexDirection="row">
             <text content={footerContent} wrapMode="none" />
             {roomForChips && riskFilterLabel ? (
               <text
@@ -1528,12 +1988,6 @@ export function SweepApp({
             {roomForChips && scopeFilterLabel ? (
               <text
                 content={t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`}
-                wrapMode="none"
-              />
-            ) : null}
-            {roomForChips && state.sortBy !== "size" ? (
-              <text
-                content={t`  ${fg(tokens.info)(`· sorted by ${state.sortBy}`)}`}
                 wrapMode="none"
               />
             ) : null}
@@ -1558,9 +2012,109 @@ export function SweepApp({
             candidate={inspectCandidate}
             queued={state.selectedIds.has(inspectCandidate.id)}
             targetDir={state.targetDir}
+            onClose={() => setInspect(false)}
+            onReview={reviewInspected}
           />
         ) : null}
         {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
+        {folderInfo ? (
+          <Modal
+            tokens={tokens}
+            title=" Current folder "
+            width={64}
+            height={14}
+            footer={<ActionButton tokens={tokens} label="Esc Close" onPress={closeFolderInfo} />}
+          >
+            <text
+              content={sanitizeTerminalText(folderInfo.path)}
+              wrapMode="char"
+              fg={tokens.text}
+            />
+            <text
+              content={`${folderInfo.count} items in this view · ${folderInfo.queued} queued here`}
+              fg={tokens.textSecondary}
+              wrapMode="word"
+            />
+            <text
+              content="Folder, search and risk filters determine this view. Browsing does not change your queue."
+              fg={tokens.textMuted}
+              wrapMode="word"
+            />
+            {folderInfo.scanning ? (
+              <text
+                content="Scan is running; these are a snapshot of discovered items."
+                fg={tokens.warning}
+                wrapMode="word"
+              />
+            ) : null}
+          </Modal>
+        ) : null}
+        {showMenu ? (
+          <Modal
+            tokens={tokens}
+            title=" Search actions "
+            width={58}
+            height={22}
+            footer={
+              <>
+                <text content="↑↓ choose · Enter open · Esc close" fg={tokens.textMuted} />
+                <box flexDirection="row" flexWrap="wrap">
+                  <ActionButton
+                    tokens={tokens}
+                    label="Previous"
+                    disabled={menuTop === 0}
+                    onPress={() => moveMenuPage(-1)}
+                  />
+                  <ActionButton
+                    tokens={tokens}
+                    label="Next"
+                    disabled={menuTop + menuPageSize >= filteredCommands.length}
+                    onPress={() => moveMenuPage(1)}
+                  />
+                  <ActionButton tokens={tokens} label="Close" onPress={() => setMenu(false)} />
+                </box>
+              </>
+            }
+          >
+            <input
+              focused
+              value={menuQuery}
+              maxLength={128}
+              placeholder="Type an action or shortcut…"
+              backgroundColor={tokens.surfaceInset}
+              focusedBackgroundColor={tokens.surfaceInset}
+              textColor={tokens.text}
+              cursorColor={tokens.accent}
+              onInput={updateMenuQuery}
+            />
+            {dimensions.height >= 10 && dimensions.width >= 28 ? (
+              <text
+                content={
+                  filteredCommands.length === 0
+                    ? "No matching actions. Clear the search to try again."
+                    : `${menuTop + 1}–${Math.min(filteredCommands.length, menuTop + menuPageSize)} of ${filteredCommands.length} actions`
+                }
+                fg={tokens.textMuted}
+              />
+            ) : (
+              <text content="Resize to use actions" fg={tokens.textMuted} />
+            )}
+            {dimensions.height >= 10 && dimensions.width >= 28
+              ? filteredCommands
+                  .slice(menuTop, menuTop + menuPageSize)
+                  .map((command, localIndex) => (
+                    <ActionButton
+                      key={command.label}
+                      tokens={tokens}
+                      active={menuCursor === menuTop + localIndex}
+                      disabled={command.disabled}
+                      label={`${command.label}${command.shortcut ? ` · ${command.shortcut}` : ""}`}
+                      onPress={() => runMenuCommand(menuTop + localIndex)}
+                    />
+                  ))
+              : null}
+          </Modal>
+        ) : null}
         {pendingApply ? (
           pendingSingleId !== null && !pendingSingleCandidate ? (
             <Modal tokens={tokens} title=" item unavailable " width={60}>
@@ -1574,12 +2128,41 @@ export function SweepApp({
             <ConfirmOverlay
               tokens={tokens}
               selectedCount={1}
+              directoryCount={
+                pendingSingleCandidate.entryType === "directory" &&
+                !pendingSingleCandidate.isSymlink
+                  ? 1
+                  : 0
+              }
               linkOnly={pendingSingleCandidate.isSymlink}
               otherQueuedCount={
                 summary.selectedCount - Number(state.selectedIds.has(pendingSingleCandidate.id))
               }
-              feedback={notice?.startsWith("Press y") ? notice : undefined}
-              applyPolicy={scan?.applyPolicy}
+              canConfirm={dimensions.width >= 40 && dimensions.height >= 12}
+              feedback={
+                dimensions.width < 40 || dimensions.height < 12
+                  ? "Resize to 40 columns and 12 rows to review"
+                  : notice?.startsWith("Press y")
+                    ? notice
+                    : undefined
+              }
+              applyPolicy={
+                scan?.applyPolicy
+                  ? {
+                      ...scan.applyPolicy,
+                      forceLarge: scan.applyPolicy.forceLarge || sizeLimitOverridden,
+                    }
+                  : undefined
+              }
+              sizeLimitOverridden={sizeLimitOverridden}
+              onOverrideSizeLimit={
+                scan?.applyPolicy &&
+                scan.applyPolicy.maxSizeGB !== null &&
+                !scan.applyPolicy.forceLarge &&
+                !dryRun
+                  ? toggleSizeLimitOverride
+                  : undefined
+              }
               lowerBound={pendingSingleCandidate.bytesKnown === false}
               selectedBytes={pendingSingleCandidate.estimatedBytes}
               dangerousCount={pendingSingleCandidate.riskTier === "dangerous" ? 1 : 0}
@@ -1588,19 +2171,57 @@ export function SweepApp({
               ]}
               {...(dryRun ? { dryRun: true } : {})}
               {...(trashModeRef.current ? { trash: true } : {})}
+              onConfirm={confirmReviewedApply}
+              onCancel={() => setPendingApply(false)}
+              onToggleTrash={() => {
+                if (confirmReadyRef.current) toggleTrash();
+              }}
             />
           ) : (
             <ConfirmOverlay
               tokens={tokens}
-              selectedCount={summary.selectedCount}
-              feedback={notice?.startsWith("Press y") ? notice : undefined}
-              applyPolicy={scan?.applyPolicy}
-              lowerBound={Boolean(summary.selectedBytesPartial)}
-              selectedBytes={summary.selectedBytes}
-              dangerousCount={dangerousSelected}
+              selectedCount={reviewedApply?.selectedCandidateIds.length ?? 0}
+              outsideViewCount={reviewedOutsideView}
+              directoryCount={
+                reviewedApply?.candidates.filter((c) => c.entryType === "directory" && !c.isSymlink)
+                  .length ?? 0
+              }
+              canConfirm={dimensions.width >= 40 && dimensions.height >= 12}
+              feedback={
+                dimensions.width < 40 || dimensions.height < 12
+                  ? "Resize to 40 columns and 12 rows to review"
+                  : notice?.startsWith("Press y")
+                    ? notice
+                    : undefined
+              }
+              applyPolicy={
+                scan?.applyPolicy
+                  ? {
+                      ...scan.applyPolicy,
+                      forceLarge: scan.applyPolicy.forceLarge || sizeLimitOverridden,
+                    }
+                  : undefined
+              }
+              sizeLimitOverridden={sizeLimitOverridden}
+              onOverrideSizeLimit={
+                scan?.applyPolicy &&
+                scan.applyPolicy.maxSizeGB !== null &&
+                !scan.applyPolicy.forceLarge &&
+                !dryRun
+                  ? toggleSizeLimitOverride
+                  : undefined
+              }
+              lowerBound={reviewedApply?.candidates.some((c) => c.bytesKnown === false) ?? false}
+              selectedBytes={reviewedApply?.summary.estimatedTotalBytes ?? 0}
+              dangerousCount={reviewedApply?.summary.riskCounts.dangerous ?? 0}
               previewPaths={confirmPreview}
               {...(dryRun ? { dryRun: true } : {})}
               {...(trashModeRef.current ? { trash: true } : {})}
+              onConfirm={confirmReviewedApply}
+              onCancel={() => setPendingApply(false)}
+              onToggleTrash={() => {
+                if (confirmReadyRef.current) toggleTrash();
+              }}
             />
           )
         ) : null}

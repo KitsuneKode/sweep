@@ -3,6 +3,7 @@ import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, dim, fg, t } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { ArtifactList } from "./ArtifactList.js";
+import { ActionButton } from "./ActionButton.js";
 import { PatternPanel } from "./PatternPanel.js";
 import { ScopeSidebar } from "./ScopeSidebar.js";
 import { DotMatrix, DotStrip } from "./widgets.js";
@@ -38,6 +39,7 @@ export interface ReviewPaneProps {
   onSubmitPatternDraft: () => void;
   /** Measured artifact-pane viewport height for real page steps. */
   onViewportRows?: (rows: number) => void;
+  onToggleScopeQueue?: (scope: string | null) => void;
   /** Live elapsed for the running scan, ms - ticks at 4Hz from the app. */
   scanElapsedMs?: number;
 }
@@ -56,6 +58,7 @@ export function ReviewPane({
   onSubmitPatternDraft,
   onViewportRows,
   scanElapsedMs,
+  onToggleScopeQueue,
 }: ReviewPaneProps) {
   const dimensions = useTerminalDimensions();
   // Artifact pane inner width: total terminal width minus sidebar (if shown),
@@ -79,11 +82,6 @@ export function ReviewPane({
   // sidebar and footer chips both hide on narrow layouts. An active scope or
   // risk filter must always be legible somewhere the user is already looking.
   const titleParts = ["artifacts"];
-  if (state.scopeFilter !== null) {
-    titleParts.push(
-      state.scopeFilter === "" ? "project root" : sanitizeTerminalText(state.scopeFilter),
-    );
-  }
   if (state.riskFilter !== "all") titleParts.push(state.riskFilter);
   const paneTitle = patternsPane
     ? " › patterns "
@@ -101,7 +99,7 @@ export function ReviewPane({
           borderStyle="rounded"
           border
           borderColor={state.focus === "sidebar" ? tokens.borderFocus : tokens.borderSoft}
-          title={state.focus === "sidebar" ? " › scopes " : " scopes "}
+          title={state.focus === "sidebar" ? " › folders " : " folders "}
           backgroundColor={tokens.bg}
           overflow="hidden"
           paddingX={1}
@@ -118,6 +116,15 @@ export function ReviewPane({
             }}
             onCursorDelta={(delta) => onMutate((s) => moveSidebarCursor(s, delta))}
             onSetCursor={(index) => onMutate((s) => moveSidebarCursor(s, index - s.sidebarIndex))}
+            {...(onToggleScopeQueue ? { onToggleQueue: onToggleScopeQueue } : {})}
+            onToggleExpand={(key) =>
+              onMutate((s) => {
+                const expandedScopes = new Set(s.expandedScopes);
+                if (expandedScopes.has(key)) expandedScopes.delete(key);
+                else expandedScopes.add(key);
+                return { ...s, expandedScopes };
+              })
+            }
           />
         </box>
       ) : null}
@@ -137,11 +144,41 @@ export function ReviewPane({
       >
         {patternsPane ? null : (
           <box width="100%" flexShrink={0} flexDirection="column">
+            <box height={1} width="100%" flexDirection="row" flexShrink={0} gap={1}>
+              {state.scopeFilter !== null ? (
+                <ActionButton
+                  tokens={tokens}
+                  label="All folders"
+                  onPress={() => onMutate((s) => setScopeFilter(s, null))}
+                />
+              ) : null}
+              <text
+                flexGrow={1}
+                minWidth={1}
+                content={`Viewing: ${state.scopeFilter === null ? "all folders" : state.scopeFilter === "" ? "target root" : sanitizeTerminalText(state.scopeFilter)}`}
+                fg={tokens.text}
+                wrapMode="none"
+              />
+              {artifactPaneInnerWidth >= 48 ? (
+                <text
+                  content={
+                    state.sortBy === "size"
+                      ? "Largest first"
+                      : state.sortBy === "name"
+                        ? "Name order"
+                        : "Oldest first"
+                  }
+                  fg={tokens.textMuted}
+                  wrapMode="none"
+                />
+              ) : null}
+            </box>
             <box width="100%" height={1} flexShrink={0}>
               <input
                 focused={searchFocused}
                 value={state.filter}
-                placeholder={`Filter… ${FILTER_HINT}`}
+                maxLength={512}
+                placeholder={searchFocused ? `Filter… ${FILTER_HINT}` : "Filter items… /"}
                 backgroundColor={tokens.surfaceInset}
                 focusedBackgroundColor={tokens.surfaceInset}
                 textColor={tokens.text}

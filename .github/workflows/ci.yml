@@ -147,6 +147,8 @@ jobs:
       - name: Qualify focused deletion and successful session exit through a Linux PTY
         run: |
           python3 scripts/smoke-focused-ui.py
+          python3 scripts/smoke-focused-ui.py --size-override --engine rust
+          python3 scripts/smoke-focused-ui.py --size-override --engine js
           python3 scripts/smoke-focused-ui.py --exit-signal SIGHUP
           python3 scripts/smoke-focused-ui.py --exit-signal SIGTERM
 

@@ -20,8 +20,8 @@ destroy review context or exit the process.
 
 ## 3. Nothing destructive is automatic
 
-- Scan, plan, and review are read-only. Deletion requires `Enter` on a
-  non-empty selection.
+- Scan, plan, and review do not remove artifacts. Fresh interactive generations
+  start unselected. Deletion requires reviewing an explicit selection.
 - **Every apply confirms.** The dialog is always there; it turns red only
   when dangerous-tier items are queued. A single `Enter` must never be able
   to delete.
@@ -29,8 +29,10 @@ destroy review context or exit the process.
   selection only through deliberate per-item toggles.
 - Scope rows in the sidebar are checkbox groups: `Space` on a scope queues or
   dequeues its whole subtree. Entering a scope only narrows the view.
-- `Enter` fires the apply dialog only when the cursor is on an artifact. On a
-  group header (reachable by mouse) it folds the group, same as `Space`.
+- `Enter` opens item details. On a group header it folds the group; in the
+  folder sidebar it browses the selected folder. Review queue is a named mouse
+  action, with Ctrl+Enter where the terminal supports the chord. The F2 menu
+  provides the same action without depending on extended key encoding.
 - Blocked items (VCS internals, protected roots) cannot be selected in any
   mode - including inside a scope-level bulk queue.
 - A visual range (`v`, then `Space`) follows the bulk-select rule: it queues
@@ -54,8 +56,8 @@ a qualification limit, so do not promise absolute deletion immunity.
 
 1. What am I looking at? (mode chip + pane titles - the artifact pane title
    carries the active scope and risk filter at every terminal width)
-2. What happens if I press Enter? (selection tally + confirm gate; the dialog
-   names the real verb - delete vs trash - and previews the largest targets)
+2. What happens if I press Enter? (details or folder browsing; removal starts
+   with a separate named review action and an explicit confirmation)
 3. How do I get out of here? (footer hints; `?` for the full map)
 
 Age is the strongest triage signal a cleaner has. Rows show how long ago the
@@ -95,9 +97,17 @@ abort. Changing trash mode is an explicit choice in either direction.
 
 ## 6. Mouse is a peer, not a fallback
 
-Rows scroll, hover, click-to-focus, and toggle on click. Headers collapse on
-click. The scrollbar is a real track: click or drag it to seek the list.
+Names focus or browse; queue checkboxes toggle separately. Folder arrows expand
+without changing the view or selection. Right/middle clicks and drags cannot
+activate queue controls. Buttons require a left press and release over the same
+control. Headers collapse on left click. The scrollbar is a real track: click or drag it to seek the list.
 Keyboard remains sufficient for every action.
+
+Actions/settings pages have mouse Previous/Next controls and visible keyboard
+navigation. Appearance preferences contain only theme, sort and motion. They
+never restore a deletion queue. Confirmation captures its plan before consent;
+later caller mutations and background input cannot change its IDs or paths.
+Below 40 columns or 12 rows, deletion consent is disarmed until review fits.
 
 Scrollbar seek uses OpenTUI's SliderRenderable model: a track press maps the
 pointer linearly onto the row index, while a thumb drag preserves the grab
@@ -110,7 +120,7 @@ selection.
 
 Every accepted key either changes the screen or updates the statusline. A key
 that deliberately does nothing must say why via a one-line notice - e.g.
-`Enter` on an empty queue explains Space to queue and x to delete this item,
+reviewing an empty queue explains how to select items,
 `Esc` with nothing left to unwind flashes `nothing to unwind - ctrl-c quits`.
 
 ## 8. Cursor and viewport are one

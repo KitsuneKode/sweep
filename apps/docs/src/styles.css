@@ -4,3 +4,78 @@
 
 /* Framework baseline only; brand styling belongs here when you design it. */
 @source "../../../docs";
+
+/* Reading structure; Fumadocs owns the theme and navigation surfaces. */
+.sweep-start {
+  --gutter: clamp(1rem, 4vi, 2rem);
+  --content: 48rem;
+  display: grid;
+  grid-template-columns:
+    [full-start] minmax(var(--gutter), 1fr) [content-start]
+    min(100% - var(--gutter) * 2, var(--content)) [content-end]
+    minmax(var(--gutter), 1fr) [full-end];
+  gap: 1.5rem;
+  padding-block: clamp(2rem, 6vi, 5rem);
+  line-height: 1.65;
+  overflow-wrap: break-word;
+}
+.sweep-start > * {
+  grid-column: content;
+  min-inline-size: 0;
+}
+.sweep-start-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.sweep-start h1 {
+  font-size: clamp(2rem, 5vi, 3.25rem);
+  line-height: 1.15;
+  font-weight: 650;
+  text-wrap: balance;
+}
+.sweep-start h2 {
+  font-size: 1.375rem;
+  font-weight: 650;
+}
+.sweep-start-lead {
+  font-size: 1.125rem;
+  max-inline-size: 65ch;
+}
+.sweep-start pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding-block: 1rem;
+  border-block: 1px solid currentColor;
+}
+.sweep-start-steps {
+  list-style: decimal;
+  padding-inline-start: 1.5rem;
+}
+.sweep-start-steps li {
+  margin-block-start: 1rem;
+  padding-inline-start: 0.25rem;
+}
+.sweep-start-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+.sweep-start-links a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 2.75rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.sweep-start-links a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 0.25rem;
+}
+.sweep-start-links a:active {
+  text-decoration-thickness: 3px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .sweep-start-links a:hover {
+    text-decoration-thickness: 2px;
+  }
+}

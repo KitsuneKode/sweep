@@ -10,22 +10,16 @@
 
 Like [`npkill`](https://github.com/voidcosmos/npkill), Sweep helps review project cleanup. It also finds build outputs, supports saved plans and automation, and streams discoveries into a terminal UI.
 
-```
- ◆ sweep                              18 found · 10 queued · 5.8 GB
- ╭─ scopes ───────────────╮ ╭─ artifacts ────────────────────────────────╮
- │  ████████░░░░░ 62%     │ │      Name                       Size       │
- │  5.8GB of 9.3GB        │ │ ──────────────────────────────────────     │
- │ › all scopes    18 9.3G│ │ ▾ apps/web/   3 · 2.4GB · 3 queued       █ │
- │ ▸ apps/          6 3.6G│ │ ▌ ● node_modules              1.7 GB     █ │
- │ ▸ .worktrees/    3 858M│ │   ● .next                   610.4 MB     █ │
- │                        │ │ ▾ vendor/legacy/           1 · 2.1GB     █ │
- │                        │ │   ○ target                    2.1 GB     ░ │
- ╰────────────────────────╯ ╰────────────────────────────────────────────╯
-  ✓ node_modules  1.7 GB  /home/user/projects/monorepo/apps/web
-    NORMAL  ↑↓ move · space queue · enter apply · / filter · ? help
+```bash
+sweep ui ~/projects
+# Queue safe items → Review queue → confirm → read the cleanup receipt.
+# Click a folder name to browse; use its checkbox to queue artifacts.
+# Ctrl+K (or F2) searches actions, settings and shortcuts.
 ```
 
-![sweep TUI demo - streaming scan, scope sidebar, queue and apply](https://raw.githubusercontent.com/KitsuneKode/sweep/main/assets/demo.gif)
+The terminal interface starts with an empty queue. Browsing, sorting and filtering
+do not select anything. Review names every selected artifact, including items
+queued outside the folder you are viewing.
 
 ---
 
@@ -173,7 +167,9 @@ Arrows work everywhere; letter keys are speed aliases.
 | `Ctrl-U` / `Ctrl-D` or `PgUp/PgDn` | page up / down                     | moves one viewport                                          |
 | `Space`                            | toggle selection                   | blocked items never toggle                                  |
 | `s` / `a` / `u`                    | select safe · safe+caution · clear | bulk never touches dangerous                                |
-| `Enter`                            | apply deletion                     | **always confirms**; red banner on danger                   |
+| `Enter`                            | open details or browse a folder    | never deletes                                               |
+| `Ctrl+Enter`                       | review queue                       | where supported; Review queue button always confirms        |
+| `F2`                               | actions and settings               | mouse pages expose selection, filters and appearance        |
 | `h` / `l` (or click header)        | collapse / expand group            | tree-style triage                                           |
 | `w` / `e`                          | collapse all · expand all          |                                                             |
 | `o`                                | sort size · name · age             | size-desc default; age is stalest first                     |

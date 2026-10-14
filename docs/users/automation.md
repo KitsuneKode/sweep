@@ -157,3 +157,8 @@ journal can additionally expose `recordedStatus` and `recordedTrashMoves` from
 fully read records. These are uncommitted observations, not confirmed disk state
 or authorization to retry/restore. Confirmed `trashMoves` remain empty until a
 complete journal establishes the outcome. Recovery itself never mutates data.
+
+A native engine that cannot start or lacks required apply capabilities returns
+`engine_unavailable` with `applyOutcome: "not_started"` and `retryable: false`.
+Repair or update that engine, then review again. An agent must not switch to a
+weaker backend or widen authorization automatically.

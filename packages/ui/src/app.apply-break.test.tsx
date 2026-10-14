@@ -129,7 +129,13 @@ async function mountWithApply(
       }}
     >
       <CrashProbe />
-      <SweepApp plan={fixturePlan} scan={control} operations={operations} onDone={onDone} />
+      <SweepApp
+        init={{ startUnselected: false }}
+        plan={fixturePlan}
+        scan={control}
+        operations={operations}
+        onDone={onDone}
+      />
     </UiErrorBoundary>,
     {
       width: 120,
@@ -316,7 +322,7 @@ describe("adversarial: same-drain bursts on the queue confirm", () => {
     const outcomes: SweepUiOutcome[] = [];
     const { setup, settle } = await mountWithApply((o) => outcomes.push(o));
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     await settle();
@@ -338,7 +344,7 @@ describe("adversarial: same-drain bursts on the queue confirm", () => {
     const outcomes: SweepUiOutcome[] = [];
     const { setup, settle, applyCalls } = await mountWithApply((o) => outcomes.push(o));
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     await settle();
@@ -360,6 +366,29 @@ describe("adversarial: same-drain bursts on the queue confirm", () => {
 });
 
 describe("adversarial: committed applying state", () => {
+  test("shrinking confirmation cannot authorize deletion until its review is readable again", async () => {
+    const { setup, settle, openSingleConfirm, applyCalls } = await mountWithApply(() => {});
+    await openSingleConfirm();
+    await act(async () => {
+      setup.resize(30, 8);
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    expect(applyCalls).toHaveLength(0);
+    await act(async () => {
+      setup.resize(120, 32);
+      await setup.flush();
+    });
+    await settle();
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0]!.plan.selectedCandidateIds).toEqual(["cand_caution"]);
+  });
   test("single-item confirmation stays compact instead of filling the terminal", async () => {
     const { setup, openSingleConfirm } = await mountWithApply(() => {});
     await openSingleConfirm();
@@ -367,7 +396,8 @@ describe("adversarial: committed applying state", () => {
     let height = 0;
     while (pending.length) {
       const node = pending.pop()!;
-      if (node instanceof BoxRenderable && node.title?.trim() === "apply") height = node.height;
+      if (node instanceof BoxRenderable && node.title?.trim() === "Delete 1 item")
+        height = node.height;
       pending.push(...node.getChildren());
     }
     expect(height).toBeGreaterThan(0);
@@ -380,14 +410,64 @@ describe("adversarial: committed applying state", () => {
     fixture.candidates = [fixture.candidates[0]!];
     const { setup, settle, openSingleConfirm } = await mountWithApply(() => {}, undefined, fixture);
     await openSingleConfirm();
-    expect(setup.captureCharFrame()).toContain("y confirm    n / esc cancel");
+    expect(setup.captureCharFrame()).toContain("[y Delete]");
+    expect(setup.captureCharFrame()).toContain("[n / Esc Cancel]");
     await act(async () => {
       for (let i = 0; i < 5; i++) setup.mockInput.pressKey("\x1b[6~");
       await setup.flush();
     });
     await settle();
     expect(setup.captureCharFrame()).toContain("tail-marker");
-    expect(setup.captureCharFrame()).toContain("y confirm    n / esc cancel");
+    expect(setup.captureCharFrame()).toContain("[y Delete]");
+    expect(setup.captureCharFrame()).toContain("[n / Esc Cancel]");
+  });
+
+  test("confirmation owns the reviewed paths and metadata instead of live caller objects", async () => {
+    const fixture = createPlan();
+    const { setup, settle, applyCalls } = await mountWithApply(() => {}, undefined, fixture);
+    await act(async () => {
+      setup.mockInput.pressKey("\x1b[13;5u");
+      await setup.flush();
+    });
+    await settle();
+    fixture.candidates[0]!.path = "/tmp/sweep-ui/unreviewed/target";
+    fixture.candidates[0]!.reasons.push("changed-after-review");
+    fixture.selectionPolicy.mode = "all";
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0]!.plan.selectedCandidateIds).toEqual(["cand_safe"]);
+    expect(applyCalls[0]!.plan.candidates).toHaveLength(1);
+    expect(applyCalls[0]!.plan.candidates[0]!.path).toBe("/tmp/sweep-ui/node_modules");
+    expect(applyCalls[0]!.plan.candidates[0]!.reasons).toEqual(["default-pattern"]);
+    expect(applyCalls[0]!.plan.selectionPolicy.mode).toBe("default");
+  });
+
+  test("mouse review and confirmation apply only the queue and ignore right-clicks", async () => {
+    const { setup, settle, applyCalls } = await mountWithApply(() => {});
+    const clickLabel = async (label: string, button: 0 | 2 = 0) => {
+      const lines = setup.captureCharFrame().split("\n");
+      const y = lines.findIndex((line) => line.includes(label));
+      expect(y).toBeGreaterThanOrEqual(0);
+      const x = lines[y]!.indexOf(label) + 2;
+      await act(async () => {
+        await setup.mockMouse.click(x, y, button);
+        await setup.flush();
+      });
+      await settle();
+    };
+    await clickLabel("Review queue");
+    expect(setup.captureCharFrame()).toContain("Permanently delete 1 item");
+    expect(applyCalls).toHaveLength(0);
+    await clickLabel("y Delete", 2);
+    expect(applyCalls).toHaveLength(0);
+    await clickLabel("y Delete");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0]!.plan.selectedCandidateIds).toEqual(["cand_safe"]);
+    expect(applyCalls[0]!.plan.candidates).toHaveLength(1);
   });
   test("once applying commits, every mutating key is ignored until the apply lands", async () => {
     const outcomes: SweepUiOutcome[] = [];
@@ -406,7 +486,7 @@ describe("adversarial: committed applying state", () => {
     for (const key of ["down", "x", "enter", "a", "t", "i", "r", "q"]) {
       await act(async () => {
         if (key === "down") setup.mockInput.pressArrow("down");
-        else if (key === "enter") setup.mockInput.pressEnter();
+        else if (key === "enter") setup.mockInput.pressKey("\x1b[13;5u");
         else setup.mockInput.pressKey(key);
         await setup.flush();
       });
@@ -607,7 +687,7 @@ describe("adversarial: committed applying state", () => {
     expect(setup.captureCharFrame()).toContain("INCOMPLETE");
     await act(async () => {
       setup.mockInput.pressKey("x");
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     await settle();
@@ -639,6 +719,61 @@ describe("adversarial: committed applying state", () => {
 });
 
 describe("adversarial: apply resolution state surgery", () => {
+  test("reviewed global queue preserves the browsed folder and never includes its unselected item", async () => {
+    const plan = createPlan();
+    plan.candidates[0]!.path = "/tmp/sweep-ui/one/node_modules";
+    plan.candidates[1]!.path = "/tmp/sweep-ui/two/dist";
+    const { setup, settle, applyCalls, applyResolvers } = await mountWithApply(
+      () => {},
+      undefined,
+      plan,
+    );
+    const lines = setup.captureCharFrame().split("\n");
+    const y = lines.findIndex((line) => line.includes("two/") && line.indexOf("two/") < 38);
+    expect(y).toBeGreaterThanOrEqual(0);
+    await act(async () => {
+      await setup.mockMouse.click(lines[y]!.indexOf("two/") + 1, y);
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("Viewing: two");
+    await act(async () => {
+      setup.mockInput.pressKey("\x1b[13;5u");
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("1 queued item is outside the current view");
+    await act(async () => {
+      setup.mockInput.pressKey("y");
+      await setup.flush();
+    });
+    await settle();
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0]!.plan.selectedCandidateIds).toEqual(["cand_safe"]);
+    expect(applyCalls[0]!.plan.candidates.map((item) => item.path)).toEqual([
+      "/tmp/sweep-ui/one/node_modules",
+    ]);
+    await act(async () => {
+      applyResolvers[0]!({
+        report: {
+          protocolVersion: "1",
+          targetDir: plan.targetDir,
+          selectedCandidateIds: ["cand_safe"],
+          deletedCount: 1,
+          failedCount: 0,
+          totalBytesFreed: 1024,
+          failedPaths: [],
+          outcomes: [{ candidateId: "cand_safe", status: "deleted" }],
+        },
+        interrupted: false,
+      });
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("Viewing: two");
+    expect(setup.captureCharFrame()).toContain("dist");
+    expect(setup.captureCharFrame()).toContain("1 found");
+  });
   test("successive link removals with the same name use different candidate ids", async () => {
     const plan = createPlan();
     plan.candidates = ["first", "second"].map((group) => ({
@@ -707,7 +842,7 @@ describe("adversarial: apply resolution state surgery", () => {
     expect(setup.captureCharFrame()).toContain("Only this item");
     expect(setup.captureCharFrame()).toContain("1 other queued item stays queued");
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     await settle();
@@ -803,8 +938,48 @@ test("confirmation exposes the ceiling and explicit override instructions", asyn
   await openSingleConfirm();
   const frame = setup.captureCharFrame();
   expect(frame).toContain("Size ceiling: 0 GiB");
-  expect(frame).toContain("--force-large --yes");
+  expect(frame).toContain("Override size ceiling");
   expect(frame).toContain("Over the limit");
+});
+
+test("size-ceiling override is explicit, captured in a burst and reset for the next review", async () => {
+  const { setup, settle, openSingleConfirm, applyCalls, applyRejecters } = await mountWithApply(
+    () => {},
+    {
+      maxSizeGB: 0.000001,
+      forceLarge: false,
+    },
+  );
+  await openSingleConfirm();
+  await act(async () => {
+    setup.mockInput.pressKey("f");
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  await settle();
+  expect(applyCalls).toHaveLength(1);
+  expect(applyCalls[0]!.overrideSizeLimit).toBe(true);
+  expect(applyCalls[0]!.plan.selectedCandidateIds).toEqual(["cand_caution"]);
+  await act(async () => {
+    applyRejecters[0]!(
+      Object.assign(new Error("Another apply holds the lock"), {
+        applyOutcome: "not_started",
+        refusalCode: "apply_busy",
+      }),
+    );
+    await setup.flush();
+  });
+  await settle();
+  await openSingleConfirm();
+  expect(setup.captureCharFrame()).toContain("Override size ceiling");
+  expect(setup.captureCharFrame()).not.toContain("overridden for this review");
+  await act(async () => {
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  await settle();
+  expect(applyCalls).toHaveLength(2);
+  expect(applyCalls[1]!.overrideSizeLimit).toBeUndefined();
 });
 
 test("uncapped confirmation remains explicit without inventing an over-limit refusal", async () => {
@@ -814,7 +989,7 @@ test("uncapped confirmation remains explicit without inventing an over-limit ref
   });
   await openSingleConfirm();
   const frame = setup.captureCharFrame();
-  expect(frame).toContain("No byte ceiling");
+  expect(frame).not.toContain("Override size ceiling");
   expect(frame).not.toContain("Over the limit");
   expect(frame).toContain("Permanently delete");
 });

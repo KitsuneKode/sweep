@@ -37,6 +37,24 @@
 - `.docs/` owns stable internal truth.
 - `.reference/` owns supporting references.
 
+## Explicit interactive selection (2026-10-13)
+
+The user approved this interaction contract after the grilling interview:
+
+- Serve developers and vibecoders through visible mouse actions and optional shortcuts.
+- Start fresh interactive scans with no selections, including streamed discovery
+  and rescans. CLI plan selection policy remains a separate explicit contract.
+- Enter opens details or browses a folder. Review queue is a named button/menu
+  action with Ctrl+Enter where supported; x reviews only the current item.
+- Browsing/filtering preserves the global queue. Confirmation names hidden
+  selections and owns a captured plan; applying preserves the browsing context.
+- Keep permanent deletion explicit and local trash opt-in. Explain retained
+  disk space, manual restoration and cancellation without rollback.
+- Persist presentation preferences only. Keep limits bounded and adjustable
+  where policy allows, without bypassing identity/protected-path checks.
+- Promotion depends on installed-package/platform qualification and measured
+  performance. A sparse-file test cannot substantiate a 600 GiB claim.
+
 ## Resource and release decisions (2026-10-02, locally implemented)
 
 - Use cumulative logical resource bounds and incremental metadata enumeration

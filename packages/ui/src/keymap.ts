@@ -144,6 +144,7 @@ export interface KeymapActions {
   setInspect?: (open: boolean) => void;
   /** Flip "move to trash instead of deleting" inside the confirm dialog. */
   toggleTrash?: () => void;
+  toggleSizeLimitOverride?: () => void;
   /** Pause/resume decorative activity without stopping the operation. */
   toggleMotion?: () => void;
   /** Write the reviewed plan (current queue) to a JSON file. */
@@ -289,6 +290,11 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     if (key.name === "t") {
       if (!confirmUnarmed) actions.toggleTrash?.();
       else actions.notify?.("Wait for the confirmation to appear before changing deletion mode");
+      return;
+    }
+    if (key.name === "f" && !key.ctrl && !key.meta) {
+      if (!confirmUnarmed) actions.toggleSizeLimitOverride?.();
+      else actions.notify?.("Wait for the confirmation to appear before changing the size ceiling");
       return;
     }
     if (key.name === "y") {
@@ -471,6 +477,14 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   // The sidebar unmounts under a narrow resize while focus stays behind -
   // reconcile on the next keypress instead of leaving keys dead in a pane
   // that isn't rendered.
+  if (
+    (state.focus === "list" || state.focus === "sidebar") &&
+    ((key.ctrl && (key.name === "return" || key.name === "enter")) || key.name === "ctrl+enter")
+  ) {
+    actions.requestApply();
+    return;
+  }
+
   if (state.focus === "sidebar" && !showSidebar) {
     actions.focusPanel("list");
     return;
@@ -515,7 +529,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       actions.mutate((s) => moveSidebarCursor(s, 1));
       return;
     }
-    if (key.name === "return") {
+    if (key.name === "return" || key.name === "enter") {
       actions.mutate((s) => applySidebarScope(s));
       return;
     }
@@ -651,7 +665,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
         break;
     }
 
-    if (key.name === "return") {
+    if (key.name === "return" || key.name === "enter") {
       // Mouse clicks can park the cursor on a group header - enter there means
       // "fold this group" (same as space/l), never the destructive dialog.
       // Read post-commit rows: a same-burst cursor move must not misclassify
@@ -661,7 +675,8 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       if (row?.kind === "header") {
         actions.mutate((s) => toggleGroup(s, row.groupKey));
       } else {
-        actions.requestApply();
+        if (row?.kind === "item") actions.setInspect?.(true);
+        else actions.notify?.("No item here; use F2 for actions");
       }
       return;
     }

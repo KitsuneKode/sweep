@@ -1,8 +1,8 @@
-import type { SweepUiOutcome } from "@kitsunekode/sweep-ui/outcome";
+import type { SweepUiOutcome, UiApplyFn } from "@kitsunekode/sweep-ui/outcome";
 import { spawnSync } from "node:child_process";
 
 import { fileURLToPath } from "node:url";
-import type { ApplyReport, CliOptions, ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { CATALOG_PATTERNS, DEFAULT_PATTERN_SET } from "@kitsunekode/sweep-core/catalog";
 import { isColdRequested, tryDropPageCache } from "@kitsunekode/sweep-core/cold";
@@ -86,13 +86,7 @@ export interface SweepUiModule {
      * engine apply pipeline quietly - the TUI owns the screen, so progress
      * lines must not print. History is appended inside the channel.
      */
-    apply?: (request: {
-      plan: ScanPlan;
-      engine: "js" | "rust";
-      trash: boolean;
-      signal: AbortSignal;
-      onProgress?: (progress: import("@kitsunekode/sweep-protocol").ApplyProgress) => void;
-    }) => Promise<{ report: ApplyReport; interrupted: boolean; trashDir?: string }>;
+    apply?: UiApplyFn;
     init?: {
       catalogPatterns?: string[];
       disabledPatterns?: string[];
@@ -209,7 +203,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
             quiet: true,
             trash: request.trash,
             maxSizeGB: scanConfig.maxSizeGB,
-            forceLarge: opts.forceLarge,
+            forceLarge: opts.forceLarge || request.overrideSizeLimit === true,
             signal: request.signal,
             ...(request.onProgress ? { onProgress: request.onProgress } : {}),
           },
@@ -270,14 +264,15 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       exitWith(EXIT.OK);
     }
 
-    assertSizeLimit(getSelectedBytes(selectedPlan), scanConfig.maxSizeGB, opts.forceLarge ?? false);
+    const forceLarge = Boolean(opts.forceLarge) || outcome.overrideSizeLimit === true;
+    assertSizeLimit(getSelectedBytes(selectedPlan), scanConfig.maxSizeGB, forceLarge);
 
     const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(
       selectedPlan,
       engine,
       {
         maxSizeGB: scanConfig.maxSizeGB,
-        forceLarge: opts.forceLarge,
+        forceLarge,
         ...(useTrash ? { trash: true } : {}),
       },
     );

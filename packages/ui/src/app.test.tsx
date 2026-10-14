@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { testRender as nativeTestRender } from "@opentui/react/test-utils";
 import { act } from "react";
+import { KeyCodes } from "@opentui/core/testing";
+import type { ViewPreferences } from "./view-preferences.js";
 import { SweepApp, type SweepUiOutcome } from "./app.js";
 import type { UiScanControl, UiScanHooks } from "./streaming.js";
 
@@ -80,6 +82,131 @@ async function mount(onDone: (outcome: SweepUiOutcome) => void) {
 }
 
 describe("sweep TUI render", () => {
+  test("Ctrl+K searches actions without running background shortcuts", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const setup = await mount((result) => outcomes.push(result));
+    const paint = async () => {
+      await act(async () => {
+        await setup.flush();
+        await setup.renderOnce();
+      });
+    };
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey("k", { ctrl: true });
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Search actions");
+    await act(async () => {
+      await setup.mockInput.typeText("theme");
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Use dark theme");
+    expect(setup.captureCharFrame()).not.toContain("Clear whole queue");
+    expect(outcomes).toEqual([]);
+    await act(async () => {
+      setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).not.toContain("Search actions");
+    expect(setup.captureCharFrame()).toContain("Review queue (0)");
+    expect(outcomes).toEqual([]);
+  });
+  test("narrow actions menu exposes every page by mouse and publishes appearance only", async () => {
+    const changes: ViewPreferences[] = [];
+    const outcomes: SweepUiOutcome[] = [];
+    const setup = await testRender(
+      <SweepApp
+        plan={createPlan()}
+        onDone={(result) => outcomes.push(result)}
+        onPreferencesChange={(value) => changes.push(value)}
+      />,
+      { width: 80, height: 14 },
+    );
+    teardown = () => setup.renderer.destroy();
+    const paint = async () => {
+      for (let i = 0; i < 3; i++)
+        await act(async () => {
+          await setup.flush();
+          await setup.renderOnce();
+        });
+    };
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey(KeyCodes.F2);
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Search actions");
+    expect(outcomes).toEqual([]);
+    const click = async (label: string) => {
+      const lines = setup.captureCharFrame().split("\n");
+      const y = lines.findIndex((line) => line.includes(label));
+      expect(y).toBeGreaterThanOrEqual(0);
+      await act(async () => {
+        await setup.mockMouse.click(lines[y]!.indexOf(label) + 1, y);
+        await setup.flush();
+      });
+      await paint();
+    };
+    for (let i = 0; i < 10 && !setup.captureCharFrame().includes("Use dark theme"); i++)
+      await click("[Next]");
+    expect(setup.captureCharFrame()).toContain("Use dark theme");
+    await click("Use dark theme");
+    expect(setup.captureCharFrame()).not.toContain("Search actions");
+    expect(changes.at(-1)?.themeMode).toBe("dark");
+    expect(Object.keys(changes.at(-1)!).sort()).toEqual([
+      "motionEnabled",
+      "sortBy",
+      "themeMode",
+      "version",
+    ]);
+    expect(setup.captureCharFrame()).toContain("Review queue (0)");
+    expect(outcomes).toEqual([]);
+  });
+  test("fresh UI is unselected and mouse actions guide selection, review and cancellation", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const setup = await mount((result) => outcomes.push(result));
+    const paint = async () => {
+      for (let i = 0; i < 3; i++)
+        await act(async () => {
+          await setup.flush();
+          await setup.renderOnce();
+        });
+    };
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Review queue (0)");
+    await act(async () => {
+      setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    await paint();
+    expect(setup.captureCharFrame()).toContain("Review removal");
+    expect(setup.captureCharFrame()).not.toContain("Permanently delete");
+    const click = async (label: string) => {
+      const lines = setup.captureCharFrame().split("\n");
+      const y = lines.findIndex((line) => line.includes(label));
+      expect(y).toBeGreaterThanOrEqual(0);
+      await act(async () => {
+        await setup.mockMouse.click(lines[y]!.indexOf(label) + 1, y);
+        await setup.flush();
+        await setup.renderOnce();
+        await setup.flush();
+      });
+      await paint();
+    };
+    await click("Esc Close");
+    await click("Queue safe items");
+    expect(setup.captureCharFrame()).toContain("Review queue (1)");
+    await click("Review queue (1)");
+    expect(setup.captureCharFrame()).toContain("Permanently delete 1 item");
+    await click("n / Esc Cancel");
+    expect(setup.captureCharFrame()).toContain("Review queue (1)");
+    expect(outcomes).toEqual([]);
+  });
   test("inspect wraps a long path rather than hiding its final component", async () => {
     const plan = createPlan();
     const rel = `東京/${"long-parent-segment/".repeat(5)}final-reviewed-node_modules`;
@@ -160,17 +287,18 @@ describe("sweep TUI render", () => {
     expect(frame).toContain("sweep");
     expect(frame).toContain("found");
     expect(frame).toContain("queued");
-    expect(frame).toContain("apply");
+    expect(frame).toContain("Review queue (0)");
+    expect(frame).toContain("nothing queued");
     // The tally carries the queue's risk mix - the header owns the bytes.
-    expect(frame).toContain("1 safe");
+    expect(frame).toContain("queue empty");
   });
 
   test("renders scope sidebar with reclaim bytes and project groups", async () => {
     const setup = await mount(() => {});
     const frame = setup.captureCharFrame();
 
-    expect(frame).toContain("scopes");
-    expect(frame).toContain("all scopes");
+    expect(frame).toContain("folders");
+    expect(frame).toContain("All folders");
     expect(frame).toContain("▾");
     expect(frame).toContain("project root");
     expect(frame).not.toMatch(/▸ project root.*▸/);
@@ -202,7 +330,7 @@ describe("sweep TUI render", () => {
     });
 
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     await act(async () => {
@@ -273,7 +401,7 @@ describe("sweep TUI render", () => {
       await setup.flush();
     });
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     await settle();
@@ -297,7 +425,11 @@ describe("sweep TUI render", () => {
       await setup.flush();
     });
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("s");
+      await setup.flush();
+    });
+    await act(async () => {
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     await settle();
@@ -384,7 +516,7 @@ describe("sweep TUI render", () => {
       await setup.flush();
     });
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     // Safe/caution-only queues are deletions too - enter opens the dialog,
@@ -422,7 +554,11 @@ describe("sweep TUI render", () => {
 
     const outcomes: SweepUiOutcome[] = [];
     const setup = await testRender(
-      <SweepApp plan={plan} onDone={(result) => outcomes.push(result)} />,
+      <SweepApp
+        init={{ startUnselected: false }}
+        plan={plan}
+        onDone={(result) => outcomes.push(result)}
+      />,
       { width: 120, height: 32 },
     );
     teardown = () => setup.renderer.destroy();
@@ -438,7 +574,7 @@ describe("sweep TUI render", () => {
       await setup.flush();
     });
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     expect(outcomes).toHaveLength(0);
@@ -476,7 +612,11 @@ describe("sweep TUI render", () => {
 
     const outcomes: SweepUiOutcome[] = [];
     const setup = await testRender(
-      <SweepApp plan={plan} onDone={(result) => outcomes.push(result)} />,
+      <SweepApp
+        init={{ startUnselected: false }}
+        plan={plan}
+        onDone={(result) => outcomes.push(result)}
+      />,
       { width: 120, height: 32 },
     );
     teardown = () => setup.renderer.destroy();
@@ -485,7 +625,7 @@ describe("sweep TUI render", () => {
     });
 
     await act(async () => {
-      setup.mockInput.pressEnter();
+      setup.mockInput.pressKey("\x1b[13;5u");
       await setup.flush();
     });
     expect(outcomes).toEqual([]);

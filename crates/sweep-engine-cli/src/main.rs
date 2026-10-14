@@ -188,6 +188,16 @@ enum IndexRequest {
         #[serde(rename = "includeDangerous")]
         include_dangerous: bool,
     },
+    Folders {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        generation: String,
+        revision: u64,
+        #[serde(deserialize_with = "required_index_scope")]
+        scope: Option<String>,
+        offset: usize,
+        limit: usize,
+    },
     Close {
         #[serde(rename = "requestId")]
         request_id: u32,
@@ -244,6 +254,7 @@ fn run_index() -> Result<(), CliFailure> {
             IndexRequest::Retire { request_id, generation, revision, candidate_ids } => (request_id, index.retire(&generation, revision, &candidate_ids).map(|summary| serde_json::json!({"type":"retired","requestId":request_id,"summary":summary}))),
             IndexRequest::Scope { request_id, generation, revision, scope } => (request_id, index.scope_summary(&generation, revision, scope.as_deref()).map(|totals| serde_json::json!({"type":"scope","requestId":request_id,"totals":totals,"summary":index.summary()}))),
             IndexRequest::SelectScope { request_id, generation, revision, scope, selected, include_dangerous } => (request_id, index.select_scope(&generation, revision, scope.as_deref(), selected, include_dangerous).map(|summary| serde_json::json!({"type":"selection","requestId":request_id,"summary":summary}))),
+            IndexRequest::Folders { request_id, generation, revision, scope, offset, limit } => (request_id, index.folders(&generation, revision, scope.as_deref(), offset, limit).map(|page| serde_json::json!({"type":"folders","requestId":request_id,"page":page}))),
         };
         let value = result.unwrap_or_else(|error| serde_json::json!({"type":"index_error","requestId":request_id,"code":"discovery_refused","message":error.to_string()}));
         write_json_line(&value).map_err(CliFailure::failure)?;

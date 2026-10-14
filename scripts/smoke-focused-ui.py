@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Linux PTY: inspect -> confirm one artifact; never touch an existing project."""
+import json
 import fcntl
 import argparse
 import os
@@ -18,6 +19,8 @@ import time
 REPO = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--exit-signal", choices=["SIGHUP", "SIGTERM"])
+parser.add_argument("--size-override", action="store_true")
+parser.add_argument("--engine", choices=["rust", "js"], default="rust")
 options = parser.parse_args()
 bun = shutil.which("bun")
 if not bun:
@@ -28,12 +31,12 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
         artifact = root / name / "node_modules"
         artifact.mkdir(parents=True)
         (artifact / "file").write_bytes(contents)
-    (root / ".sweeprc").write_text("{}\n")
+    (root / ".sweeprc").write_text(json.dumps({"maxSizeGB": 0} if options.size_override else {}) + "\n")
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
     env = {**os.environ, "TERM": "xterm-256color", "XDG_CONFIG_HOME": str(root / "config"), "SWEEP_CONFIG_DIR": str(root / "config"),
            "SWEEP_ENGINE_PATH": str(REPO / "target/release/sweep-engine")}
-    proc = subprocess.Popen([bun, "apps/cli/dist/sweep.js", "ui", str(root), "--engine", "rust"],
+    proc = subprocess.Popen([bun, "apps/cli/dist/sweep.js", "ui", str(root), "--engine", options.engine],
                             cwd=REPO, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
     os.close(slave)
     output = bytearray()
@@ -56,6 +59,8 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
 
     try:
         wait_until(lambda: "scan complete:" in text() and "node_modules" in text())
+        os.write(master, b"s")
+        wait_until(lambda: "Review queue (2)" in text())
         output.clear()
         os.write(master, b"i")
         # Background rows can repaint in the same frame. Pin the inspector's
@@ -72,6 +77,18 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
         wait_until(lambda: re.search(rf"·\s*{viewed}/node_modules\b", text()) is not None)
         if not all((root / name / "node_modules").exists() for name in ["alpha", "bravo"]):
             raise RuntimeError("removal occurred before confirmation")
+        if options.size_override:
+            os.write(master, b"y")
+            wait_until(lambda: "Nothing removed" in text())
+            if not all((root / name / "node_modules/file").exists() for name in ["alpha", "bravo"]):
+                raise RuntimeError("size refusal changed the tree")
+            if "INCOMPLETE" in text():
+                raise RuntimeError("preflight refusal invalidated the scan")
+            output.clear()
+            os.write(master, b"x")
+            wait_until(lambda: "Permanently delete" in text())
+            os.write(master, b"f")
+            wait_until(lambda: "overridden for this review only" in text())
         os.write(master, b"y")
         wait_until(lambda: not (root / viewed / "node_modules").exists())
         other = "bravo" if viewed == "alpha" else "alpha"

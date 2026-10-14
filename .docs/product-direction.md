@@ -2,6 +2,11 @@
 
 `sweep` aims to become a trust-first artifact cleanup tool.
 
+The first audience is developers and vibecoders managing project trees. The
+default human experience should expose useful cleanup choices without requiring
+shortcut knowledge: largest artifacts, explicit selection, review, confirmation
+and a receipt. Time saved and repeat use matter more than promotional counters.
+
 ## Core promise
 
 - Safe enough to trust for destructive cleanup

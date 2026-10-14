@@ -1,5 +1,11 @@
 import { isColdRequested, tryDropPageCache } from "@kitsunekode/sweep-core/cold";
-import { buildRescanConfig } from "@kitsunekode/sweep-core/config";
+import { buildRescanConfig, sweepConfigDir } from "@kitsunekode/sweep-core/config";
+import { resolve } from "node:path";
+import {
+  loadViewPreferences,
+  saveViewPreferences,
+  type ViewPreferences,
+} from "./view-preferences.js";
 import { buildPlan, candidateFromEntry } from "@kitsunekode/sweep-core/planner";
 import { isRustEngineAvailable } from "@kitsunekode/sweep-core/rust-engine";
 import { scan } from "@kitsunekode/sweep-core/scanner";
@@ -12,7 +18,7 @@ import type {
 } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
 import { SweepApp, UiErrorBoundary } from "./app.js";
-import type { SweepUiOutcome, UiApplyResult } from "./outcome.js";
+import type { SweepUiOutcome, UiApplyResult, UiApplyRequest, UiApplyFn } from "./outcome.js";
 import { openUiSession } from "./runtime.js";
 import type { SweepUiInitOptions } from "./state.js";
 import { StreamBatcher, scanBatchCap } from "./stream-batcher.js";
@@ -65,12 +71,7 @@ export interface UiScanControl {
    * on the engine `E` last selected; absent when the host provides no apply
    * channel (static plans, tests) - the app falls back to an exit-apply.
    */
-  apply?: (request: {
-    plan: ScanPlan;
-    trash: boolean;
-    signal: AbortSignal;
-    onProgress?: (progress: import("@kitsunekode/sweep-protocol").ApplyProgress) => void;
-  }) => Promise<UiApplyResult>;
+  apply?: (request: Omit<UiApplyRequest, "engine">) => Promise<UiApplyResult>;
 }
 
 export interface SweepUiStreamingOptions {
@@ -89,13 +90,7 @@ export interface SweepUiStreamingOptions {
    * same revalidation/containment/history as an exit apply. The `engine`
    * argument follows the E toggle so a flipped scan engine applies too.
    */
-  apply?: (request: {
-    plan: ScanPlan;
-    engine: "js" | "rust";
-    trash: boolean;
-    signal: AbortSignal;
-    onProgress?: (progress: import("@kitsunekode/sweep-protocol").ApplyProgress) => void;
-  }) => Promise<UiApplyResult>;
+  apply?: UiApplyFn;
   init?: SweepUiInitOptions;
 }
 
@@ -133,6 +128,14 @@ function emptyPlan(targetDir: string, selectionPolicy: SelectionPolicy): ScanPla
 export async function runSweepUiStreaming(
   options: SweepUiStreamingOptions,
 ): Promise<SweepUiOutcome> {
+  const preferencesRoot = resolve(sweepConfigDir());
+  const preferences = loadViewPreferences(preferencesRoot);
+  let latestPreferences: ViewPreferences | undefined;
+  let initialPreferences: ViewPreferences | undefined;
+  const onPreferencesChange = (value: ViewPreferences) => {
+    initialPreferences ??= value;
+    latestPreferences = value;
+  };
   const session = await openUiSession();
   let currentConfig = options.config;
   // Mutable so `E` can flip backends between generations; `start` reads it
@@ -274,6 +277,8 @@ export async function runSweepUiStreaming(
           initiallyScanning
           scan={makeControl()}
           operations={session.operations}
+          {...(preferences ? { preferences } : {})}
+          onPreferencesChange={onPreferencesChange}
           onDone={session.finish}
         />
       </UiErrorBoundary>,
@@ -281,5 +286,18 @@ export async function runSweepUiStreaming(
   } catch (error) {
     session.viewFailed(error);
   }
-  return await session.done;
+  const outcome = await session.done;
+  if (
+    latestPreferences &&
+    JSON.stringify(latestPreferences) !== JSON.stringify(initialPreferences)
+  ) {
+    try {
+      saveViewPreferences(latestPreferences, preferencesRoot);
+    } catch {
+      process.stderr.write(
+        "Appearance preferences were not saved; this session's cleanup result is unchanged.\n",
+      );
+    }
+  }
+  return outcome;
 }

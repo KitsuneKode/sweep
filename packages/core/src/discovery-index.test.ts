@@ -96,6 +96,34 @@ for await (const line of createInterface({input:process.stdin})) {
   }
   requestCount++;
   if(scenario==="stall") continue;
+  if(m.type==="folders") {
+    const groups=new Map();
+    for(const c of init.plan.candidates) {
+      let scope=relative(init.plan.targetDir,dirname(c.path));
+      if(process.platform==="win32") scope=scope.replaceAll("\\", "/");
+      let key;
+      if(m.scope===null) key=scope.split("/")[0];
+      else if(m.scope!=="" && scope.startsWith(m.scope+"/")) key=m.scope+"/"+scope.slice(m.scope.length+1).split("/")[0];
+      else continue;
+      if(!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({c,scope});
+    }
+    const folders=[...groups].map(([key, rows])=>({key,ownCount:rows.filter(r=>r.scope===key).length,
+      hasChildren:rows.some(r=>r.scope!==key),totals:summary(rows.map(r=>r.c))}));
+    folders.sort((a,b)=>b.totals.estimatedBytes-a.totals.estimatedBytes);
+    const shown=folders.slice(m.offset,m.offset+m.limit);
+    const next=m.offset+shown.length;
+    const page={generation:init.generation,revision,scope:m.scope,matchingCount:folders.length,offset:m.offset,
+      nextOffset:next<folders.length?next:null,folders:shown,summary:summary()};
+    if(scenario==="folder-key") shown[0].key="another";
+    if(scenario==="folder-count") shown[0].totals.candidateCount++;
+    if(scenario==="folder-owned") shown[0].ownCount++;
+    if(scenario==="folder-risk") shown[0].totals.riskCounts.safe++;
+    if(scenario==="folder-retained") shown[0].totals.retainedBytes++;
+    if(scenario==="folder-next") page.nextOffset=0;
+    if(scenario==="folder-generation") page.generation="another";
+    await emit({type:"folders",requestId:m.requestId,page}); continue;
+  }
   if(m.type==="scope" || m.type==="select_scope") {
     const scoped=init.plan.candidates.filter(c=> {
       let key=relative(init.plan.targetDir,dirname(c.path));
@@ -179,6 +207,35 @@ function expectReaped(path: string): void {
   const pid = Number(readFileSync(path, "utf8"));
   expect(() => process.kill(pid, 0)).toThrow();
 }
+
+for (const scenario of [
+  "folder-key",
+  "folder-count",
+  "folder-owned",
+  "folder-risk",
+  "folder-retained",
+  "folder-next",
+  "folder-generation",
+]) {
+  test(`forged folder receipt closes and reaps the generation (${scenario})`, async () => {
+    const session = await open(scenario);
+    expect(await rejection(session.folders(null, 0, 2))).toMatchObject({
+      code: "discovery_protocol",
+    });
+    await session.close();
+    expectReaped(join(root, `${scenario}.pid`));
+  });
+}
+
+test("folder input refusals preserve valid metadata navigation", async () => {
+  const session = await open();
+  await rejection(session.folders("../other"));
+  await rejection(session.folders(null, 0, 257));
+  const folders = await session.folders(null, 0, 2);
+  expect(folders.folders.map((folder) => folder.key)).toEqual(["project-2", "project-1"]);
+  expect(folders.nextOffset).toBe(2);
+  expect(session.summary.selectedCount).toBe(1);
+});
 
 test("pages are immutable, split UTF-8 survives, and queued IDs survive page eviction", async () => {
   const source = plan(600);

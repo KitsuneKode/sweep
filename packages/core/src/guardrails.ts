@@ -115,7 +115,8 @@ export type ApplyRefusalCode =
   | "size_limit_exceeded"
   | "current_size_unavailable"
   | "apply_busy"
-  | "resource_limit_exceeded";
+  | "resource_limit_exceeded"
+  | "engine_unavailable";
 export class ApplyRefusedError extends GuardrailError {
   readonly applyOutcome = "not_started" as const;
   constructor(
@@ -138,6 +139,7 @@ export function isApplyRefusedError(error: unknown): error is ApplyRefusedError 
       "current_size_unavailable",
       "apply_busy",
       "resource_limit_exceeded",
+      "engine_unavailable",
     ].includes(value.refusalCode ?? "")
   );
 }

@@ -2,7 +2,7 @@ import type { ApplyProgress, ApplyReport, ScanPlan } from "@kitsunekode/sweep-pr
 
 export type SweepUiOutcome =
   /** `trash`: the user chose "move to trash" in the confirm dialog. */
-  | { type: "apply"; plan: ScanPlan; trash?: boolean }
+  | { type: "apply"; plan: ScanPlan; trash?: boolean; overrideSizeLimit?: boolean }
   | { type: "rescan"; disabledPatterns: string[]; extraPatterns: string[] }
   | { type: "abort" }
   | {
@@ -26,6 +26,8 @@ export interface UiApplyRequest {
   plan: ScanPlan;
   engine: "js" | "rust";
   trash: boolean;
+  /** Explicit consent for this review only; does not bypass filesystem guards. */
+  overrideSizeLimit?: boolean;
   /** Abort stops scheduling new deletions; in-flight work still finishes. */
   signal: AbortSignal;
   onProgress?: (progress: ApplyProgress) => void;

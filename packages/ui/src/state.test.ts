@@ -1329,3 +1329,17 @@ test("queued lower bounds remain visible after filtering their contributing row 
     visibleCount: 0,
   });
 });
+
+test("manual UI generations never seed a queue at discovery, finalization or rescan", () => {
+  const plan = createPlan();
+  let state = createUiState(plan, { startUnselected: true });
+  expect(state.selectedIds.size).toBe(0);
+  state = resetForRescan(state);
+  state = upsertCandidates(state, plan.candidates);
+  expect(state.selectedIds.size).toBe(0);
+  state = toggleSelectionById(state, plan.candidates[0]!.id);
+  state = finalizeScan(state, plan);
+  expect([...state.selectedIds]).toEqual([plan.candidates[0]!.id]);
+  state = finalizeScan(upsertCandidates(resetForRescan(state), plan.candidates), plan);
+  expect(state.selectedIds.size).toBe(0);
+});

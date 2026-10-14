@@ -90,10 +90,13 @@ async function mount(
   height: number,
   onDone: (o: SweepUiOutcome) => void = () => {},
 ) {
-  const setup = await testRender(<SweepApp plan={createPlan()} onDone={onDone} />, {
-    width,
-    height,
-  });
+  const setup = await testRender(
+    <SweepApp init={{ startUnselected: false }} plan={createPlan()} onDone={onDone} />,
+    {
+      width,
+      height,
+    },
+  );
   teardown = () => setup.renderer.destroy();
   await act(async () => {
     await setup.renderOnce();
@@ -140,19 +143,18 @@ function expectFits(frame: string, width: number) {
 }
 
 describe("layout across terminal sizes", () => {
-  test("wide: both panes, age column, size bars, and the sidebar insights", async () => {
+  test("wide: both panes, age column, size bars and explicit view context", async () => {
     const setup = await mount(120, 34);
     const frame = setup.captureCharFrame();
 
-    expect(frame).toContain("scopes");
+    expect(frame).toContain("folders");
     expect(frame).toContain("artifacts");
     expect(frame).toContain("Age");
     expect(frame).toContain("2y");
     expect(frame).toMatch(/8mo\s+█+\s+300\.0 MiB/);
-    // Insights panel: tier breakdown and the stale total.
-    expect(frame).toContain("caution");
-    expect(frame).toContain("dangerous");
-    expect(frame).toContain("untouched 30d+");
+    expect(frame).toContain("Viewing: all folders");
+    expect(frame).toContain("Largest first");
+    expect(frame).not.toContain("untouched 30d+");
     expectFits(frame, 120);
   });
 
@@ -171,7 +173,7 @@ describe("layout across terminal sizes", () => {
     const setup = await mount(52, 20);
     const frame = setup.captureCharFrame();
 
-    expect(frame).not.toContain("scopes");
+    expect(frame).not.toContain("─ folders ─");
     expect(frame).not.toContain("Age");
     expect(frame).toContain("artifacts");
     expect(frame).toContain("? keys");
@@ -182,7 +184,7 @@ describe("layout across terminal sizes", () => {
     const setup = await mount(120, 22);
     const frame = setup.captureCharFrame();
 
-    expect(frame).toContain("all scopes");
+    expect(frame).toContain("All folders");
     expect(frame).not.toContain("untouched 30d+");
     expectFits(frame, 120);
   });
@@ -198,24 +200,24 @@ describe("layout across terminal sizes", () => {
 
   test("the confirm dialog offers trash and says what it will do", async () => {
     const setup = await mount(120, 34);
-    await send(setup, (mock) => mock.pressEnter());
+    await send(setup, (mock) => mock.pressKey("\x1b[13;5u"));
     let frame = setup.captureCharFrame();
     expect(frame).toContain("Permanently delete");
     expect(frame).toContain("estimated size");
     expect(frame).not.toContain("will be freed");
-    expect(frame).toContain("move to trash instead");
+    expect(frame).toContain("Move to trash instead");
 
     await press(setup, "t");
     frame = setup.captureCharFrame();
     expect(frame).toContain("Move to trash");
     expect(frame).toContain("estimated size");
-    expect(frame).toContain("delete permanently instead");
+    expect(frame).toContain("Delete permanently instead");
   });
 
   test("choosing trash in the dialog is reported in the apply outcome", async () => {
     const outcomes: SweepUiOutcome[] = [];
     const setup = await mount(120, 34, (outcome) => outcomes.push(outcome));
-    await send(setup, (mock) => mock.pressEnter());
+    await send(setup, (mock) => mock.pressKey("\x1b[13;5u"));
     await press(setup, "t", "y");
 
     const outcome = outcomes[0];
@@ -228,7 +230,7 @@ describe("triage keys", () => {
   test("o cycles the sort and the footer names a non-default order", async () => {
     const setup = await mount(120, 34);
     await press(setup, "o", "o");
-    expect(setup.captureCharFrame()).toContain("sorted by age");
+    expect(setup.captureCharFrame()).toContain("Oldest first");
   });
 
   test("v enters visual mode and a second v leaves it without quitting", async () => {
@@ -265,7 +267,7 @@ describe("triage keys", () => {
     const frame = setup.captureCharFrame();
     expect(frame).toContain("isn't a filter");
     expect(frame).toContain('No artifacts match "is:nope"');
-    expect(frame).toContain("all scopes");
+    expect(frame).toContain("All folders");
   });
 });
 
@@ -292,10 +294,13 @@ describe("scroll stability", () => {
   }
 
   async function mountBig(height = 20) {
-    const setup = await testRender(<SweepApp plan={bigPlan()} onDone={() => {}} />, {
-      width: 90,
-      height,
-    });
+    const setup = await testRender(
+      <SweepApp init={{ startUnselected: false }} plan={bigPlan()} onDone={() => {}} />,
+      {
+        width: 90,
+        height,
+      },
+    );
     teardown = () => setup.renderer.destroy();
     await act(async () => {
       await setup.renderOnce();
@@ -356,22 +361,22 @@ describe("scroll stability", () => {
     // The lane's bottom-most cell sits on the hit-grid boundary and does not
     // register in the test renderer, so seek one cell in from each edge.
     await mouse(setup, (m) => m.click(x, bottom - 1));
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○ ✓ node_modules\s+[0-9.]+ MiB/);
-    const mid = setup.captureCharFrame().match(/▌\s+○ ✓ node_modules\s+([0-9.]+) MiB/);
+    expect(setup.captureCharFrame()).toMatch(/▌\s+\[ \] ✓ node_modules\s+[0-9.]+ MiB/);
+    const mid = setup.captureCharFrame().match(/▌\s+\[ \] ✓ node_modules\s+([0-9.]+) MiB/);
     expect(Number(mid![1])).toBeLessThan(10);
 
     await mouse(setup, (m) => m.click(x, top));
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○ ✓ node_modules\s+30\.0 MiB/);
+    expect(setup.captureCharFrame()).toMatch(/▌\s+\[ \] ✓ node_modules\s+30\.0 MiB/);
   });
 
   test("dragging the scrollbar thumb seeks continuously", async () => {
     const setup = await mountBig();
     const frame = setup.captureCharFrame();
     const { x, top, bottom } = scrollbarGeometry(frame);
-    expect(frame).toMatch(/▌\s+○ ✓ node_modules\s+30\.0 MiB/);
+    expect(frame).toMatch(/▌\s+\[ \] ✓ node_modules\s+30\.0 MiB/);
 
     await mouse(setup, (m) => m.drag(x, top, x, bottom - 1));
-    const landed = setup.captureCharFrame().match(/▌\s+○ ✓ node_modules\s+([0-9.]+) MiB/);
+    const landed = setup.captureCharFrame().match(/▌\s+\[ \] ✓ node_modules\s+([0-9.]+) MiB/);
     expect(Number(landed![1])).toBeLessThan(10);
   });
 
@@ -386,6 +391,6 @@ describe("scroll stability", () => {
     // the old behavior - stops ~thumbHeight rows short of the last item.
     await mouse(setup, (m) => m.drag(x, top, x, bottom - 1));
     // Sorted desc by size: the last item is the 1.0 MiB row.
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○ ✓ node_modules\s+1\.0 MiB/);
+    expect(setup.captureCharFrame()).toMatch(/▌\s+\[ \] ✓ node_modules\s+1\.0 MiB/);
   });
 });

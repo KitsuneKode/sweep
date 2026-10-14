@@ -1,21 +1,13 @@
 import type { BoxRenderable, MouseEvent } from "@opentui/core";
 import { bold, fg, t } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SelectableRow, useHoverState } from "./SelectableRow.js";
-import { allocateBarCells, buildInsights, STALE_AFTER_DAYS, type Insights } from "./insights.js";
-import {
-  buildMeter,
-  buildSidebarLine,
-  concatStyled,
-  riskGlyph,
-  type ScopeRowState,
-} from "./presentation.js";
+import { buildMeter, buildSidebarLine, concatStyled, type ScopeRowState } from "./presentation.js";
 import { isScopeAncestor } from "./scope-tree.js";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import {
   buildScopeSidebarRows,
-  compactBytesLabel,
   scopeFilterToSidebarIndex,
   sidebarBytesWidth,
   sidebarColumnLayout,
@@ -25,8 +17,10 @@ import {
 import { nextScrollTop } from "./scroll.js";
 import { ScrollbarColumn, scrollbarModel } from "./ScrollbarColumn.js";
 import type { SweepUiState } from "./state.js";
-import { riskColor, type ThemeTokens } from "./theme.js";
+import type { ThemeTokens } from "./theme.js";
 import { buildTreeGuides } from "./tree-line.js";
+import { ActionButton } from "./ActionButton.js";
+import { cellWidth } from "./text-cells.js";
 
 export interface ScopeSidebarProps {
   state: SweepUiState;
@@ -38,6 +32,8 @@ export interface ScopeSidebarProps {
   /** Wheel input moves the sidebar cursor by this many rows. */
   onCursorDelta?: (delta: number) => void;
   onSetCursor?: (index: number) => void;
+  onToggleQueue?: (scope: string | null) => void;
+  onToggleExpand?: (scope: string) => void;
 }
 
 export function ScopeSidebar({
@@ -48,8 +44,12 @@ export function ScopeSidebar({
   onApplyScope,
   onCursorDelta,
   onSetCursor,
+  onToggleQueue,
+  onToggleExpand,
 }: ScopeSidebarProps) {
   const listRef = useRef<BoxRenderable>(null);
+  const rootRef = useRef<BoxRenderable>(null);
+  const footerRef = useRef<BoxRenderable>(null);
   const { isHovered, onHoverChange } = useHoverState<string>();
 
   const rows = useMemo(
@@ -85,17 +85,26 @@ export function ScopeSidebar({
   });
   const handleSizeChange = useCallback(() => {
     const height = listRef.current?.height;
-    if (height !== undefined && height > 0) setViewportHeight(height);
+    const root = rootRef.current;
+    const list = listRef.current;
+    if (height !== undefined && height > 0 && root && list) {
+      const available = Math.max(
+        1,
+        root.y + root.height - (footerRef.current?.height ?? 0) - list.y,
+      );
+      const visible = Math.min(height, available);
+      setViewportHeight((current) => (current === visible ? current : visible));
+    }
   }, []);
+  useLayoutEffect(handleSizeChange, [
+    handleSizeChange,
+    screenHeight,
+    paneWidth,
+    focused,
+    rows.length,
+  ]);
   const visibleRows = rows.slice(appliedTop, appliedTop + viewportHeight);
   const scrollbar = scrollbarModel(rows.length, viewportHeight, appliedTop);
-  // The insights panel is garnish: it yields to the scope list on short terminals.
-  const showInsights = screenHeight >= INSIGHTS_MIN_SCREEN_HEIGHT;
-  const insights = useMemo(
-    () => (showInsights ? buildInsights(state.candidates, Date.now()) : null),
-    [showInsights, state.candidates],
-  );
-
   // Wheel must move the cursor, not the viewport - the scrollbox scrolling on
   // its own left the cursor pointed at a row that was no longer visible, so
   // `enter` applied a scope the user was not looking at. stopPropagation keeps
@@ -112,7 +121,14 @@ export function ScopeSidebar({
   );
 
   return (
-    <box width="100%" flexGrow={1} minHeight={0} flexDirection="column">
+    <box
+      ref={rootRef}
+      width="100%"
+      flexGrow={1}
+      minHeight={0}
+      flexDirection="column"
+      onSizeChange={handleSizeChange}
+    >
       <ReclaimPanel
         tokens={tokens}
         selectedBytes={selectedBytes}
@@ -125,7 +141,15 @@ export function ScopeSidebar({
         selectedCount={rows[0]?.selectedCount ?? 0}
         partial={state.candidates.some((candidate) => candidate.bytesKnown === false)}
       />
-      <box flexGrow={1} minHeight={3} width="100%" flexDirection="row" onMouseScroll={handleWheel}>
+      <box
+        flexGrow={1}
+        flexBasis={0}
+        flexShrink={1}
+        minHeight={1}
+        width="100%"
+        flexDirection="row"
+        onMouseScroll={handleWheel}
+      >
         <box
           ref={listRef}
           flexGrow={1}
@@ -146,13 +170,17 @@ export function ScopeSidebar({
                 hovered={isHovered(row.key ?? "__all__")}
                 expanded={row.key !== null && state.expandedScopes.has(row.key)}
                 layout={sidebarColumnLayout(
-                  paneWidth - (scrollbar ? 1 : 0),
+                  paneWidth - 4 - (scrollbar ? 1 : 0),
                   countWidth,
                   bytesWidth,
                   row.depth,
                 )}
                 tokens={tokens}
                 onSelect={() => onApplyScope(row.key)}
+                onToggleQueue={onToggleQueue ? () => onToggleQueue(row.key) : undefined}
+                onToggleExpand={
+                  row.key !== null && onToggleExpand ? () => onToggleExpand(row.key!) : undefined
+                }
                 onHoverChange={onHoverChange(row.key ?? "__all__")}
               />
             );
@@ -168,15 +196,16 @@ export function ScopeSidebar({
           />
         ) : null}
       </box>
-      {insights && insights.tiers.length > 0 ? (
-        <InsightsPanel tokens={tokens} insights={insights} width={meterWidth} />
-      ) : null}
+      <box ref={footerRef} flexShrink={0} height={1}>
+        <text
+          content={focused ? "Enter browse · space queue" : "Names browse · [ ] queues"}
+          fg={tokens.textDim}
+          wrapMode="none"
+        />
+      </box>
     </box>
   );
 }
-
-/** Below this terminal height the scope list keeps the whole sidebar. */
-const INSIGHTS_MIN_SCREEN_HEIGHT = 26;
 
 function scopeRowState(
   row: ScopeSidebarRow,
@@ -204,6 +233,8 @@ interface ScopeRowProps {
   tokens: ThemeTokens;
   onSelect: () => void;
   onHoverChange: (hovered: boolean) => void;
+  onToggleQueue?: (() => void) | undefined;
+  onToggleExpand?: (() => void) | undefined;
 }
 
 const ScopeRow = memo(function ScopeRow({
@@ -217,7 +248,10 @@ const ScopeRow = memo(function ScopeRow({
   tokens,
   onSelect,
   onHoverChange,
+  onToggleQueue,
+  onToggleExpand,
 }: ScopeRowProps) {
+  const rowRef = useRef<BoxRenderable | null>(null);
   const branch = row.hasChildren ? (expanded ? "▾" : "▸") : " ";
 
   return (
@@ -226,27 +260,43 @@ const ScopeRow = memo(function ScopeRow({
       emphasized={rowState === "active"}
       hovered={hovered}
       tokens={tokens}
-      onSelect={onSelect}
+      elementRef={rowRef}
+      onSelect={(event) => {
+        const arrowX = (rowRef.current?.x ?? 0) + 4 + cellWidth(guide);
+        if (event && row.hasChildren && event.x === arrowX && onToggleExpand) onToggleExpand();
+        else onSelect();
+      }}
       onHoverChange={onHoverChange}
     >
-      <box width="100%" height={1} flexGrow={0} flexShrink={0}>
-        <text
-          wrapMode="none"
-          content={buildSidebarLine({
-            label: row.label,
-            count: row.count,
-            bytes: row.bytes,
-            selectedCount: row.selectedCount,
-            state: rowState,
-            guide,
-            branch,
-            countWidth: layout.countWidth,
-            bytesWidth: layout.bytesWidth,
-            maxLabelWidth: layout.maxLabelWidth,
-            showBytes: layout.showBytes,
-            tokens,
-          })}
+      <box width="100%" height={1} flexGrow={0} flexShrink={0} flexDirection="row">
+        <ActionButton
+          label={row.selectedCount === 0 ? "[ ]" : row.selectedCount === row.count ? "[x]" : "[-]"}
+          tokens={tokens}
+          framed={false}
+          disabled={!onToggleQueue || row.count === 0}
+          onPress={() => onToggleQueue?.()}
         />
+        <text content={rowState === "active" ? "›" : " "} fg={tokens.accent} />
+        <box flexGrow={1} minWidth={0}>
+          <text
+            wrapMode="none"
+            content={buildSidebarLine({
+              label: row.key === null ? "All folders" : row.key === "" ? "Target root" : row.label,
+              count: row.count,
+              bytes: row.bytes,
+              selectedCount: row.selectedCount,
+              state: rowState,
+              guide,
+              branch,
+              markActive: false,
+              countWidth: layout.countWidth,
+              bytesWidth: layout.bytesWidth,
+              maxLabelWidth: layout.maxLabelWidth,
+              showBytes: layout.showBytes,
+              tokens,
+            })}
+          />
+        </box>
       </box>
     </SelectableRow>
   );
@@ -377,68 +427,6 @@ function ReclaimPanel({
         content={t`${fg(tokens.textMuted)(`${partial ? "~" : ""}${formatBytes(selectedBytes)} / ${partial ? "~" : ""}${formatBytes(totalBytes)} estimated`)}`}
         wrapMode="none"
       />
-    </box>
-  );
-}
-
-const TIER_LABEL = {
-  safe: "safe",
-  caution: "caution",
-  dangerous: "dangerous",
-  blocked: "blocked",
-} as const;
-
-/**
- * What the scan found, by risk tier, and how much of it nobody has touched.
- * Read-only context for the queue meter above it: the meter says what will
- * go, this says what is out there.
- */
-function InsightsPanel({
-  tokens,
-  insights,
-  width,
-}: {
-  tokens: ThemeTokens;
-  insights: Insights;
-  width: number;
-}) {
-  const colors = riskColor(tokens);
-  const cells = allocateBarCells(insights.tiers, width);
-  const bar = concatStyled(
-    ...insights.tiers.map(
-      (entry, index) => t`${fg(colors[entry.tier])("█".repeat(cells[index] ?? 0))}`,
-    ),
-  );
-  const labelWidth = Math.max(...insights.tiers.map((entry) => TIER_LABEL[entry.tier].length));
-  const bytesWidth = Math.max(
-    ...insights.tiers.map((entry) => compactBytesLabel(entry.bytes).length),
-    compactBytesLabel(insights.stale.bytes).length,
-  );
-  const showStale = insights.ageKnown && insights.stale.count > 0;
-
-  return (
-    <box
-      width="100%"
-      flexDirection="column"
-      paddingLeft={1}
-      paddingTop={1}
-      flexShrink={0}
-      height={insights.tiers.length + 2 + (showStale ? 1 : 0) + 1}
-    >
-      <text content={bar} wrapMode="none" />
-      {insights.tiers.map((entry) => (
-        <text
-          key={entry.tier}
-          wrapMode="none"
-          content={t`${fg(colors[entry.tier])(riskGlyph[entry.tier])} ${fg(tokens.textMuted)(TIER_LABEL[entry.tier].padEnd(labelWidth))} ${fg(tokens.textSecondary)(compactBytesLabel(entry.bytes).padStart(bytesWidth))}`}
-        />
-      ))}
-      {showStale ? (
-        <text
-          wrapMode="none"
-          content={t`${fg(tokens.textDim)(`untouched ${STALE_AFTER_DAYS}d+`)} ${fg(tokens.positive)(compactBytesLabel(insights.stale.bytes))}`}
-        />
-      ) : null}
     </box>
   );
 }

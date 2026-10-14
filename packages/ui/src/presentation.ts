@@ -7,7 +7,7 @@ import { AGE_LABEL_WIDTH, describeAge, formatAge, isRecent, sizeBar } from "./ag
 import type { TextChunk } from "@opentui/core";
 import type { UiDisplayRow } from "./rows.js";
 import { buildDisplayRows } from "./rows.js";
-import { compactBytesLabel } from "./sidebar.js";
+import { compactBytesLabel, sidebarItemCount } from "./sidebar.js";
 import type { SweepUiState, SweepUiSummary, UiFocus } from "./state.js";
 import {
   activePatterns,
@@ -30,14 +30,14 @@ export const riskGlyph: Record<RiskTier, string> = {
   blocked: "⊘",
 };
 
-/** Selection markers - filled means queued for deletion. */
-export const SELECTED_MARK = "●";
-export const UNSELECTED_MARK = "○";
+/** Explicit checkboxes distinguish queue membership from risk and cursor. */
+export const SELECTED_MARK = "[x]";
+export const UNSELECTED_MARK = "[ ]";
 /** Hard-locked rows - neither queued nor queueable. */
-const BLOCKED_MARK = "⊘";
+const BLOCKED_MARK = "[⊘]";
 
 /** Cursor, queue and risk each have a separate cell, followed by a gap. */
-export const ROW_NAME_OFFSET = 6;
+export const ROW_NAME_OFFSET = 8;
 const SIZE_COLUMN_WIDTH = 9;
 const SIZE_GAP = 2;
 /** Extra cells reserved so a scrollbar or wide glyph cannot wrap the row. */
@@ -83,9 +83,10 @@ export function rowTotalWidth(widths: RowWidths): number {
  */
 export function artifactRowWidths(listWidth: number): RowWidths {
   const usable = Math.max(ROW_NAME_OFFSET, listWidth - WRAP_SAFETY);
+  const sizeBudget = Math.min(SIZE_COLUMN_WIDTH, usable - ROW_NAME_OFFSET - SIZE_GAP - 1);
   const shell: RowWidths = {
     nameWidth: 0,
-    sizeWidth: usable >= ROW_NAME_OFFSET + SIZE_GAP + SIZE_COLUMN_WIDTH ? SIZE_COLUMN_WIDTH : 0,
+    sizeWidth: sizeBudget >= 5 ? sizeBudget : 0,
     ageWidth: listWidth >= AGE_MIN_LIST_WIDTH ? AGE_LABEL_WIDTH : 0,
     barWidth: listWidth >= BAR_MIN_LIST_WIDTH ? BAR_COLUMN_WIDTH : 0,
   };
@@ -270,6 +271,7 @@ function formatSizeCell(bytes: number, width: number, partial: boolean): string 
   if (cellWidth(label) > width) label = label.replace(" ", "");
   if (cellWidth(label) > width && bytes > 0)
     label = `${partial ? "~" : ""}${compactBytesLabel(bytes)}`;
+  if (cellWidth(label) > width) label = "large";
   return padCells(label, width, "right");
 }
 
@@ -583,14 +585,14 @@ export function buildFooterHints(
   }
 
   if (context.focus === "sidebar") {
-    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("open/close")}${sep}${key("enter")} ${hint("scope")}${sep}${key("space")} ${hint("queue")}${sep}${key("u")} ${hint("clear queue")}${sep}${key("?")} ${hint("help")}`;
+    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("expand/fold")}${sep}${key("enter")} ${hint("browse folder")}${sep}${key("space")} ${hint("queue folder")}${sep}${key("u")} ${hint("clear queue")}${sep}${key("?")} ${hint("help")}`;
   }
 
   if (context.focus === "search") {
     return t`${key("enter")} ${hint("list")}${sep}${key("esc")} ${hint("clear")}${sep}${key("tab")} ${hint("panes")}${sep}${key("ctrl-c")} ${hint("quit")}`;
   }
 
-  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("x")} ${hint("delete this")}${sep}${key("enter")} ${hint(options.dryRun ? "done" : "apply queue")}${sep}${key("i")} ${hint("inspect")}${sep}${key("/")} ${hint("filter")}${sep}${key("?")} ${hint("help")}`;
+  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("enter")} ${hint("details")}${sep}${key("Ctrl+K")} ${hint("actions")}${sep}${key("/")} ${hint("filter")}`;
 }
 
 /** Statusline mode segment label for the focused panel. */
@@ -629,6 +631,8 @@ export interface SidebarLineOptions {
   guide?: string;
   /** Disclosure triangle: `▾` open, `▸` closed, space for a leaf. */
   branch?: "▸" | "▾" | " ";
+  /** The containing row can render the active-view cue in its own column. */
+  markActive?: boolean;
   countWidth: number;
   bytesWidth: number;
   maxLabelWidth?: number;
@@ -646,6 +650,7 @@ export function buildSidebarLine(options: SidebarLineOptions): StyledText {
     state,
     guide = "",
     branch = " ",
+    markActive = true,
     countWidth,
     bytesWidth,
     maxLabelWidth = 14,
@@ -661,7 +666,7 @@ export function buildSidebarLine(options: SidebarLineOptions): StyledText {
   const guideStyled = guide.length > 0 ? fg(guideColor)(guide) : "";
 
   const marker =
-    state === "active"
+    markActive && state === "active" && branch === " "
       ? fg(tokens.accent)("›")
       : branch === " "
         ? fg(tokens.textDim)(" ")
@@ -673,18 +678,19 @@ export function buildSidebarLine(options: SidebarLineOptions): StyledText {
       : state === "ancestor"
         ? tokens.textSecondary
         : tokens.textSecondary;
-  const labelText = truncateScopeLabel(label, Math.max(6, maxLabelWidth));
+  const labelText = truncateScopeLabel(label, Math.max(1, maxLabelWidth));
   const styledLabel = onPath
     ? bold(fg(labelColor)(labelText))
     : fg(tokens.textSecondary)(labelText);
 
-  const countStyled = fg(tokens.textMuted)(String(count).padStart(countWidth));
+  const countStyled = fg(tokens.textMuted)(
+    sidebarItemCount(count, selectedCount).padStart(countWidth),
+  );
   const bytesColor = onPath ? tokens.textSecondary : tokens.textDim;
 
   const base = showBytes
     ? t`${guideStyled}${marker} ${styledLabel}  ${countStyled}  ${fg(bytesColor)(compactBytesLabel(bytes).padStart(bytesWidth))}`
     : t`${guideStyled}${marker} ${styledLabel}  ${countStyled}`;
 
-  if (selectedCount <= 0) return base;
-  return joinStyled([base, t`  ${fg(tokens.positive)(`+${selectedCount}`)}`]);
+  return base;
 }

@@ -32,7 +32,14 @@ export function sidebarIndexToScopeFilter(
 // per row and has a hard engine limit (~500k in Bun). A sidebar that deep is not
 // reachable today; a fold has no downside, so there is no reason to sit near it.
 export function sidebarCountWidth(rows: readonly ScopeSidebarRow[]): number {
-  return rows.reduce((widest, row) => Math.max(widest, String(row.count).length), 1);
+  return rows.reduce(
+    (widest, row) => Math.max(widest, sidebarItemCount(row.count, row.selectedCount).length),
+    1,
+  );
+}
+
+export function sidebarItemCount(count: number, selectedCount: number): string {
+  return selectedCount > 0 && selectedCount < count ? `${selectedCount}/${count}` : String(count);
 }
 
 export function sidebarBytesWidth(rows: readonly ScopeSidebarRow[]): number {
@@ -58,7 +65,7 @@ export function sidebarColumnLayout(
     maxLabelWidth = paneWidth - countWidth - gaps - indent;
   }
   return {
-    maxLabelWidth: Math.max(6, maxLabelWidth),
+    maxLabelWidth: Math.max(1, maxLabelWidth),
     showBytes,
     countWidth,
     bytesWidth: fittedBytesWidth,

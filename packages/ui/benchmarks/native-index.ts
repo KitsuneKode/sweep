@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { DiscoveryIndexSession } from "@kitsunekode/sweep-core/discovery-index";
 import { compileFilter } from "../src/filter-query.js";
@@ -159,6 +159,54 @@ for (const { count, compactPaths } of [
         matching.some((candidate) => candidate.bytesKnown === false),
       );
     }
+    const folderReference = new Map<
+      string,
+      { count: number; bytes: number; partial: boolean; queued: number }
+    >();
+    for (const row of plan.candidates) {
+      const parent = relative(plan.targetDir, dirname(row.path));
+      const key = (process.platform === "win32" ? parent.replaceAll("\\", "/") : parent).split(
+        "/",
+      )[0]!;
+      const group = folderReference.get(key) ?? { count: 0, bytes: 0, partial: false, queued: 0 };
+      group.count++;
+      group.bytes += row.estimatedBytes;
+      group.partial ||= row.bytesKnown === false;
+      if (selectedIds.has(row.id)) group.queued++;
+      folderReference.set(key, group);
+    }
+    const folderOrder = [...folderReference].sort((a, b) => b[1].bytes - a[1].bytes);
+    const folderMs = [];
+    for (let sample = 0; sample < 20; sample++) {
+      const offset = (sample % 2) * 128;
+      const started = performance.now();
+      const page = await review.folders(null, offset, 128);
+      folderMs.push(performance.now() - started);
+      const expected = folderOrder.slice(offset, offset + 128);
+      assert.equal(page.matchingCount, folderReference.size);
+      assert.deepEqual(
+        page.folders.map((folder) => folder.key),
+        expected.map(([key]) => key),
+      );
+      page.folders.forEach((folder, i) => {
+        const totals = expected[i]![1];
+        assert.equal(folder.totals.candidateCount, totals.count);
+        assert.equal(folder.totals.estimatedBytes, totals.bytes);
+        assert.equal(folder.totals.bytesPartial, totals.partial);
+        assert.equal(folder.totals.selectedCount, totals.queued);
+        assert.equal(folder.ownCount, 0);
+        assert.equal(folder.hasChildren, true);
+      });
+      assert.equal(review.view.folderPage?.folders.length, page.folders.length);
+      assert.equal(page.summary.selectedCount, selectedIds.size);
+    }
+    const nested = await review.folders("group-2", 0, 256);
+    assert.equal(nested.matchingCount, 100);
+    assert.equal(
+      nested.folders.reduce((sum, folder) => sum + folder.ownCount, 0),
+      100,
+    );
+    assert.equal((await review.folders("", 0, 256)).matchingCount, 0);
     const scopeStarted = performance.now();
     const scope = await review.scopeSummary("group-2");
     const scopeRows = plan.candidates.filter((row) =>
@@ -223,6 +271,8 @@ for (const { count, compactPaths } of [
       nativeRoundTrip: latency(nativeMs),
       jsFilterAndSlice: latency(jsMs),
       scopedActions,
+      folderRoundTrip: latency(folderMs),
+      folderParentCount: folderReference.size,
     });
   } finally {
     await review.close();
@@ -319,7 +369,7 @@ const report = JSON.stringify(
       execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim().length > 0,
     rustc: execFileSync("rustc", ["--version"], { encoding: "utf8" }).trim(),
     method:
-      "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries per accepted child. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Scoped totals are compared with reference paths; global clear/queue/clear actions verify counts, bytes and partial markers without exporting candidates or ID batches. Bulk timings are individual observations, not percentile qualification. Native timings include the bounded UI page owner, production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, synthetic outcome retirement, remaining-queue export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
+      "Read-only synthetic metadata, 5k/50k/100k records, including both normal and compact paths at 100k, 200 sequential discovery-order queries and 20 immediate-folder pages per accepted child. Folder replies are checked against reference descendant totals, ordering and pagination; their timing includes host aggregation and validation. Plan resource refusals are recorded before spawn; no limits are raised. Every returned record and aggregate is compared with JS filtering; 50 explicit selected IDs remain queued across paging. Scoped totals are compared with reference paths; global clear/queue/clear actions verify counts, bytes and partial markers without exporting candidates or ID batches. Bulk timings are individual observations, not percentile qualification. Native timings include the bounded UI page owner, production adapter, NDJSON transport, strict validation and candidate fingerprint checks; JS timings cover filter and slice, without rendering or transport. Native VmHWM includes snapshot parsing/build peak. These are different costs, not an end-to-end engine speed ratio. Three additional 50k generations qualify queue-preserving selected export, synthetic outcome retirement, remaining-queue export, child reaping and descriptor cleanup. Host retains the reference snapshot; total UI memory and real-tree scan/delete are not qualified.",
     results,
     replacements,
   },

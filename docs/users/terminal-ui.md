@@ -10,7 +10,7 @@ sweep ui .
 ```
 
 The left pane narrows the current scope. The right pane lists matched artifacts.
-Results appear while scanning, then sizes fill in. A filled dot means queued;
+Results appear while scanning, then sizes fill in. A checked box (`[x]`) means queued;
 it does not mean deleted. The next symbol shows risk: `✓` safe, `!` caution,
 `✗` dangerous, and `⊘` blocked. Risk and queue state remain distinct when a row
 is focused or color is disabled. A size prefixed with `~` is incomplete or approximate.
@@ -22,7 +22,14 @@ data. This is queue coverage, not deletion or scan completion. During a scan,
 the meter instead labels sizing progress; the number of discoveries can still
 grow. Partial byte estimates do not display an exact coverage percentage.
 
-Enter opens confirmation for the **whole queue**. `x` or `d` opens confirmation
+Fresh interactive scans start with an empty queue. Choose **Queue safe items**
+for recognized safe artifacts in the current view, or use individual checkboxes.
+Selection is explicit even when a scanner's default plan policy proposes items.
+
+Enter opens the focused item's details or browses a folder. **Review queue (N)**
+opens confirmation for the **whole queue**. Ctrl+Enter is a shortcut when the
+terminal sends that chord distinctly; the button and Ctrl+K / F2 menu work without it.
+`x` or `d` opens confirmation
 for **only this item**, including inside inspect. The single-item dialog says
 how many other items stay queued, and the result says how many remain queued.
 Inside confirmation, press `y` to proceed or `n` / Esc to cancel. Enter gives
@@ -59,8 +66,10 @@ queued items outside that view.
 | Tab / Shift+Tab     | Change pane focus                                  |
 | `/`                 | Filter candidates                                  |
 | `i`                 | Inspect path, kind, reasons and selection          |
+| Ctrl+K / F2         | Search actions, settings and shortcuts             |
 | `x` or `d`          | Request confirmation for just the focused artifact |
-| Enter               | Request confirmation for the queued selection      |
+| Enter               | Open item details or browse a folder               |
+| Ctrl+Enter          | Review the queued selection, where supported       |
 | `s` / `a`           | Queue safe / visible safe+caution                  |
 | `u`                 | Unqueue everything, including hidden artifacts     |
 | `U` (Shift-U)       | Unqueue visible artifacts; keep hidden selections  |
@@ -83,6 +92,11 @@ seeking; an item cannot stay selected off-screen because the viewport moved alon
 Sweep uses the terminal's font and size. Theme selection (`t`) cycles dark,
 light and automatic backgrounds. A nonempty `NO_COLOR` environment variable
 uses neutral colors; symbols and labels still identify risk, focus and queue state.
+Theme, sorting and animation changes are saved on normal session exit in
+`ui-preferences.json` under Sweep's configuration directory. Paths, selections,
+filters and deletion modes are not saved there. Invalid or unsafe preference
+files use defaults. If saving fails, Sweep reports it without changing the
+cleanup outcome. A hard-killed session may lose unsaved appearance changes.
 
 To start with loader animation paused:
 
@@ -91,12 +105,36 @@ SWEEP_REDUCED_MOTION=1 sweep ui .
 ```
 
 PowerShell uses `$env:SWEEP_REDUCED_MOTION = '1'` before running `sweep ui .`.
-The `m` key changes only the current session's animation preference. It also
+The `m` key changes the animation preference. It also
 works during confirmation and deletion. Search and pattern inputs keep `m`
 as ordinary text. Keyboard navigation, queue changes and dialogs appear instantly.
 
 The inspector shows the scan root and artifact path separately, wraps long
 values and keeps its action hints visible. Page Up / Page Down scroll its details.
+
+## Mouse controls and actions
+
+- Click an artifact name to focus it; repeated name clicks do not queue it.
+- Click its checkbox to queue or unqueue it. Right-clicks and drags do not toggle selection.
+- Click a folder name to browse it, its arrow to expand it, or its checkbox to toggle eligible subtree items.
+- Choose **Actions** or press Ctrl+K / F2, then type an action or shortcut to find filtering, selection, sorting, patterns and appearance settings.
+- Use **Previous** and **Next** to reach every menu page by mouse. Keyboard arrows and Tab also navigate it.
+- **Current folder details** shows the full path and current filtered counts when the sidebar label is shortened.
+
+Folder checkboxes exclude dangerous and blocked items. They leave separately
+queued dangerous items untouched when toggling off; use **Clear queue in this
+view** or **Clear whole queue** to clear those selections explicitly.
+The queue covers the whole target. Browsing and filters change the view, not the
+queue; confirmation names queued items outside the current view. Confirmation
+captures the reviewed IDs and paths, and applying leaves the browsed folder intact.
+At less than 40 columns or 12 rows, confirmation asks you to resize before
+authorizing removal. Cancelling remains available.
+
+If you configured a size ceiling, confirmation offers **Override size ceiling**
+(`f`). It applies only to this reviewed operation, then resets. You still confirm
+the same item IDs and paths. The override does not disable protected-path,
+identity, mount or resource checks. Use **Restore size ceiling** to reverse the
+choice before confirming. There is no default byte ceiling.
 
 ## Remove just the item you inspected
 
@@ -173,3 +211,8 @@ waits for the engine's report before closing the terminal. The exit summary keep
 known deletion counts and reports the view failure. If the engine report is also
 unavailable, it marks the filesystem outcome unknown; inspect the recovery journal
 and disk before retrying.
+
+The artifact pane labels the folder being viewed and the current sort order.
+In the sidebar, `›` beside a checkbox marks that active view. The highlighted
+keyboard row is only a navigation cursor: Up / Down and scrollbar dragging do
+not browse or queue it. Enter or clicking its name opens the folder.

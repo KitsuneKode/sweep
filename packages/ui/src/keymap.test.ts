@@ -55,6 +55,7 @@ describe("handleKeymap", () => {
       focusPanel: mock(() => {}),
       setShowHelp: mock(() => {}),
       setPendingApply: mock(() => {}),
+      setInspect: mock(() => {}),
       requestApply: mock(() => {}),
       applyPlan: mock(() => {}),
       dismissScanError: mock(() => {}),
@@ -207,7 +208,7 @@ describe("handleKeymap", () => {
     expect(actions.mutate).toHaveBeenCalled();
   });
 
-  test("enter on an item still requests apply", () => {
+  test("enter on an item opens details without requesting apply", () => {
     const actions = makeActions();
     handleKeymap(
       makeContext({
@@ -216,7 +217,8 @@ describe("handleKeymap", () => {
       }),
       actions,
     );
-    expect(actions.requestApply).toHaveBeenCalled();
+    expect(actions.setInspect).toHaveBeenCalledWith(true);
+    expect(actions.requestApply).not.toHaveBeenCalled();
   });
 
   test("E swaps the scan engine from any pane", () => {
@@ -476,6 +478,7 @@ describe("single-row apply (x/d)", () => {
       focusPanel: mock(() => {}),
       setShowHelp: mock(() => {}),
       setPendingApply: mock(() => {}),
+      setInspect: mock(() => {}),
       requestApply: mock(() => {}),
       applyPlan: mock(() => {}),
     };
@@ -664,7 +667,8 @@ describe("single-row apply (x/d)", () => {
       actions.requestApply = mock(() => {});
       actions.readState = () => committed;
       handleKeymap(makeContext({ key: { name: "return" }, state: stale }), actions);
-      expect(actions.requestApply).toHaveBeenCalledTimes(1);
+      expect(actions.setInspect).toHaveBeenCalledWith(true);
+      expect(actions.requestApply).not.toHaveBeenCalled();
       expect(actions.mutate).not.toHaveBeenCalled();
     });
 
@@ -729,6 +733,7 @@ describe("scope queue gestures", () => {
       finalize: mock(() => {}),
       setShowHelp: mock(() => {}),
       setPendingApply: mock(() => {}),
+      setInspect: mock(() => {}),
       applyPlan: mock(() => {}),
       mutate: (fn) => {
         state = fn(state);
@@ -760,6 +765,7 @@ describe("scope queue gestures", () => {
       finalize: mock(() => {}),
       setShowHelp: mock(() => {}),
       setPendingApply: mock(() => {}),
+      setInspect: mock(() => {}),
       applyPlan: mock(() => {}),
       mutate: (fn) => {
         state = fn(state);

@@ -36,8 +36,9 @@ export function Modal({
   children: ReactNode;
 }) {
   const { width: screenWidth, height: screenHeight } = useTerminalDimensions();
-  // Floor at 1 cell, never more than the screen itself: a hard 4x3 floor
-  // still overflows a 3x2 terminal.
+  // Percent bounds are resolved by native layout in the resize frame, before
+  // React's terminal-dimensions hook can commit. Fixed viewport-derived sizes
+  // can briefly exceed a shrinking terminal and produce negative offsets.
   const modalWidth = Math.max(1, Math.min(width, Math.max(1, screenWidth - 2)));
   const maxHeight = Math.max(1, screenHeight - 2);
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
@@ -56,12 +57,15 @@ export function Modal({
       bottom={0}
       justifyContent="center"
       alignItems="center"
+      paddingX={screenWidth < 3 ? 0 : 1}
+      paddingY={screenHeight < 3 ? 0 : 1}
       backgroundColor={tokens.overlayBackdrop}
     >
       <box
-        width={modalWidth}
-        {...(height === undefined ? {} : { height: Math.min(maxHeight, Math.max(1, height)) })}
-        maxHeight={maxHeight}
+        width="100%"
+        maxWidth={width}
+        {...(height === undefined ? {} : { height: Math.max(1, height) })}
+        maxHeight="100%"
         border
         borderStyle="rounded"
         borderColor={titleColor ?? tokens.borderFocus}

@@ -1,5 +1,6 @@
 import type { BoxProps } from "@opentui/react";
-import { type ReactNode, useCallback, useState } from "react";
+import type { BoxRenderable, MouseEvent } from "@opentui/core";
+import { type ReactNode, type Ref, useCallback, useState } from "react";
 import type { ThemeTokens } from "./theme.js";
 
 export interface SelectableRowProps {
@@ -10,9 +11,10 @@ export interface SelectableRowProps {
   emphasized?: boolean;
   hovered: boolean;
   tokens: ThemeTokens;
-  onSelect: () => void;
+  onSelect: (event?: MouseEvent) => void;
   onHoverChange: (hovered: boolean) => void;
   children: ReactNode;
+  elementRef?: Ref<BoxRenderable> | undefined;
 }
 
 /**
@@ -43,18 +45,22 @@ export function SelectableRow({
   onSelect,
   onHoverChange,
   children,
+  elementRef,
 }: SelectableRowProps) {
   const backgroundColor = rowBackground(selected, emphasized, hovered, tokens);
 
   const mouseProps = {
     selectable: true,
-    onMouseDown: onSelect,
+    onMouseDown: (event: MouseEvent) => {
+      if (event.button === 0 && !event.isDragging) onSelect(event);
+    },
     onMouseOver: () => onHoverChange(true),
     onMouseOut: () => onHoverChange(false),
   } as BoxProps;
 
   return (
     <box
+      {...(elementRef === undefined ? {} : { ref: elementRef })}
       width={width}
       height={1}
       flexGrow={0}

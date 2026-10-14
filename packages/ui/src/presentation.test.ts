@@ -90,7 +90,7 @@ describe("presentation formatters", () => {
     const line = plain(
       buildArtifactRowContent(candidate(), true, false, artifactRowWidths(80), darkTheme),
     );
-    expect(line).toContain("●");
+    expect(line).toContain("[x]");
     expect(line).toContain("node_modules");
     expect(line).toContain("512 B");
     expect(line.startsWith(" ")).toBe(true);
@@ -103,7 +103,7 @@ describe("presentation formatters", () => {
       "▌",
     );
     expect(plain(buildArtifactRowContent(candidate(), false, false, widths, darkTheme))).toContain(
-      "○",
+      "[ ]",
     );
   });
 
@@ -124,7 +124,7 @@ describe("presentation formatters", () => {
             darkTheme,
           ),
         );
-        expect(line).toContain(`${riskTier === "blocked" ? "⊘" : "●"} ${glyph}`);
+        expect(line).toContain(`${riskTier === "blocked" ? "[⊘]" : "[x]"} ${glyph}`);
         expect(cellWidth(line)).toBeLessThanOrEqual(30);
       }
     }

@@ -458,3 +458,51 @@ test.skipIf(!available)(
     expect((await owner.scopeSummary("東京😀x")).selectedCount).toBe(0);
   },
 );
+
+test.skipIf(!available)(
+  "folder pages carry descendant totals without exposing the whole candidate graph",
+  async () => {
+    const source = snapshot(600);
+    for (let i = 0; i < 600; i++)
+      source.candidates[i]!.path = join(
+        source.targetDir,
+        i === 0 ? "" : i < 300 ? "a/b" : "ab",
+        `node_modules-${i}`,
+      );
+    const { owner } = await open(source);
+    const top = await owner.folders(null, 0, 1);
+    expect(top.folders).toHaveLength(1);
+    expect(top.matchingCount).toBe(3);
+    expect(top.nextOffset).toBe(1);
+    expect(top.folders[0]!.key).toBe("ab");
+    expect(top.folders[0]!.totals.candidateCount).toBe(300);
+    const second = await owner.folders(null, 1, 1);
+    expect(second.folders[0]!.key).toBe("a");
+    expect(second.folders[0]!.ownCount).toBe(0);
+    expect(second.folders[0]!.hasChildren).toBe(true);
+    expect(second.folders[0]!.totals.selectedCount).toBe(2);
+    expect(second.folders[0]!.totals.bytesPartial).toBe(true);
+    expect(owner.view.folderPage).toBe(second);
+    const nested = await owner.folders("a");
+    expect(nested.folders.map((row) => row.key)).toEqual(["a/b"]);
+    expect(nested.folders[0]!.ownCount).toBe(299);
+    expect((await owner.folders("")).folders).toEqual([]);
+    expect((await owner.folders("a/b")).folders).toEqual([]);
+    const root = await owner.folders(null, 2, 1);
+    expect(root.folders[0]!.key).toBe("");
+    expect(root.folders[0]!.totals.selectedCount).toBe(1);
+    const reviewed = await owner.prepareQueue();
+    await owner.reconcile(
+      reviewed,
+      report(
+        reviewed,
+        reviewed.selectedCandidateIds.map((candidateId) => ({ candidateId, status: "deleted" })),
+      ),
+    );
+    expect(owner.view.folderPage).toBeNull();
+    const after = await owner.folders("a");
+    expect(after.folders[0]!.totals.candidateCount).toBe(297);
+    expect(after.folders[0]!.totals.selectedCount).toBe(0);
+    expect(after.folders[0]!.totals.bytesPartial).toBe(false);
+  },
+);

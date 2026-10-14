@@ -45,6 +45,104 @@ fn query() -> Query {
 }
 
 #[test]
+fn folder_pages_keep_root_items_prefix_boundaries_and_live_totals() {
+    let mut plan = snapshot(4);
+    for (candidate, path) in plan.candidates.iter_mut().zip([
+        "/owned/project/a/dist",
+        "/owned/project/a/child/dist",
+        "/owned/project/ab/dist",
+        "/owned/project/dist",
+    ]) {
+        candidate.entry.path = path.into();
+    }
+    let mut index = DiscoveryIndex::new(plan, "generation-one".into(), 64 * 1024 * 1024)
+        .unwrap_or_else(|error| panic!("index: {error}"));
+    let root = index
+        .folders("generation-one", 0, None, 0, 2)
+        .unwrap_or_else(|error| panic!("folders: {error}"));
+    assert_eq!(root.matching_count, 3);
+    assert_eq!(root.next_offset, Some(2));
+    assert_eq!(root.folders[0].key, "");
+    assert_eq!(root.folders[0].own_count, 1);
+    assert_eq!(root.folders[1].key, "ab");
+    let tail = index
+        .folders("generation-one", 0, None, 2, 2)
+        .unwrap_or_else(|error| panic!("tail: {error}"));
+    assert_eq!(tail.folders[0].key, "a");
+    assert_eq!(tail.folders[0].own_count, 1);
+    assert!(tail.folders[0].has_children);
+    assert_eq!(tail.folders[0].totals.candidate_count, 2);
+    assert_eq!(tail.next_offset, None);
+    let nested = index
+        .folders("generation-one", 0, Some("a"), 0, 256)
+        .unwrap_or_else(|error| panic!("nested: {error}"));
+    assert_eq!(nested.matching_count, 1);
+    assert_eq!(nested.folders[0].key, "a/child");
+    assert_eq!(nested.folders[0].own_count, 1);
+    assert!(!nested.folders[0].has_children);
+    assert_eq!(
+        index
+            .folders("generation-one", 0, Some(""), 0, 256)
+            .unwrap_or_else(|error| panic!("root items: {error}"))
+            .matching_count,
+        0
+    );
+    index
+        .select("generation-one", 0, &["candidate-1".into()], true)
+        .unwrap_or_else(|error| panic!("select: {error}"));
+    let selected = index
+        .folders("generation-one", 1, Some("a"), 0, 256)
+        .unwrap_or_else(|error| panic!("selected: {error}"));
+    assert_eq!(selected.folders[0].totals.selected_count, 1);
+    index
+        .retire("generation-one", 1, &["candidate-1".into()])
+        .unwrap_or_else(|error| panic!("retire: {error}"));
+    assert!(index
+        .folders("generation-one", 2, Some("a"), 0, 256)
+        .unwrap_or_else(|error| panic!("retired: {error}"))
+        .folders
+        .is_empty());
+    assert!(index.folders("generation-one", 1, None, 0, 256).is_err());
+    assert!(index
+        .folders("generation-one", 2, Some("a/"), 0, 256)
+        .is_err());
+    assert!(index
+        .folders("generation-one", 2, Some("../a"), 0, 256)
+        .is_err());
+    assert_eq!(index.summary().revision, 2);
+}
+
+#[test]
+fn wide_folder_pages_are_bounded_and_never_omit_the_remaining_page() {
+    let index = DiscoveryIndex::new(snapshot(1000), "generation-one".into(), 64 * 1024 * 1024)
+        .unwrap_or_else(|error| panic!("index: {error}"));
+    let mut offset = 0;
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        let page = index
+            .folders("generation-one", 0, None, offset, MAX_PAGE_RECORDS)
+            .unwrap_or_else(|error| panic!("page: {error}"));
+        assert!(page.folders.len() <= MAX_PAGE_RECORDS);
+        assert_eq!(page.matching_count, 1000);
+        for folder in page.folders {
+            assert!(seen.insert(folder.key));
+        }
+        match page.next_offset {
+            Some(next) => {
+                assert!(next > offset);
+                offset = next;
+            }
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 1000);
+    assert!(index
+        .folders("generation-one", 0, None, 0, MAX_PAGE_RECORDS + 1)
+        .is_err());
+    assert!(index.folders("generation-one", 0, None, 0, 0).is_err());
+}
+
+#[test]
 fn pages_preserve_snapshot_fields_and_do_not_change_selection() {
     let plan = snapshot(7);
     let expected = plan.candidates.clone();

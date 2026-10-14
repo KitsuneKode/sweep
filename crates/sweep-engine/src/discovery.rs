@@ -11,6 +11,7 @@ use sweep_types::{
 pub const MAX_PAGE_RECORDS: usize = 256;
 pub const MAX_PAGE_BYTES: usize = 1024 * 1024;
 pub const MAX_INDEX_BYTES: usize = 64 * 1024 * 1024;
+const MAX_FOLDER_WORK_BYTES: usize = 32 * 1024 * 1024;
 const MAX_RECORDS: usize = 100_000;
 const MAX_TEXT_BYTES: usize = 1000;
 const SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -77,6 +78,56 @@ pub struct Page {
     pub next_offset: Option<usize>,
     pub candidates: Vec<ScanCandidate>,
     pub summary: IndexSummary,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Folder {
+    pub key: String,
+    pub has_children: bool,
+    pub own_count: usize,
+    pub totals: IndexSummary,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderPage {
+    pub generation: String,
+    pub revision: u64,
+    pub scope: Option<String>,
+    pub matching_count: usize,
+    pub offset: usize,
+    pub next_offset: Option<usize>,
+    pub folders: Vec<Folder>,
+    pub summary: IndexSummary,
+}
+
+#[derive(Default)]
+struct FolderTotals {
+    count: usize,
+    bytes: u64,
+    partial: bool,
+    selected_count: usize,
+    selected_bytes: u64,
+    selected_partial: bool,
+    risks: RiskCounts,
+    selected_risks: RiskCounts,
+    own_count: usize,
+    has_children: bool,
+    first_seen: usize,
+}
+
+fn child_key<'a>(key: &'a str, parent: Option<&str>) -> Option<&'a str> {
+    let start = match parent {
+        None => 0,
+        Some("") => return None,
+        Some(parent) => {
+            key.strip_prefix(parent)?.strip_prefix('/')?;
+            parent.len() + 1
+        }
+    };
+    let end = key[start..].find('/').map_or(key.len(), |i| start + i);
+    Some(&key[..end])
 }
 
 #[derive(Clone, Copy, Default)]
@@ -427,6 +478,100 @@ impl DiscoveryIndex {
             }
         }
         Ok(summary)
+    }
+
+    /// Immediate children with descendant totals. The target root's own items
+    /// have the empty key; expanding that row has no folder children. Ordering
+    /// is largest first with first-observation ties, independent of queue changes.
+    pub fn folders(
+        &self,
+        generation: &str,
+        revision: u64,
+        scope: Option<&str>,
+        offset: usize,
+        limit: usize,
+    ) -> Result<FolderPage> {
+        self.check_revision(generation, revision)?;
+        let parent = checked_scope(scope)?;
+        if offset > MAX_RECORDS || limit == 0 || limit > MAX_PAGE_RECORDS {
+            return Err(DiscoveryError("folder query limit exceeded"));
+        }
+        let mut groups: HashMap<&str, FolderTotals> = HashMap::new();
+        let mut charged = 0usize;
+        for (position, record) in self.records.iter().enumerate() {
+            if !record.active {
+                continue;
+            }
+            let scope = self.strings.get(record.scope);
+            let Some(key) = child_key(scope, parent.as_deref()) else {
+                continue;
+            };
+            if !groups.contains_key(key) {
+                // Hash storage, capacity growth and the eventual sort references.
+                charged += std::mem::size_of::<FolderTotals>() * 2 + 96;
+                if charged > MAX_FOLDER_WORK_BYTES {
+                    return Err(DiscoveryError("folder aggregation memory limit exceeded"));
+                }
+            }
+            let group = groups.entry(key).or_insert_with(|| FolderTotals {
+                first_seen: position,
+                ..FolderTotals::default()
+            });
+            group.count += 1;
+            group.bytes += record.bytes;
+            group.partial |= record.known == Some(false);
+            group.own_count += usize::from(scope == key);
+            group.has_children |= scope != key;
+            *risk_counter(&mut group.risks, record.risk) += 1;
+            if self.selected[position] {
+                group.selected_count += 1;
+                group.selected_bytes += record.bytes;
+                group.selected_partial |= record.known == Some(false);
+                *risk_counter(&mut group.selected_risks, record.risk) += 1;
+            }
+        }
+        let mut ordered: Vec<_> = groups.iter().collect();
+        ordered
+            .sort_by(|(_, a), (_, b)| b.bytes.cmp(&a.bytes).then(a.first_seen.cmp(&b.first_seen)));
+        let matching_count = ordered.len();
+        let mut folders = Vec::new();
+        let mut bytes = 2048 + parent.as_deref().map_or(0, |key| key.len() * 6);
+        for (key, group) in ordered.into_iter().skip(offset).take(limit) {
+            let charge = key.len() * 6 + 768;
+            if bytes + charge > MAX_PAGE_BYTES {
+                if folders.is_empty() {
+                    return Err(DiscoveryError("folder exceeds reply byte limit"));
+                }
+                break;
+            }
+            bytes += charge;
+            let mut totals = self.summary();
+            totals.candidate_count = group.count;
+            totals.estimated_bytes = group.bytes;
+            totals.bytes_partial = group.partial;
+            totals.selected_count = group.selected_count;
+            totals.selected_bytes = group.selected_bytes;
+            totals.selected_bytes_partial = group.selected_partial;
+            totals.risk_counts = group.risks.clone();
+            totals.selected_risk_counts = group.selected_risks.clone();
+            folders.push(Folder {
+                key: (*key).to_owned(),
+                own_count: group.own_count,
+                has_children: group.has_children,
+                totals,
+            });
+        }
+        let next = offset + folders.len();
+        Ok(FolderPage {
+            generation: self.generation.clone(),
+            revision: self.revision,
+            scope: parent.map(Cow::into_owned),
+            matching_count,
+            offset,
+            next_offset: (next < matching_count).then_some(next),
+            folders,
+            summary: self.summary(),
+        })
     }
 
     /// Atomic metadata-only bulk change with constant temporary storage. A caller

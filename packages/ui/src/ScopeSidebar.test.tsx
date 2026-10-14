@@ -93,6 +93,66 @@ function descendantCount(root: BaseRenderable): number {
   return count;
 }
 
+test("folder names browse, checkboxes queue and arrows expand as separate mouse actions", async () => {
+  const source = plan(2);
+  source.candidates.forEach((item, i) => {
+    item.path = `/tmp/sweep-sidebar/pkg/sub${i}/node_modules`;
+  });
+  let browsed: string | null | undefined;
+  let queued: string | null | undefined;
+  let expanded: string | undefined;
+  const setup = await testRender(
+    <ScopeSidebar
+      state={createUiState(source)}
+      tokens={darkTheme}
+      focused={false}
+      paneWidth={36}
+      onApplyScope={(key) => {
+        browsed = key;
+      }}
+      onToggleQueue={(key) => {
+        queued = key;
+      }}
+      onToggleExpand={(key) => {
+        expanded = key;
+      }}
+    />,
+    { width: 40, height: 20 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+    await setup.flush();
+  });
+  const lines = setup.captureCharFrame().split("\n");
+  const y = lines.findIndex((line) => line.includes("pkg/"));
+  expect(y).toBeGreaterThanOrEqual(0);
+  const line = lines[y]!;
+  await act(async () => {
+    await setup.mockMouse.click(line.indexOf("pkg/") + 1, y, 2);
+    await setup.flush();
+  });
+  expect(browsed).toBeUndefined();
+  await act(async () => {
+    await setup.mockMouse.click(line.indexOf("pkg/") + 1, y);
+    await setup.flush();
+  });
+  expect(browsed).toBe("pkg");
+  expect(queued).toBeUndefined();
+  await act(async () => {
+    await setup.mockMouse.click(line.indexOf("[ ]") + 1, y);
+    await setup.flush();
+  });
+  expect(queued).toBe("pkg");
+  expect(browsed).toBe("pkg");
+  await act(async () => {
+    await setup.mockMouse.click(line.indexOf("▸"), y);
+    await setup.flush();
+  });
+  expect(expanded).toBe("pkg");
+  expect(browsed).toBe("pkg");
+});
+
 test("10,000 folders mount only a viewport and preserve the cursor through seeking and resize", async () => {
   let selected: string | null | undefined;
   let cursor = 0;
@@ -126,7 +186,7 @@ test("10,000 folders mount only a viewport and preserve the cursor through seeki
     await setup.renderOnce();
     await setup.flush();
   });
-  expect(setup.captureCharFrame()).toContain("all scopes");
+  expect(setup.captureCharFrame()).toContain("All folders");
   expect(descendantCount(setup.renderer.root)).toBeLessThan(200);
   await act(async () => {
     setup.mockInput.pressKey("G");
@@ -156,7 +216,7 @@ test("10,000 folders mount only a viewport and preserve the cursor through seeki
     await setup.renderOnce();
   });
   expect(cursor).toBe(0);
-  expect(setup.captureCharFrame()).toContain("all scopes");
+  expect(setup.captureCharFrame()).toContain("All folders");
   await act(async () => {
     await setup.mockMouse.scroll(3, 3, "down");
     await setup.flush();
@@ -190,12 +250,33 @@ test("10,000 folders mount only a viewport and preserve the cursor through seeki
     await setup.renderOnce();
   });
   expect(cursor).toBe(0);
+  await act(async () => {
+    await setup.mockMouse.click(x, bottom, 2);
+    await setup.flush();
+  });
+  expect(cursor).toBe(0);
+  await act(async () => {
+    await setup.mockMouse.drag(x, top, x, bottom);
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  expect(cursor).toBe(10_000);
+  expect(selected).toBeUndefined();
+  await act(async () => {
+    setup.mockInput.pressKey("g");
+    await setup.flush();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+    await setup.flush();
+  });
   const scopeY = setup
     .captureCharFrame()
     .split("\n")
     .findIndex((line) => line.includes("pkg00000/"));
+  expect(scopeY).toBeGreaterThanOrEqual(0);
   await act(async () => {
-    await setup.mockMouse.click(5, scopeY);
+    await setup.mockMouse.click(8, scopeY);
     await setup.flush();
   });
   expect(selected).toBe("pkg00000");

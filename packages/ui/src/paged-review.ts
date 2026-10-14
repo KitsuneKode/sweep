@@ -4,6 +4,7 @@ import {
   type DiscoveryPage,
   type DiscoveryQuery,
   type DiscoverySummary,
+  type DiscoveryFolderPage,
 } from "@kitsunekode/sweep-core/discovery-index";
 import { validateApplyReport } from "@kitsunekode/sweep-core/plan";
 import type { ApplyReport, ScanPlan } from "@kitsunekode/sweep-protocol";
@@ -11,6 +12,7 @@ import type { ApplyReport, ScanPlan } from "@kitsunekode/sweep-protocol";
 export interface PagedReviewView {
   readonly summary: DiscoverySummary;
   readonly page: DiscoveryPage | null;
+  readonly folderPage: DiscoveryFolderPage | null;
   /** Only the current page's queue marks; this is never the global apply selection. */
   readonly queuedCandidateIds: readonly string[];
   readonly busy: boolean;
@@ -28,6 +30,7 @@ export interface PagedApplyReceipt {
  * callers must not operate it separately. This owner never invokes an apply engine. */
 export class PagedReviewSession {
   private page: DiscoveryPage | null = null;
+  private folderPage: DiscoveryFolderPage | null = null;
   private busy = false;
   private closed = false;
   private receipt: PagedApplyReceipt | null = null;
@@ -39,6 +42,7 @@ export class PagedReviewSession {
     return Object.freeze({
       summary: this.index.summary,
       page: this.page,
+      folderPage: this.folderPage,
       busy: this.busy,
       queuedCandidateIds: Object.freeze(
         this.page?.candidates
@@ -105,6 +109,7 @@ export class PagedReviewSession {
     await this.run(async () => {
       await this.index.select(ids, selected);
       this.page = null; // is:queued filters, row selection and totals need a fresh revision.
+      this.folderPage = null;
     });
     return this.view;
   }
@@ -118,6 +123,16 @@ export class PagedReviewSession {
     return this.run(() => this.index.scopeSummary(scope));
   }
 
+  async folders(scope: string | null, offset = 0, limit = 256): Promise<DiscoveryFolderPage> {
+    return this.run(async () => {
+      this.folderPage = null;
+      const page = await this.index.folders(scope, offset, limit);
+      this.assertOpen();
+      this.folderPage = page;
+      return page;
+    });
+  }
+
   /** A scope action intentionally includes hidden rows and ignores the text filter.
    * null clears/queues all scopes; the empty key means the target root alone. */
   async selectScope(
@@ -128,6 +143,7 @@ export class PagedReviewSession {
     await this.run(async () => {
       await this.index.selectScope(scope, selected, includeDangerous);
       this.page = null;
+      this.folderPage = null;
     });
     return this.view;
   }
@@ -210,6 +226,7 @@ export class PagedReviewSession {
         unattemptedCount: outcomes.filter((outcome) => outcome.status === "unattempted").length,
       });
       this.page = null;
+      this.folderPage = null;
       try {
         for (let offset = 0; offset < removed.length; offset += 256)
           await this.index.retire(removed.slice(offset, offset + 256));
@@ -226,6 +243,7 @@ export class PagedReviewSession {
   async close(): Promise<void> {
     this.closed = true;
     this.page = null;
+    this.folderPage = null;
     await this.index.close();
   }
 }

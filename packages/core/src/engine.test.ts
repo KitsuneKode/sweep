@@ -574,6 +574,25 @@ for (const backend of ["js", "rust"] as const) {
   );
 }
 
+test("rust: an unavailable binary refuses before deletion and preserves the plan", async () => {
+  mkdirSync(dir("node_modules"));
+  const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+  const ids = [...plan.selectedCandidateIds];
+  const previous = process.env.SWEEP_ENGINE_PATH;
+  process.env.SWEEP_ENGINE_PATH = dir("missing-engine");
+  try {
+    await expect(applyPlanWithBackend(plan, "rust")).rejects.toMatchObject({
+      applyOutcome: "not_started",
+      refusalCode: "engine_unavailable",
+    });
+    expect(plan.selectedCandidateIds).toEqual(ids);
+    expect(existsSync(dir("node_modules"))).toBe(true);
+  } finally {
+    if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
+    else process.env.SWEEP_ENGINE_PATH = previous;
+  }
+});
+
 test.skipIf(process.platform === "win32")(
   "rust: an older engine cannot silently omit identity enforcement",
   async () => {
@@ -597,7 +616,10 @@ if (process.argv[2] === "--capabilities") {
     const previous = process.env.SWEEP_ENGINE_PATH;
     process.env.SWEEP_ENGINE_PATH = binary;
     try {
-      await expect(applyPlanWithBackend(plan, "rust")).rejects.toThrow("saved-plan identity");
+      await expect(applyPlanWithBackend(plan, "rust")).rejects.toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "engine_unavailable",
+      });
       expect(existsSync(started)).toBe(false);
       expect(existsSync(dir("node_modules"))).toBe(true);
     } finally {

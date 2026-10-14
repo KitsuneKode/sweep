@@ -110,7 +110,7 @@ describe("native terminal worst-case review", () => {
       await act(async () => {
         await setup.renderOnce();
       });
-      expect(setup.captureCharFrame()).toContain("x / d");
+      expect(setup.captureCharFrame()).toContain("Review removal");
       const seen: string[] = [];
       // Check each viewport, rather than only proving the text exists in JSX.
       for (let i = 0; i < 22; i++) {
@@ -119,7 +119,7 @@ describe("native terminal worst-case review", () => {
           setup.mockInput.pressKey("\x1b[6~");
           await setup.renderOnce();
         });
-        expect(setup.captureCharFrame()).toContain("i / esc");
+        expect(setup.captureCharFrame()).toContain("Esc Close");
       }
       const contents = seen
         .map((frame) =>

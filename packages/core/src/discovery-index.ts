@@ -14,6 +14,7 @@ const MAX_SNAPSHOT = 64 * 1024 * 1024;
 const MAX_HOST_CHARGE = 64 * 1024 * 1024;
 const MAX_PAGE = 256;
 const MAX_RECORDS = 100_000;
+const MAX_FOLDER_WORK = 32 * 1024 * 1024;
 type RiskCounts = ScanPlan["summary"]["riskCounts"];
 
 export class DiscoveryIndexError extends Error {
@@ -64,6 +65,31 @@ export interface DiscoveryPage {
   readonly nextOffset: number | null;
   readonly candidates: readonly ScanCandidate[];
   readonly summary: DiscoverySummary;
+}
+
+export interface DiscoveryFolder {
+  readonly key: string;
+  readonly ownCount: number;
+  readonly hasChildren: boolean;
+  readonly totals: DiscoverySummary;
+}
+export interface DiscoveryFolderPage {
+  readonly generation: string;
+  readonly revision: number;
+  readonly scope: string | null;
+  readonly offset: number;
+  readonly matchingCount: number;
+  readonly nextOffset: number | null;
+  readonly folders: readonly DiscoveryFolder[];
+  readonly summary: DiscoverySummary;
+}
+
+function childScope(key: string, parent: string | null): string | null {
+  if (parent === "") return null;
+  const start = parent === null ? 0 : parent.length + 1;
+  if (parent !== null && !key.startsWith(`${parent}/`)) return null;
+  const end = key.indexOf("/", start);
+  return end < 0 ? key : key.slice(0, end);
 }
 
 interface Witness {
@@ -222,7 +248,7 @@ export class DiscoveryIndexSession {
           value,
           envelope.type === "index_ready"
             ? ["type", "summary"]
-            : envelope.type === "page"
+            : envelope.type === "page" || envelope.type === "folders"
               ? ["type", "requestId", "page"]
               : envelope.type === "scope"
                 ? ["type", "requestId", "summary", "totals"]
@@ -641,6 +667,155 @@ export class DiscoveryIndexSession {
   /** null includes all scopes; "" includes only artifacts directly in the root. */
   async scopeSummary(scope: string | null): Promise<DiscoverySummary> {
     return this.scopeRequest(normalizedScope(scope));
+  }
+
+  /** Immediate folder children. Descendant totals come from the whole generation,
+   * not the retained artifact page. Empty scope means root items, with no children. */
+  async folders(scope: string | null, offset = 0, limit = MAX_PAGE): Promise<DiscoveryFolderPage> {
+    const parent = normalizedScope(scope);
+    const before = this.summary;
+    if (!uint(offset, MAX_RECORDS) || !uint(limit, MAX_PAGE) || limit === 0)
+      throw new DiscoveryIndexError("discovery_refused", "Invalid folder page range");
+    if (this.pending || this.preparingScope)
+      throw new DiscoveryIndexError("discovery_busy", "A discovery request is already running");
+    this.preparingScope = true;
+    try {
+      const groups = new Map<
+        string,
+        { firstSeen: number; ownCount: number; hasChildren: boolean; totals: DiscoverySummary }
+      >();
+      let charged = 0;
+      let visited = 0;
+      for (const witness of this.witnesses.values()) {
+        const key = childScope(witness.scope, parent);
+        if (key !== null) {
+          let group = groups.get(key);
+          if (!group) {
+            charged += 512 + key.length * 4;
+            if (charged > MAX_FOLDER_WORK)
+              throw new DiscoveryIndexError(
+                "discovery_refused",
+                "Folder aggregation memory limit exceeded",
+              );
+            group = {
+              firstSeen: visited,
+              ownCount: 0,
+              hasChildren: false,
+              totals: {
+                ...before,
+                candidateCount: 0,
+                estimatedBytes: 0,
+                bytesPartial: false,
+                selectedCount: 0,
+                selectedBytes: 0,
+                selectedBytesPartial: false,
+                riskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
+                selectedRiskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
+              },
+            };
+            groups.set(key, group);
+          }
+          group.ownCount += Number(witness.scope === key);
+          group.hasChildren ||= witness.scope !== key;
+          // These are private expected values; public receipts stay immutable.
+          const totals = group.totals as {
+            -readonly [K in keyof DiscoverySummary]: DiscoverySummary[K];
+          };
+          totals.candidateCount++;
+          totals.estimatedBytes += witness.bytes;
+          totals.bytesPartial ||= witness.partial;
+          (totals.riskCounts as RiskCounts)[witness.risk]++;
+          if (witness.selected) {
+            totals.selectedCount++;
+            totals.selectedBytes += witness.bytes;
+            totals.selectedBytesPartial ||= witness.partial;
+            (totals.selectedRiskCounts as RiskCounts)[witness.risk]++;
+          }
+        }
+        if (++visited % 256 === 0) {
+          await setImmediate();
+          this.summary;
+        }
+      }
+      const ordered = [...groups.entries()].sort(
+        ([, a], [, b]) =>
+          b.totals.estimatedBytes - a.totals.estimatedBytes || a.firstSeen - b.firstSeen,
+      );
+      const reply = await this.request(
+        "folders",
+        { generation: before.generation, revision: before.revision, scope: parent, offset, limit },
+        true,
+      );
+      try {
+        if (reply.type !== "folders")
+          throw new DiscoveryIndexError("discovery_protocol", "Expected a folder page");
+        const p = object(reply.page, [
+          "generation",
+          "revision",
+          "scope",
+          "matchingCount",
+          "offset",
+          "nextOffset",
+          "folders",
+          "summary",
+        ]);
+        if (
+          p.generation !== before.generation ||
+          p.revision !== before.revision ||
+          p.scope !== parent ||
+          p.offset !== offset ||
+          p.matchingCount !== ordered.length ||
+          !Array.isArray(p.folders) ||
+          p.folders.length > limit
+        )
+          throw new DiscoveryIndexError(
+            "discovery_protocol",
+            "Invalid folder page range or generation",
+          );
+        const folders = p.folders.map((value, index) => {
+          const row = object(value, ["key", "ownCount", "hasChildren", "totals"]);
+          const expected = ordered[offset + index];
+          if (
+            !expected ||
+            row.key !== expected[0] ||
+            row.ownCount !== expected[1].ownCount ||
+            row.hasChildren !== expected[1].hasChildren
+          )
+            throw new DiscoveryIndexError(
+              "discovery_protocol",
+              "Folder page changed scope or ordering",
+            );
+          const totals = this.checkSummary(row.totals, before.revision, expected[1].totals);
+          if (totals.retainedBytes !== before.retainedBytes)
+            throw new DiscoveryIndexError(
+              "discovery_protocol",
+              "Folder page changed retention accounting",
+            );
+          return Object.freeze({
+            key: row.key,
+            ownCount: row.ownCount,
+            hasChildren: row.hasChildren,
+            totals,
+          }) as DiscoveryFolder;
+        });
+        const next = offset + folders.length;
+        if (
+          next > Math.max(offset, ordered.length) ||
+          (next < ordered.length
+            ? p.nextOffset !== next || folders.length === 0
+            : p.nextOffset !== null)
+        )
+          throw new DiscoveryIndexError("discovery_protocol", "Invalid folder pagination");
+        p.summary = this.checkSummary(p.summary, before.revision, before);
+        p.folders = Object.freeze(folders);
+        return Object.freeze(p) as unknown as DiscoveryFolderPage;
+      } catch (error) {
+        this.fail(error as Error);
+        throw error;
+      }
+    } finally {
+      this.preparingScope = false;
+    }
   }
 
   /** Metadata-only bulk action, independent of the visible page or text filter.

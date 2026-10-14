@@ -109,6 +109,8 @@ export interface SweepUiState {
    * scan generation is a new decision.
    */
   queueCleared: boolean;
+  /** Interactive fresh scans require explicit selection; saved-plan views may seed. */
+  startUnselected: boolean;
 }
 
 export interface SweepUiSummary {
@@ -132,13 +134,17 @@ export interface SweepUiSummary {
 }
 
 export interface SweepUiInitOptions {
+  startUnselected?: boolean;
+  themeMode?: ThemeMode;
+  sortBy?: UiSortBy;
   catalogPatterns?: string[];
   disabledPatterns?: string[];
   extraPatterns?: string[];
 }
 
 export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): SweepUiState {
-  const selectedIds = new Set(plan.selectedCandidateIds);
+  const startUnselected = init.startUnselected ?? false;
+  const selectedIds = new Set(startUnselected ? [] : plan.selectedCandidateIds);
   const candidates = plan.candidates.slice();
   const state: SweepUiState = {
     targetDir: plan.targetDir,
@@ -161,20 +167,21 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     patternInputMode: "filter",
     selectedIds,
     focus: "list",
-    themeMode: "auto",
+    themeMode: init.themeMode ?? "auto",
     patternsDirty: false,
     scanning: false,
     scanIncomplete: false,
     scanSizedCount: plan.candidates.length,
     scannedDirs: plan.summary.scannedDirs,
     scanCurrentDir: null,
-    sortBy: "size",
+    sortBy: init.sortBy ?? "size",
     orderPinned: false,
     collapsedGroups: new Set<string>(),
     expandedScopes: new Set<string>(),
     skippedDirs: 0,
     selectionTouched: new Set<string>(),
-    queueCleared: false,
+    queueCleared: startUnselected,
+    startUnselected,
   };
 
   const rows = buildDisplayRows(state);
@@ -828,7 +835,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     patternsDirty: false,
     selectedIds: new Set<string>(),
     selectionTouched: new Set<string>(),
-    queueCleared: false,
+    queueCleared: state.startUnselected,
     rowIndex: 0,
     visualAnchorId: null,
     sidebarIndex: 0,

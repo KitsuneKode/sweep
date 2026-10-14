@@ -18,7 +18,8 @@
       [Paged review ownership](paged-review-2026-10-12.md) implements cached totals,
       explicit single-item plans and trusted outcome retirement; it remains gated.
       [Scoped review authority](scoped-review-2026-10-12.md) adds scope totals and
-      atomic global/scoped queue changes; bounded hierarchy/group pages remain open.
+      atomic global/scoped queue changes. [Folder navigation](review-navigation-2026-10-12.md)
+      adds bounded hierarchy pages; cursor/order/group parity and progressive handover remain open.
 
 - [ ] Close [round-four audit reconciliation](audit-round4-2026-10-08.md):
       confirmation authority, error contract, session truth and recovery evidence;

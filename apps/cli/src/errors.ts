@@ -75,11 +75,13 @@ export function fatalErrorDocument(err: unknown, applyOutcome?: "not_started" | 
             hint:
               err.refusalCode === "apply_busy"
                 ? "Inspect the lock owner and journal. Retry only after the holder finishes; do not remove a lock automatically."
-                : err.refusalCode === "resource_limit_exceeded"
-                  ? "Review a smaller selection or subtree within the resource budget. Nothing was removed; do not increase limits automatically."
-                  : err.refusalCode === "size_limit_exceeded"
-                    ? "Review the queue or configured size policy. Do not widen deletion authorization automatically."
-                    : "Inspect unreadable or unsupported entries before creating a newly reviewed plan.",
+                : err.refusalCode === "engine_unavailable"
+                  ? "Repair or update the native engine, then review again. Nothing was removed. Do not switch engines or retry automatically."
+                  : err.refusalCode === "resource_limit_exceeded"
+                    ? "Review a smaller selection or subtree within the resource budget. Nothing was removed; do not increase limits automatically."
+                    : err.refusalCode === "size_limit_exceeded"
+                      ? "Review the queue or configured size policy. Do not widen deletion authorization automatically."
+                      : "Inspect unreadable or unsupported entries before creating a newly reviewed plan.",
           }
         : {}),
     ...(unknownOutcome || refused || applyOutcome

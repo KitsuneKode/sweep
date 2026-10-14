@@ -55,8 +55,17 @@ For a visual review in an interactive terminal:
 sweep ui .
 ```
 
-Inspect an artifact with `i`. Press `x` to request deletion of that artifact,
-then read the confirmation. Nothing is removed until you confirm.
+The queue starts empty. The largest artifacts appear first. Choose **Queue safe
+items**, or use the checkboxes to pick individual artifacts. Enter opens an
+item's details; folder names change the view without changing your selection.
+Choose **Review queue**, check its paths and deletion mode, then confirm. Nothing
+is removed before confirmation. **Actions** (F2) exposes settings and shortcuts;
+you can complete the review with the mouse.
+
+To remove only one artifact, open its details and choose **Review removal**.
+Other queued items stay queued. Watch the outcome rather than repeatedly
+confirming: cancellation stops remaining work and does not restore completed
+deletions. Read [Terminal UI](terminal-ui.md) for the complete interaction model.
 
 ## Your first cleanup
 

@@ -524,9 +524,10 @@ export async function applyPlanViaRust(
   // Distinguish "binary cannot run" (ENOENT/EPERM spawn error) from "ran but
   // lacks applyControl" (old engine): same flag, different remedy.
   if (capabilities.error) {
-    throw new GuardrailError(
+    throw new ApplyRefusedError(
       `Could not run the Rust engine at ${binary}: ${capabilities.error.message}. ` +
-        `Reinstall the native package or use --engine js.`,
+        `Repair or reinstall the native engine, then review again. Nothing was removed.`,
+      "engine_unavailable",
     );
   }
   let controlled = false;
@@ -544,12 +545,14 @@ export async function applyPlanViaRust(
     /* older engine */
   }
   if (!controlled)
-    throw new GuardrailError(
-      "This Rust engine lacks safe apply cancellation. Update the native package or use --engine js.",
+    throw new ApplyRefusedError(
+      "This Rust engine lacks safe apply cancellation. Update the native package, then review again. Nothing was removed.",
+      "engine_unavailable",
     );
   if (!identityChecked)
-    throw new GuardrailError(
-      "This Rust engine lacks saved-plan identity checks. Update the native package or use --engine js with a fresh scan.",
+    throw new ApplyRefusedError(
+      "This Rust engine lacks saved-plan identity checks. Update the native package, then review again. Nothing was removed.",
+      "engine_unavailable",
     );
   let report: ApplyReport | undefined;
   let refusal: ApplyRefusedError | undefined;
