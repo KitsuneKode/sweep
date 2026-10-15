@@ -5,6 +5,7 @@ This directory is the working home for implementation plans.
 ## Structure
 
 - `TODO.md` — backlog and current execution order
+- `remaining-work.md` — ledger of open gates with stable IDs (source of truth for open work)
 - `overhaul-roadmap.md` — completed P0–P6 overhaul (source of truth for roadmap status)
 - `*.md` — scoped plans that live directly in this directory
 - `<scope>/` — focused plan folders when a effort spans multiple files (e.g.

@@ -13,6 +13,10 @@
 
 ## Next
 
+Open work is tracked in the [remaining-work ledger](remaining-work.md) (S1–S3,
+G1–G9, L1–L4). The unchecked umbrellas below stay for history; each maps to
+ledger IDs there.
+
 - [ ] Integrate the production TUI with the bounded page owner after completing
       scope/group aggregates, cursor ordering and progressive generation handover.
       [Paged review ownership](paged-review-2026-10-12.md) implements cached totals,
