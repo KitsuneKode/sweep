@@ -20,7 +20,34 @@ const SCENARIOS = [
   { name: "workspace-matrix", scenario: "workspace-matrix" as const },
   { name: "risk-mix", scenario: "risk-mix-parity" as const },
   { name: "opt-in-patterns", scenario: "opt-in-patterns" as const },
+  { name: "classification-context", scenario: "classification-context" as const },
 ];
+
+/**
+ * Default names out of context: a regular file called `target`, an authored
+ * `target/` folder with no cargo marker, and a directory named like tsc
+ * state must never be presumed safe; a crate's `target`, a tagged custom
+ * target dir, a real tsbuildinfo file and a `node_modules` still are.
+ */
+function seedClassificationContext(root: string): void {
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "target"), "my notes\n");
+  mkdirSync(join(root, "notes", "target"), { recursive: true });
+  writeFileSync(join(root, "notes", "target", "chapter1.md"), "authored essay\n");
+  mkdirSync(join(root, "crate", "target", "debug"), { recursive: true });
+  writeFileSync(join(root, "crate", "Cargo.toml"), '[package]\nname = "crate"\n');
+  writeFileSync(join(root, "crate", "target", "debug", "app"), "bin\n");
+  mkdirSync(join(root, "tagged", "target"), { recursive: true });
+  writeFileSync(
+    join(root, "tagged", "target", "CACHEDIR.TAG"),
+    "Signature: 8a477f597d28d172789f06886806bc55\n",
+  );
+  mkdirSync(join(root, "app", "node_modules", "pkg"), { recursive: true });
+  writeFileSync(join(root, "app", "package.json"), "{}\n");
+  writeFileSync(join(root, "app", "node_modules", "pkg", "index.js"), "module.exports = {};\n");
+  mkdirSync(join(root, "pkg", "odd.tsbuildinfo"), { recursive: true });
+  writeFileSync(join(root, "pkg", "tsconfig.tsbuildinfo"), "{}\n");
+}
 
 function seedNodeModulesOnly(root: string): void {
   mkdirSync(join(root, "node_modules"), { recursive: true });
@@ -97,6 +124,12 @@ function main(): void {
 
     if (scenario === "opt-in-patterns") {
       seedOptInPatterns(root);
+      continue;
+    }
+
+    if (scenario === "classification-context") {
+      seedClassificationContext(root);
+      ensureGitkeeps(root);
       continue;
     }
 

@@ -254,7 +254,7 @@ fn blocked_roots() -> HashSet<PathBuf> {
     roots
 }
 
-fn home_dir() -> Option<PathBuf> {
+pub(crate) fn home_dir() -> Option<PathBuf> {
     // std::env::home_dir mirrors os.homedir(): env vars first, then the
     // passwd/registry fallback - so $HOME-unset scans still get home-dir
     // protection. JS parity.

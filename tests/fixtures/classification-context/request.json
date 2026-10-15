@@ -1,0 +1,7 @@
+{
+  "exact": false,
+  "selectionPolicy": {
+    "mode": "default",
+    "includeDangerous": false
+  }
+}

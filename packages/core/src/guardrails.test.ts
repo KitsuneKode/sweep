@@ -49,7 +49,8 @@ describe("assertSafeCwd", () => {
 
   test("blocks path traversal resolving to root or system directories", () => {
     expect(() => assertSafeCwd("/tmp/../../etc")).toThrow(GuardrailError);
-    expect(() => assertSafeCwd("../../../../../../../../etc")).toThrow(GuardrailError);
+    // Climb past the root from any checkout depth (worktrees nest deeper).
+    expect(() => assertSafeCwd(`${"../".repeat(64)}etc`)).toThrow(GuardrailError);
   });
 
   test("allows relative path to a valid project directory", () => {

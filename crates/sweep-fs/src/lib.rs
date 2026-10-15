@@ -35,6 +35,10 @@ pub struct WalkEntry {
     pub bytes_known: bool,
     /// Own mtime in epoch milliseconds (`lstat`, so a symlink reports itself).
     pub modified_ms: Option<u64>,
+    /// Whether the catalog's project marker was present when the walk matched
+    /// this entry (`true` when the name declares no marker). Checked once
+    /// here so found and sized events classify identically.
+    pub has_project_marker: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +163,86 @@ pub fn catalog_match_for(name: &str) -> Option<CatalogMatch> {
     } else {
         None
     }
+}
+
+/// What the catalog expects of a shipping-default name before presuming it is
+/// the build artifact (JS `CatalogEntry.entryType` / `markers`). Keep in sync
+/// with `packages/core/src/catalog.ts`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtifactRule {
+    pub entry_type: WalkEntryType,
+    /// Files whose presence beside the entry marks a real project.
+    pub sibling_markers: &'static [&'static str],
+    /// Files whose presence inside the entry marks a real artifact.
+    pub inside_markers: &'static [&'static str],
+}
+
+const DIRECTORY_ARTIFACT: ArtifactRule = ArtifactRule {
+    entry_type: WalkEntryType::Directory,
+    sibling_markers: &[],
+    inside_markers: &[],
+};
+
+const ARTIFACT_RULES: &[(&str, ArtifactRule)] = &[
+    ("node_modules", DIRECTORY_ARTIFACT),
+    (".next", DIRECTORY_ARTIFACT),
+    (".nuxt", DIRECTORY_ARTIFACT),
+    (".svelte-kit", DIRECTORY_ARTIFACT),
+    (".turbo", DIRECTORY_ARTIFACT),
+    (".parcel-cache", DIRECTORY_ARTIFACT),
+    (".vite", DIRECTORY_ARTIFACT),
+    (".nyc_output", DIRECTORY_ARTIFACT),
+    (
+        "*.tsbuildinfo",
+        ArtifactRule {
+            entry_type: WalkEntryType::File,
+            sibling_markers: &[],
+            inside_markers: &[],
+        },
+    ),
+    // `target` is an ordinary word: require cargo's manifest beside it or the
+    // CACHEDIR.TAG cargo writes inside every target directory.
+    (
+        "target",
+        ArtifactRule {
+            entry_type: WalkEntryType::Directory,
+            sibling_markers: &["Cargo.toml"],
+            inside_markers: &["CACHEDIR.TAG"],
+        },
+    ),
+];
+
+/// The default-catalog rule covering a scanned name, if any (same glob and
+/// case-folding semantics as `catalog_match_for`).
+pub fn artifact_rule_for(name: &str) -> Option<ArtifactRule> {
+    static MATCHERS: OnceLock<Vec<(PatternMatcher, ArtifactRule)>> = OnceLock::new();
+    MATCHERS
+        .get_or_init(|| {
+            ARTIFACT_RULES
+                .iter()
+                .map(|(pattern, rule)| (PatternMatcher::compile(&[(*pattern).to_owned()]), *rule))
+                .collect()
+        })
+        .iter()
+        .find(|(matcher, _)| matcher.matches(name))
+        .map(|(_, rule)| *rule)
+}
+
+/// True when the rule needs no marker or one of its marker files exists.
+/// Unreadable evidence counts as missing.
+pub fn has_project_marker(entry_path: &Utf8Path, rule: ArtifactRule) -> bool {
+    if rule.sibling_markers.is_empty() && rule.inside_markers.is_empty() {
+        return true;
+    }
+    let is_file = |path: Utf8PathBuf| fs::metadata(path).is_ok_and(|meta| meta.is_file());
+    let parent = entry_path.parent();
+    rule.sibling_markers
+        .iter()
+        .any(|name| parent.is_some_and(|parent| is_file(parent.join(name))))
+        || rule
+            .inside_markers
+            .iter()
+            .any(|name| is_file(entry_path.join(name)))
 }
 
 /// Result of a scan walk before size estimation.
@@ -671,6 +755,11 @@ fn scan_dir_entries(
                 .and_then(|meta| meta.modified().ok())
                 .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
                 .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok());
+            // Marker I/O only for real directories whose name declares one.
+            let has_project_marker = match artifact_rule_for(file_name) {
+                Some(rule) if is_dir && !is_symlink => has_project_marker(&full_path, rule),
+                _ => true,
+            };
             let entry = WalkEntry {
                 identity,
                 path: full_path,
@@ -680,6 +769,7 @@ fn scan_dir_entries(
                 estimated_bytes: 0,
                 bytes_known: false,
                 modified_ms,
+                has_project_marker,
             };
             if let Some(on_match) = ctx.hooks.and_then(|h| h.on_match) {
                 on_match(&entry);

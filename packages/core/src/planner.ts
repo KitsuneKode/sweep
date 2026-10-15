@@ -21,6 +21,7 @@ import {
   WORKSPACE_STUB_REASON,
 } from "./candidate-insights.js";
 import { catalogMatchFor } from "./catalog.js";
+import { artifactContextReason } from "./classification.js";
 import { identityFromStat, sameFilesystemIdentity } from "./filesystem-identity.js";
 import {
   GuardrailError,
@@ -101,8 +102,7 @@ export function compileSelectedCandidateIds(
 export function toCandidate(entry: ScanEntry): ScanCandidate {
   const id = `cand_${hashString(`${entry.path}:${entry.name}`)}`;
   const kind = candidateKindFromName(entry.name);
-  const riskTier = inferRiskTier(entry);
-  const reasons = inferReasons(entry);
+  const { riskTier, reasons } = classifyEntry(entry);
 
   return {
     ...entry,
@@ -323,31 +323,49 @@ export function countRiskTiers(candidates: ScanCandidate[]): Record<RiskTier, nu
 
 export { candidateKindFromName } from "@kitsunekode/sweep-protocol";
 
-export function inferRiskTier(entry: ScanEntry): RiskTier {
-  if (pathHasProtectedVcsSegment(entry.path)) return "blocked";
-  if (entry.isSymlink) return "caution";
-  // Only names a shipping-default pattern covers earn the safe tier. Opt-in
+/**
+ * Risk tier and reasons in one pass, so the context check (which may stat a
+ * marker file) runs once per candidate. Rust parity: `classify` in
+ * `sweep-engine`.
+ */
+export function classifyEntry(entry: ScanEntry): { riskTier: RiskTier; reasons: string[] } {
+  const reasons: string[] = [];
+  const protectedVcs = pathHasProtectedVcsSegment(entry.path);
+  if (protectedVcs) reasons.push("protected-vcs-path");
+  if (entry.isSymlink) reasons.push("symlink");
+  const match = catalogMatchFor(entry.name);
+  reasons.push(
+    match === "default"
+      ? "default-pattern"
+      : match === "opt-in"
+        ? "opt-in-pattern"
+        : "custom-pattern",
+  );
+
+  if (protectedVcs) return { riskTier: "blocked", reasons };
+  if (entry.isSymlink) return { riskTier: "caution", reasons };
+  // Only names a shipping-default pattern covers can earn the safe tier. Opt-in
   // catalog names (dist, build, out, coverage, ...) are dangerous for the same
   // reason they are opt-in - the name can hold authored files. Enabling a
   // pattern consents to scanning, never to pre-selection.
-  return catalogMatchFor(entry.name) === "default" ? "safe" : "dangerous";
+  if (match !== "default") return { riskTier: "dangerous", reasons };
+  // A default name is still only presumed safe in context: right entry type,
+  // outside tool/system install trees, and with a project marker where the
+  // name is an ordinary word.
+  const contextReason = artifactContextReason(entry);
+  if (contextReason) {
+    reasons.push(contextReason);
+    return { riskTier: "dangerous", reasons };
+  }
+  return { riskTier: "safe", reasons };
+}
+
+export function inferRiskTier(entry: ScanEntry): RiskTier {
+  return classifyEntry(entry).riskTier;
 }
 
 export function inferReasons(entry: ScanEntry): string[] {
-  const reasons: string[] = [];
-  if (pathHasProtectedVcsSegment(entry.path)) {
-    reasons.push("protected-vcs-path");
-  }
-  if (entry.isSymlink) reasons.push("symlink");
-  const match = catalogMatchFor(entry.name);
-  if (match === "default") {
-    reasons.push("default-pattern");
-  } else if (match === "opt-in") {
-    reasons.push("opt-in-pattern");
-  } else {
-    reasons.push("custom-pattern");
-  }
-  return reasons;
+  return classifyEntry(entry).reasons;
 }
 
 function shouldSelectCandidate(

@@ -1,0 +1,142 @@
+---
+source: crates/sweep-engine-cli/tests/parity.rs
+expression: "&actual"
+---
+{
+  "candidates": [
+    {
+      "bytesKnown": true,
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_0a945782c15c8f86",
+      "isSymlink": false,
+      "kind": "node_modules",
+      "name": "node_modules",
+      "path": "__FIXTURE_ROOT__/app/node_modules",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "bytesKnown": true,
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_a14f8aa801ec6fca",
+      "isSymlink": false,
+      "kind": "target",
+      "name": "target",
+      "path": "__FIXTURE_ROOT__/crate/target",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "bytesKnown": true,
+      "entryType": "file",
+      "estimatedBytes": 0,
+      "id": "cand_538bdcdb0a5959c2",
+      "isSymlink": false,
+      "kind": "target",
+      "name": "target",
+      "path": "__FIXTURE_ROOT__/docs/target",
+      "reasons": [
+        "default-pattern",
+        "entry-type-mismatch"
+      ],
+      "riskTier": "dangerous",
+      "selectedByDefault": false
+    },
+    {
+      "bytesKnown": true,
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_a394cb03f16d4c23",
+      "isSymlink": false,
+      "kind": "target",
+      "name": "target",
+      "path": "__FIXTURE_ROOT__/notes/target",
+      "reasons": [
+        "default-pattern",
+        "no-project-marker"
+      ],
+      "riskTier": "dangerous",
+      "selectedByDefault": false
+    },
+    {
+      "bytesKnown": true,
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_5bd4ca689c6a08c9",
+      "isSymlink": false,
+      "kind": "tsbuildinfo",
+      "name": "odd.tsbuildinfo",
+      "path": "__FIXTURE_ROOT__/pkg/odd.tsbuildinfo",
+      "reasons": [
+        "default-pattern",
+        "entry-type-mismatch"
+      ],
+      "riskTier": "dangerous",
+      "selectedByDefault": false
+    },
+    {
+      "bytesKnown": true,
+      "entryType": "file",
+      "estimatedBytes": 0,
+      "id": "cand_8db3bdeac3650542",
+      "isSymlink": false,
+      "kind": "tsbuildinfo",
+      "name": "tsconfig.tsbuildinfo",
+      "path": "__FIXTURE_ROOT__/pkg/tsconfig.tsbuildinfo",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    },
+    {
+      "bytesKnown": true,
+      "entryType": "directory",
+      "estimatedBytes": 0,
+      "id": "cand_72166e342c5d56e0",
+      "isSymlink": false,
+      "kind": "target",
+      "name": "target",
+      "path": "__FIXTURE_ROOT__/tagged/target",
+      "reasons": [
+        "default-pattern"
+      ],
+      "riskTier": "safe",
+      "selectedByDefault": true
+    }
+  ],
+  "createdAt": "1970-01-01T00:00:00.000Z",
+  "protocolVersion": "1",
+  "selectedCandidateIds": [
+    "cand_0a945782c15c8f86",
+    "cand_a14f8aa801ec6fca",
+    "cand_8db3bdeac3650542",
+    "cand_72166e342c5d56e0"
+  ],
+  "selectionPolicy": {
+    "includeDangerous": false,
+    "mode": "default"
+  },
+  "summary": {
+    "candidateCount": 7,
+    "estimatedTotalBytes": 0,
+    "exact": false,
+    "riskCounts": {
+      "blocked": 0,
+      "caution": 0,
+      "dangerous": 3,
+      "safe": 4
+    },
+    "scannedDirs": 7,
+    "selectedCount": 4
+  },
+  "targetDir": "__FIXTURE_ROOT__"
+}
