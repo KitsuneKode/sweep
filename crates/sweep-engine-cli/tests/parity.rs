@@ -81,3 +81,19 @@ fn parity_opt_in_patterns_matches_golden() {
     );
     insta::assert_json_snapshot!("opt_in_patterns", &actual);
 }
+
+/// `classification-context` - default names out of context (a file named
+/// `target`, an authored `target/` without a cargo marker, a directory named
+/// like tsc state) stay `dangerous` and unselected on both engines; real
+/// artifacts beside their markers stay `safe`.
+#[test]
+fn parity_classification_context_matches_golden() {
+    let golden = parity_support::load_golden_plan("classification-context");
+    let actual = parity_support::run_rust_scan_normalized("classification-context");
+
+    assert_eq!(
+        actual, golden,
+        "rust scan plan should match committed JS golden fixture"
+    );
+    insta::assert_json_snapshot!("classification_context", &actual);
+}

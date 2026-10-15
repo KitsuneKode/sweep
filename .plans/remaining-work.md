@@ -55,17 +55,30 @@ Xcursor file), `~/.bun/install/global/node_modules`,
 `~/.local/share`. Cause: `inferRiskTier` (`packages/core/src/planner.ts`) and
 its Rust twin classify by catalog name only.
 
-- Entry type per catalog entry: directory-only for `target`, `node_modules`,
-  `.next` and peers; file-only for `*.tsbuildinfo`.
-- Project marker for `target` (sibling `Cargo.toml` or `CACHEDIR.TAG` inside)
-  and `node_modules` (sibling `package.json`). Missing marker → `caution`,
-  not pre-selected, reason `no-project-marker`.
-- Tool and app homes (`~/.bun`, `~/.cargo`, `~/.rustup`, `~/.npm`,
-  `~/.local/share`, `~/.config`, `~/Library`, `/usr/share`, `*.app`,
-  `%APPDATA%`) → not `safe`.
-- Done when: fixture `classification-context` passes in both engines with
-  identical goldens; read-only scans of `~/.local/share`, `~/.bun` and
-  `/usr/share` pre-select nothing; real-tree selection diff shows only removals.
+Implemented (`packages/core/src/classification.ts`,
+`crates/sweep-engine/src/classify.rs`); each failure is `dangerous`, never
+pre-selected, with one added reason:
+
+- `entry-type-mismatch`: catalog entries declare their entry type
+  (directories for `target`, `node_modules`, `.next` and peers; files for
+  `*.tsbuildinfo`).
+- `tool-home`: toolchain, package-manager, editor, app-data and system install
+  trees (`~/.bun`, `~/.cargo`, `~/.local`, `~/.config`, `~/Library`,
+  `AppData` except `AppData/Local/Temp`, `/usr`, `/opt`, `/var/lib`, `*.app`,
+  `Program Files`, ...). `/var/www` and macOS `/var/folders` are not listed.
+- `no-project-marker`: `target` needs a sibling `Cargo.toml` or a
+  `CACHEDIR.TAG` inside. Rust checks once at walk time (`WalkEntry`) so found
+  and sized events classify identically.
+
+Evidence: fixture `classification-context` matches identical goldens on both
+engines; the six existing goldens are unchanged. `scripts/selection-diff.ts`
+against bfe1eab, both engines: `~/.local/share` 51 → 0, `~/.bun` 69 → 0,
+`/usr/share` 5 → 0, `~/Projects` 724 → 720 with zero additions (the four
+removals are fixture negatives and an unmarked fixture `target`).
+
+Follow-up (not Phase 0): a `node_modules` marker (`package.json`) was dropped
+from scope. No reproduced harm needed it once tool homes are excluded, and it
+would demote every bare test fixture; revisit with a user-facing review.
 
 ### S2 — burst input reaches global shortcuts
 

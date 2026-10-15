@@ -141,6 +141,7 @@ describe("CLI scan/apply", () => {
   test("scan --json emits a plan-shaped document with candidates", () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("target"));
+    writeFileSync(dir("Cargo.toml"), "[package]\n");
 
     const result = runCli(["scan", tmpDir, "--json"]);
 
@@ -178,6 +179,7 @@ describe("CLI scan/apply", () => {
   test("apply --plan deletes planned candidates and reports JSON results", () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("target"));
+    writeFileSync(dir("Cargo.toml"), "[package]\n");
 
     const scanResult = runCli(["scan", tmpDir, "--json"]);
     expect(scanResult.exitCode).toBe(0);
@@ -206,6 +208,7 @@ describe("CLI scan/apply", () => {
     // the flag must gate the destructive path, not just parse.
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("target"));
+    writeFileSync(dir("Cargo.toml"), "[package]\n");
 
     const scanResult = runCli(["scan", tmpDir, "--json"]);
     expect(scanResult.exitCode).toBe(0);
@@ -298,6 +301,7 @@ describe("CLI scan/apply", () => {
   test("apply reports a revalidation failure when a candidate changes type", () => {
     mkdirSync(dir("node_modules"));
     mkdirSync(dir("target"));
+    writeFileSync(dir("Cargo.toml"), "[package]\n");
 
     const scanResult = runCli(["scan", tmpDir, "--json"]);
     expect(scanResult.exitCode).toBe(0);

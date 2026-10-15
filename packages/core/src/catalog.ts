@@ -20,6 +20,18 @@ export interface CatalogEntry {
   byDefault: boolean;
   /** One-line justification shown next to the toggle. */
   note: string;
+  /**
+   * Entry type the real artifact always has. A default name on the other
+   * type (a regular file called `target`) is not that artifact and never
+   * earns the safe tier.
+   */
+  entryType?: "directory" | "file";
+  /**
+   * Evidence that a generic word is the build artifact: a sibling file (the
+   * project manifest) or a file inside (`CACHEDIR.TAG`). Without either the
+   * match is treated as possibly authored.
+   */
+  markers?: { siblings: readonly string[]; inside: readonly string[] };
 }
 
 /** Display order for ecosystems in the pattern menu. */
@@ -45,21 +57,74 @@ export const PATTERN_CATALOG: readonly CatalogEntry[] = [
     ecosystem: "javascript",
     byDefault: true,
     note: "npm/bun/pnpm install output",
+    entryType: "directory",
   },
-  { pattern: ".next", ecosystem: "javascript", byDefault: true, note: "next.js build cache" },
-  { pattern: ".nuxt", ecosystem: "javascript", byDefault: true, note: "nuxt build cache" },
-  { pattern: ".svelte-kit", ecosystem: "javascript", byDefault: true, note: "sveltekit output" },
-  { pattern: ".turbo", ecosystem: "javascript", byDefault: true, note: "turborepo cache" },
-  { pattern: ".parcel-cache", ecosystem: "javascript", byDefault: true, note: "parcel cache" },
-  { pattern: ".vite", ecosystem: "javascript", byDefault: true, note: "vite cache" },
-  { pattern: ".nyc_output", ecosystem: "javascript", byDefault: true, note: "nyc coverage cache" },
+  {
+    pattern: ".next",
+    ecosystem: "javascript",
+    byDefault: true,
+    note: "next.js build cache",
+    entryType: "directory",
+  },
+  {
+    pattern: ".nuxt",
+    ecosystem: "javascript",
+    byDefault: true,
+    note: "nuxt build cache",
+    entryType: "directory",
+  },
+  {
+    pattern: ".svelte-kit",
+    ecosystem: "javascript",
+    byDefault: true,
+    note: "sveltekit output",
+    entryType: "directory",
+  },
+  {
+    pattern: ".turbo",
+    ecosystem: "javascript",
+    byDefault: true,
+    note: "turborepo cache",
+    entryType: "directory",
+  },
+  {
+    pattern: ".parcel-cache",
+    ecosystem: "javascript",
+    byDefault: true,
+    note: "parcel cache",
+    entryType: "directory",
+  },
+  {
+    pattern: ".vite",
+    ecosystem: "javascript",
+    byDefault: true,
+    note: "vite cache",
+    entryType: "directory",
+  },
+  {
+    pattern: ".nyc_output",
+    ecosystem: "javascript",
+    byDefault: true,
+    note: "nyc coverage cache",
+    entryType: "directory",
+  },
   {
     pattern: "*.tsbuildinfo",
     ecosystem: "typescript",
     byDefault: true,
     note: "tsc incremental state",
+    entryType: "file",
   },
-  { pattern: "target", ecosystem: "rust", byDefault: true, note: "cargo build output" },
+  {
+    // `target` is an ordinary word: require cargo's manifest beside it or the
+    // CACHEDIR.TAG cargo writes inside every target directory.
+    pattern: "target",
+    ecosystem: "rust",
+    byDefault: true,
+    note: "cargo build output",
+    entryType: "directory",
+    markers: { siblings: ["Cargo.toml"], inside: ["CACHEDIR.TAG"] },
+  },
 
   // ── Opt-in: regenerable, but the name could hold authored files ──
   {
@@ -162,4 +227,13 @@ export function catalogMatchFor(name: string): CatalogMatch | null {
   if (defaultNameMatcher(name)) return "default";
   if (optInNameMatcher(name)) return "opt-in";
   return null;
+}
+
+const defaultEntryMatchers = PATTERN_CATALOG.filter((e) => e.byDefault).map(
+  (entry) => [entry, compileGlobMatchers([entry.pattern], NAME_MATCH_CASE_FOLD)] as const,
+);
+
+/** The shipping-default catalog entry covering a scanned name, if any. */
+export function defaultCatalogEntryForName(name: string): CatalogEntry | undefined {
+  return defaultEntryMatchers.find(([, matches]) => matches(name))?.[0];
 }

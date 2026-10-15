@@ -339,8 +339,11 @@ describe("core engine", () => {
       "x.tsbuildinfo",
     ];
     for (const name of names) {
-      mkdirSync(dir(name));
+      // Real artifacts: tsc state is a file, cargo output sits beside a manifest.
+      if (name.endsWith(".tsbuildinfo")) writeFileSync(dir(name), "{}");
+      else mkdirSync(dir(name));
     }
+    writeFileSync(dir("Cargo.toml"), "[package]\n");
 
     const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
     expect(plan.selectedCandidateIds.length).toBe(names.length);
@@ -364,6 +367,7 @@ describe("core engine", () => {
   test("scanToPlan preserves a mixed workspace scenario as a stable plan shape", async () => {
     mkdirSync(dir("packages", "web", "node_modules"), { recursive: true });
     mkdirSync(dir("packages", "api", "target"), { recursive: true });
+    writeFileSync(dir("packages", "api", "Cargo.toml"), "[package]\n");
     mkdirSync(dir("apps", "docs", ".next"), { recursive: true });
     mkdirSync(dir("apps", "docs", "custom-cache"), { recursive: true });
 

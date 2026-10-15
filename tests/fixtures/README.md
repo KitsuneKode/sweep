@@ -4,14 +4,15 @@ Committed directories and golden `expected.plan.json` files used by Rust
 `insta` parity tests, JS engine contract tests, and regeneration via
 `scripts/generate-parity-fixture.ts`.
 
-| Fixture              | Scenario                                                             |
-| -------------------- | -------------------------------------------------------------------- |
-| `node_modules-only/` | Single root `node_modules`                                           |
-| `basic/`             | `node_modules`, `tsconfig.tsbuildinfo`, plus an inert `dist`         |
-| `monorepo/`          | Nested `packages/*` and `apps/*` artifacts, plus an inert `dist`     |
-| `workspace-matrix/`  | Web/api packages, docs app, `target`, `.next`, `tsbuildinfo`         |
-| `risk-mix/`          | `node_modules`, a `target` symlink (caution tier), inert `dist` dirs |
-| `opt-in-patterns/`   | `dist`, `build`, `*.egg-info` enabled via `extraPatterns` + defaults |
+| Fixture                   | Scenario                                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `node_modules-only/`      | Single root `node_modules`                                                                             |
+| `basic/`                  | `node_modules`, `tsconfig.tsbuildinfo`, plus an inert `dist`                                           |
+| `monorepo/`               | Nested `packages/*` and `apps/*` artifacts, plus an inert `dist`                                       |
+| `workspace-matrix/`       | Web/api packages, docs app, `target`, `.next`, `tsbuildinfo`                                           |
+| `risk-mix/`               | `node_modules`, a `target` symlink (caution tier), inert `dist` dirs                                   |
+| `opt-in-patterns/`        | `dist`, `build`, `*.egg-info` enabled via `extraPatterns` + defaults                                   |
+| `classification-context/` | Default names out of context (file `target`, unmarked `target/`, `*.tsbuildinfo` dir) beside real ones |
 
 The `dist`/`build`-style directories in these trees are deliberate: `dist` is
 an opt-in catalog entry, so default-config scans must produce no candidate for

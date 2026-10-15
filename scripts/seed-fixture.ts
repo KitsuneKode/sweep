@@ -69,6 +69,9 @@ function seedRiskMix(root: string, created: string[]): void {
 function seedWorkspaceMatrix(root: string, created: string[]): void {
   ensureDir(join(root, "packages", "web", "node_modules"), created);
   ensureDir(join(root, "packages", "api", "target"), created);
+  // A real crate: `target` is only presumed cargo output beside its manifest.
+  writeFileSync(join(root, "packages", "api", "Cargo.toml"), '[package]\nname = "api"\n');
+  created.push(join(root, "packages", "api", "Cargo.toml"));
   ensureDir(join(root, "apps", "docs", ".next"), created);
   ensureDir(join(root, "apps", "docs", "custom-cache"), created);
   writeFileSync(join(root, "apps", "docs", "tsconfig.tsbuildinfo"), "");
