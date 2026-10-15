@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   GuardrailError,
   assertSafeCwd,
+  DARWIN_SYSTEM_ROOTS,
   assertSafePattern,
   assertSizeLimit,
   assertTargetDirectory,
@@ -190,6 +191,16 @@ describe("assertSafeCwd: adversarial inputs", () => {
     } else {
       expect(() => assertSafeCwd("/usr/lib/../../etc")).toThrow(GuardrailError);
     }
+  });
+
+  test.if(process.platform === "darwin")("blocks two-segment macOS system trees", () => {
+    for (const root of DARWIN_SYSTEM_ROOTS) {
+      expect(() => assertSafeCwd(root)).toThrow(GuardrailError);
+    }
+    // Case-insensitive APFS: a case variant names the same directory.
+    expect(() => assertSafeCwd("/system/library")).toThrow(GuardrailError);
+    // Deeper project paths stay usable; their contents are judged per item.
+    expect(() => assertSafeCwd("/Users/Shared/projects/app")).not.toThrow();
   });
 
   test("blocks paths resolving to blocked roots", () => {

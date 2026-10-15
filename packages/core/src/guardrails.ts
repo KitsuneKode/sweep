@@ -32,6 +32,22 @@ export const PROTECTED_VCS_DIR_NAMES = new Set([
  * Evaluated AFTER resolve() - these are canonical absolute paths.
  * Built once at module load (not per-call) for performance.
  */
+/** macOS system trees two segments deep. Rust parity: `DARWIN_SYSTEM_ROOTS`. */
+export const DARWIN_SYSTEM_ROOTS: readonly string[] = [
+  "/private/etc",
+  "/private/var",
+  "/private/tmp",
+  "/System/Library",
+  "/System/Applications",
+  "/System/Volumes",
+  "/Library/Caches",
+  "/Library/Application Support",
+  "/Library/Developer",
+  "/Library/Frameworks",
+  "/Users/Shared",
+  "/opt/homebrew",
+];
+
 function buildBlockedRoots(): Set<string> {
   const roots = new Set<string>([
     "/",
@@ -52,6 +68,12 @@ function buildBlockedRoots(): Set<string> {
     "/tmp",
     homedir(),
   ]);
+
+  if (process.platform === "darwin") {
+    // One-segment roots (/System, /Library, /private, /Users) already fail the
+    // depth rule; these two-segment system trees would otherwise pass it.
+    for (const root of DARWIN_SYSTEM_ROOTS) roots.add(root);
+  }
 
   if (process.platform === "win32") {
     for (const drive of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
