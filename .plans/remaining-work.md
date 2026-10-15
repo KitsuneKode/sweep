@@ -109,6 +109,13 @@ macOS system roots below one segment (`/System/Library`, `/Library/Caches`,
 and relies on S1's tool-home rule. Allowing read-only scans of `~` waits for
 L3 (`sweep report`), after per-item protection is proven.
 
+Implemented: `DARWIN_SYSTEM_ROOTS` (both engines, macOS only, exact match with
+case folding) refuses two-segment system trees as targets. One-segment roots
+already fail the depth rule; deeper paths remain scannable and S1 demotes
+their contents. Pre-selection from `/usr/share` and `~/.bun` is closed by S1
+(selection diff 5 → 0 and 69 → 0). The macOS-only JS and Rust tests are
+skipped on Linux; the hosted macOS job is their first execution.
+
 ## Gates
 
 | ID  | Gate                                   | Work remaining                                                                                                                                                                                                                                                                                                                                     | Absorbs                                                                                 |

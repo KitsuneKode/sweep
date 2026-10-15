@@ -209,6 +209,23 @@ pub fn assert_safe_config_patterns(config: &sweep_types::SweepConfig) -> Result<
     Ok(())
 }
 
+/// macOS system trees two segments deep. JS parity: `DARWIN_SYSTEM_ROOTS`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const DARWIN_SYSTEM_ROOTS: &[&str] = &[
+    "/private/etc",
+    "/private/var",
+    "/private/tmp",
+    "/System/Library",
+    "/System/Applications",
+    "/System/Volumes",
+    "/Library/Caches",
+    "/Library/Application Support",
+    "/Library/Developer",
+    "/Library/Frameworks",
+    "/Users/Shared",
+    "/opt/homebrew",
+];
+
 fn blocked_roots() -> HashSet<PathBuf> {
     let mut roots = HashSet::from([
         PathBuf::from("/"),
@@ -232,6 +249,11 @@ fn blocked_roots() -> HashSet<PathBuf> {
     if let Some(home) = home_dir() {
         roots.insert(home);
     }
+
+    // One-segment roots (/System, /Library, /private, /Users) already fail the
+    // depth rule; these two-segment system trees would otherwise pass it.
+    #[cfg(target_os = "macos")]
+    roots.extend(DARWIN_SYSTEM_ROOTS.iter().map(PathBuf::from));
 
     #[cfg(windows)]
     {
@@ -336,6 +358,16 @@ mod tests {
             assert!(assert_safe_cwd(&canonical.to_string_lossy()).is_err());
         }
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn two_segment_macos_system_trees_are_protected() {
+        for root in DARWIN_SYSTEM_ROOTS {
+            assert!(assert_safe_cwd(root).is_err(), "{root} should be refused");
+        }
+        assert!(assert_safe_cwd("/system/library").is_err());
+        assert!(assert_safe_cwd("/Users/Shared/projects/app").is_ok());
     }
 
     #[test]
