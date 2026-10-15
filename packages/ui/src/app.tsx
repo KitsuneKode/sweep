@@ -1122,11 +1122,25 @@ export function SweepApp({
     setPendingApply(true);
   };
 
+  /**
+   * `mutate`, committed before returning. Input-mode changes decide how the
+   * next key routes, and a burst ("/node", a paste) dispatches every key before
+   * React's default-lane render - only a dispatch inside `flushSync` commits in
+   * time for the following key to see it.
+   */
+  const commitMutation = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
+    if (openModalsRef.current.size > 0) return;
+    flushSync(() => {
+      setNotice(null);
+      dispatch({ type: "mutate", fn });
+    });
+  }, []);
+
   const focusPanel = useCallback(
     (focus: SweepUiState["focus"]) => {
-      mutate((s) => setFocus(s, focus));
+      commitMutation((s) => setFocus(s, focus));
     },
-    [mutate],
+    [commitMutation],
   );
 
   // The dialog can change the initial --trash mode before confirmation.
@@ -1790,6 +1804,7 @@ export function SweepApp({
       {
         finalize,
         mutate,
+        commitMutation,
         focusPanel,
         setShowHelp,
         setPendingApply,

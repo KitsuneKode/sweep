@@ -125,6 +125,11 @@ function collapseCurrentGroup(state: SweepUiState): SweepUiState {
 export interface KeymapActions {
   finalize: (outcome: SweepUiOutcome) => void;
   mutate: (fn: (state: SweepUiState) => SweepUiState) => void;
+  /**
+   * Like `mutate`, but committed before the next key is routed. Use for
+   * input-mode changes; falls back to `mutate` where no renderer commits.
+   */
+  commitMutation?: (fn: (state: SweepUiState) => SweepUiState) => void;
   focusPanel: (focus: UiFocus) => void;
   setShowHelp: (show: boolean) => void;
   setPendingApply: (pending: boolean) => void;
@@ -489,10 +494,13 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   }
 
   if (key.name === "/") {
+    // The mode switch commits synchronously, so the newly focused input would
+    // otherwise receive this same keypress as text.
+    key.preventDefault?.();
     // Inside the patterns pane, / narrows the catalog - the artifact filter
     // is the other pane's job. (patternInput never reaches this line.)
     if (state.focus === "patterns") {
-      actions.mutate((s) => setPatternInput(s, "filter"));
+      (actions.commitMutation ?? actions.mutate)((s) => setPatternInput(s, "filter"));
     } else {
       actions.focusPanel("search");
     }
@@ -610,7 +618,8 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
       return;
     }
     if (key.name === "a") {
-      actions.mutate((s) => setPatternInput(s, "add"));
+      key.preventDefault?.();
+      (actions.commitMutation ?? actions.mutate)((s) => setPatternInput(s, "add"));
       return;
     }
     if (key.name === "d" || key.name === "x") {

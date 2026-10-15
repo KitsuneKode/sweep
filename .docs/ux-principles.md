@@ -10,6 +10,11 @@ Primary navigation must work on the keys every terminal user already knows:
 aliases (`j/k/g/G/h/l`) exist for speed but are never required and never
 documented as the primary binding.
 
+Keys that enter a text input (`/`, and `a` in the patterns pane) commit the
+mode before the next key is routed and consume their own keypress. A burst or
+unbracketed paste such as `/node` arrives in one read; every following key must
+land as filter text, never as a shortcut (`o` sort, `d` review, `q` quit).
+
 ## 2. Esc walks back - it never quits
 
 `Esc` unwinds exactly one layer of state per press: modal → panel → risk

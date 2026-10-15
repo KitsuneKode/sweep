@@ -87,11 +87,19 @@ confirmation (`d`); `/zzqq` quits. Consent held: no burst deleted anything.
 Cause: `packages/ui/src/keymap.ts` routes on `state.focus`, which updates on
 the next render; modal routing already uses a synchronous ref.
 
-- Synchronous input-mode ref set before dispatch; keys arriving before the
-  filter input mounts are appended to the query.
-- Done when: an app test writing `"/node"` and `"/zzqq"` in a single chunk
-  leaves sort, modals and process state unchanged and the filter text equal to
-  the typed word.
+Implemented: key-driven input-mode changes (`focusPanel`, patterns `/` and `a`)
+dispatch inside `flushSync` through `commitMutation`, and the switching key calls
+`preventDefault` so the newly focused input does not also receive it. A bare
+`flushSync()` does not commit default-lane updates from stdin handlers, so
+reading fresh state alone was not enough.
+
+Evidence: four app tests send `/node`, `/zzqq`, `/yolo` and `P/target` as one
+write; all fail with the fix reverted and pass with it. Real tmux PTY: new build
+6/6 correct (word in filter, sort unchanged, no dialog, still running); bfe1eab
+control reproduces the quit, sort change and delete dialog.
+
+Follow-up (G9): `readFreshState()` relies on a bare `flushSync()`; audit callers
+for the same default-lane assumption.
 
 ### S3 — guardrail gaps (conservative half)
 

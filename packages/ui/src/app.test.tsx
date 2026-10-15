@@ -216,6 +216,53 @@ describe("sweep TUI render", () => {
     expect(readFileSync(path, "utf8")).toBe(original);
   });
 
+  test.each(["node", "zzqq", "yolo"])(
+    "/%s arriving in one write filters instead of running shortcuts",
+    async (word) => {
+      // A fast typist or a paste delivers `/` and the query in one stdin chunk:
+      // every key is dispatched before React commits the search focus. Those
+      // keys must not sort (o), open a removal review (d), quit (q) or confirm.
+      const outcomes: SweepUiOutcome[] = [];
+      const setup = await mount((outcome) => outcomes.push(outcome));
+      const before = setup.captureCharFrame();
+      expect(before).toContain("Largest first");
+      await act(async () => {
+        setup.mockInput.pressKey(`/${word}`);
+        await setup.flush();
+      });
+      await act(async () => {
+        await setup.flush();
+        await setup.renderOnce();
+      });
+      const frame = setup.captureCharFrame();
+      expect(outcomes).toEqual([]);
+      expect(frame).toContain(word);
+      expect(frame).toContain("Largest first");
+      expect(frame).not.toMatch(/Delete \d+ item|Move \d+ item|Remove \d+ item/);
+      expect(frame).toContain("SEARCH");
+    },
+  );
+
+  test("a burst into the patterns filter types instead of toggling theme, adding or rescanning", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const setup = await mount((outcome) => outcomes.push(outcome));
+    await act(async () => {
+      // P focuses patterns, / opens its filter; t/a/r would otherwise run.
+      setup.mockInput.pressKey("P/target");
+      await setup.flush();
+    });
+    await act(async () => {
+      await setup.flush();
+      await setup.renderOnce();
+    });
+    const frame = setup.captureCharFrame();
+    expect(outcomes).toEqual([]);
+    // The catalog narrowed to the typed word, with no stray "/" in the query.
+    expect(frame).toContain("target  cargo build output");
+    expect(frame).not.toContain("npm/bun/pnpm install output");
+    expect(frame).not.toContain("/target");
+  });
+
   test("closing action search returns typing to the original filter without overwriting it", async () => {
     const setup = await mount(() => {});
     const paint = async () =>
