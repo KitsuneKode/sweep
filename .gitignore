@@ -32,3 +32,6 @@ apps/docs/src/routeTree.gen.ts
 
 # design inspector working output (screenshots, reports)
 .taste-skill/
+
+# Vercel link state and Build Output API artifacts
+.vercel/

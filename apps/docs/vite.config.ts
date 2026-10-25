@@ -6,6 +6,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import { fumadocsMdx } from "fumadocs-mdx/vite";
+import { nitro } from "nitro/vite";
 import { parseSiteUrl } from "./src/lib/site.ts";
 const contentDir = fileURLToPath(new URL("../../docs", import.meta.url));
 function contentPaths(dir: string): string[] {
@@ -41,6 +42,9 @@ export default defineConfig({
         prerender: { enabled: true },
       })),
     }),
+    // Vercel builds set VERCEL; Nitro then emits .vercel/output. Local builds,
+    // preview and smoke keep the plain dist/ server output.
+    ...(process.env.VERCEL ? [nitro()] : []),
     react(),
   ],
 });
