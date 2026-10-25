@@ -1,0 +1,65 @@
+/*
+ * Sweep theme for Fumadocs, matching the home page: warm olive-black with a
+ * chartreuse signal in dark mode, and a paper variant in light mode where the
+ * signal deepens to olive so links and focus keep AA contrast on white.
+ */
+@theme {
+  --color-fd-background: oklch(97.6% 0.006 100);
+  --color-fd-foreground: oklch(19% 0.012 128);
+  --color-fd-muted: oklch(94.5% 0.008 100);
+  --color-fd-muted-foreground: oklch(43% 0.014 120);
+  --color-fd-popover: oklch(99% 0.004 100);
+  --color-fd-popover-foreground: oklch(19% 0.012 128);
+  --color-fd-card: oklch(95.6% 0.008 100);
+  --color-fd-card-foreground: oklch(19% 0.012 128);
+  --color-fd-border: oklch(19% 0.012 128 / 0.12);
+  --color-fd-primary: oklch(42% 0.11 128);
+  --color-fd-primary-foreground: oklch(97% 0.03 120);
+  --color-fd-secondary: oklch(93% 0.01 110);
+  --color-fd-secondary-foreground: oklch(19% 0.012 128);
+  --color-fd-accent: oklch(90% 0.07 122 / 0.55);
+  --color-fd-accent-foreground: oklch(19% 0.012 128);
+  --color-fd-ring: oklch(55% 0.13 125);
+  --color-fd-overlay: oklch(0% 0 none / 0.2);
+}
+
+.dark {
+  --color-fd-background: oklch(15.5% 0.012 128);
+  --color-fd-foreground: oklch(94% 0.012 100);
+  --color-fd-muted: oklch(19.5% 0.013 128);
+  --color-fd-muted-foreground: oklch(76% 0.014 110);
+  --color-fd-popover: oklch(18.5% 0.013 128);
+  --color-fd-popover-foreground: oklch(94% 0.012 100);
+  --color-fd-card: oklch(18% 0.013 128);
+  --color-fd-card-foreground: oklch(94% 0.012 100);
+  --color-fd-border: oklch(100% 0 none / 0.1);
+  --color-fd-primary: oklch(91% 0.19 122);
+  --color-fd-primary-foreground: oklch(20% 0.045 125);
+  --color-fd-secondary: oklch(21% 0.015 128);
+  --color-fd-secondary-foreground: oklch(94% 0.012 100);
+  --color-fd-accent: oklch(91% 0.19 122 / 0.12);
+  --color-fd-accent-foreground: oklch(94% 0.012 100);
+  --color-fd-ring: oklch(91% 0.19 122);
+  --color-fd-overlay: oklch(0% 0 none / 0.45);
+}
+
+.dark #nd-sidebar {
+  --color-fd-muted: oklch(21% 0.014 128);
+  --color-fd-secondary: oklch(22.5% 0.015 128);
+}
+
+@theme static {
+  --color-fd-info: oklch(70% 0.12 240);
+  --color-fd-warning: oklch(80% 0.14 82);
+  --color-fd-error: oklch(68% 0.17 32);
+  --color-fd-success: oklch(72% 0.17 128);
+  --color-fd-idea: oklch(78% 0.15 100);
+  --color-fd-diff-remove: oklch(68% 0.17 32 / 0.12);
+  --color-fd-diff-remove-symbol: oklch(64% 0.19 32);
+  --color-fd-diff-add: oklch(72% 0.17 128 / 0.12);
+  --color-fd-diff-add-symbol: oklch(64% 0.17 128);
+
+  --font-sans: "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Martian Mono Variable", ui-monospace, monospace;
+  --font-display: "Bricolage Grotesque Variable", "Hanken Grotesk Variable", sans-serif;
+}

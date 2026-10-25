@@ -1,8 +1,17 @@
 # Sweep docs foundation
 
 Private TanStack Start + Fumadocs workspace. The content lives in the repository's
-`docs/` directory. This app uses the neutral Fumadocs baseline; add your visual
-identity in `src/styles.css` and the shared layout options when ready.
+`docs/` directory. Docs pages use the neutral Fumadocs baseline. The home page is
+its own design: `src/components/landing/` with `src/landing.css`, linked only from
+`routes/index.tsx`. Its claims mirror `docs/users/*` and `packages/core`; keep
+`landing/content.ts` in step when behaviour changes.
+
+Interactive controls (slider, radio group, tabs, copy field) come from the
+[Fluid Functionalism](https://www.fluidfunctionalism.com) shadcn registry,
+configured in `components.json`. Update one with
+`bunx --bun shadcn@latest add https://www.fluidfunctionalism.com/r/base/<name>.json --diff`.
+Fonts are self-hosted from `@fontsource-variable/*`: Bricolage Grotesque (display),
+Hanken Grotesk (text) and Martian Mono (terminal fragments and code).
 
 From the repository root:
 

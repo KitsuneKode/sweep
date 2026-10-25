@@ -1,81 +1,494 @@
 @import "tailwindcss";
-@import "fumadocs-ui/css/neutral.css";
+@import "./theme.css";
 @import "fumadocs-ui/css/preset.css";
+@import "@fontsource-variable/hanken-grotesk/wght.css";
+@import "@fontsource-variable/bricolage-grotesque/opsz.css";
+@import "@fontsource-variable/martian-mono/standard.css";
 
-/* Framework baseline only; brand styling belongs here when you design it. */
+@custom-variant dark (&:is(.dark *));
+
 @source "../../../docs";
 
-/* Reading structure; Fumadocs owns the theme and navigation surfaces. */
-.sweep-start {
-  --gutter: clamp(1rem, 4vi, 2rem);
-  --content: 48rem;
+/* Docs typography: the home page's faces, display type on headings. */
+#nd-docs-layout h1,
+.prose :is(h2, h3) {
+  font-family: var(--font-display);
+  letter-spacing: -0.025em;
+}
+.prose :where(a) {
+  text-decoration-color: color-mix(in oklch, var(--color-fd-primary) 55%, transparent);
+  text-underline-offset: 0.2em;
+}
+.prose :where(code) {
+  font-stretch: 87.5%;
+}
+::selection {
+  background: color-mix(in oklch, var(--color-fd-primary) 35%, transparent);
+}
+/* The folder-tab wordmark, shared with the home page. */
+.sweep-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 640;
+  letter-spacing: -0.04em;
+}
+.sweep-wordmark-tab {
+  inline-size: 1rem;
+  block-size: 0.85rem;
+  background: var(--color-fd-primary);
+  clip-path: polygon(0 18%, 38% 18%, 48% 0, 100% 0, 100% 100%, 0 100%);
+}
+
+@theme inline {
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-selected: var(--selected);
+  --color-destructive-light: var(--destructive-light);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-surface-5: var(--surface-5);
+  --color-surface-6: var(--surface-6);
+  --color-surface-7: var(--surface-7);
+  --color-surface-8: var(--surface-8);
+  --shadow-surface-1: var(--shadow-1);
+  --shadow-surface-2: var(--shadow-2);
+  --shadow-surface-3: var(--shadow-3);
+  --shadow-surface-4: var(--shadow-4);
+  --shadow-surface-5: var(--shadow-5);
+  --shadow-surface-6: var(--shadow-6);
+  --shadow-surface-7: var(--shadow-7);
+  --shadow-surface-8: var(--shadow-8);
+  --text-display: var(--fs-display);
+  --text-display--line-height: var(--lh-display);
+  --text-title: var(--fs-title);
+  --text-title--line-height: var(--lh-title);
+  --text-subtitle: var(--fs-subtitle);
+  --text-subtitle--line-height: var(--lh-subtitle);
+  --text-body: var(--fs-body);
+  --text-body--line-height: var(--lh-body);
+  --text-caption: var(--fs-caption);
+  --text-caption--line-height: var(--lh-caption);
+  --text-micro: var(--fs-micro);
+  --text-micro--line-height: var(--lh-micro);
+  --color-dm-drop: var(--dm-drop);
+  --color-dm-ring-high: var(--dm-ring-high);
+  --color-dm-ring-mid: var(--dm-ring-mid);
+  --color-dm-ring-base: var(--dm-ring-base);
+  --color-dm-hi-peak: var(--dm-hi-peak);
+  --color-dm-hi-high: var(--dm-hi-high);
+  --color-dm-hi-mid: var(--dm-hi-mid);
+  --color-dm-hi-base: var(--dm-hi-base);
+  --lh-micro-compact: var(--lh-micro-compact);
+  --fs-micro-compact: var(--fs-micro-compact);
+  --lh-micro: var(--lh-micro);
+  --fs-micro: var(--fs-micro);
+  --lh-caption-compact: var(--lh-caption-compact);
+  --fs-caption-compact: var(--fs-caption-compact);
+  --lh-caption: var(--lh-caption);
+  --fs-caption: var(--fs-caption);
+  --lh-body-compact: var(--lh-body-compact);
+  --fs-body-compact: var(--fs-body-compact);
+  --lh-body: var(--lh-body);
+  --fs-body: var(--fs-body);
+  --lh-subtitle-compact: var(--lh-subtitle-compact);
+  --fs-subtitle-compact: var(--fs-subtitle-compact);
+  --lh-subtitle: var(--lh-subtitle);
+  --fs-subtitle: var(--fs-subtitle);
+  --lh-title-compact: var(--lh-title-compact);
+  --fs-title-compact: var(--fs-title-compact);
+  --lh-title: var(--lh-title);
+  --fs-title: var(--fs-title);
+  --lh-display-compact: var(--lh-display-compact);
+  --fs-display-compact: var(--fs-display-compact);
+  --lh-display: var(--lh-display);
+  --fs-display: var(--fs-display);
+  --shadow-8: var(--shadow-8);
+  --shadow-7: var(--shadow-7);
+  --shadow-6: var(--shadow-6);
+  --shadow-5: var(--shadow-5);
+  --shadow-4: var(--shadow-4);
+  --shadow-3: var(--shadow-3);
+  --shadow-2: var(--shadow-2);
+  --shadow-1: var(--shadow-1);
+  --color-shadow-color: var(--shadow-color);
+  --color-tint-hover: var(--tint-hover);
+  --color-tint: var(--tint);
+  --color-focus-ring: var(--focus-ring);
+  --overlay: var(--overlay);
+}
+
+:root {
+  --hover: rgb(0 0 0 / 0.04);
+  --active: rgb(0 0 0 / 0.07);
+  --selected: #d4d4d4;
+  --destructive-light: #fef2f2;
+  --overlay: 0 0 0;
+  --focus-ring: #6b97ff;
+  --tint: rgb(0 0 0 / 0.08);
+  --tint-hover: rgb(0 0 0 / 0.065);
+  --surface-1: #fafafa;
+  --surface-2: #fcfcfc;
+  --surface-3: #ffffff;
+  --surface-4: #ffffff;
+  --surface-5: #ffffff;
+  --surface-6: #ffffff;
+  --surface-7: #ffffff;
+  --surface-8: #ffffff;
+  --shadow-color: rgb(0 0 0 / 0.06);
+  --shadow-1: 0 0 0 1px var(--shadow-color);
+  --shadow-2: 0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color);
+  --shadow-3:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color);
+  --shadow-4:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color);
+  --shadow-5:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color),
+    0 12px 12px -6px var(--shadow-color);
+  --shadow-6:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color),
+    0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color);
+  --shadow-7:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color),
+    0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color),
+    0 48px 48px -24px var(--shadow-color);
+  --shadow-8:
+    0 0 0 1px var(--shadow-color), 0 1px 1px -0.5px var(--shadow-color),
+    0 3px 3px -1.5px var(--shadow-color), 0 6px 6px -3px var(--shadow-color),
+    0 12px 12px -6px var(--shadow-color), 0 24px 24px -12px var(--shadow-color),
+    0 48px 48px -24px var(--shadow-color), 0 96px 96px -48px var(--shadow-color);
+  --fs-display: 28px;
+  --lh-display: 34px;
+  --fs-display-compact: 24px;
+  --lh-display-compact: 30px;
+  --fs-title: 16px;
+  --lh-title: 22px;
+  --fs-title-compact: 15px;
+  --lh-title-compact: 20px;
+  --fs-subtitle: 14px;
+  --lh-subtitle: 20px;
+  --fs-subtitle-compact: 13px;
+  --lh-subtitle-compact: 18px;
+  --fs-body: 13px;
+  --lh-body: 20px;
+  --fs-body-compact: 12px;
+  --lh-body-compact: 18px;
+  --fs-caption: 12px;
+  --lh-caption: 16px;
+  --fs-caption-compact: 11px;
+  --lh-caption-compact: 14px;
+  --fs-micro: 11px;
+  --lh-micro: 14px;
+  --fs-micro-compact: 10px;
+  --lh-micro-compact: 12px;
+}
+
+.dark {
+  --hover: rgb(255 255 255 / 0.06);
+  --active: rgb(255 255 255 / 0.1);
+  --selected: #525252;
+  --destructive-light: #450a0a;
+  --overlay: 255 255 255;
+  --tint: rgb(255 255 255 / 0.25);
+  --tint-hover: rgb(255 255 255 / 0.2);
+  --surface-1: #171717;
+  --surface-2: #1e1e1e;
+  --surface-3: #252525;
+  --surface-4: #2c2c2c;
+  --surface-5: #333333;
+  --surface-6: #3a3a3a;
+  --surface-7: #414141;
+  --surface-8: #484848;
+  --dm-hi-base: rgba(255, 255, 255, 0.01);
+  --dm-hi-mid: rgba(255, 255, 255, 0.02);
+  --dm-hi-high: rgba(255, 255, 255, 0.04);
+  --dm-hi-peak: rgba(255, 255, 255, 0.06);
+  --dm-ring-base: rgba(255, 255, 255, 0.02);
+  --dm-ring-mid: rgba(255, 255, 255, 0.04);
+  --dm-ring-high: rgba(255, 255, 255, 0.06);
+  --dm-drop: rgba(0, 0, 0, 0.18);
+  --shadow-1: inset 0 0 0 1px var(--dm-ring-base);
+  --shadow-2:
+    inset 0 1px 0 0 var(--dm-hi-base), inset 0 0 0 1px var(--dm-ring-base),
+    0 1px 1px -0.5px var(--dm-drop);
+  --shadow-3:
+    inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-base),
+    0 0 0 1px rgba(0, 0, 0, 0.12), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop);
+  --shadow-4:
+    inset 0 1px 0 0 var(--dm-hi-mid), inset 0 0 0 1px var(--dm-ring-mid),
+    0 0 0 1px rgba(0, 0, 0, 0.14), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop),
+    0 6px 6px -3px var(--dm-drop);
+  --shadow-5:
+    inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-mid),
+    0 0 0 1px rgba(0, 0, 0, 0.16), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop),
+    0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop);
+  --shadow-6:
+    inset 0 1px 0 0 var(--dm-hi-high), inset 0 0 0 1px var(--dm-ring-high),
+    0 0 0 1px rgba(0, 0, 0, 0.18), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop),
+    0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop), 0 24px 24px -12px var(--dm-drop);
+  --shadow-7:
+    inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high),
+    0 0 0 1px rgba(0, 0, 0, 0.2), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop),
+    0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop),
+    0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop);
+  --shadow-8:
+    inset 0 1px 0 0 var(--dm-hi-peak), inset 0 0 0 1px var(--dm-ring-high),
+    0 0 0 1px rgba(0, 0, 0, 0.22), 0 1px 1px -0.5px var(--dm-drop), 0 3px 3px -1.5px var(--dm-drop),
+    0 6px 6px -3px var(--dm-drop), 0 12px 12px -6px var(--dm-drop),
+    0 24px 24px -12px var(--dm-drop), 0 48px 48px -24px var(--dm-drop),
+    0 96px 96px -48px var(--dm-drop);
+}
+
+@layer base {
+  :focus-visible {
+    outline: 1px solid var(--focus-ring, #6b97ff);
+    outline-offset: 2px;
+    border-radius: var(--shape-input-radius, 8px);
+  }
+  a:focus-visible {
+    border-radius: 2px;
+  }
+}
+html.transitioning *,
+html.transitioning *::before,
+html.transitioning *::after {
+  transition:
+    border-radius 180ms ease-in-out,
+    background-color 180ms ease-in-out,
+    color 180ms ease-in-out,
+    border-color 180ms ease-in-out,
+    fill 180ms ease-in-out,
+    stroke 180ms ease-in-out !important;
+}
+/*
+ * shadcn semantic tokens for Fluid Functionalism components. They follow
+ * the Fumadocs theme by default; the landing page remaps them under `.sw`.
+ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+}
+:root {
+  --background: var(--color-fd-background);
+  --foreground: var(--color-fd-foreground);
+  --muted: var(--color-fd-muted);
+  --muted-foreground: var(--color-fd-muted-foreground);
+  --accent: var(--color-fd-accent);
+  --accent-foreground: var(--color-fd-accent-foreground);
+  --border: var(--color-fd-border);
+  --destructive: var(--color-fd-error);
+}
+
+/* ── Not found and load errors: a scan that finds nothing ─────────────── */
+.nf {
   display: grid;
-  grid-template-columns:
-    [full-start] minmax(var(--gutter), 1fr) [content-start]
-    min(100% - var(--gutter) * 2, var(--content)) [content-end]
-    minmax(var(--gutter), 1fr) [full-end];
-  gap: 1.5rem;
-  padding-block: clamp(2rem, 6vi, 5rem);
-  line-height: 1.65;
-  overflow-wrap: break-word;
+  justify-items: center;
+  align-content: center;
+  gap: 1.25rem;
+  min-block-size: 100svh;
+  padding-block: 4rem;
+  padding-inline: 1.25rem;
+  text-align: center;
+  color: var(--color-fd-foreground);
+  background: var(--color-fd-background);
 }
-.sweep-start > * {
-  grid-column: content;
-  min-inline-size: 0;
+.nf-home {
+  position: absolute;
+  inset-block-start: 1.25rem;
+  inset-inline-start: 1.5rem;
+  min-block-size: 2.75rem;
+  text-decoration: none;
 }
-.sweep-start-label {
-  font-size: 0.875rem;
+.nf h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 1.4rem + 2.6vw, 3.5rem);
   font-weight: 600;
-}
-.sweep-start h1 {
-  font-size: clamp(2rem, 5vi, 3.25rem);
-  line-height: 1.15;
-  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1;
   text-wrap: balance;
 }
-.sweep-start h2 {
-  font-size: 1.375rem;
-  font-weight: 650;
+.nf-lead {
+  max-inline-size: 40ch;
+  color: var(--color-fd-muted-foreground);
+  font-size: 1.0625rem;
+  text-wrap: pretty;
 }
-.sweep-start-lead {
-  font-size: 1.125rem;
-  max-inline-size: 65ch;
+/* An empty folder; the front lifts on hover to show there is nothing inside. */
+.nf-folder {
+  position: relative;
+  inline-size: 7.5rem;
+  block-size: 5.5rem;
+  margin-block-end: 0.5rem;
 }
-.sweep-start pre {
-  white-space: pre-wrap;
+.nf-folder-back,
+.nf-folder-front {
+  position: absolute;
+  inset-inline: 0;
+  border-radius: 6px;
+}
+.nf-folder-back {
+  inset-block: 0;
+  background: color-mix(in oklch, var(--color-fd-primary) 55%, var(--color-fd-background));
+  clip-path: polygon(0 12%, 38% 12%, 46% 0, 100% 0, 100% 100%, 0 100%);
+}
+.nf-folder-front {
+  inset-block: 26% 0;
+  background: var(--color-fd-primary);
+  transform-origin: bottom center;
+}
+.nf-dust {
+  position: absolute;
+  inset-block-start: 40%;
+  inline-size: 4px;
+  block-size: 4px;
+  border-radius: 50%;
+  background: var(--color-fd-muted-foreground);
+  opacity: 0;
+}
+.nf-dust:nth-of-type(2) {
+  inset-inline-start: 30%;
+}
+.nf-dust:nth-of-type(3) {
+  inset-inline-start: 50%;
+}
+.nf-dust:nth-of-type(4) {
+  inset-inline-start: 68%;
+}
+.nf-term {
+  inline-size: min(100%, 30rem);
+  padding: 0.9rem 1.1rem;
+  border-radius: 10px;
+  background: var(--color-fd-card);
+  box-shadow: inset 0 0 0 1px var(--color-fd-border);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-stretch: 87.5%;
+  text-align: start;
+}
+.nf-term-cmd {
   overflow-wrap: anywhere;
-  padding-block: 1rem;
-  border-block: 1px solid currentColor;
 }
-.sweep-start-steps {
-  list-style: decimal;
-  padding-inline-start: 1.5rem;
+.nf-term-cmd span {
+  color: var(--color-fd-primary);
+  user-select: none;
 }
-.sweep-start-steps li {
-  margin-block-start: 1rem;
-  padding-inline-start: 0.25rem;
+.nf-term-line {
+  color: var(--color-fd-muted-foreground);
 }
-.sweep-start-links {
+.nf-next {
+  display: grid;
+  gap: 0.75rem;
+  justify-items: center;
+}
+.nf-next > p:first-child {
+  color: var(--color-fd-muted-foreground);
+  font-size: 0.875rem;
+}
+.nf-next ul {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.5rem;
+  justify-content: center;
+  gap: 0.5rem;
 }
-.sweep-start-links a {
+.nf-next ul a,
+.nf-links :is(a, button) {
   display: inline-flex;
   align-items: center;
   min-block-size: 2.75rem;
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
+  padding-inline: 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-fd-secondary);
+  box-shadow: inset 0 0 0 1px var(--color-fd-border);
+  color: var(--color-fd-foreground);
+  font: inherit;
+  font-size: 0.9375rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 180ms cubic-bezier(0.23, 1, 0.32, 1);
 }
-.sweep-start-links a:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 0.25rem;
+.nf-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
 }
-.sweep-start-links a:active {
-  text-decoration-thickness: 3px;
+.nf-links > :first-child {
+  background: var(--color-fd-primary);
+  box-shadow: none;
+  color: var(--color-fd-primary-foreground);
+  font-weight: 600;
+}
+.nf :is(a, button):active {
+  transform: scale(0.97);
+}
+.nf :focus-visible {
+  outline: 2px solid var(--color-fd-ring);
+  outline-offset: 3px;
 }
 @media (hover: hover) and (pointer: fine) {
-  .sweep-start-links a:hover {
-    text-decoration-thickness: 2px;
+  .nf-next ul a:hover,
+  .nf-links > :not(:first-child):hover {
+    background: var(--color-fd-accent);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes nf-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @keyframes nf-dust {
+    0% {
+      opacity: 0;
+      transform: translate(0, 0);
+    }
+    30% {
+      opacity: 0.7;
+    }
+    100% {
+      opacity: 0;
+      transform: translate(var(--dx, 4px), -34px);
+    }
+  }
+  .nf-term-line {
+    animation: nf-in 280ms calc(500ms + var(--i) * 260ms) cubic-bezier(0.23, 1, 0.32, 1) both;
+  }
+  .nf-folder-front {
+    transition: transform 300ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .nf-dust:nth-of-type(3) {
+    --dx: -3px;
+  }
+  /* Opening the empty folder lets a little dust out: there was nothing else. */
+  @media (hover: hover) and (pointer: fine) {
+    .nf-folder:hover .nf-folder-front {
+      transform: perspective(300px) rotateX(-28deg);
+    }
+    .nf-folder:hover .nf-dust {
+      animation: nf-dust 1.1s cubic-bezier(0.23, 1, 0.32, 1) both;
+    }
+    .nf-folder:hover .nf-dust:nth-of-type(3) {
+      animation-delay: 120ms;
+    }
+    .nf-folder:hover .nf-dust:nth-of-type(4) {
+      animation-delay: 220ms;
+    }
   }
 }
