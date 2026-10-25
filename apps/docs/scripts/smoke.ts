@@ -31,11 +31,21 @@ for (const path of pagePaths) {
   const html = await readFile(resolve(client, `.${path}`, "index.html"), "utf8");
   assert.match(html, /<h1[\s>]/, `${path}: prerendered heading is missing`);
   assert.match(html, /name="description"/, `${path}: description is missing`);
-  assert.match(html, /<title>[^<]+\| Sweep<\/title>/, `${path}: page title is missing`);
+  assert.match(
+    html,
+    /<title>[^<]*\bSweep\b[^<]*<\/title>/,
+    `${path}: branded page title is missing`,
+  );
   assert(!/href="[^"#]*\.md(?:[#?"])/.test(html), `${path}: raw Markdown link was not mapped`);
   preview = html.includes('content="noindex, nofollow"');
-  if (preview)
+  if (preview) {
     assert(!html.includes('rel="canonical"'), `${path}: preview advertises a canonical URL`);
+    assert(!html.includes('property="og:image"'), `${path}: preview advertises a social image`);
+  } else assert(html.includes('property="og:image"'), `${path}: social image is missing`);
+  for (const [, json] of html.matchAll(
+    /<script type="application\/ld\+json"[^>]*>(.*?)<\/script>/gs,
+  ))
+    assert.doesNotThrow(() => JSON.parse(json!), `${path}: structured data is not valid JSON`);
   const response = await app.fetch(new Request(`http://localhost${path}`));
   assert.equal(response.status, 200, `${path}: SSR route failed`);
 }

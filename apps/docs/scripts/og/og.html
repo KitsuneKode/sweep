@@ -1,0 +1,273 @@
+<!doctype html>
+<!--
+  Source for public/og.png (1200x630) and public/apple-touch-icon.png.
+  Render with any headless Chrome at a 1200x630 viewport, device scale 1:
+  open this file from apps/docs/scripts/og/ so the font paths resolve.
+  Append #icon to render the 180x180 touch icon instead.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: "Bricolage";
+        src: url("../../node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-opsz-normal.woff2")
+          format("woff2-variations");
+        font-weight: 200 800;
+      }
+      @font-face {
+        font-family: "Hanken";
+        src: url("../../node_modules/@fontsource-variable/hanken-grotesk/files/hanken-grotesk-latin-wght-normal.woff2")
+          format("woff2-variations");
+        font-weight: 100 900;
+      }
+      @font-face {
+        font-family: "Martian";
+        src: url("../../node_modules/@fontsource-variable/martian-mono/files/martian-mono-latin-standard-normal.woff2")
+          format("woff2-variations");
+        font-weight: 100 800;
+        font-stretch: 75% 112.5%;
+      }
+      :root {
+        --bg: oklch(15.5% 0.012 128);
+        --raise: oklch(18.5% 0.013 128);
+        --sunk: oklch(12.5% 0.01 128);
+        --line: oklch(100% 0 none / 0.09);
+        --line-strong: oklch(100% 0 none / 0.16);
+        --text: oklch(94% 0.012 100);
+        --soft: oklch(78% 0.014 108);
+        --faint: oklch(64% 0.014 112);
+        --signal: oklch(91% 0.19 122);
+        --signal-ink: oklch(20% 0.045 125);
+        --caution: oklch(84% 0.13 82);
+        --danger: oklch(74% 0.15 32);
+        --blocked: oklch(64% 0.02 240);
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      html,
+      body {
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Hanken", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .card {
+        position: relative;
+        width: 1200px;
+        height: 630px;
+        padding: 64px 72px;
+        display: grid;
+        grid-template-columns: 1fr 470px;
+        gap: 56px;
+        align-items: center;
+        border-inline: 1px solid var(--line);
+        background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.5px);
+        background-size: 22px 22px;
+      }
+      .card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(ellipse 60% 70% at 25% 50%, var(--bg) 35%, transparent 80%);
+      }
+      .copy,
+      .tui {
+        position: relative;
+      }
+      .mark {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-family: "Bricolage";
+        font-size: 34px;
+        font-weight: 640;
+        letter-spacing: -0.04em;
+      }
+      .tab {
+        width: 32px;
+        height: 27px;
+        background: var(--signal);
+        clip-path: polygon(0 18%, 38% 18%, 48% 0, 100% 0, 100% 100%, 0 100%);
+      }
+      h1 {
+        margin-top: 46px;
+        font-family: "Bricolage";
+        font-size: 68px;
+        font-weight: 600;
+        letter-spacing: -0.035em;
+        line-height: 1;
+      }
+      p.lead {
+        margin-top: 26px;
+        max-width: 30ch;
+        color: var(--soft);
+        font-size: 23px;
+        line-height: 1.4;
+      }
+      .tui {
+        padding: 8px;
+        border-radius: 16px;
+        background: var(--raise);
+        box-shadow:
+          inset 0 0 0 1px var(--line-strong),
+          0 0 0 8px oklch(91% 0.19 122 / 0.04);
+      }
+      .screen {
+        border-radius: 10px;
+        background: var(--sunk);
+        box-shadow: inset 0 0 0 1px var(--line);
+        font-family: "Martian";
+        font-stretch: 87.5%;
+        font-size: 14px;
+        padding-bottom: 14px;
+      }
+      .bar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+        color: var(--soft);
+      }
+      .chip {
+        padding: 0 6px;
+        border-radius: 3px;
+        background: var(--signal);
+        color: var(--signal-ink);
+        font-weight: 700;
+      }
+      .meter {
+        height: 4px;
+        margin: 16px 16px 8px;
+        border-radius: 2px;
+        background: oklch(100% 0 none / 0.08);
+      }
+      .meter span {
+        display: block;
+        height: 100%;
+        width: 76%;
+        border-radius: 2px;
+        background: var(--signal);
+      }
+      .label {
+        padding: 0 16px 6px;
+        color: var(--faint);
+      }
+      .label b {
+        color: var(--text);
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 18px 1fr auto 86px;
+        gap: 12px;
+        align-items: center;
+        padding: 8px 16px;
+      }
+      .box {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        box-shadow: inset 0 0 0 1.5px var(--faint);
+      }
+      .on .box {
+        background: var(--signal);
+        box-shadow: none;
+      }
+      .size {
+        color: var(--soft);
+        text-align: right;
+        white-space: nowrap;
+      }
+      .tier {
+        text-align: right;
+        color: var(--signal);
+      }
+      .caution {
+        color: var(--caution);
+      }
+      .danger {
+        color: var(--danger);
+      }
+      .blocked {
+        color: var(--blocked);
+      }
+      /* The touch icon: just the mark. */
+      .icon {
+        display: none;
+      }
+      :target.icon,
+      html:has(#icon:target) .icon {
+        display: grid;
+      }
+      html:has(#icon:target),
+      html:has(#icon:target) body {
+        width: 180px;
+        height: 180px;
+      }
+      html:has(#icon:target) .card {
+        display: none;
+      }
+      .icon {
+        width: 180px;
+        height: 180px;
+        place-items: center;
+        background: var(--bg);
+      }
+      .icon .tab {
+        width: 92px;
+        height: 78px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="copy">
+        <div class="mark"><span class="tab"></span>sweep</div>
+        <h1>Reclaim gigabytes.<br />Delete nothing by surprise.</h1>
+        <p class="lead">Find build artifacts across your projects. Remove only what you tick.</p>
+      </div>
+      <div class="tui">
+        <div class="screen">
+          <div class="bar">
+            <span class="chip">NORMAL</span>sweep ui ~/projects<span style="margin-left: auto"
+              >8 found</span
+            >
+          </div>
+          <div class="meter"><span></span></div>
+          <div class="label"><b>3.2 GB</b> queued of 4.3 GB found</div>
+          <div class="row on">
+            <span class="box"></span>engine/target<span class="size">2.3 GB</span
+            ><span class="tier">safe</span>
+          </div>
+          <div class="row on">
+            <span class="box"></span>web/node_modules<span class="size">905 MB</span
+            ><span class="tier">safe</span>
+          </div>
+          <div class="row">
+            <span class="box"></span>web/.next<span class="size">638 MB</span
+            ><span class="tier">safe</span>
+          </div>
+          <div class="row">
+            <span class="box"></span>packages/ui/node_modules<span class="size">92 KB</span
+            ><span class="tier caution">caution</span>
+          </div>
+          <div class="row">
+            <span class="box"></span>web/dist<span class="size">18 MB</span
+            ><span class="tier danger">dangerous</span>
+          </div>
+          <div class="row blocked">
+            <span class="box"></span>api/.git/modules/target<span class="size">3 MB</span
+            ><span class="tier blocked">blocked</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="icon" id="icon"><span class="tab"></span></div>
+  </body>
+</html>
