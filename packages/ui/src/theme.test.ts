@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { darkTheme, lightTheme, resolveTheme, type ThemeTokens } from "./theme.js";
+import { darkTheme, lightTheme, noticeColor, resolveTheme, type ThemeTokens } from "./theme.js";
 
 describe("resolveTheme", () => {
   const original = process.env.COLORFGBG;
@@ -111,6 +111,17 @@ describe.each([
     expect(contrast(theme.selectionText, theme.selectionBg)).toBeGreaterThanOrEqual(4.5);
     for (const surface of [theme.bg, theme.surface, theme.hoverBg, theme.selectionBg]) {
       expect(contrast(theme.borderFocus, surface)).toBeGreaterThanOrEqual(3);
+    }
+  });
+});
+
+describe("notice tones", () => {
+  test("only warnings use the warning colour", () => {
+    for (const theme of [darkTheme, lightTheme]) {
+      expect(noticeColor("warning", theme)).toBe(theme.warning);
+      expect(noticeColor("success", theme)).toBe(theme.positive);
+      expect(noticeColor("neutral", theme)).toBe(theme.textSecondary);
+      expect(noticeColor("success", theme)).not.toBe(theme.warning);
     }
   });
 });
