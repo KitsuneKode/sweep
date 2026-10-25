@@ -29,3 +29,6 @@ apps/docs/src/routeTree.gen.ts
 
 # Local clones and qualification scratch must not become broken gitlinks.
 .scratch/
+
+# design inspector working output (screenshots, reports)
+.taste-skill/

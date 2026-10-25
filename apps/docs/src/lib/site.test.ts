@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { pageHead, parseSiteUrl, robots, sitemap } from "./site";
+import { docJsonLd, homeJsonLd, jsonLdText, pageHead, parseSiteUrl, robots, sitemap } from "./site";
 import { docHref } from "./links";
 
 describe("public documentation boundaries", () => {
@@ -30,6 +30,42 @@ describe("public documentation boundaries", () => {
     expect(
       pageHead("Safety", "Review", "/docs/users/safety", "https://docs.example.org").links,
     ).toEqual([{ rel: "canonical", href: "https://docs.example.org/docs/users/safety" }]);
+  });
+  test("social images and structured data need a public origin", () => {
+    const jsonLd = () => [{ "@type": "WebSite" }];
+    const preview = pageHead("Safety", "Review", "/docs/users/safety", undefined, { jsonLd });
+    expect(preview.scripts).toEqual([]);
+    expect(preview.meta).toContainEqual({ name: "twitter:card", content: "summary" });
+    expect(preview.meta.some((m) => "property" in m && m.property === "og:image")).toBe(false);
+
+    const site = "https://docs.example.org";
+    const live = pageHead("Safety", "Review", "/docs/users/safety", site, {
+      type: "article",
+      jsonLd,
+    });
+    expect(live.meta).toContainEqual({ property: "og:image", content: `${site}/og.png` });
+    expect(live.meta).toContainEqual({ name: "twitter:card", content: "summary_large_image" });
+    expect(live.meta).toContainEqual({ property: "og:type", content: "article" });
+    expect(live.scripts).toHaveLength(1);
+  });
+  test("structured data cannot close its script tag", () => {
+    const text = jsonLdText({ name: "</script><script>alert(1)</script>" });
+    expect(text).not.toContain("<");
+    expect(JSON.parse(text).name).toBe("</script><script>alert(1)</script>");
+  });
+  test("home and docs structured data use absolute URLs", () => {
+    const site = "https://docs.example.org";
+    const [web, app] = homeJsonLd(site, `${site}/`) as Record<string, unknown>[];
+    expect(web!["@type"]).toBe("WebSite");
+    expect(app!.image).toBe(`${site}/og.png`);
+    const [, crumbs] = docJsonLd("Safety", "Review", [
+      { name: "Docs", path: "/docs" },
+      { name: "Safety", path: "/docs/users/safety" },
+    ])(site, `${site}/docs/users/safety`) as { itemListElement: { item: string }[] }[];
+    expect(crumbs!.itemListElement.map((i) => i.item)).toEqual([
+      `${site}/docs`,
+      `${site}/docs/users/safety`,
+    ]);
   });
   test("sitemap deduplicates routes and escapes XML", () => {
     const xml = sitemap(["/", "/docs", "/docs", "/docs?a=1&b=2"], "https://docs.example.org");
