@@ -3,7 +3,9 @@ import { useRef, useState } from "react";
 import type { ThemeTokens } from "./theme.js";
 
 /** Mouse release and keyboard commands use the same caller-owned action.
- * A drag, right click or release over a different control never activates it. */
+ * A drag, right click or release over a different control never activates it.
+ * `primary` marks the screen's next step; it only shows while enabled, so a
+ * dead action is never advertised. */
 export function ActionButton({
   label,
   tokens,
@@ -11,6 +13,7 @@ export function ActionButton({
   disabled = false,
   active = false,
   danger = false,
+  primary = false,
   framed = true,
 }: {
   label: string;
@@ -19,11 +22,13 @@ export function ActionButton({
   disabled?: boolean;
   active?: boolean;
   danger?: boolean;
+  primary?: boolean;
   framed?: boolean;
 }) {
   const pressed = useRef(false);
   const element = useRef<BoxRenderable | null>(null);
   const [hovered, setHovered] = useState(false);
+  const lead = primary && !disabled && !active;
   const down = (event: MouseEvent) => {
     event.stopPropagation();
     event.preventDefault();
@@ -50,7 +55,13 @@ export function ActionButton({
       height={1}
       flexShrink={0}
       backgroundColor={
-        active ? tokens.selectionBg : hovered && !disabled ? tokens.hoverBg : tokens.surface
+        active
+          ? tokens.selectionBg
+          : lead
+            ? tokens.accent
+            : hovered && !disabled
+              ? tokens.hoverBg
+              : tokens.surface
       }
       onMouseDown={down}
       onMouseUp={up}
@@ -71,9 +82,11 @@ export function ActionButton({
             ? tokens.textDim
             : active
               ? tokens.selectionText
-              : danger
-                ? tokens.danger
-                : tokens.text
+              : lead
+                ? tokens.accentContrast
+                : danger
+                  ? tokens.danger
+                  : tokens.text
         }
       />
     </box>

@@ -12,6 +12,7 @@ import {
   sidebarBytesWidth,
   sidebarColumnLayout,
   sidebarCountWidth,
+  sidebarHint,
   type ScopeSidebarRow,
 } from "./sidebar.js";
 import { nextScrollTop } from "./scroll.js";
@@ -197,11 +198,7 @@ export function ScopeSidebar({
         ) : null}
       </box>
       <box ref={footerRef} flexShrink={0} height={1}>
-        <text
-          content={focused ? "Enter browse · space queue" : "Names browse · [ ] queues"}
-          fg={tokens.textDim}
-          wrapMode="none"
-        />
+        <text content={sidebarHint(focused, paneWidth)} fg={tokens.textDim} wrapMode="none" />
       </box>
     </box>
   );

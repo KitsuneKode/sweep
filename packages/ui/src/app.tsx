@@ -2050,6 +2050,7 @@ export function SweepApp({
                   tokens={tokens}
                   label={`Review queue (${summary.selectedCount})`}
                   onPress={requestApply}
+                  primary
                   disabled={state.scanning || state.scanIncomplete || summary.selectedCount === 0}
                 />
               </>

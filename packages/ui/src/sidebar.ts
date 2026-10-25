@@ -1,5 +1,6 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { buildScopeTreeRows, type ScopeSidebarRow } from "./scope-tree.js";
+import { cellWidth } from "./text-cells.js";
 
 export type { ScopeSidebarRow } from "./scope-tree.js";
 
@@ -85,4 +86,15 @@ export function compactBytesLabel(bytes: number): string {
   }
   const rounded = value >= 10 || unit === 0 ? Math.round(value) : Math.round(value * 10) / 10;
   return `${rounded}${units[unit]}`;
+}
+
+/**
+ * The longest footer hint that fits whole. A hint cut mid-word ("[ ] que")
+ * reads worse than a shorter complete one, so wording drops before clipping.
+ */
+export function sidebarHint(focused: boolean, width: number): string {
+  const options = focused
+    ? ["Enter browse · space queue", "space queue", "space"]
+    : ["Names browse · [ ] queues", "[ ] queues", "[ ]"];
+  return options.find((hint) => cellWidth(hint) <= width) ?? "";
 }
