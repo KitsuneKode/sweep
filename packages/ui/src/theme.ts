@@ -33,64 +33,67 @@ export interface ThemeTokens {
 }
 
 /**
- * Charcoal surfaces with sage focus and separate warning/danger roles.
- * Text tokens cover the canvas, dialog, hover and soft-selection surfaces.
- * Focused rows use selectionText; risk shapes remain visible without color.
+ * The sweep brand, shared with the website: olive-black surfaces with a
+ * chartreuse signal for focus and the mode chip, and separate
+ * warning/danger roles. Text tokens cover the canvas, dialog, hover and
+ * soft-selection surfaces. Focused rows use selectionText; risk shapes remain
+ * visible without color.
  */
 export const darkTheme: ThemeTokens = {
-  bg: "#0a0a0a",
-  surface: "#121212",
-  surfaceInset: "#0f0f0f",
-  border: "#2a2a2a",
-  borderSoft: "#a0a0a026",
-  borderFocus: "#7c9082",
-  text: "#f5f5f5",
-  textSecondary: "#c9c9c9",
-  textMuted: "#a0a0a0",
-  textDim: "#919191",
-  accent: "#829788",
-  accentContrast: "#0a0a0a",
-  positive: "#8b9d83",
-  warning: "#d9a94f",
-  danger: "#f26363",
-  blocked: "#9198a3",
-  info: "#93a0b4",
-  selectionBg: "#36443a",
-  selectionText: "#f5f5f5",
-  selectionSoftBg: "#222b26",
-  hoverBg: "#1a1a1a",
-  headerText: "#d4d4d4",
-  statusBg: "#0f0f0f",
-  overlayBackdrop: "#0a0a0acc",
-  meterTrack: "#1a1a1a",
+  bg: "#0b0d08",
+  surface: "#12150f",
+  surfaceInset: "#0e110b",
+  border: "#272c21",
+  borderSoft: "#c8d0b026",
+  borderFocus: "#cdf450",
+  text: "#eeede6",
+  textSecondary: "#c9c9bf",
+  textMuted: "#a8aa9d",
+  textDim: "#9a9c8f",
+  accent: "#cdf450",
+  accentContrast: "#1a2108",
+  positive: "#bfe35a",
+  warning: "#e2b552",
+  danger: "#f47f69",
+  blocked: "#9ea6b0",
+  info: "#a2b4ca",
+  selectionBg: "#2c3a18",
+  selectionText: "#f5f5ee",
+  selectionSoftBg: "#1b2113",
+  hoverBg: "#171b12",
+  headerText: "#dcdcd2",
+  statusBg: "#0e110b",
+  overlayBackdrop: "#0b0d08cc",
+  meterTrack: "#1d2216",
 };
 
+/** Paper surfaces; the signal deepens to olive so it keeps contrast on light. */
 export const lightTheme: ThemeTokens = {
-  bg: "#f8f7f4",
-  surface: "#ffffff",
-  surfaceInset: "#f4f3ef",
-  border: "#e8e6e1",
+  bg: "#f7f6f0",
+  surface: "#fdfdf9",
+  surfaceInset: "#f1f0e8",
+  border: "#e3e2d6",
   borderSoft: "#0000000f",
-  borderFocus: "#506658",
-  text: "#1a1f2e",
-  textSecondary: "#474f60",
-  textMuted: "#5b6372",
-  textDim: "#616875",
-  accent: "#506658",
+  borderFocus: "#4a6a12",
+  text: "#1b1f14",
+  textSecondary: "#434936",
+  textMuted: "#555b48",
+  textDim: "#5a604d",
+  accent: "#4a6a12",
   accentContrast: "#ffffff",
-  positive: "#4f6959",
-  warning: "#835b0b",
-  danger: "#b63532",
-  blocked: "#5b6472",
-  info: "#4e6680",
-  selectionBg: "#bfc9bb",
-  selectionText: "#1a1f2e",
-  selectionSoftBg: "#e3e8e0",
-  hoverBg: "#edeee8",
-  headerText: "#2a3040",
-  statusBg: "#fafaf8",
-  overlayBackdrop: "#1a1f2e55",
-  meterTrack: "#e8e6e1",
+  positive: "#3f6212",
+  warning: "#7a5806",
+  danger: "#b0372c",
+  blocked: "#58606d",
+  info: "#46617c",
+  selectionBg: "#d6e4ad",
+  selectionText: "#1b1f14",
+  selectionSoftBg: "#e9efd7",
+  hoverBg: "#ecede2",
+  headerText: "#262b1c",
+  statusBg: "#fafaf4",
+  overlayBackdrop: "#1b1f1455",
+  meterTrack: "#e3e2d6",
 };
 
 export type ThemeMode = "dark" | "light" | "auto";
@@ -125,7 +128,9 @@ export function resolveTheme(mode: ThemeMode): ThemeTokens {
   return {
     ...theme,
     bg: dark ? "#0a0a0a" : "#f7f7f7",
+    surface: dark ? "#121212" : "#ffffff",
     surfaceInset: dark ? "#0f0f0f" : "#f3f3f3",
+    borderSoft: dark ? "#a0a0a026" : "#0000000f",
     border: dark ? "#2a2a2a" : "#e6e6e6",
     accent: dark ? "#c9c9c9" : "#474747",
     accentContrast: dark ? "#0a0a0a" : "#ffffff",
@@ -163,4 +168,13 @@ export function riskColor(theme: ThemeTokens): Record<RiskTier, string> {
     dangerous: theme.danger,
     blocked: theme.blocked,
   };
+}
+
+/** How a one-line notice reads: amber is reserved for things worth a second look. */
+export type NoticeTone = "neutral" | "success" | "warning";
+
+export function noticeColor(tone: NoticeTone, theme: ThemeTokens): string {
+  if (tone === "success") return theme.positive;
+  if (tone === "neutral") return theme.textSecondary;
+  return theme.warning;
 }

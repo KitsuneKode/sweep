@@ -90,7 +90,13 @@ import {
   type SweepUiState,
 } from "./state.js";
 import { getVisibleCandidates } from "./state/selectors.js";
-import { cycleThemeMode, resolveTheme, type ThemeTokens } from "./theme.js";
+import {
+  cycleThemeMode,
+  noticeColor,
+  resolveTheme,
+  type NoticeTone,
+  type ThemeTokens,
+} from "./theme.js";
 import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
 import type { UiScanControl } from "./streaming.js";
 
@@ -181,6 +187,11 @@ export class UiErrorBoundary extends Component<
 
 /** A help row: keycap + what it does. Sections break on `keys === null`. */
 type HelpRow = readonly [keys: string | null, description: string];
+
+interface Notice {
+  text: string;
+  tone: NoticeTone;
+}
 
 const HELP_MOVE: ReadonlyArray<HelpRow> = [
   [null, "move"],
@@ -754,10 +765,16 @@ export function SweepApp({
   const [applyProgress, setApplyProgress] = useState<ApplyProgress | null>(null);
   const [showInspect, setShowInspectState] = useState(false);
   const [scanError, setScanErrorState] = useState<string | null>(null);
-  // One-line feedback for keys that deliberately do nothing (esc with nothing
-  // left to unwind, enter on an empty queue, space on a blocked row). Cleared
-  // by the next real state change so it never lingers past its context.
-  const [notice, setNotice] = useState<string | null>(null);
+  // One-line feedback, cleared by the next real state change so it never
+  // lingers past its context. Warning is the default and the original job:
+  // keys that deliberately do nothing (esc with nothing left to unwind, enter
+  // on an empty queue, space on a blocked row). Outcomes that went as asked
+  // are "success"; plain information is "neutral", so amber keeps meaning
+  // "look at this".
+  const [notice, setNoticeState] = useState<Notice | null>(null);
+  const setNotice = useCallback((text: string | null, tone: NoticeTone = "warning") => {
+    setNoticeState(text === null ? null : { text, tone });
+  }, []);
 
   /**
    * Which overlay is live, tracked synchronously in a ref. useState/useReducer
@@ -987,6 +1004,7 @@ export function SweepApp({
                   : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
               setNotice(
                 `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}${isColdRequested() ? " · cold" : ""}`,
+                skippedDirs > 0 ? "warning" : "success",
               );
               dispatch({
                 type: "mutate",
@@ -1190,7 +1208,7 @@ export function SweepApp({
         return;
       }
       if (dryRun) {
-        setNotice(`dry run - would ${requestedTrash ? "move" : "delete"} ${name}`);
+        setNotice(`dry run - would ${requestedTrash ? "move" : "delete"} ${name}`, "neutral");
         return;
       }
       const controller = new AbortController();
@@ -1232,6 +1250,7 @@ export function SweepApp({
             scopedPlan.selectedCandidateIds.length === 1 ? ` · path: ${name}` : "";
           setNotice(
             `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${getUiSummary(merged.state).selectedCount} still queued · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${reviewedPath}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
+            stopped || merged.failed > 0 ? "warning" : "success",
           );
         } catch (error) {
           if (applyAbortRef.current !== controller) return;
@@ -1399,7 +1418,10 @@ export function SweepApp({
     }
     try {
       const file = writePlanExport(applyUiSelection(plan, s), process.cwd());
-      setNotice(`plan saved: ${sanitizeTerminalText(basename(file))} (sweep apply --plan)`);
+      setNotice(
+        `plan saved: ${sanitizeTerminalText(basename(file))} (sweep apply --plan)`,
+        "success",
+      );
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       setNotice(`couldn't save plan: ${sanitizeTerminalText(reason)}`);
@@ -1418,6 +1440,7 @@ export function SweepApp({
       copied
         ? `copied ${sanitizeTerminalText(relativePath(s.targetDir, candidate.path))}`
         : "this terminal does not accept clipboard writes (OSC 52)",
+      copied ? "success" : "warning",
     );
   }, [renderer]);
 
@@ -1438,8 +1461,8 @@ export function SweepApp({
     });
     if (!result) return;
     const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
-    if (result.queued > 0) setNotice(`queued ${result.queued}${skipped}`);
-    else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued}${skipped}`);
+    if (result.queued > 0) setNotice(`queued ${result.queued}${skipped}`, "success");
+    else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued}${skipped}`, "neutral");
     else setNotice(`nothing queueable in that range${skipped}`);
   }, []);
 
@@ -1461,8 +1484,9 @@ export function SweepApp({
     });
     if (!result) return;
     const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
-    if (result.queued > 0) setNotice(`queued ${result.queued} in folder${skipped}`);
-    else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued} in folder${skipped}`);
+    if (result.queued > 0) setNotice(`queued ${result.queued} in folder${skipped}`, "success");
+    else if (result.unqueued > 0)
+      setNotice(`unqueued ${result.unqueued} in folder${skipped}`, "neutral");
     else setNotice(`nothing queueable in that folder${skipped}`);
   }, []);
 
@@ -1488,14 +1512,14 @@ export function SweepApp({
     if (stateRef.current.catalogPatterns.includes(draft)) {
       // Already catalogued - enabling it is a toggle, not a duplicate row.
       dispatch({ type: "mutate", fn: (s) => setPatternInput(s, null) });
-      setNotice(`"${sanitizeTerminalText(draft)}" is in the catalog - space toggles it`);
+      setNotice(`"${sanitizeTerminalText(draft)}" is in the catalog - space toggles it`, "neutral");
       return;
     }
     dispatch({
       type: "mutate",
       fn: (s) => addCustomPattern(setPatternInput(s, null), draft),
     });
-    setNotice(`added "${sanitizeTerminalText(draft)}" - r rescans with it`);
+    setNotice(`added "${sanitizeTerminalText(draft)}" - r rescans with it`, "success");
   }, []);
 
   const closeConfigSave = () => {
@@ -1512,7 +1536,7 @@ export function SweepApp({
     closeConfigSave();
     try {
       writeProjectSweeprc(captured.path, captured.delta, true, captured.revision);
-      setNotice("Saved patterns to .sweeprc · other settings kept");
+      setNotice("Saved patterns to .sweeprc · other settings kept", "success");
     } catch (error) {
       setNotice(
         `Patterns not saved · ${sanitizeTerminalText(error instanceof Error ? error.message : String(error))}`,
@@ -1537,7 +1561,7 @@ export function SweepApp({
         configSaveReadyRef.current = false;
         configSaveRef.current = captured;
         setConfigSave(captured);
-      } else setNotice("Saved patterns to .sweeprc");
+      } else setNotice("Saved patterns to .sweeprc", "success");
     } catch (error) {
       setNotice(
         `Patterns not saved · ${sanitizeTerminalText(error instanceof Error ? error.message : String(error))}`,
@@ -1824,6 +1848,7 @@ export function SweepApp({
             motionEnabledRef.current
               ? "Activity animation resumed"
               : "Activity animation paused · work continues",
+            "neutral",
           );
         },
         exportPlan,
@@ -2067,7 +2092,11 @@ export function SweepApp({
           backgroundColor={tokens.bg}
         >
           <text
-            content={notice ? t`${fg(tokens.warning)(notice)}` : buildContextLine(state, tokens)}
+            content={
+              notice
+                ? t`${fg(noticeColor(notice.tone, tokens))(notice.text)}`
+                : buildContextLine(state, tokens)
+            }
             wrapMode="none"
           />
         </box>
@@ -2326,8 +2355,8 @@ export function SweepApp({
               feedback={
                 dimensions.width < 40 || dimensions.height < 12
                   ? "Resize to 40 columns and 12 rows to review"
-                  : notice?.startsWith("Press y")
-                    ? notice
+                  : notice?.text.startsWith("Press y")
+                    ? notice.text
                     : undefined
               }
               applyPolicy={
@@ -2374,8 +2403,8 @@ export function SweepApp({
               feedback={
                 dimensions.width < 40 || dimensions.height < 12
                   ? "Resize to 40 columns and 12 rows to review"
-                  : notice?.startsWith("Press y")
-                    ? notice
+                  : notice?.text.startsWith("Press y")
+                    ? notice.text
                     : undefined
               }
               applyPolicy={
