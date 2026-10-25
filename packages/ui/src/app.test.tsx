@@ -375,7 +375,7 @@ describe("sweep TUI render", () => {
       await paint();
     };
     for (let i = 0; i < 10 && !setup.captureCharFrame().includes("Use dark theme"); i++)
-      await click("[Next]");
+      await click(" Next ");
     expect(setup.captureCharFrame()).toContain("Use dark theme");
     await click("Use dark theme");
     expect(setup.captureCharFrame()).not.toContain("Search actions");
@@ -421,7 +421,7 @@ describe("sweep TUI render", () => {
       await paint();
     };
     await click("Esc Close");
-    await click("Queue safe items");
+    await click("Queue safe");
     expect(setup.captureCharFrame()).toContain("Review queue (1)");
     await click("Review queue (1)");
     expect(setup.captureCharFrame()).toContain("Permanently delete 1 item");
@@ -696,11 +696,11 @@ describe("sweep TUI render", () => {
     });
     await settle();
     expect(setup.captureCharFrame()).toContain("1 sizing");
-    // The sidebar meter reports sizing progress while the scan runs -
-    // queue coverage would sit near 100% under default selection and read
-    // as "done" on a scan that can still fail.
+    // The ledger reports sizing progress while the scan runs - queue
+    // coverage would sit near 100% under default selection and read as
+    // "done" on a scan that can still fail.
     const midScan = setup.captureCharFrame();
-    expect(midScan).toContain("1 sized");
+    expect(midScan).toContain("1 of 2 sized");
     expect(midScan).toContain("of");
     expect(midScan).toContain("2 found");
     expect(midScan).not.toContain("100%");

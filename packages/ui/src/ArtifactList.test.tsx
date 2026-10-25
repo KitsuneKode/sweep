@@ -43,7 +43,7 @@ test("item names only focus; queue checkboxes require a left release without dra
     });
     const lines = setup.captureCharFrame().split("\n");
     const y = lines.findIndex((line) => line.includes("node_modules"));
-    const x = lines[y]!.indexOf("[ ]") + 1;
+    const x = lines[y]!.indexOf("○");
     const send = async (fn: () => Promise<void>) =>
       act(async () => {
         await fn();

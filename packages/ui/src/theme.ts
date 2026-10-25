@@ -30,6 +30,8 @@ export interface ThemeTokens {
   overlayBackdrop: string;
   /** Unfilled portion of progress meters. */
   meterTrack: string;
+  /** Resting fill of a pressable control, one step above its surface. */
+  controlBg: string;
 }
 
 /**
@@ -43,13 +45,13 @@ export const darkTheme: ThemeTokens = {
   bg: "#0b0d08",
   surface: "#12150f",
   surfaceInset: "#0e110b",
-  border: "#272c21",
+  border: "#2c3324",
   borderSoft: "#c8d0b026",
   borderFocus: "#cdf450",
-  text: "#eeede6",
-  textSecondary: "#c9c9bf",
-  textMuted: "#a8aa9d",
-  textDim: "#9a9c8f",
+  text: "#f2f1e9",
+  textSecondary: "#bcbdb0",
+  textMuted: "#9b9d8f",
+  textDim: "#868979",
   accent: "#cdf450",
   accentContrast: "#1a2108",
   positive: "#bfe35a",
@@ -65,6 +67,7 @@ export const darkTheme: ThemeTokens = {
   statusBg: "#0e110b",
   overlayBackdrop: "#0b0d08cc",
   meterTrack: "#1d2216",
+  controlBg: "#1f2518",
 };
 
 /** Paper surfaces; the signal deepens to olive so it keeps contrast on light. */
@@ -75,10 +78,10 @@ export const lightTheme: ThemeTokens = {
   border: "#e3e2d6",
   borderSoft: "#0000000f",
   borderFocus: "#4a6a12",
-  text: "#1b1f14",
-  textSecondary: "#434936",
-  textMuted: "#555b48",
-  textDim: "#5a604d",
+  text: "#171a10",
+  textSecondary: "#3b4130",
+  textMuted: "#565c49",
+  textDim: "#666b59",
   accent: "#4a6a12",
   accentContrast: "#ffffff",
   positive: "#3f6212",
@@ -94,6 +97,7 @@ export const lightTheme: ThemeTokens = {
   statusBg: "#fafaf4",
   overlayBackdrop: "#1b1f1455",
   meterTrack: "#e3e2d6",
+  controlBg: "#e9e9dd",
 };
 
 export type ThemeMode = "dark" | "light" | "auto";
@@ -152,6 +156,7 @@ export function resolveTheme(mode: ThemeMode): ThemeTokens {
     overlayBackdrop: dark ? "#0a0a0acc" : "#1f1f1f55",
     statusBg: dark ? "#0f0f0f" : "#fafafa",
     meterTrack: dark ? "#1a1a1a" : "#e6e6e6",
+    controlBg: dark ? "#222222" : "#e8e8e8",
   };
 }
 

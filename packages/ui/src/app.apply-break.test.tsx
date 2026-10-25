@@ -410,16 +410,16 @@ describe("adversarial: committed applying state", () => {
     fixture.candidates = [fixture.candidates[0]!];
     const { setup, settle, openSingleConfirm } = await mountWithApply(() => {}, undefined, fixture);
     await openSingleConfirm();
-    expect(setup.captureCharFrame()).toContain("[y Delete]");
-    expect(setup.captureCharFrame()).toContain("[n / Esc Cancel]");
+    expect(setup.captureCharFrame()).toContain(" y Delete ");
+    expect(setup.captureCharFrame()).toContain(" n / Esc Cancel ");
     await act(async () => {
       for (let i = 0; i < 5; i++) setup.mockInput.pressKey("\x1b[6~");
       await setup.flush();
     });
     await settle();
     expect(setup.captureCharFrame()).toContain("tail-marker");
-    expect(setup.captureCharFrame()).toContain("[y Delete]");
-    expect(setup.captureCharFrame()).toContain("[n / Esc Cancel]");
+    expect(setup.captureCharFrame()).toContain(" y Delete ");
+    expect(setup.captureCharFrame()).toContain(" n / Esc Cancel ");
   });
 
   test("confirmation owns the reviewed paths and metadata instead of live caller objects", async () => {
