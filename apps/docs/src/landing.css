@@ -7,7 +7,18 @@
  * Motion is opt-in (prefers-reduced-motion: no-preference); the static page
  * is the complete page.
  */
-.sw {
+.sw,
+:root.light
+  .sw
+  :is(
+    .sw-window,
+    .sw-inspect dl,
+    .sw-tree,
+    .sw-rules,
+    .sw-statusline,
+    .sw-log,
+    .sw-auto-panel pre
+  ) {
   --bg: oklch(15.5% 0.012 128);
   --bg-raise: oklch(18.5% 0.013 128);
   --bg-raise-2: oklch(22% 0.015 128);
@@ -45,7 +56,8 @@
   --surface-3: oklch(26% 0.016 128);
   --surface-4: oklch(28% 0.016 128);
   --shadow-color: oklch(0% 0 none / 0.45);
-
+}
+.sw {
   --font-display: "Bricolage Grotesque Variable", "Hanken Grotesk Variable", sans-serif;
   --font-text: "Hanken Grotesk Variable", system-ui, sans-serif;
   --font-mono: "Martian Mono Variable", ui-monospace, monospace;
@@ -80,8 +92,68 @@
   -moz-osx-font-smoothing: grayscale;
   color-scheme: dark;
 }
+
+/*
+ * Light: the page turns to paper and the signal deepens to olive so text and
+ * focus keep AA contrast. The terminal screens stay dark, the way a terminal
+ * looks on a desk, so the product pictures read the same in both themes.
+ */
+:root.light .sw {
+  --bg: oklch(97.6% 0.006 100);
+  --bg-raise: oklch(99.3% 0.003 100);
+  --bg-raise-2: oklch(94.6% 0.008 105);
+  --bg-sunk: oklch(94.8% 0.008 100);
+  --line: oklch(19% 0.012 128 / 0.1);
+  --line-strong: oklch(19% 0.012 128 / 0.18);
+  --text: oklch(19% 0.012 128);
+  --text-soft: oklch(37% 0.014 120);
+  --text-faint: oklch(47% 0.014 118);
+  --signal: oklch(43% 0.115 128);
+  --signal-ink: oklch(97.5% 0.03 118);
+  --signal-soft: color-mix(in oklch, var(--signal) 12%, transparent);
+  --paper: oklch(99.6% 0.004 95);
+  --paper-ink: oklch(22% 0.01 100);
+  --caution: oklch(50% 0.12 70);
+  --danger: oklch(50% 0.17 32);
+  --blocked: oklch(48% 0.03 240);
+
+  --background: var(--bg-raise);
+  --foreground: var(--text);
+  --muted: var(--bg-raise-2);
+  --muted-foreground: var(--text-soft);
+  --accent: var(--bg-raise-2);
+  --accent-foreground: var(--text);
+  --border: var(--line-strong);
+  --focus-ring: var(--signal);
+  --hover: oklch(19% 0.012 128 / 0.05);
+  --active: oklch(19% 0.012 128 / 0.09);
+  --selected: var(--bg-raise-2);
+  --tint: oklch(19% 0.012 128 / 0.06);
+  --tint-hover: oklch(19% 0.012 128 / 0.05);
+  --surface-1: var(--bg-raise);
+  --surface-2: var(--bg-raise-2);
+  --surface-3: oklch(92% 0.01 110);
+  --surface-4: oklch(90% 0.01 110);
+  --shadow-color: oklch(30% 0.02 120 / 0.16);
+
+  color-scheme: light;
+}
+:root.light
+  .sw
+  :is(
+    .sw-window,
+    .sw-inspect dl,
+    .sw-tree,
+    .sw-rules,
+    .sw-statusline,
+    .sw-log,
+    .sw-auto-panel pre
+  ) {
+  color: var(--text);
+  color-scheme: dark;
+}
 body:has(.sw) {
-  background: var(--bg);
+  background: var(--color-fd-background);
 }
 .sw *,
 .sw *::before,
@@ -207,7 +279,7 @@ body:has(.sw) {
     background: var(--surface-3);
   }
   .sw-btn-light:hover {
-    background: white;
+    background: color-mix(in oklch, var(--text) 86%, var(--bg));
   }
 }
 
@@ -1175,7 +1247,7 @@ body:has(.sw) {
   flex: 1 1 18rem;
   max-inline-size: 26rem;
   aspect-ratio: 1;
-  color: oklch(100% 0 none / 0.12);
+  color: color-mix(in oklch, var(--text) 12%, transparent);
   background-image: var(--dot);
   background-size: calc(100% / 32) calc(100% / 32);
 }

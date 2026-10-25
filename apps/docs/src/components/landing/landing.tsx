@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { ThemeSwitch } from "fumadocs-ui/layouts/shared/slots/theme-switch";
 import {
   Archive,
   ArrowRight,
@@ -141,6 +142,7 @@ function Header() {
           </Link>
         </nav>
         <div className="sw-top-end">
+          <ThemeSwitch className="sw-theme" />
           <a href="https://github.com/KitsuneKode/sweep">GitHub</a>
           <Link
             to="/docs/$"
