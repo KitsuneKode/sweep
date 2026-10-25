@@ -49,8 +49,10 @@ with tempfile.TemporaryDirectory(prefix="sweep-apply-pipe-", dir=REPO / "target"
         (tree / ".sweeprc").write_text("{}\n")
         (tree / "keep").write_text("unselected")
         for i in range(COUNT):
+            # A real Cargo project: `target` only classifies safe beside a manifest.
             artifact = tree / str(i) / "target"
             artifact.mkdir(parents=True)
+            (tree / str(i) / "Cargo.toml").write_text(f'[package]\nname = "fixture-{i}"\nversion = "0.0.0"\n')
             for j in range(200):
                 (artifact / str(j)).write_bytes(b"x")
         config = owned / "config" / f"{engine}-{scenario}"
