@@ -9,7 +9,6 @@ import {
   buildArtifactRowContent,
   buildGroupHeaderContent,
   buildListColumnHeader,
-  buildListRule,
   type RowMetrics,
   type RowWidths,
 } from "./presentation.js";
@@ -197,7 +196,6 @@ export function ArtifactList({
     <box width="100%" flexGrow={1} minHeight={0} flexDirection="column" onMouseScroll={handleWheel}>
       <box width="100%" flexShrink={0} flexDirection="column">
         <text content={buildListColumnHeader(widths, tokens)} wrapMode="none" />
-        <text content={buildListRule(widths, tokens)} wrapMode="none" />
         {reserveStickyRow ? (
           <box width="100%" height={1} flexShrink={0} overflow="hidden">
             {stickyHeader ? (

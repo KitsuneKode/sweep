@@ -32,6 +32,7 @@ import { ReviewPane } from "./ReviewPane.js";
 import { candidateIndex } from "./candidate-index.js";
 import { ApplyOverlay } from "./ApplyOverlay.js";
 import { ActionButton } from "./ActionButton.js";
+import { LedgerBand, type LedgerReceipt } from "./LedgerBand.js";
 import { captureReviewedApply } from "./reviewed-apply.js";
 import type { ViewPreferences } from "./view-preferences.js";
 import { MotionContext, motionEnabledFromEnvironment } from "./motion.js";
@@ -433,22 +434,7 @@ function ConfirmOverlay({
       footer={
         <>
           {feedback ? <text fg={tokens.info} content={feedback} /> : null}
-          {dryRun ? null : (
-            <ActionButton
-              tokens={tokens}
-              label={trash ? "t Delete permanently instead" : "t Move to trash instead"}
-              onPress={onToggleTrash}
-            />
-          )}
-          {onOverrideSizeLimit ? (
-            <ActionButton
-              tokens={tokens}
-              label={sizeLimitOverridden ? "f Restore size ceiling" : "f Override size ceiling"}
-              onPress={onOverrideSizeLimit}
-              disabled={!canConfirm}
-            />
-          ) : null}
-          <box flexDirection="row" flexWrap="wrap">
+          <box flexDirection="row" flexWrap="wrap" gap={1}>
             <ActionButton
               tokens={tokens}
               label={dryRun ? "y Preview" : trash ? "y Move to trash" : "y Delete"}
@@ -457,6 +443,21 @@ function ConfirmOverlay({
               onPress={onConfirm}
             />
             <ActionButton tokens={tokens} label="n / Esc Cancel" onPress={onCancel} />
+            {dryRun ? null : (
+              <ActionButton
+                tokens={tokens}
+                label={trash ? "t Delete permanently instead" : "t Move to trash instead"}
+                onPress={onToggleTrash}
+              />
+            )}
+            {onOverrideSizeLimit ? (
+              <ActionButton
+                tokens={tokens}
+                label={sizeLimitOverridden ? "f Restore size ceiling" : "f Override size ceiling"}
+                onPress={onOverrideSizeLimit}
+                disabled={!canConfirm}
+              />
+            ) : null}
           </box>
         </>
       }
@@ -622,7 +623,7 @@ function InspectOverlay({
       width={64}
       height={22}
       footer={
-        <box flexDirection="row" flexWrap="wrap">
+        <box flexDirection="row" flexWrap="wrap" gap={1}>
           <ActionButton
             tokens={tokens}
             label="x Review removal"
@@ -760,6 +761,8 @@ export function SweepApp({
   // An in-session apply is running: keys trap (except ctrl-c = stop), and the
   // report merges back into the list instead of ending the session.
   const [applying, setApplyingState] = useState<string | null>(null);
+  // What the last apply gave back; the ledger shows it until the next queue.
+  const [receipt, setReceipt] = useState<LedgerReceipt | null>(null);
   const applyAbortRef = useRef<AbortController | null>(null);
   const closeAfterApplyRef = useRef(false);
   const [applyProgress, setApplyProgress] = useState<ApplyProgress | null>(null);
@@ -1084,7 +1087,8 @@ export function SweepApp({
   const tokens = useMemo(() => resolveTheme(state.themeMode), [state.themeMode]);
   const summary = useMemo(() => getUiSummary(state), [state]);
   const dimensions = useTerminalDimensions();
-  const sidebarWidth = dimensions.width >= 110 ? 38 : dimensions.width >= 90 ? 32 : 26;
+  const sidebarWidth =
+    dimensions.width >= 140 ? 48 : dimensions.width >= 110 ? 38 : dimensions.width >= 90 ? 32 : 26;
   const showSidebar = dimensions.width >= 72;
 
   const mutate = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
@@ -1245,6 +1249,14 @@ export function SweepApp({
           const merged = mergeApplyReport(stateRef.current, result.report);
           dispatch({ type: "replace", state: merged.state });
           const stopped = result.interrupted || merged.interrupted || merged.unattempted > 0;
+          setReceipt({
+            removed: merged.removedIds.length,
+            failed: merged.failed,
+            unattempted: merged.unattempted,
+            freedBytes: merged.freedBytes,
+            trash: Boolean(result.trashDir),
+            stopped,
+          });
           const verb = result.trashDir ? "moved to trash" : "deleted";
           const reviewedPath =
             scopedPlan.selectedCandidateIds.length === 1 ? ` · path: ${name}` : "";
@@ -1942,6 +1954,19 @@ export function SweepApp({
       : activeEngine,
   );
 
+  const headerStatsLean = buildHeaderStats(
+    plan,
+    summary,
+    tokens,
+    dryRun,
+    dimensions.width,
+    trashMode,
+    scanDurations[activeEngine] !== undefined
+      ? `${activeEngine}·${formatScanMs(scanDurations[activeEngine]!)}`
+      : activeEngine,
+    true,
+  );
+
   const riskFilterLabel = state.riskFilter === "all" ? undefined : `${state.riskFilter} only`;
   // The sidebar is the scope filter's control surface, and it hides under 72
   // cols - without a chip the list is silently filtered with no way to see why
@@ -2022,41 +2047,39 @@ export function SweepApp({
         paddingBottom={0}
         backgroundColor={tokens.bg}
       >
-        {/* Header band */}
-        <box
-          width="100%"
-          flexShrink={0}
-          height={1}
-          flexDirection="row"
-          justifyContent="space-between"
-        >
-          <text content={buildBrandLine(tokens, dimensions.width)} wrapMode="none" />
-          <text content={headerStats} wrapMode="none" />
-        </box>
-
+        {/* The ledger: how much can come back, and how much is chosen. */}
         {dimensions.height >= 12 ? (
-          <box height={1} flexShrink={0} flexDirection="row" gap={1}>
-            <ActionButton tokens={tokens} label="Ctrl+K Actions" onPress={() => setMenu(true)} />
-            {dimensions.width >= 54 ? (
-              <>
-                {dimensions.width >= 64 ? (
-                  <ActionButton
-                    tokens={tokens}
-                    label="Queue safe items"
-                    onPress={() => mutate(selectSafeOnly)}
-                  />
-                ) : null}
-                <ActionButton
-                  tokens={tokens}
-                  label={`Review queue (${summary.selectedCount})`}
-                  onPress={requestApply}
-                  primary
-                  disabled={state.scanning || state.scanIncomplete || summary.selectedCount === 0}
-                />
-              </>
-            ) : null}
+          <LedgerBand
+            tokens={tokens}
+            width={dimensions.width}
+            targetDir={state.targetDir}
+            candidates={state.candidates}
+            visible={visibleItems}
+            selectedIds={state.selectedIds}
+            summary={summary}
+            riskFilter={state.riskFilter}
+            scanning={state.scanning}
+            incomplete={state.scanIncomplete}
+            sizedCount={state.scanSizedCount}
+            receipt={receipt}
+            stats={headerStatsLean}
+            onMenu={() => setMenu(true)}
+            onQueueSafe={() => mutate(selectSafeOnly)}
+            onReview={requestApply}
+            onRiskFilter={(tier) => mutate((s) => setRiskFilter(s, tier))}
+          />
+        ) : (
+          <box
+            width="100%"
+            flexShrink={0}
+            height={1}
+            flexDirection="row"
+            justifyContent="space-between"
+          >
+            <text content={buildBrandLine(tokens, dimensions.width)} wrapMode="none" />
+            <text content={headerStats} wrapMode="none" />
           </box>
-        ) : null}
+        )}
 
         <box width="100%" flexGrow={1} minHeight={0} flexShrink={1}>
           <ReviewPane
@@ -2272,7 +2295,7 @@ export function SweepApp({
             footer={
               <>
                 <text content="↑↓ choose · Enter open · Esc close" fg={tokens.textMuted} />
-                <box flexDirection="row" flexWrap="wrap">
+                <box flexDirection="row" flexWrap="wrap" gap={1}>
                   <ActionButton
                     tokens={tokens}
                     label="Previous"

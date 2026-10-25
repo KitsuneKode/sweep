@@ -100,13 +100,25 @@ to a queue dialog. Quitting after an apply reports the session outcomes, includi
 failures/interruption or an unknown report, rather than calling completed work an
 abort. Changing trash mode is an explicit choice in either direction.
 
+## 5a. The ledger leads
+
+The top of the screen answers the question sweep is opened with: how much can
+come back, and how much is chosen. It shows the reclaimable total (blocked
+items never count), its split by tier, the queue's item count and bytes, and a
+rule that fills with the queue's share of bytes. While a scan runs it reports
+sizing progress instead; an incomplete review asks for a rescan and claims no
+total. After an apply it holds the receipt until something is queued again.
+Sizes carry the list's hierarchy: gigabytes are bright and bold, hundreds of
+megabytes secondary, smaller sizes recede.
+
 ## 6. Mouse is a peer, not a fallback
 
 Names focus or browse; queue checkboxes toggle separately. Folder arrows expand
 without changing the view or selection. Right/middle clicks and drags cannot
 activate queue controls. Buttons require a left press and release over the same
 control. Headers collapse on left click. The scrollbar is a real track: click or drag it to seek the list.
-Keyboard remains sufficient for every action.
+The ledger's tier entries filter the list by risk and toggle back to all, the
+same filter `Esc` unwinds. Keyboard remains sufficient for every action.
 
 Actions/settings pages have mouse Previous/Next controls and visible keyboard
 navigation. Appearance preferences contain only theme, sort and motion. They

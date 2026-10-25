@@ -103,6 +103,14 @@ describe.each([
     }
   });
 
+  test("button labels and their shortcut hints read on the control fill", () => {
+    for (const fill of [theme.controlBg, theme.border]) {
+      for (const color of [theme.text, theme.textMuted, theme.danger]) {
+        expect(contrast(color, fill)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   test("mode chip label is readable on the accent block", () => {
     expect(contrast(theme.accentContrast, theme.accent)).toBeGreaterThanOrEqual(4.5);
   });

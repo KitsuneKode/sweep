@@ -132,10 +132,11 @@ describe("column widths on large trees", () => {
 
 describe("sidebarHint", () => {
   test("keeps the full hint when it fits and drops words instead of clipping", () => {
-    expect(sidebarHint(false, 40)).toBe("Names browse · [ ] queues");
-    expect(sidebarHint(false, 22)).toBe("[ ] queues");
+    expect(sidebarHint(false, 40)).toBe("Names browse · ○ queues");
+    expect(sidebarHint(false, 22)).toBe("○ queues");
     expect(sidebarHint(true, 40)).toBe("Enter browse · space queue");
     expect(sidebarHint(true, 20)).toBe("space queue");
-    expect(sidebarHint(false, 2)).toBe("");
+    expect(sidebarHint(false, 2)).toBe("○");
+    expect(sidebarHint(false, 0)).toBe("");
   });
 });

@@ -124,10 +124,11 @@ for (const width of [24, 50]) {
       });
     const click = async (label: string) => {
       const lines = setup.captureCharFrame().split("\n");
-      const y = lines.findIndex((line) => line.includes(`[${label}]`));
+      // Buttons are filled pills: the label sits between one cell of padding.
+      const y = lines.findIndex((line) => line.includes(` ${label} `));
       expect(y).toBeGreaterThanOrEqual(0);
       await act(async () => {
-        await setup.mockMouse.click(lines[y]!.indexOf(`[${label}]`) + 1, y);
+        await setup.mockMouse.click(lines[y]!.indexOf(` ${label} `) + 1, y);
         await setup.flush();
       });
       await paint();

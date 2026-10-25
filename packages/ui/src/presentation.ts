@@ -30,11 +30,32 @@ export const riskGlyph: Record<RiskTier, string> = {
   blocked: "⊘",
 };
 
-/** Explicit checkboxes distinguish queue membership from risk and cursor. */
-export const SELECTED_MARK = "[x]";
-export const UNSELECTED_MARK = "[ ]";
-/** Hard-locked rows - neither queued nor queueable. */
-const BLOCKED_MARK = "[⊘]";
+/**
+ * Queue membership has its own shape, distinct from risk and cursor: an open
+ * ring waits, a filled one is queued. The three-cell slot is the click target.
+ */
+export const SELECTED_MARK = " ● ";
+export const UNSELECTED_MARK = " ○ ";
+/** Hard-locked rows offer no checkbox at all - neither queued nor queueable. */
+const BLOCKED_MARK = " · ";
+
+const GIB = 1024 ** 3;
+const MIB = 1024 ** 2;
+
+/**
+ * Sizes read by magnitude, because size is what a cleaner is shopping for:
+ * gigabytes lead, hundreds of megabytes support, everything smaller recedes.
+ */
+export function bytesTone(bytes: number, tokens: ThemeTokens): { color: string; strong: boolean } {
+  if (bytes >= GIB) return { color: tokens.text, strong: true };
+  if (bytes >= 100 * MIB) return { color: tokens.textSecondary, strong: false };
+  return { color: tokens.textDim, strong: false };
+}
+
+function toned(text: string, bytes: number, tokens: ThemeTokens): TextChunk {
+  const tone = bytesTone(bytes, tokens);
+  return tone.strong ? bold(fg(tone.color)(text)) : fg(tone.color)(text);
+}
 
 /** Cursor, queue and risk each have a separate cell, followed by a gap. */
 export const ROW_NAME_OFFSET = 8;
@@ -117,8 +138,9 @@ export function buildGroupHeaderContent(
   tokens: ThemeTokens,
   widths: RowWidths,
 ): StyledText {
-  const glyph = row.collapsed ? fg(tokens.textDim)("▸") : fg(tokens.accent)("▾");
-  const stats = `${row.itemCount} · ${compactBytesLabel(row.bytes)}`;
+  const glyph = fg(tokens.textDim)(row.collapsed ? "▸" : "▾");
+  const count = `${row.itemCount} · `;
+  const bytes = compactBytesLabel(row.bytes);
   // A partly queued group must not read like a fully queued one.
   const fullyQueued = row.selectedCount === row.itemCount;
   const queued =
@@ -128,18 +150,29 @@ export function buildGroupHeaderContent(
         ? ` · ${row.selectedCount} queued`
         : ` · ${row.selectedCount} of ${row.itemCount} queued`;
   const total = rowTotalWidth(widths);
-  const status = `${stats}${queued}`;
-  const shownStats = clipCells(
-    cellWidth(status) <= total - 7 ? status : stats,
-    Math.max(0, total - 7),
-  );
-  const labelWidth = Math.max(0, total - 2 - cellWidth(shownStats) - 1);
+  const full = `${count}${bytes}${queued}`;
+  const fits = cellWidth(full) <= total - 7;
+  const shownCount = fits || cellWidth(`${count}${bytes}`) <= total - 7 ? count : "";
+  const shownQueued = fits ? queued : "";
+  const statsWidth = cellWidth(`${shownCount}${bytes}${shownQueued}`);
+  const labelWidth = Math.max(0, total - 2 - statsWidth - 1);
   const label = truncateScopeLabel(row.label, labelWidth);
-  const statsStyled =
-    row.selectedCount === 0
-      ? fg(tokens.textDim)(shownStats)
-      : fg(fullyQueued ? tokens.positive : tokens.textSecondary)(shownStats);
-  return t`${glyph} ${bold(fg(tokens.textMuted)(label))} ${statsStyled}`;
+  // The project folder names the group; the path that leads to it recedes.
+  const trimmed = label.trimEnd();
+  const cut = trimmed.replace(/\/$/, "").lastIndexOf("/") + 1;
+  const lead = trimmed.slice(0, cut);
+  const leaf = trimmed.slice(cut);
+  const pad = " ".repeat(Math.max(0, cellWidth(label) - cellWidth(trimmed)));
+  const queuedColor = fullyQueued ? tokens.positive : tokens.textSecondary;
+  return new StyledText([
+    glyph,
+    fg(tokens.textDim)(" "),
+    fg(tokens.textMuted)(lead),
+    bold(fg(tokens.text)(leaf)),
+    fg(tokens.textDim)(`${pad} ${shownCount}`),
+    toned(bytes, row.bytes, tokens),
+    ...(shownQueued ? [fg(queuedColor)(shownQueued)] : []),
+  ]);
 }
 
 export function buildArtifactRowContent(
@@ -167,9 +200,14 @@ export function buildArtifactRowContent(
           : tokens.textDim
         : colors[candidate.riskTier];
   const mark = fg(markColor)(markShape);
-  const risk = fg(isCurrent ? tokens.selectionText : colors[candidate.riskTier])(
-    riskGlyph[candidate.riskTier],
-  );
+  // Safe is the common case; its mark recedes so caution and danger stand out.
+  const risk = fg(
+    isCurrent
+      ? tokens.selectionText
+      : candidate.riskTier === "safe"
+        ? tokens.textDim
+        : colors[candidate.riskTier],
+  )(riskGlyph[candidate.riskTier]);
   // The parent path earns its column only when it says something the group
   // header above the row does not already say.
   const parent = root ? artifactParentLabel(root, candidate.path) : "";
@@ -199,11 +237,8 @@ export function buildArtifactRowContent(
     widths.sizeWidth,
     candidate.bytesKnown === false,
   );
-  const sizeColor = isCurrent
-    ? tokens.selectionText
-    : selected
-      ? tokens.positive
-      : tokens.textSecondary;
+  const sizeTone = bytesTone(candidate.estimatedBytes, tokens);
+  const sizeColor = isCurrent ? tokens.selectionText : selected ? tokens.accent : sizeTone.color;
   const nameStyled =
     parentText.length > 0
       ? t`${fg(nameColor)(nameText)}${fg(parentColor)(parentText)}`
@@ -221,11 +256,20 @@ export function buildArtifactRowContent(
     );
   }
   if (widths.barWidth > 0) {
-    const barColor = isCurrent ? tokens.selectionText : selected ? tokens.accent : tokens.textDim;
+    const barColor = isCurrent
+      ? tokens.selectionText
+      : selected
+        ? tokens.accent
+        : sizeTone.strong
+          ? tokens.textMuted
+          : tokens.border;
     const bar = sizeBar(candidate.estimatedBytes, metrics?.maxBytes ?? 0, widths.barWidth);
     parts.push(t`${" ".repeat(COLUMN_GAP)}${fg(barColor)(bar)}`);
   }
-  if (widths.sizeWidth > 0) parts.push(t`${" ".repeat(SIZE_GAP)}${fg(sizeColor)(size)}`);
+  if (widths.sizeWidth > 0) {
+    const sizeChunk = sizeTone.strong ? bold(fg(sizeColor)(size)) : fg(sizeColor)(size);
+    parts.push(t`${" ".repeat(SIZE_GAP)}${sizeChunk}`);
+  }
   return joinStyled(parts);
 }
 
@@ -363,6 +407,8 @@ export function buildHeaderStats(
   trash?: boolean,
   /** e.g. `rust 263ms vs js 241ms` - plain engine name before any run times. */
   engine?: string,
+  /** The ledger band already states the queue; the header line drops it. */
+  omitQueue = false,
 ): StyledText {
   const w = width ?? Number.POSITIVE_INFINITY;
   const parts: StyledText[] = [];
@@ -370,6 +416,9 @@ export function buildHeaderStats(
   if (w < 50) {
     // Fit complete facts; never cut a byte value/unit at the terminal edge.
     const modes = [dryRun ? "DRY RUN" : "", trash ? "TRASH" : ""].filter(Boolean).join(" · ");
+    if (omitQueue) {
+      return t`${fg(modes ? tokens.info : tokens.textMuted)(modes || `${summary.visibleCount} found`)}`;
+    }
     const queue = `${summary.selectedCount} queued`;
     const bytes = `${summary.selectedBytesPartial ? "~" : ""}${compactBytesLabel(summary.selectedBytes)}`;
     const budget = Math.max(0, w - 5); // outer padding, compact brand and separation
@@ -390,7 +439,7 @@ export function buildHeaderStats(
     parts.push(t`${fg(tokens.textMuted)(`${padCount(summary.visibleCount)} found`)}`);
   }
 
-  if (summary.selectedCount > 0) {
+  if (summary.selectedCount > 0 && !omitQueue) {
     // The queue outliving the current view is the point - you narrow, queue,
     // narrow again, then apply. Say when part of it is off screen, so a header
     // reading higher than the visible rows is explained rather than alarming.
@@ -642,6 +691,10 @@ export interface SidebarLineOptions {
   bytesWidth: number;
   maxLabelWidth?: number;
   showBytes?: boolean;
+  /** Cells for a share-of-space bar before the bytes; 0 hides it. */
+  barWidth?: number;
+  /** Largest sibling-or-root byte count the bar scales against. */
+  maxBytes?: number;
   tokens: ThemeTokens;
 }
 
@@ -660,6 +713,8 @@ export function buildSidebarLine(options: SidebarLineOptions): StyledText {
     bytesWidth,
     maxLabelWidth = 14,
     showBytes = true,
+    barWidth = 0,
+    maxBytes = 0,
     tokens,
   } = options;
 
@@ -688,14 +743,19 @@ export function buildSidebarLine(options: SidebarLineOptions): StyledText {
     ? bold(fg(labelColor)(labelText))
     : fg(tokens.textSecondary)(labelText);
 
-  const countStyled = fg(tokens.textMuted)(
+  const countStyled = fg(tokens.textDim)(
     sidebarItemCount(count, selectedCount).padStart(countWidth),
   );
-  const bytesColor = onPath ? tokens.textSecondary : tokens.textDim;
+  const bytesText = toned(compactBytesLabel(bytes).padStart(bytesWidth), bytes, tokens);
+  // ncdu-style share of space: the eye finds the heavy folders before it reads.
+  const bar =
+    showBytes && barWidth > 0
+      ? fg(bytesTone(bytes, tokens).strong ? tokens.accent : tokens.border)(
+          sizeBar(bytes, maxBytes, barWidth),
+        )
+      : "";
 
-  const base = showBytes
-    ? t`${guideStyled}${marker} ${styledLabel}  ${countStyled}  ${fg(bytesColor)(compactBytesLabel(bytes).padStart(bytesWidth))}`
-    : t`${guideStyled}${marker} ${styledLabel}  ${countStyled}`;
-
-  return base;
+  const countPart = countWidth > 0 ? t`  ${countStyled}` : t``;
+  const head = concatStyled(t`${guideStyled}${marker} ${styledLabel}`, countPart);
+  return showBytes ? concatStyled(head, t`  ${bar}${bar ? " " : ""}${bytesText}`) : head;
 }
