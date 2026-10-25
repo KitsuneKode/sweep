@@ -148,48 +148,54 @@ export function ReviewPane({
       >
         {patternsPane ? null : (
           <box width="100%" flexShrink={0} flexDirection="column">
-            <box height={1} width="100%" flexDirection="row" flexShrink={0} gap={1}>
+            <box height={1} width="100%" flexDirection="row" flexShrink={0} gap={2}>
               {state.scopeFilter !== null ? (
                 <ActionButton
                   tokens={tokens}
-                  label="All folders"
+                  label="← All folders"
                   onPress={() => onMutate((s) => setScopeFilter(s, null))}
                 />
               ) : null}
               <text
-                flexGrow={1}
+                flexShrink={1}
                 minWidth={1}
-                content={`Viewing: ${state.scopeFilter === null ? "all folders" : state.scopeFilter === "" ? "target root" : sanitizeTerminalText(state.scopeFilter)}`}
-                fg={tokens.text}
+                content={t`${fg(tokens.textDim)(artifactPaneInnerWidth >= 64 ? "Viewing: " : "")}${bold(
+                  fg(tokens.text)(
+                    state.scopeFilter === null
+                      ? "all folders"
+                      : state.scopeFilter === ""
+                        ? "target root"
+                        : sanitizeTerminalText(state.scopeFilter),
+                  ),
+                )}`}
                 wrapMode="none"
               />
+              <box flexGrow={1} flexShrink={1} minWidth={8} height={1}>
+                <input
+                  focused={searchFocused}
+                  value={state.filter}
+                  maxLength={512}
+                  placeholder={searchFocused ? `Filter… ${FILTER_HINT}` : "/ filter items"}
+                  backgroundColor={tokens.surfaceInset}
+                  focusedBackgroundColor={tokens.surfaceInset}
+                  textColor={tokens.text}
+                  cursorColor={tokens.accent}
+                  onInput={(value: string) => onMutate((s) => setFilter(s, value))}
+                  onSubmit={() => onFocusPanel("list")}
+                />
+              </box>
               {artifactPaneInnerWidth >= 48 ? (
                 <text
-                  content={
+                  content={t`${fg(tokens.textMuted)(
                     state.sortBy === "size"
                       ? "Largest first"
                       : state.sortBy === "name"
                         ? "Name order"
-                        : "Oldest first"
-                  }
-                  fg={tokens.textMuted}
+                        : "Oldest first",
+                  )} ${fg(tokens.textDim)("o")}`}
                   wrapMode="none"
                 />
               ) : null}
-            </box>
-            <box width="100%" height={1} flexShrink={0}>
-              <input
-                focused={searchFocused}
-                value={state.filter}
-                maxLength={512}
-                placeholder={searchFocused ? `Filter… ${FILTER_HINT}` : "Filter items… /"}
-                backgroundColor={tokens.surfaceInset}
-                focusedBackgroundColor={tokens.surfaceInset}
-                textColor={tokens.text}
-                cursorColor={tokens.accent}
-                onInput={(value: string) => onMutate((s) => setFilter(s, value))}
-                onSubmit={() => onFocusPanel("list")}
-              />
             </box>
             {advice ? (
               <text content={sanitizeTerminalText(advice)} fg={tokens.warning} wrapMode="none" />

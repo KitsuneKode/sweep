@@ -47,29 +47,43 @@ export function sidebarBytesWidth(rows: readonly ScopeSidebarRow[]): number {
   return rows.reduce((widest, row) => Math.max(widest, compactBytesLabel(row.bytes).length), 6);
 }
 
-/** Drop the bytes column before the label when the pane is too narrow. */
+/**
+ * Fit a scope row to the pane. Size is the column that matters, so the item
+ * count goes first, then the bytes, and only then does the label shrink.
+ */
 export function sidebarColumnLayout(
   paneWidth: number,
   countWidth: number,
   bytesWidth: number,
   depth = 0,
-): { maxLabelWidth: number; showBytes: boolean; countWidth: number; bytesWidth: number } {
+): {
+  maxLabelWidth: number;
+  showBytes: boolean;
+  countWidth: number;
+  bytesWidth: number;
+  barWidth: number;
+} {
   const indent = Math.max(0, depth) * 2;
+  // Disclosure marker, its space and two cells of wrap safety.
+  const base = paneWidth - indent - 4;
+  const minLabel = 10;
+  let showCount = true;
   let showBytes = paneWidth >= 22;
-  let fittedBytesWidth = showBytes ? bytesWidth : 0;
-  let gaps = showBytes ? 8 : 6;
-  let maxLabelWidth = paneWidth - countWidth - fittedBytesWidth - gaps - indent;
-  if (maxLabelWidth < 8 && showBytes) {
+  const label = () => base - (showCount ? countWidth + 2 : 0) - (showBytes ? bytesWidth + 2 : 0);
+  if (label() < minLabel) showCount = false;
+  if (label() < 8 && showBytes) {
     showBytes = false;
-    fittedBytesWidth = 0;
-    gaps = 6;
-    maxLabelWidth = paneWidth - countWidth - gaps - indent;
+    showCount = true;
+    if (label() < minLabel) showCount = false;
   }
+  // The share bar is a luxury: it only takes cells a full label does not need.
+  const barWidth = showBytes && label() >= 22 ? 4 : 0;
   return {
-    maxLabelWidth: Math.max(1, maxLabelWidth),
+    maxLabelWidth: Math.max(1, label() - (barWidth > 0 ? barWidth + 1 : 0)),
     showBytes,
-    countWidth,
-    bytesWidth: fittedBytesWidth,
+    countWidth: showCount ? countWidth : 0,
+    bytesWidth: showBytes ? bytesWidth : 0,
+    barWidth,
   };
 }
 
@@ -89,12 +103,12 @@ export function compactBytesLabel(bytes: number): string {
 }
 
 /**
- * The longest footer hint that fits whole. A hint cut mid-word ("[ ] que")
+ * The longest footer hint that fits whole. A hint cut mid-word ("○ que")
  * reads worse than a shorter complete one, so wording drops before clipping.
  */
 export function sidebarHint(focused: boolean, width: number): string {
   const options = focused
     ? ["Enter browse · space queue", "space queue", "space"]
-    : ["Names browse · [ ] queues", "[ ] queues", "[ ]"];
+    : ["Names browse · ○ queues", "○ queues", "○"];
   return options.find((hint) => cellWidth(hint) <= width) ?? "";
 }

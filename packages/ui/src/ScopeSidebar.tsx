@@ -1,11 +1,9 @@
 import type { BoxRenderable, MouseEvent } from "@opentui/core";
-import { bold, fg, t } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SelectableRow, useHoverState } from "./SelectableRow.js";
-import { buildMeter, buildSidebarLine, concatStyled, type ScopeRowState } from "./presentation.js";
+import { buildSidebarLine, type ScopeRowState } from "./presentation.js";
 import { isScopeAncestor } from "./scope-tree.js";
-import { formatBytes } from "@kitsunekode/sweep-display";
 import {
   buildScopeSidebarRows,
   scopeFilterToSidebarIndex,
@@ -67,13 +65,16 @@ export function ScopeSidebar({
   const guides = useMemo(() => buildTreeGuides(rows), [rows]);
   const countWidth = useMemo(() => sidebarCountWidth(rows), [rows]);
   const bytesWidth = useMemo(() => sidebarBytesWidth(rows), [rows]);
-  const totalBytes = rows[0]?.bytes ?? 0;
-  const selectedBytes = rows[0]?.selectedBytes ?? 0;
+  // Folder bars scale against the heaviest folder, not the grand total, so
+  // the top entry fills its bar and the rest read as shares of it.
+  const maxFolderBytes = useMemo(
+    () => rows.reduce((max, row) => (row.key === null ? max : Math.max(max, row.bytes)), 0),
+    [rows],
+  );
   const cursorIndex = focused
     ? state.sidebarIndex
     : scopeFilterToSidebarIndex(state.scopeFilter, rows);
 
-  const meterWidth = Math.max(10, paneWidth - 4);
   const { height: screenHeight } = useTerminalDimensions();
   const [viewportHeight, setViewportHeight] = useState(() => Math.max(1, screenHeight - 10));
   const scrollTopRef = useRef(0);
@@ -130,18 +131,6 @@ export function ScopeSidebar({
       flexDirection="column"
       onSizeChange={handleSizeChange}
     >
-      <ReclaimPanel
-        tokens={tokens}
-        selectedBytes={selectedBytes}
-        totalBytes={totalBytes}
-        width={meterWidth}
-        scanning={state.scanning}
-        incomplete={state.scanIncomplete}
-        foundCount={state.candidates.length}
-        sizedCount={state.scanSizedCount}
-        selectedCount={rows[0]?.selectedCount ?? 0}
-        partial={state.candidates.some((candidate) => candidate.bytesKnown === false)}
-      />
       <box
         flexGrow={1}
         flexBasis={0}
@@ -170,8 +159,9 @@ export function ScopeSidebar({
                 isCursor={index === cursorIndex && focused}
                 hovered={isHovered(row.key ?? "__all__")}
                 expanded={row.key !== null && state.expandedScopes.has(row.key)}
+                maxBytes={row.key === null ? 0 : maxFolderBytes}
                 layout={sidebarColumnLayout(
-                  paneWidth - 4 - (scrollbar ? 1 : 0),
+                  paneWidth - 3 - (scrollbar ? 1 : 0),
                   countWidth,
                   bytesWidth,
                   row.depth,
@@ -227,6 +217,7 @@ interface ScopeRowProps {
   hovered: boolean;
   expanded: boolean;
   layout: ReturnType<typeof sidebarColumnLayout>;
+  maxBytes: number;
   tokens: ThemeTokens;
   onSelect: () => void;
   onHoverChange: (hovered: boolean) => void;
@@ -242,6 +233,7 @@ const ScopeRow = memo(function ScopeRow({
   hovered,
   expanded,
   layout,
+  maxBytes,
   tokens,
   onSelect,
   onHoverChange,
@@ -259,7 +251,7 @@ const ScopeRow = memo(function ScopeRow({
       tokens={tokens}
       elementRef={rowRef}
       onSelect={(event) => {
-        const arrowX = (rowRef.current?.x ?? 0) + 4 + cellWidth(guide);
+        const arrowX = (rowRef.current?.x ?? 0) + 3 + cellWidth(guide);
         if (event && row.hasChildren && event.x === arrowX && onToggleExpand) onToggleExpand();
         else onSelect();
       }}
@@ -267,13 +259,14 @@ const ScopeRow = memo(function ScopeRow({
     >
       <box width="100%" height={1} flexGrow={0} flexShrink={0} flexDirection="row">
         <ActionButton
-          label={row.selectedCount === 0 ? "[ ]" : row.selectedCount === row.count ? "[x]" : "[-]"}
+          label={row.selectedCount === 0 ? "○" : row.selectedCount === row.count ? "●" : "◉"}
+          color={row.selectedCount === 0 ? tokens.textDim : tokens.accent}
           tokens={tokens}
           framed={false}
           disabled={!onToggleQueue || row.count === 0}
           onPress={() => onToggleQueue?.()}
         />
-        <text content={rowState === "active" ? "›" : " "} fg={tokens.accent} />
+        <text content={rowState === "active" ? " ›" : "  "} fg={tokens.accent} />
         <box flexGrow={1} minWidth={0}>
           <text
             wrapMode="none"
@@ -290,6 +283,8 @@ const ScopeRow = memo(function ScopeRow({
               bytesWidth: layout.bytesWidth,
               maxLabelWidth: layout.maxLabelWidth,
               showBytes: layout.showBytes,
+              barWidth: layout.barWidth,
+              maxBytes,
               tokens,
             })}
           />
@@ -298,132 +293,3 @@ const ScopeRow = memo(function ScopeRow({
     </SelectableRow>
   );
 });
-
-function ReclaimPanel({
-  tokens,
-  selectedBytes,
-  totalBytes,
-  width,
-  scanning,
-  incomplete,
-  foundCount,
-  sizedCount,
-  selectedCount,
-  partial,
-}: {
-  tokens: ThemeTokens;
-  selectedBytes: number;
-  totalBytes: number;
-  width: number;
-  scanning: boolean;
-  incomplete: boolean;
-  foundCount: number;
-  sizedCount: number;
-  selectedCount: number;
-  partial: boolean;
-}) {
-  // While a scan runs the meter reports sizing progress, not queue coverage -
-  // default selection keeps coverage pinned near 100%, which reads as "done"
-  // even on a scan that later fails.
-  if (scanning) {
-    const percent = foundCount > 0 ? Math.min(99, Math.round((sizedCount / foundCount) * 100)) : 0;
-    const percentLabel = `${String(percent).padStart(3, " ")}% sized`;
-    const barWidth = Math.max(8, width - percentLabel.length - 1);
-    return (
-      <box
-        width="100%"
-        height={2}
-        flexDirection="column"
-        paddingLeft={1}
-        backgroundColor={tokens.bg}
-        flexShrink={0}
-      >
-        <text
-          content={concatStyled(
-            // Feed the clamped percent, not the raw ratio - a sized==found
-            // frame before onDone would otherwise draw a full bar next to
-            // a "99%" label.
-            buildMeter(percent, 100, barWidth, tokens),
-            t` ${fg(tokens.info)(percentLabel)}`,
-          )}
-          wrapMode="none"
-        />
-        <text
-          content={t`${fg(tokens.info)(`${sizedCount.toLocaleString()} sized`)} ${fg(tokens.textMuted)("of")} ${fg(tokens.textMuted)(`${foundCount.toLocaleString()} found`)}`}
-          wrapMode="none"
-        />
-      </box>
-    );
-  }
-  // A failed or partial scan holds whatever it last measured - showing a full
-  // bar next to the INCOMPLETE chip would be a lie, so the meter steps down
-  // to text until a rescan restores trust.
-  if (incomplete) {
-    return (
-      <box
-        width="100%"
-        height={2}
-        flexDirection="column"
-        paddingLeft={1}
-        backgroundColor={tokens.bg}
-        flexShrink={0}
-      >
-        <text content={t`${fg(tokens.warning)("review incomplete")}`} wrapMode="none" />
-        <text
-          content={t`${fg(tokens.textMuted)("rescan before applying ·")} ${bold(fg(tokens.text)("r"))}`}
-          wrapMode="none"
-        />
-      </box>
-    );
-  }
-
-  const percent =
-    totalBytes > 0 ? Math.min(100, Math.max(0, Math.round((selectedBytes / totalBytes) * 100))) : 0;
-  const scanned = t`${fg(tokens.textDim)(`${partial ? "~" : ""}${formatBytes(totalBytes)} estimated`)}`;
-
-  if (selectedCount === 0) {
-    return (
-      <box
-        width="100%"
-        height={2}
-        flexDirection="column"
-        paddingLeft={1}
-        backgroundColor={tokens.bg}
-        flexShrink={0}
-      >
-        <text content={t`${bold(fg(tokens.textMuted)("nothing queued"))}`} wrapMode="none" />
-        <text content={scanned} wrapMode="none" />
-      </box>
-    );
-  }
-
-  const percentLabel = partial ? "partial bytes" : `${percent}% of bytes`;
-  const barWidth = Math.max(8, width - percentLabel.length - 1);
-
-  return (
-    <box
-      width="100%"
-      height={3}
-      flexDirection="column"
-      paddingLeft={1}
-      backgroundColor={tokens.bg}
-      flexShrink={0}
-    >
-      <text
-        content={concatStyled(
-          buildMeter(selectedBytes, totalBytes, barWidth, tokens),
-          t` ${fg(tokens.positive)(percentLabel)}`,
-        )}
-        wrapMode="none"
-      />
-      <text
-        content={t`${fg(tokens.positive)(`${selectedCount.toLocaleString()} of ${foundCount.toLocaleString()} items queued`)}`}
-        wrapMode="none"
-      />
-      <text
-        content={t`${fg(tokens.textMuted)(`${partial ? "~" : ""}${formatBytes(selectedBytes)} / ${partial ? "~" : ""}${formatBytes(totalBytes)} estimated`)}`}
-        wrapMode="none"
-      />
-    </box>
-  );
-}
