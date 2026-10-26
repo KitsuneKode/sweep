@@ -71,7 +71,9 @@ describe("presentation formatters", () => {
   test("pattern and queued group context never stringify style objects", () => {
     const plan = planFixture();
     const entry = candidate();
-    plan.candidates = [entry];
+    // A second artifact in the same folder, so row 0 is the group header.
+    const sibling = candidate({ id: "cand_2", path: "/tmp/project/.turbo", name: ".turbo" });
+    plan.candidates = [entry, sibling];
     plan.selectedCandidateIds = [entry.id];
     const state = createUiState(plan);
     const pattern = plain(buildContextLine(setFocus(state, "patterns"), darkTheme));

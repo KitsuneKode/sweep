@@ -117,6 +117,21 @@ the same size format, and a single-artifact group drops its `1 ·` count; the
 header itself stays, because an orphan row reads as part of the group above it.
 Live status lines drop whole parts by priority instead of drawing one over another.
 
+## 5b. Filtering has two doors, one filter
+
+`/` types a query; `f` (or the toolbar's Filter button) opens a picker of
+facets - risk, kind, size, last touched, queue - each showing what it alone
+matches. The picker toggles terms in the same filter string the `/` box edits
+(`kind:target,dist` is OR within a facet, terms AND across facets), so the two
+never disagree, and typed text survives toggling. While filtering, the toolbar
+shows the query, the match count and bytes. The picker is the only overlay that
+changes state, and only the filter.
+
+Colour carries one meaning each: chartreuse is queued or actionable, orange is
+the caution tier, red is dangerous, the info hue marks recently touched ages.
+Queue rings stay neutral; the risk glyph beside them says the tier. A folder's
+only artifact is a single row that names its folder.
+
 ## 6. Mouse is a peer, not a fallback
 
 Names focus or browse; queue checkboxes toggle separately. Folder arrows expand

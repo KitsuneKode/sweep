@@ -35,6 +35,19 @@ function mockPlan(): ScanPlan {
   };
 }
 
+/** Two artifacts in one folder, so the list opens with a group header. */
+function groupedPlan(): ScanPlan {
+  const plan = mockPlan();
+  const first = plan.candidates[0]!;
+  return {
+    ...plan,
+    candidates: [
+      first,
+      { ...first, id: "cand_2", path: "/tmp/sweep-ui/.turbo", name: ".turbo", kind: "turbo" },
+    ],
+  } as ScanPlan;
+}
+
 describe("handleKeymap", () => {
   function makeContext(overrides: Partial<KeymapContext> = {}): KeymapContext {
     return {
@@ -227,7 +240,7 @@ describe("handleKeymap", () => {
     // Mouse clicks park the cursor on headers; the destructive dialog must
     // never be one stray enter away when the cursor has no artifact on it.
     const state: SweepUiState = {
-      ...createUiState(mockPlan()),
+      ...createUiState(groupedPlan()),
       focus: "list",
       collapsedGroups: new Set([""]), // every row under the cursor is a header
       rowIndex: 0,
@@ -313,8 +326,7 @@ describe("handleKeymap", () => {
   });
 
   test("i on a group header notifies instead of opening an empty modal", () => {
-    // Every group emits a header row at index 0 (rows.ts), so rowIndex 0 is
-    // always a header. The overlay doesn't render without a candidate, but
+    // A folder with two artifacts opens with its header at index 0. The overlay doesn't render without a candidate, but
     // inspectOpen would still trap every key - an invisible modal is the
     // worst trap in the app.
     const actions = makeActions();
@@ -323,7 +335,7 @@ describe("handleKeymap", () => {
     handleKeymap(
       makeContext({
         key: { name: "i" },
-        state: { ...createUiState(mockPlan()), rowIndex: 0 },
+        state: { ...createUiState(groupedPlan()), rowIndex: 0 },
       }),
       actions,
     );
@@ -691,7 +703,7 @@ describe("single-row apply (x/d)", () => {
     });
 
     test("enter acts on the post-move row, not the pre-burst cursor", () => {
-      const stale = { ...createUiState(mockPlan()), rowIndex: 0 }; // header row
+      const stale = { ...createUiState(groupedPlan()), rowIndex: 0 }; // header row
       const committed = { ...stale, rowIndex: 1 }; // cursor already moved to item
       const actions = makeActions();
       actions.requestApply = mock(() => {});
@@ -703,7 +715,7 @@ describe("single-row apply (x/d)", () => {
     });
 
     test("enter on a post-move header folds instead of opening a confirm", () => {
-      const stale = { ...createUiState(mockPlan()), rowIndex: 1 }; // item row
+      const stale = { ...createUiState(groupedPlan()), rowIndex: 1 }; // item row
       const committed = { ...stale, rowIndex: 0 }; // moved up onto the header
       const actions = makeActions();
       const mutateMock = mock((fn: (s: SweepUiState) => SweepUiState) => fn);
@@ -717,7 +729,7 @@ describe("single-row apply (x/d)", () => {
     });
 
     test("i refuses to open inspect when the post-move row has no subject", () => {
-      const stale = { ...createUiState(mockPlan()), rowIndex: 1 };
+      const stale = { ...createUiState(groupedPlan()), rowIndex: 1 };
       const committed = { ...stale, rowIndex: 0 };
       const actions = makeActions();
       actions.setInspect = mock(() => {});

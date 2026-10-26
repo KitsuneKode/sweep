@@ -102,6 +102,16 @@ function isPredicate(value: string): Predicate | null {
 
 function keyedPredicate(key: string, value: string): Predicate | null {
   if (value.length === 0) return null;
+  // `kind:target,dist` matches either: OR within a key, AND across terms.
+  if ((key === "kind" || key === "risk" || key === "path") && value.includes(",")) {
+    const options = value
+      .split(",")
+      .filter(Boolean)
+      .map((option) => keyedPredicate(key, option))
+      .filter((predicate): predicate is Predicate => predicate !== null);
+    if (options.length === 0) return null;
+    return (candidate, context) => options.some((predicate) => predicate(candidate, context));
+  }
   switch (key) {
     case "kind":
       return (candidate) => candidate.kind.toLowerCase().includes(value);
@@ -162,7 +172,7 @@ export function filterAdvice(input: string): string | null {
     if ((key === "older" || key === "newer") && !DURATION_TERM.test(value)) {
       return `${key}:${value} needs a duration like 30d, 12h, or 2w`;
     }
-    if (key === "risk" && !RISK_TIERS.has(value)) {
+    if (key === "risk" && value.split(",").some((tier) => tier && !RISK_TIERS.has(tier))) {
       return `risk:${value} isn't a tier — safe, caution, dangerous, blocked`;
     }
     if (!FILTER_KEY_SET.has(key)) {

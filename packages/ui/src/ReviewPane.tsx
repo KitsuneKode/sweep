@@ -19,7 +19,11 @@ import {
   type SweepUiState,
   type UiFocus,
 } from "./state.js";
-import { FILTER_HINT, filterAdvice } from "./filter-query.js";
+import { filterAdvice } from "./filter-query.js";
+import { activeFacetCount } from "./filter-facets.js";
+import { formatBytes } from "@kitsunekode/sweep-display";
+
+const FILTER_PLACEHOLDER = "name, kind:target, >100MB, older:30d, risk:caution";
 import type { ThemeTokens } from "./theme.js";
 import { cellWidth, clipCells } from "./text-cells.js";
 
@@ -44,6 +48,8 @@ export interface ReviewPaneProps {
   onToggleScopeQueue?: (scope: string | null) => void;
   /** Live elapsed for the running scan, ms - ticks at 4Hz from the app. */
   scanElapsedMs?: number;
+  /** Opens the facet filter picker. */
+  onOpenFilter?: () => void;
 }
 
 export function ReviewPane({
@@ -63,6 +69,7 @@ export function ReviewPane({
   onViewportRows,
   scanElapsedMs,
   onToggleScopeQueue,
+  onOpenFilter,
 }: ReviewPaneProps) {
   const dimensions = useTerminalDimensions();
   // Artifact pane inner width: total terminal width minus sidebar (if shown),
@@ -81,6 +88,18 @@ export function ReviewPane({
   const advice = patternsPane ? null : filterAdvice(state.filter);
   const listFocused = state.focus === "list" || patternsPane;
   const emptyScan = state.scanning && state.candidates.length === 0;
+  // While a filter is typed or held, the bar is the query: prompt, field and
+  // what it caught. The scope it applies within moves to the pane title.
+  const filtering = searchFocused || state.filter.length > 0;
+  const facetCount = activeFacetCount(state.filter);
+  const scopeName =
+    state.scopeFilter === null
+      ? "all folders"
+      : state.scopeFilter === ""
+        ? "target root"
+        : sanitizeTerminalText(state.scopeFilter);
+  let visibleBytes = 0;
+  if (filtering) for (const item of visibleItems) visibleBytes += item.estimatedBytes;
 
   // The pane title is the one indicator that survives every terminal width -
   // sidebar and footer chips both hide on narrow layouts. An active scope or
@@ -89,8 +108,8 @@ export function ReviewPane({
   if (state.riskFilter !== "all") titleParts.push(state.riskFilter);
   const paneTitle = patternsPane
     ? " › patterns "
-    : searchFocused
-      ? " › filter "
+    : filtering
+      ? ` ${searchFocused ? "› " : ""}filter · ${scopeName} `
       : ` ${titleParts.join(" · ")} `;
 
   return (
@@ -148,44 +167,84 @@ export function ReviewPane({
       >
         {patternsPane ? null : (
           <box width="100%" flexShrink={0} flexDirection="column">
-            <box height={1} width="100%" flexDirection="row" flexShrink={0} gap={2}>
-              {state.scopeFilter !== null ? (
+            <box height={1} width="100%" flexDirection="row" flexShrink={0} gap={1}>
+              {/* Positions stay fixed (nulls hold their slot) so the input never
+                  remounts and loses focus when the bar switches modes. */}
+              {!filtering && state.scopeFilter !== null ? (
                 <ActionButton
                   tokens={tokens}
                   label="← All folders"
                   onPress={() => onMutate((s) => setScopeFilter(s, null))}
                 />
               ) : null}
-              <text
+              {filtering ? null : (
+                <text
+                  flexShrink={1}
+                  minWidth={1}
+                  content={t`${fg(tokens.textDim)(artifactPaneInnerWidth >= 64 ? "Viewing: " : "")}${bold(
+                    fg(tokens.text)(scopeName),
+                  )}`}
+                  wrapMode="none"
+                />
+              )}
+              {filtering ? (
+                <text
+                  content={t`${bold(fg(searchFocused ? tokens.accent : tokens.textMuted)("/"))}`}
+                  wrapMode="none"
+                  flexShrink={0}
+                />
+              ) : (
+                <box flexGrow={1} flexShrink={1} />
+              )}
+              <box
+                flexGrow={filtering ? 1 : 0}
                 flexShrink={1}
-                minWidth={1}
-                content={t`${fg(tokens.textDim)(artifactPaneInnerWidth >= 64 ? "Viewing: " : "")}${bold(
-                  fg(tokens.text)(
-                    state.scopeFilter === null
-                      ? "all folders"
-                      : state.scopeFilter === ""
-                        ? "target root"
-                        : sanitizeTerminalText(state.scopeFilter),
-                  ),
-                )}`}
-                wrapMode="none"
-              />
-              <box flexGrow={1} flexShrink={1} minWidth={8} height={1}>
+                minWidth={8}
+                width={filtering ? "auto" : 12}
+                height={1}
+              >
                 <input
                   focused={searchFocused}
                   value={state.filter}
                   maxLength={512}
-                  placeholder={searchFocused ? `Filter… ${FILTER_HINT}` : "/ filter items"}
+                  placeholder={searchFocused ? FILTER_PLACEHOLDER : "/ filter"}
                   backgroundColor={tokens.surfaceInset}
                   focusedBackgroundColor={tokens.surfaceInset}
                   textColor={tokens.text}
+                  placeholderColor={tokens.textDim}
                   cursorColor={tokens.accent}
                   onInput={(value: string) => onMutate((s) => setFilter(s, value))}
                   onSubmit={() => onFocusPanel("list")}
                 />
               </box>
-              {artifactPaneInnerWidth >= 48 ? (
+              {onOpenFilter && artifactPaneInnerWidth >= 56 ? (
+                <ActionButton
+                  tokens={tokens}
+                  label={facetCount > 0 ? `Filter ${facetCount}` : "Filter"}
+                  hint={facetCount > 0 ? undefined : "f"}
+                  {...(facetCount > 0 ? { color: tokens.accent } : {})}
+                  onPress={onOpenFilter}
+                />
+              ) : null}
+              {filtering ? (
+                // The answer to "what did my filter catch": count and bytes,
+                // right where the query is typed.
                 <text
+                  flexShrink={0}
+                  content={
+                    visibleItems.length === 0
+                      ? t`${fg(tokens.warning)("no matches")}`
+                      : t`${bold(fg(tokens.text)(visibleItems.length.toLocaleString()))}${fg(
+                          tokens.textMuted,
+                        )(
+                          ` of ${state.candidates.length.toLocaleString()} · ${formatBytes(visibleBytes)}`,
+                        )}`
+                  }
+                  wrapMode="none"
+                />
+              ) : artifactPaneInnerWidth >= 48 ? (
+                <text
+                  flexShrink={0}
                   content={t`${fg(tokens.textMuted)(
                     state.sortBy === "size"
                       ? "Largest first"

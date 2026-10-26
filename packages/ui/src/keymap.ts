@@ -26,7 +26,12 @@ import {
   startVisual,
   type UiFocus,
 } from "./state.js";
-import { buildDisplayRows, firstSelectableRow, lastSelectableRow } from "./rows.js";
+import {
+  buildDisplayRows,
+  firstSelectableRow,
+  lastSelectableRow,
+  owningHeaderIndex,
+} from "./rows.js";
 import { cycleThemeMode } from "./theme.js";
 import type { SweepUiOutcome } from "./outcome.js";
 
@@ -112,14 +117,10 @@ function expandCurrentGroup(state: SweepUiState): SweepUiState {
 /** Collapse the group containing the focused item (nearest header above cursor). */
 function collapseCurrentGroup(state: SweepUiState): SweepUiState {
   const rows = buildDisplayRows(state);
-  for (let i = Math.min(state.rowIndex, rows.length - 1); i >= 0; i--) {
-    const row = rows[i];
-    if (row?.kind === "header") {
-      if (row.collapsed) return state;
-      return toggleGroup(state, row.groupKey);
-    }
-  }
-  return state;
+  const owner = owningHeaderIndex(rows, state.rowIndex);
+  const row = owner >= 0 ? rows[owner] : undefined;
+  if (row?.kind !== "header" || row.collapsed) return state;
+  return toggleGroup(state, row.groupKey);
 }
 
 export interface KeymapActions {
@@ -144,6 +145,8 @@ export interface KeymapActions {
   toggleEngine?: () => void;
   /** Cycle artifact ordering: size, name, age. */
   toggleSort?: () => void;
+  /** Open the facet filter picker (risk, kind, size, age, queue). */
+  openFilterPicker?: () => void;
   /** Dismiss a scan-error modal without retrying. */
   dismissScanError?: () => void;
   /** Open/close the per-candidate inspect overlay. */
@@ -453,7 +456,7 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   // after edits is the pane's point.
   if (
     state.focus === "patterns" &&
-    (key.name === "o" || key.name === "S" || (key.name === "s" && key.shift))
+    (key.name === "o" || key.name === "f" || key.name === "S" || (key.name === "s" && key.shift))
   ) {
     actions.notify?.("finish in patterns first - esc leaves the pane");
     return;
@@ -490,6 +493,11 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
 
   if (key.name === "o") {
     actions.toggleSort?.();
+    return;
+  }
+
+  if (key.name === "f" && !key.ctrl && !key.meta) {
+    actions.openFilterPicker?.();
     return;
   }
 
