@@ -2,7 +2,7 @@ import type { BoxRenderable, MouseEvent } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SelectableRow, useHoverState } from "./SelectableRow.js";
-import { buildSidebarLine, type ScopeRowState } from "./presentation.js";
+import { buildSidebarLine, type ScopeRowState, QUEUE_GLYPH, queueState } from "./presentation.js";
 import { isScopeAncestor } from "./scope-tree.js";
 import {
   buildScopeSidebarRows,
@@ -259,8 +259,14 @@ const ScopeRow = memo(function ScopeRow({
     >
       <box width="100%" height={1} flexGrow={0} flexShrink={0} flexDirection="row">
         <ActionButton
-          label={row.selectedCount === 0 ? "○" : row.selectedCount === row.count ? "●" : "◉"}
-          color={row.selectedCount === 0 ? tokens.textDim : tokens.accent}
+          label={QUEUE_GLYPH[queueState(row.selectedCount, row.count)]}
+          color={
+            {
+              none: tokens.textDim,
+              some: tokens.textSecondary,
+              all: tokens.accent,
+            }[queueState(row.selectedCount, row.count)]
+          }
           tokens={tokens}
           framed={false}
           disabled={!onToggleQueue || row.count === 0}

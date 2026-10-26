@@ -36,6 +36,19 @@ export const riskGlyph: Record<RiskTier, string> = {
  */
 export const SELECTED_MARK = " ● ";
 export const UNSELECTED_MARK = " ○ ";
+/**
+ * A checkbox standing for many rows has three states, and each needs its own
+ * shape: an open ring (none queued), a half disc (some), a full disc (all).
+ * `◉` beside `●` read as the same tick at terminal size, so a folder with one
+ * queued item looked fully queued.
+ */
+export type QueueState = "none" | "some" | "all";
+export function queueState(selected: number, total: number): QueueState {
+  if (selected <= 0 || total <= 0) return "none";
+  return selected >= total ? "all" : "some";
+}
+export const QUEUE_GLYPH: Record<QueueState, string> = { none: "○", some: "◐", all: "●" };
+
 /** Hard-locked rows offer no checkbox at all - neither queued nor queueable. */
 const BLOCKED_MARK = " · ";
 
