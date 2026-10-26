@@ -25,6 +25,7 @@ fn snapshot(count: usize) -> ScanPlan {
             },
             reasons: vec!["default-pattern".to_owned()],
             selected_by_default: true,
+            project_active_ms: None,
         });
     }
     plan

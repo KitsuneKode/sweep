@@ -13,6 +13,8 @@ export interface PrintGroupedScanPlanOptions {
   elapsedMs?: number;
   /** Backend that produced the plan - printed in the header when provided. */
   engine?: string;
+  /** The run's --idle window, for the report's headline. */
+  idleMs?: number;
 }
 
 const WORKSPACE_STUB_REASON = "workspace-stub";

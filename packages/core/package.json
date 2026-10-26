@@ -11,6 +11,7 @@
     "./glob-match": "./src/glob-match.ts",
     "./filesystem-identity": "./src/filesystem-identity.ts",
     "./git-tracked": "./src/git-tracked.ts",
+    "./project-activity": "./src/project-activity.ts",
     "./guardrails": "./src/guardrails.ts",
     "./planner": "./src/planner.ts",
     "./plan": "./src/plan.ts",

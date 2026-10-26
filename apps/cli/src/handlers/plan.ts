@@ -25,6 +25,7 @@ export async function handlePlan(pathArg: string, opts: CliOptions): Promise<voi
     const engine = resolveEngineBackend(opts);
     const { plan } = await runScanToPlan(targetDir, config, {
       selectionPolicy,
+      ...(opts.idle !== undefined ? { idleMs: opts.idle } : {}),
       engine,
       projectConfig,
       resourceProfile: opts.resourceProfile,

@@ -1,3 +1,5 @@
+import { statfsSync } from "node:fs";
+import { basename, dirname } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import pc from "picocolors";
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
@@ -20,6 +22,49 @@ export interface ScanReportOptions {
   columns?: number;
   /** Rows shown per group before the tail folds. */
   rowsPerGroup?: number;
+  /** The run's --idle window, when one was given. */
+  idleMs?: number;
+  /** Free/total bytes of the scanned filesystem; null hides the line. */
+  disk?: { free: number; total: number } | null;
+  /** Clock for idle math (tests). */
+  now?: number;
+}
+
+const DAY = 86_400_000;
+/** Suggest `--idle` at this window: long enough to mean "not in use". */
+const SUGGESTED_IDLE_DAYS = 30;
+
+function readDisk(targetDir: string): { free: number; total: number } | null {
+  try {
+    const stats = statfsSync(targetDir);
+    return { free: stats.bavail * stats.bsize, total: stats.blocks * stats.bsize };
+  } catch {
+    return null;
+  }
+}
+
+/** "5h", "12d", "3mo", "1.5y" since the project was last worked on. */
+export function idleLabel(activeMs: number | undefined, now = Date.now()): string {
+  if (activeMs === undefined) return "";
+  const ms = Math.max(0, now - activeMs);
+  const days = ms / DAY;
+  if (days < 1) return `${Math.max(1, Math.round(ms / 3_600_000))}h`;
+  if (days < 60) return `${Math.round(days)}d`;
+  if (days < 365) return `${Math.round(days / 30)}mo`;
+  return `${(days / 365).toFixed(1).replace(/\.0$/, "")}y`;
+}
+
+/** Outermost owning folders, by name: `sweep`, not its `apps/cli` and `apps/docs`. */
+function projectNames(candidates: readonly ScanCandidate[]): string[] {
+  const parents = [...new Set(candidates.map((c) => dirname(c.path)))].sort(
+    (a, b) => a.length - b.length,
+  );
+  const outer: string[] = [];
+  for (const dir of parents) {
+    if (!outer.some((root) => dir.startsWith(`${root}/`) || dir.startsWith(`${root}\\`)))
+      outer.push(dir);
+  }
+  return outer.map((dir) => basename(dir));
 }
 
 const WORKSPACE_STUB_REASON = "workspace-stub";
@@ -113,6 +158,9 @@ export function formatScanReport(
   const rowsPerGroup = verbose ? Infinity : (options.rowsPerGroup ?? 6);
   const selectedIds = new Set(plan.selectedCandidateIds);
   const approx = !plan.summary.exact;
+  const now = options.now ?? Date.now();
+  const idleDays = (c: ScanCandidate) =>
+    c.projectActiveMs === undefined ? undefined : (now - c.projectActiveMs) / DAY;
   const lines: string[] = [];
 
   const visible = verbose ? plan.candidates : plan.candidates.filter((c) => !isStub(c));
@@ -139,12 +187,56 @@ export function formatScanReport(
   }
 
   // The answer, before the evidence.
+  const idleScope =
+    options.idleMs !== undefined
+      ? ` from projects idle ${idleLabel(now - options.idleMs, now)}+`
+      : "";
   lines.push(
-    ` ${pc.bold(pc.yellow(size(selectedBytes, approx)))} ${pc.bold("to reclaim")}` +
+    ` ${pc.bold(pc.yellow(size(selectedBytes, approx)))} ${pc.bold(`to reclaim${idleScope}`)}` +
       pc.dim(
         `  ·  ${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`,
       ),
   );
+  // Disk context: what the cleanup means for the space actually left.
+  const disk = options.disk === undefined ? readDisk(targetDir) : options.disk;
+  if (disk && disk.total > 0) {
+    const after = Math.min(disk.total, disk.free + selectedBytes);
+    const tight = disk.free / disk.total < 0.1;
+    lines.push(
+      ` ${pc.dim("disk")} ${(tight ? pc.yellow : (text: string) => text)(formatBytes(disk.free))}` +
+        pc.dim(` free of ${formatBytes(disk.total)}`) +
+        (selectedBytes > 0 ? pc.dim("  →  ") + pc.green(`up to ${formatBytes(after)} free`) : ""),
+    );
+  }
+
+  // Advice from project activity: clear what nobody uses, warn about what
+  // someone is using right now (it comes straight back on the next build).
+  const advice: string[] = [];
+  const activeToday = selected.filter((c) => (idleDays(c) ?? Infinity) < 1);
+  if (activeToday.length > 0) {
+    const bytes = activeToday.reduce((sum, c) => sum + c.estimatedBytes, 0);
+    const all = projectNames(activeToday);
+    const names = all.slice(0, 3).map(sanitizeTerminalText);
+    advice.push(
+      `${pc.yellow("!")} ${size(bytes, approx)} ${pc.dim("of that is in projects worked on today")} ` +
+        pc.dim(`(${names.join(", ")}${all.length > names.length ? ", …" : ""}); `) +
+        pc.dim("the next build or install brings it back"),
+    );
+  }
+  if (options.idleMs === undefined) {
+    const idle = selected.filter((c) => (idleDays(c) ?? 0) >= SUGGESTED_IDLE_DAYS);
+    const idleBytes = idle.reduce((sum, c) => sum + c.estimatedBytes, 0);
+    if (idle.length > 0 && idleBytes < selectedBytes) {
+      advice.push(
+        `${pc.cyan("→")} ${size(idleBytes, approx)} ${pc.dim(`is in projects idle ${SUGGESTED_IDLE_DAYS}+ days, safe to clear first:`)} ` +
+          pc.cyan(`sweep --idle ${SUGGESTED_IDLE_DAYS}d`),
+      );
+    }
+  }
+  if (advice.length > 0) {
+    lines.push("");
+    for (const line of advice) lines.push(` ${line}`);
+  }
   lines.push("");
 
   const groups = groupCandidatesByKind(visible).sort((a, b) => b.totalBytes - a.totalBytes);
@@ -157,6 +249,7 @@ export function formatScanReport(
     Math.max(0, ...shownRows.flat().map((c) => stripVTControlCharacters(note(c)).length)),
   );
   const sizeWidth = 11;
+  const idleWidth = 10;
   const longestPath = Math.max(
     0,
     ...shownRows.flat().map((c) => sanitizeTerminalText(displayPath(c.path, targetDir)).length),
@@ -164,7 +257,10 @@ export function formatScanReport(
   // Sizes sit next to their paths, not stranded at the far edge of a wide terminal.
   const pathWidth = Math.max(
     12,
-    Math.min(longestPath + 2, columns - 5 - sizeWidth - (noteWidth > 0 ? noteWidth + 2 : 0)),
+    Math.min(
+      longestPath + 2,
+      columns - 5 - sizeWidth - idleWidth - (noteWidth > 0 ? noteWidth + 2 : 0),
+    ),
   );
   const maxGroupBytes = groups[0]?.totalBytes ?? 0;
   const labelWidth = Math.min(18, Math.max(...groups.map((g) => g.label.length)) + 2);
@@ -187,10 +283,17 @@ export function formatScanReport(
         pathWidth,
       );
       const amount = size(candidate.estimatedBytes, approx || candidate.bytesKnown === false);
+      const days = idleDays(candidate);
+      const idle = idleLabel(candidate.projectActiveMs, now);
+      // Recent work reads warm; long-idle reads quiet - it is the easy call.
+      const idleCell = idle
+        ? `  ${(days !== undefined && days < 7 ? pc.yellow : pc.dim)(`idle ${idle}`.padEnd(idleWidth - 2))}`
+        : " ".repeat(idleWidth);
       lines.push(
         `   ${rail(selectedIds.has(candidate.id), candidate.riskTier)} ` +
           `${path.padEnd(pathWidth)}` +
           `${pc.dim(amount.padStart(sizeWidth))}` +
+          idleCell +
           (tail ? `  ${tail}` : ""),
       );
     }

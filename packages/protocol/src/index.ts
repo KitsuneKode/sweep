@@ -156,6 +156,8 @@ export interface CliOptions {
   ignore: string[];
   includeDangerous: boolean;
   select: SelectionMode;
+  /** --idle: only select artifacts in projects idle at least this long (ms). */
+  idle?: number;
   /** Absent unless the user passed --depth - config layers stay reachable. */
   depth?: number;
   /** Per-run deletion ceiling in GiB; none explicitly disables a configured cap. */
@@ -184,6 +186,14 @@ export interface ScanCandidate extends ScanEntry {
   riskTier: RiskTier;
   reasons: string[];
   selectedByDefault: boolean;
+  /**
+   * When a person last worked on the project that owns this artifact (epoch
+   * ms): git index and HEAD reflog, plus the project root's own entries,
+   * never build output. Unlike `modifiedMs`, a rebuild does not refresh it,
+   * so it answers "is anyone still using this?". Absent when no signal could
+   * be read or the plan predates the field.
+   */
+  projectActiveMs?: number;
 }
 
 export interface SelectionPolicy {

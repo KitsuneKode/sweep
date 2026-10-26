@@ -1,4 +1,5 @@
 import { gitTrackedPaths } from "@kitsunekode/sweep-core/git-tracked";
+import { restrictSelectionToIdle } from "@kitsunekode/sweep-core/planner";
 import { assertPlanResources } from "@kitsunekode/sweep-core/plan";
 import { noteApplyBackendEntered, noteApplyReportTrusted } from "../apply-lifecycle.js";
 import { beginApplySession, type ApplySession } from "@kitsunekode/sweep-core/apply-session";
@@ -158,6 +159,7 @@ export function warnIgnoredOptions(
     if (opts.depth !== undefined) ignored.add("--depth");
     if (opts.select !== undefined && opts.select !== "default") ignored.add("--select");
     if (opts.includeDangerous) ignored.add("--include-dangerous");
+    if (opts.idle !== undefined) ignored.add("--idle");
     if (opts.cold) ignored.add("--cold");
     if (opts.resourceProfile && opts.resourceProfile !== "balanced")
       ignored.add("--resource-profile");
@@ -186,6 +188,22 @@ export function warnIgnoredOptions(
 }
 
 export async function runScanToPlan(
+  targetDir: string,
+  config: SweepConfig,
+  options: ScanToPlanOptions & {
+    engine?: EngineBackend;
+    projectConfig?: SweepConfig;
+    /** --idle: keep the selection to projects untouched at least this long. */
+    idleMs?: number;
+  } = {},
+): Promise<{ result: ScanResult; plan: ScanPlan; engineUsed: "js" | "rust" }> {
+  const { idleMs, ...scanOptions } = options;
+  const scanned = await scanToPlanWithEngine(targetDir, config, scanOptions);
+  if (idleMs === undefined) return scanned;
+  return { ...scanned, plan: restrictSelectionToIdle(scanned.plan, idleMs) };
+}
+
+async function scanToPlanWithEngine(
   targetDir: string,
   config: SweepConfig,
   options: ScanToPlanOptions & {
@@ -345,6 +363,7 @@ export async function runScanWithDisplay(
     projectConfig?: SweepConfig;
     spinnerLabel?: string;
     output?: OutputOptions;
+    idleMs?: number;
   },
 ): Promise<{ result: ScanResult; plan: ScanPlan }> {
   const { output, spinnerLabel, ...scanOptions } = options;
@@ -419,6 +438,7 @@ export async function runScanWithDisplay(
         ...(output?.verbose ? { verbose: true } : {}),
         elapsedMs: Math.round(performance.now() - startedAt),
         engine: engineUsed,
+        ...(options.idleMs !== undefined ? { idleMs: options.idleMs } : {}),
       });
     }
 
