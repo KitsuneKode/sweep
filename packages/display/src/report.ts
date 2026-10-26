@@ -285,9 +285,11 @@ export function formatScanReport(
       const amount = size(candidate.estimatedBytes, approx || candidate.bytesKnown === false);
       const days = idleDays(candidate);
       const idle = idleLabel(candidate.projectActiveMs, now);
-      // Recent work reads warm; long-idle reads quiet - it is the easy call.
+      // Recent work reads at full strength, long-idle recedes: the easy call.
+      // Not yellow - that is the caution tier's colour.
+      const idleText = `idle ${idle}`.padEnd(idleWidth - 2);
       const idleCell = idle
-        ? `  ${(days !== undefined && days < 7 ? pc.yellow : pc.dim)(`idle ${idle}`.padEnd(idleWidth - 2))}`
+        ? `  ${days !== undefined && days < 7 ? pc.bold(idleText) : pc.dim(idleText)}`
         : " ".repeat(idleWidth);
       lines.push(
         `   ${rail(selectedIds.has(candidate.id), candidate.riskTier)} ` +

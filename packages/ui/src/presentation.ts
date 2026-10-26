@@ -3,7 +3,7 @@ import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-proto
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { bg, bold, dim, fg, StyledText, t } from "@opentui/core";
-import { AGE_LABEL_WIDTH, describeAge, formatAge, isRecent, sizeBar } from "./age.js";
+import { AGE_LABEL_WIDTH, describeAge, formatAge, isRecent, sizeBar, lastActiveMs } from "./age.js";
 import type { TextChunk } from "@opentui/core";
 import type { UiDisplayRow } from "./rows.js";
 import { buildDisplayRows } from "./rows.js";
@@ -19,7 +19,7 @@ import { type ThemeTokens, riskColor } from "./theme.js";
 import { cellWidth, clipCells, padCells } from "./text-cells.js";
 
 function padCount(value: number, width = 2): string {
-  return String(value).padStart(width, " ");
+  return value.toLocaleString().padStart(width, " ");
 }
 
 /** One-character risk glyphs - shape encodes meaning, color reinforces it. */
@@ -123,7 +123,7 @@ export function relativePath(root: string, path: string): string {
 export function buildListColumnHeader(widths: RowWidths, tokens: ThemeTokens): StyledText {
   const nameLabel = padCells("Name", widths.nameWidth);
   const ageLabel =
-    widths.ageWidth > 0 ? `${" ".repeat(COLUMN_GAP)}${"Age".padStart(widths.ageWidth)}` : "";
+    widths.ageWidth > 0 ? `${" ".repeat(COLUMN_GAP)}${"Idle".padStart(widths.ageWidth)}` : "";
   const barGap = widths.barWidth > 0 ? " ".repeat(COLUMN_GAP + widths.barWidth) : "";
   const sizeLabel = padCells("Size", widths.sizeWidth, "right");
   return t`${" ".repeat(ROW_NAME_OFFSET)}${fg(tokens.textDim)(nameLabel)}${fg(tokens.textDim)(ageLabel)}${barGap}${" ".repeat(widths.sizeWidth > 0 ? SIZE_GAP : 0)}${fg(tokens.textDim)(sizeLabel)}`;
@@ -252,11 +252,11 @@ export function buildArtifactRowContent(
   if (widths.ageWidth > 0) {
     // Touched within the week reads as "probably in use": the one age the
     // eye should catch before deleting.
-    const recent = metrics !== undefined && isRecent(candidate.modifiedMs, metrics.now);
+    const recent = metrics !== undefined && isRecent(lastActiveMs(candidate), metrics.now);
     // Recent means "in use", not "risky": it takes the info hue, so orange
     // stays reserved for the caution tier.
     const ageColor = isCurrent ? tokens.selectionText : recent ? tokens.info : tokens.textDim;
-    const age = metrics ? formatAge(candidate.modifiedMs, metrics.now) : "";
+    const age = metrics ? formatAge(lastActiveMs(candidate), metrics.now) : "";
     parts.push(
       t`${" ".repeat(COLUMN_GAP)}${fg(ageColor)(padCells(age, widths.ageWidth, "right"))}`,
     );
@@ -426,7 +426,7 @@ export function buildHeaderStats(
     // Fit complete facts; never cut a byte value/unit at the terminal edge.
     const modes = [dryRun ? "DRY RUN" : "", trash ? "TRASH" : ""].filter(Boolean).join(" · ");
     if (omitQueue) {
-      return t`${fg(modes ? tokens.info : tokens.textMuted)(modes || `${summary.visibleCount} found`)}`;
+      return t`${fg(modes ? tokens.info : tokens.textMuted)(modes || `${summary.visibleCount.toLocaleString()} found`)}`;
     }
     const queue = `${summary.selectedCount} queued`;
     const bytes = `${summary.selectedBytesPartial ? "~" : ""}${compactBytesLabel(summary.selectedBytes)}`;
@@ -562,9 +562,13 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
     `${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidate.estimatedBytes)}`,
   );
   const now = Date.now();
-  const ageText = describeAge(candidate.modifiedMs, now);
+  // Say which clock this is: "worked on 3 months ago" reads differently from
+  // "changed 2 days ago" (a rebuild), and both matter when deciding.
+  const active = lastActiveMs(candidate);
+  const ageText = describeAge(active, now);
+  const label = candidate.projectActiveMs !== undefined ? "project worked on" : "changed";
   const age = ageText
-    ? fg(isRecent(candidate.modifiedMs, now) ? tokens.info : tokens.textMuted)(`  ${ageText}`)
+    ? fg(isRecent(active, now) ? tokens.info : tokens.textMuted)(`  ${label} ${ageText}`)
     : "";
   const path = fg(tokens.textSecondary)(truncateMiddle(sanitizeTerminalText(candidate.path), 64));
   const flag = candidate.isSymlink

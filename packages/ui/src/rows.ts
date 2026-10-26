@@ -1,4 +1,5 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { lastActiveMs } from "./age.js";
 import { groupCandidatesByScope, labelForKey } from "./grouping.js";
 import { candidateIndex } from "./candidate-index.js";
 import { artifactScopeKey } from "./scope-tree.js";
@@ -39,7 +40,8 @@ function itemComparator(sortBy: UiSortBy): (a: ScanCandidate, b: ScanCandidate) 
     // Stalest first: the oldest artifacts are the safest wins. Unknown mtimes
     // sink to the bottom rather than posing as ancient.
     return (a, b) =>
-      (a.modifiedMs ?? Number.POSITIVE_INFINITY) - (b.modifiedMs ?? Number.POSITIVE_INFINITY) ||
+      (lastActiveMs(a) ?? Number.POSITIVE_INFINITY) -
+        (lastActiveMs(b) ?? Number.POSITIVE_INFINITY) ||
       b.estimatedBytes - a.estimatedBytes ||
       a.name.localeCompare(b.name);
   }
@@ -305,7 +307,9 @@ function oldestModified(
 ): number {
   let oldest = Number.POSITIVE_INFINITY;
   for (const id of group.candidateIds) {
-    oldest = Math.min(oldest, byId.get(id)?.modifiedMs ?? Number.POSITIVE_INFINITY);
+    const candidate = byId.get(id);
+    const active = candidate ? lastActiveMs(candidate) : undefined;
+    if (active !== undefined) oldest = Math.min(oldest, active);
   }
   return oldest;
 }

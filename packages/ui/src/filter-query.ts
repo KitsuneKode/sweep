@@ -1,4 +1,5 @@
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { lastActiveMs } from "./age.js";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -73,10 +74,11 @@ function agePredicate(key: "older" | "newer", value: string): Predicate | null {
   const match = DURATION_TERM.exec(value);
   if (!match) return null;
   const span = Number(match[1]) * (DURATION_UNITS[(match[2] ?? "").toLowerCase()] ?? 0);
-  // An unknown mtime cannot be older or newer than anything, so it never matches.
+  // An unknown age cannot be older or newer than anything, so it never matches.
   return (candidate, { now }) => {
-    if (candidate.modifiedMs === undefined) return false;
-    const age = now - candidate.modifiedMs;
+    const active = lastActiveMs(candidate);
+    if (active === undefined) return false;
+    const age = now - active;
     return key === "older" ? age >= span : age < span;
   };
 }

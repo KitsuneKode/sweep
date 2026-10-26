@@ -1343,3 +1343,62 @@ test("manual UI generations never seed a queue at discovery, finalization or res
   state = finalizeScan(upsertCandidates(resetForRescan(state), plan.candidates), plan);
   expect(state.selectedIds.size).toBe(0);
 });
+
+describe("idle-project recommendation", () => {
+  test("queues only safe, non-stub items whose project is measurably idle", async () => {
+    const { createUiState, selectIdleSafe, idleSafeCandidates } = await import("./state.js");
+    const now = Date.parse("2026-10-26T12:00:00Z");
+    const day = 86_400_000;
+    const base = {
+      estimatedBytes: 10,
+      isSymlink: false,
+      entryType: "directory" as const,
+      reasons: ["default-pattern"],
+      selectedByDefault: true,
+      kind: "node_modules" as const,
+      name: "node_modules",
+    };
+    const plan = {
+      protocolVersion: "1",
+      targetDir: "/w",
+      selectionPolicy: { mode: "default" as const, includeDangerous: false },
+      candidates: [
+        {
+          ...base,
+          id: "idle",
+          path: "/w/a/node_modules",
+          riskTier: "safe" as const,
+          projectActiveMs: now - 60 * day,
+        },
+        {
+          ...base,
+          id: "busy",
+          path: "/w/b/node_modules",
+          riskTier: "safe" as const,
+          projectActiveMs: now - day,
+        },
+        { ...base, id: "unknown", path: "/w/c/node_modules", riskTier: "safe" as const },
+        {
+          ...base,
+          id: "risky",
+          path: "/w/d/node_modules",
+          riskTier: "caution" as const,
+          projectActiveMs: now - 90 * day,
+        },
+      ],
+      summary: {
+        candidateCount: 4,
+        estimatedTotalBytes: 40,
+        scannedDirs: 4,
+        exact: false,
+        selectedCount: 0,
+        riskCounts: { safe: 3, caution: 1, dangerous: 0, blocked: 0 },
+      },
+      selectedCandidateIds: [],
+      createdAt: new Date(now).toISOString(),
+    };
+    const state = createUiState(plan as unknown as ScanPlan, { startUnselected: true });
+    expect(idleSafeCandidates(state, 30 * day, now).map((c) => c.id)).toEqual(["idle"]);
+    expect([...selectIdleSafe(state, 30 * day, now).selectedIds]).toEqual(["idle"]);
+  });
+});

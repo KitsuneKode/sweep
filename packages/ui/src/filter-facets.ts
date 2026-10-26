@@ -20,7 +20,7 @@ export const FACET_GROUP_LABEL: Record<FacetGroup, string> = {
   risk: "Risk",
   kind: "Kind",
   size: "Size",
-  age: "Last touched",
+  age: "Project idle",
   status: "Queue",
 };
 
@@ -33,10 +33,10 @@ const SIZE_OPTIONS: FacetOption[] = [
   { group: "size", value: ">10MiB", label: "over 10 MiB" },
 ];
 const AGE_OPTIONS: FacetOption[] = [
-  { group: "age", value: "older:90d", label: "90+ days ago" },
-  { group: "age", value: "older:30d", label: "30+ days ago" },
-  { group: "age", value: "older:7d", label: "7+ days ago" },
-  { group: "age", value: "newer:7d", label: "this week" },
+  { group: "age", value: "older:90d", label: "idle 90+ days" },
+  { group: "age", value: "older:30d", label: "idle 30+ days" },
+  { group: "age", value: "older:7d", label: "idle 7+ days" },
+  { group: "age", value: "newer:7d", label: "worked on this week" },
 ];
 const STATUS_OPTIONS: FacetOption[] = [
   { group: "status", value: "is:unqueued", label: "not queued" },

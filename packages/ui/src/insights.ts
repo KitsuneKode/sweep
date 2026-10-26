@@ -1,4 +1,5 @@
 import type { RiskTier, ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { lastActiveMs } from "./age.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -45,12 +46,10 @@ export function buildInsights(candidates: readonly ScanCandidate[], now: number)
     byTier.set(candidate.riskTier, entry);
     totalBytes += candidate.estimatedBytes;
 
-    if (candidate.modifiedMs === undefined) continue;
+    const active = lastActiveMs(candidate);
+    if (active === undefined) continue;
     ageKnown = true;
-    if (
-      candidate.riskTier !== "blocked" &&
-      now - candidate.modifiedMs >= STALE_AFTER_DAYS * DAY_MS
-    ) {
+    if (candidate.riskTier !== "blocked" && now - active >= STALE_AFTER_DAYS * DAY_MS) {
       stale.bytes += candidate.estimatedBytes;
       stale.count += 1;
     }
