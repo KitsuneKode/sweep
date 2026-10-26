@@ -46,10 +46,11 @@ describe.skipIf(!hasGit)("git-tracked candidates", () => {
   });
 
   test("glob characters in a folder name are matched literally", () => {
-    write("src/a.ts");
-    git("add", "src/a.ts");
-    mkdirSync(join(root, "*"));
-    expect(gitTrackedPaths([join(root, "*")]).size).toBe(0);
+    // As a glob, `dist[1]` would match the tracked `dist1`; as a path it must not.
+    write("dist1/a.js");
+    git("add", "dist1/a.js");
+    mkdirSync(join(root, "dist[1]"));
+    expect(gitTrackedPaths([join(root, "dist[1]")]).size).toBe(0);
   });
 
   test("a hostile fsmonitor in the repository's config never runs", () => {
