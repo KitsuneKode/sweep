@@ -36,7 +36,10 @@ commands also require Cargo for workspace discovery.
   requested page; search indexing stays on the server.
 - Fumadocs provides navigation, search, code copying, themes and the table of
   contents. Markdown `.md` links map to site routes without rewriting the source.
-- No analytics, third-party fonts, runtime MDX execution or cleanup API is added.
+- No third-party fonts, runtime MDX execution or cleanup API is added.
+- Vercel Web Analytics and Speed Insights are the only measurement: cookieless,
+  first-party (`/_vercel/insights`, `/_vercel/speed-insights`), no-ops outside
+  Vercel. Pageviews record the path and route pattern, never query strings.
 - The CLI build/publish filters exclude this app. Its dependencies and assets
   never belong in the npm package or standalone binary.
 
