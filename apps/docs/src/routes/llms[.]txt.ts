@@ -5,7 +5,9 @@ import { createFileRoute } from "@tanstack/react-router";
  * in the plain markdown assistants read. The safety contract here matches
  * skills/sweep/SKILL.md and the landing page's agent prompt.
  */
-function llmsTxt(site: string): string {
+function llmsTxt(siteUrl?: string): string {
+  // Preview builds have no configured origin: fall back to site-relative links.
+  const site = siteUrl ?? "";
   const doc = (slug: string) => `${site}/docs/${slug}`;
   return `# sweep
 
