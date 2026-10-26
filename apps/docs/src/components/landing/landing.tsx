@@ -42,6 +42,7 @@ export function Landing() {
       <main id="main-content" tabIndex={-1} className="sw-frame">
         <Hero />
         <CatalogStrip />
+        <Idle />
         <Refuses />
         <Speed />
         <Keys />
@@ -166,10 +167,6 @@ function Hero() {
     <section className="sw-hero" aria-labelledby="hero-title">
       <div className="sw-hero-grid">
         <div className="sw-hero-title">
-          <p className="sw-chip">
-            <span className="sw-chip-dot" aria-hidden="true" />
-            Open source CLI · MIT
-          </p>
           <h1 id="hero-title">
             Reclaim gigabytes. <br />
             Delete nothing by surprise.
@@ -177,8 +174,8 @@ function Hero() {
         </div>
         <div className="sw-hero-copy">
           <p className="sw-hero-lead">
-            sweep finds node_modules, target, .next and other build output across your projects,
-            shows what each one is, and removes only what you tick.
+            sweep is a free, open-source CLI that finds node_modules, target, .next and other build
+            output across your projects, shows what each one is, and removes only what you tick.
           </p>
           <div className="sw-hero-actions">
             <Link to="/docs/$" params={{ _splat: "users/getting-started" }} className="sw-btn">
@@ -192,13 +189,14 @@ function Hero() {
             </button>
           </div>
           <InputCopy
+            data-ui
             className="sw-hero-cmd"
             value="npx @kitsunekode/sweep ui ."
             label="Or run it without installing"
           />
         </div>
         <div className="sw-hero-demo">
-          <div className="sw-window">
+          <div className="sw-window" data-ui>
             <span className="sw-panel-tab">Try it · sample tree, not your disk</span>
             <QueueDemo onPhaseChange={setPhase} />
           </div>
@@ -221,7 +219,7 @@ function Hero() {
 function CatalogStrip() {
   const row = CATALOG_NAMES.map((entry) => (
     <li key={entry.name} data-default={entry.byDefault}>
-      {entry.name}
+      <code>{entry.name}</code>
     </li>
   ));
   return (
@@ -236,6 +234,85 @@ function CatalogStrip() {
       <div className="sw-marquee">
         <ul>{row}</ul>
         <ul aria-hidden="true">{row}</ul>
+      </div>
+    </section>
+  );
+}
+
+/* ── Idle projects: what a disk analyser cannot know ────────────────── */
+
+/** An illustrative `sweep --dry-run` report: the shape the CLI prints. */
+const REPORT_ROWS: { path: string; size: string; idle: string; picked: boolean }[] = [
+  { path: "thesis-site/node_modules", size: "612 MiB", idle: "8mo", picked: true },
+  { path: "old-api/target", size: "2.4 GiB", idle: "5mo", picked: true },
+  { path: "game-jam/.next", size: "318 MiB", idle: "3mo", picked: true },
+  { path: "shop/node_modules", size: "1.1 GiB", idle: "2h", picked: false },
+];
+
+const IDLE_FACTS: { term: string; detail: ReactNode }[] = [
+  {
+    term: "When you last worked on it",
+    detail:
+      "From the project's git index and history and its own files, never its build output. A reinstall does not make a forgotten project look busy.",
+  },
+  {
+    term: "Idle projects first",
+    detail: (
+      <>
+        <code>sweep --idle 30d</code> selects only what nobody has touched for a month. The terminal
+        UI offers the same queue in one action.
+      </>
+    ),
+  },
+  {
+    term: "What it does to your disk",
+    detail:
+      "Free space now and after, and a warning when the selection includes a project you worked on today: the next build brings it straight back.",
+  },
+];
+
+function Idle() {
+  return (
+    <section className="sw-section" aria-labelledby="idle-title">
+      <SectionHead id="idle-title" title="Knows which projects you left">
+        <p>
+          A disk analyser sees sizes. sweep also sees when you last touched the project around each
+          folder, so the easy wins come first and today's work stays put.{" "}
+          <Link to="/docs/$" params={{ _splat: "users/commands" }}>
+            Read about --idle
+          </Link>
+        </p>
+      </SectionHead>
+      <div className="sw-idle">
+        <figure className="sw-report" data-ui data-reveal>
+          <span className="sw-panel-tab">sweep --dry-run · illustrative</span>
+          <p className="sw-report-head">
+            <strong>4.4 GiB</strong> to reclaim · 3 of 4 selected
+          </p>
+          <p className="sw-report-dim">disk 9.6 GiB free of 256 GiB → up to 14.0 GiB free</p>
+          <p className="sw-report-warn">! 1.1 GiB is in a project worked on today (shop)</p>
+          <p className="sw-report-tip">
+            → 3.3 GiB is in projects idle 30+ days: <span>sweep --idle 30d</span>
+          </p>
+          <ul>
+            {REPORT_ROWS.map((row) => (
+              <li key={row.path} data-picked={row.picked}>
+                <span aria-hidden="true">{row.picked ? "●" : "○"}</span>
+                <span>{row.path}</span>
+                <span>{row.size}</span>
+                <span>idle {row.idle}</span>
+              </li>
+            ))}
+          </ul>
+        </figure>
+        <dl className="sw-idle-facts">
+          {IDLE_FACTS.map((fact) => (
+            <div key={fact.term} data-reveal>
+              <dt>{fact.term}</dt>
+              <dd>{fact.detail}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
     </section>
   );
@@ -780,7 +857,8 @@ function useReveal(rootRef: React.RefObject<HTMLDivElement | null>) {
           if (!entry.isIntersecting) continue;
           const el = entry.target as HTMLElement;
           const siblings = pending.filter((p) => p.parentElement === el.parentElement);
-          el.style.setProperty("--d", `${Math.max(0, siblings.indexOf(el)) * 70}ms`);
+          // Large items: 80ms steps, capped so the last one is never late.
+          el.style.setProperty("--d", `${Math.min(3, Math.max(0, siblings.indexOf(el))) * 80}ms`);
           el.dataset.reveal = "in";
           observer.unobserve(el);
         }
