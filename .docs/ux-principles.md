@@ -111,6 +111,12 @@ total. After an apply it holds the receipt until something is queued again.
 Sizes carry the list's hierarchy: gigabytes are bright and bold, hundreds of
 megabytes secondary, smaller sizes recede.
 
+Keys are drawn as keycaps (a filled cell) in the footer and the help card, so
+the eye can scan keys apart from what they do. Group headers and item rows use
+the same size format, and a single-artifact group drops its `1 ·` count; the
+header itself stays, because an orphan row reads as part of the group above it.
+Live status lines drop whole parts by priority instead of drawing one over another.
+
 ## 6. Mouse is a peer, not a fallback
 
 Names focus or browse; queue checkboxes toggle separately. Folder arrows expand

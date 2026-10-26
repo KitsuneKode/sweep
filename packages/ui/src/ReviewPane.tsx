@@ -1,6 +1,6 @@
 import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
-import { bold, dim, fg, t } from "@opentui/core";
+import { bold, dim, fg, StyledText, t, type TextChunk } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { ArtifactList } from "./ArtifactList.js";
 import { ActionButton } from "./ActionButton.js";
@@ -212,6 +212,7 @@ export function ReviewPane({
             currentDir={state.scanCurrentDir}
             elapsedMs={scanElapsedMs}
             orderPinned={state.orderPinned}
+            width={artifactPaneInnerWidth}
           />
         ) : null}
         {patternsPane ? (
@@ -343,8 +344,10 @@ function ScanningStrip({
   currentDir,
   elapsedMs,
   orderPinned,
+  width,
 }: {
   tokens: ThemeTokens;
+  width: number;
   found: number;
   pendingSizes: number;
   scannedDirs: number;
@@ -354,6 +357,41 @@ function ScanningStrip({
   orderPinned: boolean;
 }) {
   const dirs = scannedDirs > 0 ? `${scannedDirs.toLocaleString()} dirs` : "walking\u2026";
+  // One line, filled in priority order: a part that does not fit is left out
+  // whole rather than drawn over its neighbour.
+  const sep = dim("  \u00b7  ");
+  const parts: Array<{ text: string; chunk: TextChunk }> = [];
+  const push = (text: string, color: string) => parts.push({ text, chunk: fg(color)(text) });
+  push(`${found.toLocaleString()} found`, tokens.textSecondary);
+  // Unreadable/cycled dirs mean the result set is partial - that must be
+  // visible, not quietly absorbed into a total.
+  if (skippedDirs > 0) push(`${skippedDirs} skipped`, tokens.warning);
+  if (pendingSizes > 0) push(`${pendingSizes.toLocaleString()} sizing`, tokens.textMuted);
+  push(dirs, tokens.textMuted);
+  if (elapsedMs !== undefined && elapsedMs >= 250) push(formatElapsed(elapsedMs), tokens.textDim);
+  // Sizes arrive after discovery, so the list is held in discovery order
+  // until the scan ends. Say so, or it just looks unsorted.
+  if (orderPinned) push("found order \u00b7 sorts when done", tokens.textDim);
+  // ncdu's "current item" idiom - the path keeps moving even when the
+  // counters stall, which is the proof-of-life a big tree needs.
+  const lead = "scanning  ";
+  let room = Math.max(0, width - 9 - lead.length);
+  const shown: typeof parts = [];
+  for (const part of parts) {
+    const cost = cellWidth(part.text) + (shown.length > 0 ? 5 : 0);
+    if (cost > room) continue;
+    shown.push(part);
+    room -= cost;
+  }
+  const pathRoom = room - 5;
+  const path =
+    currentDir !== null && pathRoom >= 12 ? tailPath(currentDir, Math.min(40, pathRoom)) : "";
+  const chunks: TextChunk[] = [bold(fg(tokens.accent)("scanning")), fg(tokens.textMuted)("  ")];
+  shown.forEach((part, index) => {
+    if (index > 0) chunks.push(sep);
+    chunks.push(part.chunk);
+  });
+  if (path) chunks.push(sep, fg(tokens.textDim)(path));
   return (
     <box
       width="100%"
@@ -365,43 +403,7 @@ function ScanningStrip({
       paddingLeft={1}
     >
       <DotStrip tokens={tokens} width={7} pattern="scan" />
-      <text
-        content={t`${bold(fg(tokens.accent)("scanning"))}  ${fg(tokens.textSecondary)(`${found} found`)}  ${dim("\u00b7")}  ${fg(tokens.textMuted)(dirs)}`}
-        wrapMode="none"
-      />
-      {pendingSizes > 0 ? (
-        <text content={t`${fg(tokens.textMuted)(`${pendingSizes} sizing`)}`} wrapMode="none" />
-      ) : null}
-      {currentDir !== null ? (
-        // ncdu's "current item" idiom - the path keeps moving even when the
-        // counters stall, which is the proof-of-life a big tree needs.
-        <text
-          content={t` ${dim("\u00b7")}  ${fg(tokens.textDim)(tailPath(currentDir, 24))}`}
-          wrapMode="none"
-        />
-      ) : null}
-      {elapsedMs !== undefined && elapsedMs >= 250 ? (
-        <text
-          content={t` ${dim("\u00b7")}  ${fg(tokens.textDim)(formatElapsed(elapsedMs))}`}
-          wrapMode="none"
-        />
-      ) : null}
-      {skippedDirs > 0 ? (
-        // Unreadable/cycled dirs mean the result set is partial - that must be
-        // visible, not quietly absorbed into a total.
-        <text
-          content={t` ${dim("\u00b7")}  ${fg(tokens.warning)(`${skippedDirs} skipped`)}`}
-          wrapMode="none"
-        />
-      ) : null}
-      {orderPinned ? (
-        // Sizes arrive after discovery, so the list is held in discovery order
-        // until the scan ends. Say so, or it just looks unsorted.
-        <text
-          content={t` ${dim("\u00b7")}  ${fg(tokens.textDim)(`found order \u00b7 sorts when done`)}`}
-          wrapMode="none"
-        />
-      ) : null}
+      <text content={new StyledText(chunks)} wrapMode="none" />
     </box>
   );
 }

@@ -2,7 +2,7 @@ import { relative } from "node:path";
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
-import { bold, dim, fg, StyledText, t } from "@opentui/core";
+import { bg, bold, dim, fg, StyledText, t } from "@opentui/core";
 import { AGE_LABEL_WIDTH, describeAge, formatAge, isRecent, sizeBar } from "./age.js";
 import type { TextChunk } from "@opentui/core";
 import type { UiDisplayRow } from "./rows.js";
@@ -139,8 +139,10 @@ export function buildGroupHeaderContent(
   widths: RowWidths,
 ): StyledText {
   const glyph = fg(tokens.textDim)(row.collapsed ? "▸" : "▾");
-  const count = `${row.itemCount} · `;
-  const bytes = compactBytesLabel(row.bytes);
+  // A lone artifact's header already names its folder; "1 ·" only adds noise.
+  const count = row.itemCount > 1 ? `${row.itemCount} · ` : "";
+  // Same unit spacing as the item rows below, so the size column reads as one.
+  const bytes = formatBytes(row.bytes);
   // A partly queued group must not read like a fully queued one.
   const fullyQueued = row.selectedCount === row.itemCount;
   const queued =
@@ -567,6 +569,11 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
   return t`${glyph}  ${kind}  ${size}${age}  ${path}${flag}`;
 }
 
+/** A key rendered as a keycap: ` space ` on the control fill. */
+export function keycap(label: string, tokens: ThemeTokens) {
+  return bg(tokens.controlBg)(fg(tokens.text)(` ${label} `));
+}
+
 /** Which key hints the statusline should show. Modals own the footer too. */
 export type FooterContext =
   | { kind: "confirm" }
@@ -587,17 +594,23 @@ export type FooterContext =
 export function buildFooterHints(
   context: FooterContext,
   tokens: ThemeTokens,
-  options: { dryRun?: boolean; patternsDirty?: boolean; compact?: boolean } = {},
+  options: { dryRun?: boolean; patternsDirty?: boolean; compact?: boolean; medium?: boolean } = {},
 ): StyledText {
-  const key = (label: string) => fg(tokens.text)(label);
+  // Keys read as keycaps: a filled cell sets them apart from what they do,
+  // so the eye can scan the keys alone. Spacing, not dots, separates hints.
+  const key = (label: string) => keycap(label, tokens);
   const hint = (label: string) => fg(tokens.textMuted)(label);
-  const sep = dim(" · ");
+  const sep = fg(tokens.textMuted)("  ");
 
   // Narrow terminals: never clip a hint mid-word - swap to a minimal set.
   // Modal hints are already short enough to survive, so this only rewrites
   // the long pane hint rows.
   if (options.compact && context.kind === "pane") {
     return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("?")} ${hint("keys")}`;
+  }
+  // Mid widths keep the actions palette, the way to everything else.
+  if (options.medium && context.kind === "pane" && context.focus === "list") {
+    return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("Ctrl+K")} ${hint("actions")}${sep}${key("?")} ${hint("keys")}`;
   }
 
   if (context.kind === "confirm") {
@@ -639,7 +652,7 @@ export function buildFooterHints(
   }
 
   if (context.focus === "sidebar") {
-    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("expand/fold")}${sep}${key("enter")} ${hint("browse folder")}${sep}${key("space")} ${hint("queue folder")}${sep}${key("u")} ${hint("clear queue")}${sep}${key("?")} ${hint("help")}`;
+    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("expand/fold")}${sep}${key("enter")} ${hint("browse")}${sep}${key("space")} ${hint("queue folder")}${sep}${key("?")} ${hint("keys")}`;
   }
 
   if (context.focus === "search") {

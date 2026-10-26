@@ -46,6 +46,7 @@ import {
   buildBrandLine,
   buildContextLine,
   buildFooterHints,
+  keycap,
   buildHeaderStats,
   buildRiskTally,
   modeLabel,
@@ -53,6 +54,7 @@ import {
   riskGlyph,
   type FooterContext,
 } from "./presentation.js";
+import { cellWidth } from "./text-cells.js";
 import { buildDisplayRows } from "./rows.js";
 import {
   addCustomPattern,
@@ -298,7 +300,7 @@ function helpColumn(rows: ReadonlyArray<HelpRow>, keyWidth: number, tokens: Them
       {rows.map(([keys, description], index) =>
         keys === null ? (
           <box key={`section-${description}`} flexDirection="column">
-            <text content="" />
+            {index > 0 ? <text content="" /> : null}
             <text
               content={t`${bold(fg(tokens.accent)(description.toUpperCase()))}`}
               wrapMode="none"
@@ -309,7 +311,7 @@ function helpColumn(rows: ReadonlyArray<HelpRow>, keyWidth: number, tokens: Them
             // Index, not the keycap: "space" and "/" legitimately appear in
             // two sections, and single-column mode concatenates both columns.
             key={`${keys}-${index}`}
-            content={t`${bold(fg(tokens.text)(keys.padEnd(keyWidth)))}${fg(tokens.textMuted)(description)}`}
+            content={t`${keycap(keys, tokens)}${" ".repeat(Math.max(1, keyWidth - cellWidth(keys)))}${fg(tokens.textSecondary)(description)}`}
             wrapMode="none"
           />
         ),
@@ -321,13 +323,14 @@ function helpColumn(rows: ReadonlyArray<HelpRow>, keyWidth: number, tokens: Them
 function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: number }) {
   // Keys get the strong color, descriptions recede, section headers are the
   // only accent - the hierarchy reads at a glance instead of one gray wall.
+  // Keycaps add a cell of fill on each side; +1 more keeps them off the text.
   const keyWidth =
     Math.max(
-      ...HELP_LEFT.map(([k]) => k?.length ?? 0),
-      ...HELP_RIGHT.map(([k]) => k?.length ?? 0),
-    ) + 2;
-  const leftWidth = keyWidth + Math.max(...HELP_LEFT.map(([, d]) => d.length));
-  const rightWidth = keyWidth + Math.max(...HELP_RIGHT.map(([, d]) => d.length));
+      ...HELP_LEFT.map(([k]) => (k === null ? 0 : cellWidth(k))),
+      ...HELP_RIGHT.map(([k]) => (k === null ? 0 : cellWidth(k))),
+    ) + 1;
+  const leftWidth = keyWidth + 2 + Math.max(...HELP_LEFT.map(([, d]) => d.length));
+  const rightWidth = keyWidth + 2 + Math.max(...HELP_RIGHT.map(([, d]) => d.length));
   const twoColWidth = leftWidth + rightWidth + 4; // column gap
 
   // Modal chrome: 2 border + 6 paddingX + 2 scrollbox reserve. Budget for all
@@ -342,8 +345,14 @@ function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: number }) 
     ? twoColWidth + CHROME
     : Math.min(singleWidth + CHROME, Math.max(28, width - 4));
 
+  // Hug the content: a card taller than its rows reads as unfinished.
+  const lines = (rows: ReadonlyArray<HelpRow>) =>
+    rows.reduce((n, [keys]) => n + (keys === null ? 2 : 1), 0) - 1; // first section has no gap
+  const bodyLines = twoCol ? Math.max(lines(HELP_LEFT), lines(HELP_RIGHT)) : lines(HELP_SINGLE);
+  const modalHeight = bodyLines + 3 + 4; // syntax + exit lines, border + padding
+
   return (
-    <Modal tokens={tokens} title=" keys " width={modalWidth}>
+    <Modal tokens={tokens} title=" keys " width={modalWidth} height={modalHeight}>
       {twoCol ? (
         <box flexDirection="row" gap={4}>
           {helpColumn(HELP_LEFT, keyWidth, tokens)}
@@ -2010,7 +2019,7 @@ export function SweepApp({
   const footerContent = buildFooterHints(footerContext, tokens, {
     ...(dryRun ? { dryRun: true } : {}),
     ...(state.patternsDirty ? { patternsDirty: true } : {}),
-    ...(dimensions.width < 72 ? { compact: true } : {}),
+    ...(dimensions.width < 72 ? { compact: true } : dimensions.width < 108 ? { medium: true } : {}),
   });
   const tallyContent = buildRiskTally(summary, tokens);
   // Below this width the tally and the risk/sort chips crowd the key hints out
