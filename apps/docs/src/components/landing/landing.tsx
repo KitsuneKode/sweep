@@ -8,6 +8,7 @@ import {
   Copy,
   Keyboard,
   ReceiptText,
+  RotateCcw,
   ScanSearch,
   ShieldCheck,
   Workflow,
@@ -15,7 +16,6 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { InputCopy } from "@/components/ui/input-copy";
-import { Slider } from "@/components/ui/slider";
 import { TabItem, TabPanel, Tabs, TabsList } from "@/components/ui/tabs";
 import {
   AGENT_PROMPT,
@@ -28,6 +28,7 @@ import {
   INSTALL,
   KEY_GROUPS,
   PHASES,
+  RACE,
   STREAM_EVENTS,
   type Phase,
 } from "./content";
@@ -58,7 +59,21 @@ export function Landing() {
 
 function Wordmark() {
   return (
-    <Link to="/" className="sw-wordmark" aria-label="Sweep home">
+    <Link
+      to="/"
+      className="sw-wordmark"
+      aria-label="Sweep home"
+      onClick={(event) => {
+        // Already home: a link to the current page would do nothing. Take the
+        // reader to the top, and focus with them so keyboard users land there too.
+        if (window.location.pathname !== "/") return;
+        event.preventDefault();
+        const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+        document.getElementById("main-content")?.focus({ preventScroll: true });
+        if (window.location.hash) history.replaceState(null, "", "/");
+      }}
+    >
       <span className="sw-wordmark-tab" aria-hidden="true" />
       sweep
     </Link>
@@ -494,56 +509,165 @@ function Refuses() {
   );
 }
 
-/* ── Speed: one dot per candidate ───────────────────────────────────── */
+/* ── Speed: a race on a real tree, at real speed ───────────────────── */
 
-/** Linear between the two measured runs; never extrapolated past them. */
-function estimateMs(candidates: number): number {
-  const { low, high } = BENCH;
-  const t = Math.max(0, (candidates - low.candidates) / (high.candidates - low.candidates));
-  return low.ms + t * (high.ms - low.ms);
+const RACE_END_MS = Math.max(...RACE.runners.map((runner) => runner.ms));
+
+/**
+ * Plays the measured runs back in real time once the section is in view.
+ * One rAF clock writes bar scale and counters through refs - no React render
+ * per frame. Reduced motion, or no script, shows the finished race.
+ */
+function useRace(rootRef: React.RefObject<HTMLElement | null>) {
+  const bars = useRef<(HTMLSpanElement | null)[]>([]);
+  const clocks = useRef<(HTMLSpanElement | null)[]>([]);
+  const found = useRef<HTMLSpanElement | null>(null);
+  const [run, setRun] = useState(0);
+  const [finished, setFinished] = useState(true);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const paint = (elapsed: number) => {
+      RACE.runners.forEach((runner, index) => {
+        const progress = Math.min(1, elapsed / runner.ms);
+        const bar = bars.current[index];
+        const clock = clocks.current[index];
+        // One time axis for every lane: a bar stops where its run finished, so
+        // the finished race is itself the comparison.
+        if (bar) bar.style.transform = `scaleX(${Math.min(elapsed, runner.ms) / RACE_END_MS})`;
+        if (clock) {
+          clock.textContent =
+            progress >= 1
+              ? `${(runner.ms / 1000).toFixed(2)} s`
+              : `${(elapsed / 1000).toFixed(2)} s`;
+          clock.dataset.done = String(progress >= 1);
+        }
+      });
+      // sweep streams: results arrive from the first milliseconds, not at the end.
+      const sweepMs = RACE.runners[0].ms;
+      const share = Math.max(
+        0,
+        Math.min(1, (elapsed - RACE.firstResultMs) / (sweepMs - RACE.firstResultMs)),
+      );
+      if (found.current)
+        found.current.textContent = Math.round(share * RACE.tree.artifacts).toLocaleString("en");
+    };
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      paint(RACE_END_MS);
+      setFinished(true);
+      return;
+    }
+    let frame = 0;
+    let started = 0;
+    const tick = (now: number) => {
+      started ||= now;
+      const elapsed = now - started;
+      paint(elapsed);
+      if (elapsed < RACE_END_MS) frame = requestAnimationFrame(tick);
+      else setFinished(true);
+    };
+    const start = () => {
+      cancelAnimationFrame(frame);
+      started = 0;
+      setFinished(false);
+      paint(0);
+      frame = requestAnimationFrame(tick);
+    };
+    if (run > 0) {
+      start();
+      return () => cancelAnimationFrame(frame);
+    }
+    // First run waits until the race is on screen; until then it reads finished.
+    paint(RACE_END_MS);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        start();
+      },
+      { threshold: 0.4 },
+    );
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [rootRef, run]);
+
+  return { bars, clocks, found, finished, replay: () => setRun((value) => value + 1) };
 }
 
 function Speed() {
-  const [count, setCount] = useState(200);
-  const cols = 32;
-  const full = Math.floor(count / cols);
-  const rest = count % cols;
-  const rowPct = (n: number) => `${(n / cols) * 100}%`;
-  const clip = `polygon(0 0, 100% 0, 100% ${rowPct(full)}, ${rowPct(rest)} ${rowPct(full)}, ${rowPct(rest)} ${rowPct(full + 1)}, 0 ${rowPct(full + 1)})`;
+  const raceRef = useRef<HTMLDivElement>(null);
+  const { bars, clocks, found, finished, replay } = useRace(raceRef);
   return (
     <section className="sw-section" aria-labelledby="speed-title">
-      <SectionHead id="speed-title" title="Fast enough to stay out of the way">
+      <SectionHead id="speed-title" title="Answers before you finish reading">
         <p>
-          The Rust engine streams the first result in about two milliseconds, so the list fills
-          while you are still reading it. Set a tree size and see the measured median.
+          Disk analysers show you sizes when they are done. sweep streams what it finds from the
+          first milliseconds, and when it finishes you have a list of what is safe to remove, not a
+          tree to search.
         </p>
       </SectionHead>
-      <div className="sw-speed" data-reveal>
-        <div className="sw-matrix" aria-hidden="true">
-          <span className="sw-matrix-on" style={{ clipPath: clip }} />
-        </div>
-        <div className="sw-speed-read">
-          <div className="sw-slider" data-ui>
-            <Slider
-              label="Candidates found"
-              value={count}
-              onChange={(value) => setCount(value as number)}
-              min={BENCH.low.candidates}
-              max={BENCH.high.candidates}
-              step={8}
-              formatValue={(value) => value.toLocaleString("en")}
-            />
-          </div>
-          <p className="sw-figure" aria-live="polite">
-            {estimateMs(count).toFixed(1)}
-            <span>ms</span>
+      <div className="sw-race" ref={raceRef} data-reveal>
+        <div className="sw-race-head">
+          <p>
+            <strong>~/Projects</strong> · {RACE.tree.folders.toLocaleString("en")} folders, played
+            back at real speed
           </p>
-          <p className="sw-figure-note">
-            Median scan to plan, interpolated between measured runs of {BENCH.low.candidates} and{" "}
-            {BENCH.high.candidates.toLocaleString("en")} candidates. {BENCH.cpu}, warm cache. One
-            dot is one candidate.
-          </p>
+          <button type="button" className="sw-race-replay" onClick={replay} disabled={!finished}>
+            <RotateCcw aria-hidden="true" />
+            Replay
+          </button>
         </div>
+        <ol className="sw-race-lanes">
+          {RACE.runners.map((runner, index) => (
+            <li key={runner.id} data-runner={runner.id}>
+              <span className="sw-race-name">{runner.label}</span>
+              <span className="sw-race-track" aria-hidden="true">
+                <span
+                  className="sw-race-bar"
+                  ref={(el) => {
+                    bars.current[index] = el;
+                  }}
+                />
+              </span>
+              <span
+                className="sw-race-clock"
+                ref={(el) => {
+                  clocks.current[index] = el;
+                }}
+              >
+                {(runner.ms / 1000).toFixed(2)} s
+              </span>
+              <span className="sw-race-note">
+                {runner.streams ? (
+                  <>
+                    <span
+                      ref={(el) => {
+                        found.current = el;
+                      }}
+                    >
+                      {RACE.tree.artifacts.toLocaleString("en")}
+                    </span>{" "}
+                    artifacts found, first at {RACE.firstResultMs}
+                    {"\u00a0"}ms
+                  </>
+                ) : (
+                  runner.note
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <p className="sw-race-method">
+          Same folder, warm cache, {BENCH.cpu}; medians of repeated runs. sweep is the full CLI run;
+          gdu, dust and du size every folder in the tree.{" "}
+          <Link to="/docs/$" params={{ _splat: "developer/benchmarks" }}>
+            How we measure
+          </Link>
+        </p>
       </div>
       <ul className="sw-facts">
         {BENCH_FACTS.map((fact) => (
