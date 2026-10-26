@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import {
   ago,
   discoverJumpTargets,
@@ -100,8 +100,9 @@ describe("folder jump ranking", () => {
   });
 
   test("display helpers", () => {
-    expect(tildePath("/home/me/code", "/home/me")).toBe("~/code");
-    expect(tildePath("/home/meadow", "/home/me")).toBe("/home/meadow");
+    const home = join(root, "me");
+    expect(tildePath(join(home, "code"), home)).toBe(`~${sep}code`);
+    expect(tildePath(join(root, "meadow"), home)).toBe(join(root, "meadow"));
     const now = Date.parse("2026-10-26T12:00:00Z");
     expect(ago("2026-10-26T11:30:00Z", now)).toBe("30m ago");
     expect(ago("2026-10-26T07:00:00Z", now)).toBe("5h ago");
@@ -112,10 +113,16 @@ describe("folder jump ranking", () => {
 describe("jump labels", () => {
   test("read relative to the folder under review", async () => {
     const { jumpLabel } = await import("./folder-jump.js");
-    expect(jumpLabel({ path: "/w/mono/apps/web", source: "inside" }, "/w/mono", "/h")).toBe(
-      "./apps/web",
+    const mono = join(root, "w", "mono");
+    const home = join(root, "h");
+    expect(jumpLabel({ path: join(mono, "apps", "web"), source: "inside" }, mono, home)).toBe(
+      `.${sep}${join("apps", "web")}`,
     );
-    expect(jumpLabel({ path: "/w/api", source: "beside" }, "/w/mono", "/h")).toBe("../api");
-    expect(jumpLabel({ path: "/h/code", source: "cleaned" }, "/w/mono", "/h")).toBe("~/code");
+    expect(jumpLabel({ path: join(root, "w", "api"), source: "beside" }, mono, home)).toBe(
+      `..${sep}api`,
+    );
+    expect(jumpLabel({ path: join(home, "code"), source: "cleaned" }, mono, home)).toBe(
+      `~${sep}code`,
+    );
   });
 });
