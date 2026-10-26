@@ -68,7 +68,7 @@ jobs:
         with:
           toolchain: 1.99.0
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Check, build, and preflight
         run: bunx turbo run check build preflight --filter "@kitsunekode/*" --continue
@@ -120,7 +120,7 @@ jobs:
           toolchain: 1.99.0
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Rust fmt, clippy, and tests via turbo
         run: bunx turbo run "sweep-rust#fmt:check" "sweep-rust#lint" "sweep-rust#test" --continue
@@ -220,7 +220,7 @@ jobs:
           toolchain: 1.99.0
           components: clippy
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       # Typecheck + pure-TS tests on every OS. The TUI itself needs a TTY and
       # OpenTUI native FFI (Bun), so it is smoke-checked via unit render tests
