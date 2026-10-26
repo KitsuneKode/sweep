@@ -182,3 +182,21 @@ test("flush waits for the data itself, not a zero-byte write that completes earl
     out.destroy();
   }
 });
+
+test("flush still surfaces a closed pipe when only direct stream writes happened", async () => {
+  // Human receipts write to stdout directly; a lost receipt must still fail.
+  const out = new Writable({
+    write(_chunk, _encoding, callback) {
+      callback(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+    },
+  });
+  out.on("error", () => {});
+  const writer = new JsonOutput(out, 1000);
+  try {
+    out.write("receipt\n");
+    await expect(writer.flush()).rejects.toThrow();
+  } finally {
+    writer.dispose();
+    out.destroy();
+  }
+});
