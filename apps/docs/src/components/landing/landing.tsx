@@ -956,10 +956,77 @@ function Footer() {
           <a href="#main-content">Back to top</a>
         </div>
       </div>
-      <p className="sw-foot-word" aria-hidden="true">
-        sweep
-      </p>
+      <FootWord />
     </footer>
+  );
+}
+
+/**
+ * The closing wordmark fills with colour where the pointer is. The circle
+ * eases toward the pointer each frame (no React render), so it trails
+ * smoothly instead of snapping. Pointer-and-hover devices only; reduced
+ * motion keeps the plain outline.
+ */
+function FootWord() {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    if (!matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const fill = wrap.querySelector<HTMLElement>(".sw-foot-word-fill");
+    if (!fill) return;
+    let target = { x: 0, y: 0 };
+    let at = { x: 0, y: 0 };
+    let radius = 0;
+    let goal = 0;
+    let frame = 0;
+    const step = () => {
+      at = { x: at.x + (target.x - at.x) * 0.18, y: at.y + (target.y - at.y) * 0.18 };
+      radius += (goal - radius) * 0.12;
+      fill.style.setProperty("--x", `${at.x}px`);
+      fill.style.setProperty("--y", `${at.y}px`);
+      fill.style.setProperty("--r", `${radius}px`);
+      const settled =
+        Math.abs(target.x - at.x) < 0.5 &&
+        Math.abs(target.y - at.y) < 0.5 &&
+        Math.abs(goal - radius) < 0.5;
+      frame = settled ? 0 : requestAnimationFrame(step);
+    };
+    const kick = () => {
+      if (!frame) frame = requestAnimationFrame(step);
+    };
+    const move = (event: PointerEvent) => {
+      const box = wrap.getBoundingClientRect();
+      target = { x: event.clientX - box.left, y: event.clientY - box.top };
+      kick();
+    };
+    const enter = (event: PointerEvent) => {
+      const box = wrap.getBoundingClientRect();
+      // Start where the pointer enters, so the fill grows from there.
+      at = target = { x: event.clientX - box.left, y: event.clientY - box.top };
+      goal = 72;
+      kick();
+    };
+    const leave = () => {
+      goal = 0;
+      kick();
+    };
+    wrap.addEventListener("pointermove", move);
+    wrap.addEventListener("pointerenter", enter);
+    wrap.addEventListener("pointerleave", leave);
+    return () => {
+      wrap.removeEventListener("pointermove", move);
+      wrap.removeEventListener("pointerenter", enter);
+      wrap.removeEventListener("pointerleave", leave);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+  return (
+    <div className="sw-foot-word-wrap" ref={wrapRef} aria-hidden="true">
+      <p className="sw-foot-word">sweep</p>
+      <p className="sw-foot-word sw-foot-word-fill">sweep</p>
+    </div>
   );
 }
 

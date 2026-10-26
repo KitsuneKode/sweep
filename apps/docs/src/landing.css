@@ -1861,6 +1861,33 @@ body:has(.sw) {
   -webkit-text-stroke: 1px var(--line-strong);
   user-select: none;
 }
+/* The fill: the same word in the signal colour, seen only through a soft
+   circle that trails the pointer. Hidden until a pointer is over it. */
+.sw-foot-word-wrap {
+  position: relative;
+}
+.sw-foot-word-fill {
+  position: absolute;
+  inset: 0;
+  color: var(--signal);
+  -webkit-text-stroke: 1px var(--signal);
+  opacity: 0;
+  pointer-events: none;
+  mask-image: radial-gradient(
+    circle at var(--x, 50%) var(--y, 50%),
+    #000 0,
+    #000 var(--r, 0px),
+    transparent calc(var(--r, 0px) + 9rem)
+  );
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .sw-foot-word-fill {
+    transition: opacity var(--duration-slow) var(--ease-smooth-out);
+  }
+  .sw-foot-word-wrap:hover .sw-foot-word-fill {
+    opacity: 1;
+  }
+}
 
 /* ── Motion, opt-in ─────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: no-preference) {
