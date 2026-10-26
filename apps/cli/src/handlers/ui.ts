@@ -71,6 +71,12 @@ function ensureBunRuntimeForUi(): boolean {
  * Runtime contract for the OpenTUI app. Declared locally so the Node CLI does
  * only imports a type-only outcome module; React/JSX is loaded dynamically.
  */
+interface UiInit {
+  catalogPatterns?: string[];
+  disabledPatterns?: string[];
+  extraPatterns?: string[];
+}
+
 export interface SweepUiModule {
   runSweepUiStreaming: (options: {
     targetDir: string;
@@ -87,10 +93,12 @@ export interface SweepUiModule {
      * lines must not print. History is appended inside the channel.
      */
     apply?: UiApplyFn;
-    init?: {
-      catalogPatterns?: string[];
-      disabledPatterns?: string[];
-      extraPatterns?: string[];
+    init?: UiInit;
+    switchTarget?: (path: string) => {
+      targetDir: string;
+      config: import("@kitsunekode/sweep-protocol").SweepConfig;
+      init?: UiInit;
+      warnings?: string[];
     };
   }) => Promise<SweepUiOutcome>;
 }
@@ -177,6 +185,17 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     }
 
     const scanConfig = resolveScanConfig(targetDir, opts);
+    // ctrl-o can move the session; every folder it visits keeps its own
+    // config, so each apply checks against the ceiling of the plan's folder.
+    const configs = new Map([[targetDir, scanConfig]]);
+    const configFor = (dir: string) => configs.get(dir) ?? resolveScanConfig(dir, opts);
+    const uiInit = (config: typeof scanConfig): UiInit => ({
+      // The pane lists the whole curated catalog; extraPatterns carries what
+      // is enabled beyond defaults (opt-in catalog picks + customs alike).
+      catalogPatterns: [...CATALOG_PATTERNS],
+      disabledPatterns: config.disabledPatterns ?? [],
+      extraPatterns: config.patterns.filter((pattern) => !DEFAULT_PATTERN_SET.has(pattern)),
+    });
 
     await assertOpenTuiAvailable();
 
@@ -202,18 +221,21 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
           {
             quiet: true,
             trash: request.trash,
-            maxSizeGB: scanConfig.maxSizeGB,
+            maxSizeGB: configFor(request.plan.targetDir).maxSizeGB,
             forceLarge: opts.forceLarge || request.overrideSizeLimit === true,
             signal: request.signal,
             ...(request.onProgress ? { onProgress: request.onProgress } : {}),
           },
         ),
-      init: {
-        // The pane lists the whole curated catalog; extraPatterns carries what
-        // is enabled beyond defaults (opt-in catalog picks + customs alike).
-        catalogPatterns: [...CATALOG_PATTERNS],
-        disabledPatterns: scanConfig.disabledPatterns ?? [],
-        extraPatterns: scanConfig.patterns.filter((pattern) => !DEFAULT_PATTERN_SET.has(pattern)),
+      init: uiInit(scanConfig),
+      // The same resolution `sweep ui <path>` runs: protected roots and
+      // unreadable folders refuse here, and the refusal is shown in the UI.
+      switchTarget: (path) => {
+        const next = resolveScanTarget(path);
+        const warnings: string[] = [];
+        const config = resolveScanConfig(next, opts, (message) => warnings.push(message));
+        configs.set(next, config);
+        return { targetDir: next, config, init: uiInit(config), warnings };
       },
     });
 
@@ -265,13 +287,14 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
     }
 
     const forceLarge = Boolean(opts.forceLarge) || outcome.overrideSizeLimit === true;
-    assertSizeLimit(getSelectedBytes(selectedPlan), scanConfig.maxSizeGB, forceLarge);
+    const planConfig = configFor(selectedPlan.targetDir);
+    assertSizeLimit(getSelectedBytes(selectedPlan), planConfig.maxSizeGB, forceLarge);
 
     const { report, cleanResult, interrupted, trashDir } = await executePlanDeletion(
       selectedPlan,
       engine,
       {
-        maxSizeGB: scanConfig.maxSizeGB,
+        maxSizeGB: planConfig.maxSizeGB,
         forceLarge,
         ...(useTrash ? { trash: true } : {}),
       },

@@ -1193,3 +1193,78 @@ test("an explicitly reviewed trash flip off survives the exit apply outcome", as
   expect(outcomes[0]).toMatchObject({ type: "apply", trash: false });
   if (outcomes[0]?.type === "apply") expect(outcomes[0].plan.selectedCandidateIds).toHaveLength(1);
 });
+
+describe("folder switcher (ctrl-o)", () => {
+  test("lists nearby folders, filters as you type and switches on enter; a refusal stays visible", async () => {
+    const picked: string[] = [];
+    const folders = {
+      list: () => [
+        { path: "/tmp", source: "up" as const },
+        { path: "/tmp/other-app", source: "beside" as const, detail: "node" },
+        { path: "/tmp/sweep-ui/apps/web", source: "inside" as const, detail: "node" },
+      ],
+      go: (path: string) => {
+        picked.push(path);
+        return path.endsWith("web") ? null : "refusing to scan a protected root";
+      },
+    };
+    const setup = await testRender(
+      <SweepApp plan={createPlan()} onDone={() => {}} folders={folders} />,
+      { width: 120, height: 32 },
+    );
+    teardown = () => setup.renderer.destroy();
+    const paint = async () => {
+      await act(async () => {
+        await setup.flush();
+        await setup.renderOnce();
+      });
+      await act(async () => {
+        await setup.renderOnce();
+      });
+    };
+    await paint();
+    await act(async () => {
+      setup.mockInput.pressKey("o", { ctrl: true });
+      await setup.flush();
+    });
+    await paint();
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("switch folder");
+    expect(frame).toContain("other-app");
+    expect(frame).toContain("up one level");
+
+    // Enter on the first row (up) is refused by the host: the card stays and says why.
+    await act(async () => {
+      setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    await paint();
+    frame = setup.captureCharFrame();
+    expect(picked).toEqual(["/tmp"]);
+    expect(frame).toContain("refusing to scan a protected root");
+
+    await act(async () => {
+      await setup.mockInput.typeText("web");
+      await setup.flush();
+    });
+    await paint();
+    frame = setup.captureCharFrame();
+    expect(frame).not.toContain("other-app");
+    await act(async () => {
+      setup.mockInput.pressEnter();
+      await setup.flush();
+    });
+    await paint();
+    expect(picked).toEqual(["/tmp", "/tmp/sweep-ui/apps/web"]);
+  });
+
+  test("ctrl-o does nothing without a switcher", async () => {
+    const setup = await mount(() => {});
+    await act(async () => {
+      setup.mockInput.pressKey("o", { ctrl: true });
+      await setup.flush();
+      await setup.renderOnce();
+    });
+    expect(setup.captureCharFrame()).not.toContain("switch folder");
+  });
+});

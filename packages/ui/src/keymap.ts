@@ -1,6 +1,7 @@
 import type { SweepUiState } from "./state.js";
 import {
   applySidebarScope,
+  setScopeFilter,
   cancelVisual,
   clearSelection,
   clearVisibleSelection,
@@ -549,6 +550,16 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
     return;
   }
 
+  // ncdu's "..": step the review up one folder, then out to everything.
+  if (
+    key.name === "backspace" &&
+    (state.focus === "list" || state.focus === "sidebar") &&
+    state.scopeFilter !== null
+  ) {
+    actions.mutate((s) => setScopeFilter(s, parentScope(s.scopeFilter)));
+    return;
+  }
+
   if (state.focus === "sidebar") {
     if (isCtrlU || isCtrlD) {
       actions.mutate((s) => moveSidebarCursor(s, (isCtrlU ? -1 : 1) * pageRows(ctx)));
@@ -802,4 +813,11 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   if (key.name === "4") {
     actions.mutate((s) => setRiskFilter(s, "dangerous"));
   }
+}
+
+/** The folder above a scope; the top-level folders step out to "all". */
+export function parentScope(scope: string | null): string | null {
+  if (scope === null || scope === "") return null;
+  const cut = scope.lastIndexOf("/");
+  return cut <= 0 ? null : scope.slice(0, cut);
 }

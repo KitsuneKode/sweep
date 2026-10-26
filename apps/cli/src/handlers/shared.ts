@@ -96,7 +96,11 @@ const warnConfig = (message: string): void => {
   console.error(`warning: ${sanitizeTerminalText(message)}`);
 };
 
-export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepConfig {
+export function resolveScanConfig(
+  targetDir: string,
+  opts: CliOptions,
+  warn: (message: string) => void = warnConfig,
+): SweepConfig {
   const patterns = opts.pattern ?? [];
   const disabledPatterns = opts.disabledPattern ?? [];
   const ignore = opts.ignore ?? [];
@@ -117,7 +121,7 @@ export function resolveScanConfig(targetDir: string, opts: CliOptions): SweepCon
     ...(ignore.length > 0 ? { ignore } : {}),
   };
 
-  return loadConfig(targetDir, opts.config, cliOverrides, warnConfig);
+  return loadConfig(targetDir, opts.config, cliOverrides, warn);
 }
 
 /** Config from project files only (no CLI pattern/ignore/depth overrides). */

@@ -67,6 +67,9 @@ queued items outside that view.
 | `/`                 | Filter candidates                                  |
 | `i`                 | Inspect path, kind, reasons and selection          |
 | Ctrl+K / F2         | Search actions, settings and shortcuts             |
+| Ctrl+O              | Switch to another folder (fuzzy search or a path)  |
+| Backspace           | Browse one folder up; from the top, all folders    |
+| `f`                 | Filter by risk, kind, size or age                  |
 | `x` or `d`          | Request confirmation for just the focused artifact |
 | Enter               | Open item details or browse a folder               |
 | Ctrl+Enter          | Review the queued selection, where supported       |
@@ -89,6 +92,20 @@ items, and Ctrl+Y does not confirm removal. Text inputs retain their editing
 chords. Ctrl+U / Ctrl+D page lists; Ctrl+C cancels active work.
 Mouse wheel moves the cursor as well as the viewport. The scrollbar supports
 seeking; an item cannot stay selected off-screen because the viewport moved alone.
+
+## Switching folders
+
+Ctrl+O opens **switch folder** without leaving the session. It lists the
+folder one level up, folders you cleaned before, projects inside the current
+folder (two levels deep) and projects beside it. Type to fuzzy-match, or type
+a path such as `~/code` or `../api` to go anywhere; a path completes from the
+folders around it. Enter rescans there.
+
+A switch runs the same checks as `sweep ui <path>`: protected roots and
+unreadable folders are refused in the card, and the new folder's own `.sweeprc`
+applies. The queue starts empty; nothing queued in the previous folder is
+removed. A switch waits while a cleanup is running. Recent folders come from
+the cleanup history Sweep already keeps; the switcher stores nothing new.
 
 ## Color and motion preferences
 

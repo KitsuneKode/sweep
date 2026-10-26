@@ -24,6 +24,11 @@ export class UiOperationSession {
     return this.closingState;
   }
 
+  /** An apply is in flight: the session must not change what it reviews. */
+  get busy(): boolean {
+    return this.active !== undefined;
+  }
+
   async run(
     request: Request,
     apply: (request: Request) => Promise<UiApplyResult>,
