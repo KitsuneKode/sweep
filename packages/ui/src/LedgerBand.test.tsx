@@ -7,6 +7,7 @@ import {
   buildLedger,
   buildQueueRule,
   buildReceiptLine,
+  holdFraction,
   displayTarget,
   LedgerBand,
   queueSafeBytes,
@@ -162,5 +163,20 @@ describe("ledger band", () => {
     setup = await render({ ...state, riskFilter: "caution" }, 120, (tier) => calls.push(tier));
     await click("caution");
     expect(calls).toEqual(["caution", "all"]);
+  });
+});
+
+describe("scan meter", () => {
+  test("never runs backwards while found keeps growing, and resets for a new scan", () => {
+    // 9 of 10 sized, then discovery adds 5 more: 9 of 15 is 60%, but the bar holds 90%.
+    let shown = holdFraction(0, 9 / 10, true);
+    expect(shown).toBeCloseTo(0.9);
+    shown = holdFraction(shown, 9 / 15, true);
+    expect(shown).toBeCloseTo(0.9);
+    shown = holdFraction(shown, 14 / 15, true);
+    expect(shown).toBeCloseTo(14 / 15);
+    // Not scanning: the real value, no hold.
+    expect(holdFraction(shown, 0.2, false)).toBeCloseTo(0.2);
+    expect(holdFraction(0, 1.4, true)).toBe(1);
   });
 });
