@@ -7,6 +7,7 @@ import { globMatch } from "@kitsunekode/sweep-core/glob-match";
 import { assertSafeCwd, assertTargetDirectory } from "@kitsunekode/sweep-core/guardrails";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
+  createSpinner,
   formatBytes,
   printInitNextSteps,
   printInitReport,
@@ -51,11 +52,17 @@ export async function handleInit(opts: InitHandlerOptions): Promise<void> {
       exitWith(EXIT.GUARDRAIL);
     }
 
+    // Only a terminal gets the live line: piped `--dry-run` output stays pure JSON.
+    const spinner = process.stdout.isTTY ? createSpinner("Looking around") : null;
     const { plan } = await runScanToPlan(
       targetDir,
       { ...DEFAULT_CONFIG, patterns: PATTERN_CATALOG.map((entry) => entry.pattern) },
-      { engine: resolveEngineBackend({ engine: opts.engine ?? "auto" }) },
-    );
+      {
+        engine: resolveEngineBackend({ engine: opts.engine ?? "auto" }),
+        onProgress: (progress) =>
+          spinner?.update(`Looking around  ${progress.scannedDirs} dirs · ${progress.found} found`),
+      },
+    ).finally(() => spinner?.stop());
 
     const findings = (byDefault: boolean): InitFinding[] =>
       PATTERN_CATALOG.filter((entry) => entry.byDefault === byDefault)

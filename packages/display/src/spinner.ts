@@ -19,10 +19,18 @@ export function createSpinner(initialText: string): Spinner {
 
   let current = initialText;
   let frameIdx = 0;
+  let stopped = false;
+
+  const paint = () => {
+    const frame = SPINNER_FRAMES[frameIdx % SPINNER_FRAMES.length] ?? "⠋";
+    // One line, never wrapped: a wrapped line cannot be redrawn with `\r`.
+    const room = Math.max(8, (process.stdout.columns ?? 80) - 3);
+    const text = current.length > room ? `${current.slice(0, room - 1)}…` : current;
+    process.stdout.write(`\r\x1b[2K${pc.cyan(frame)} ${text}`);
+  };
 
   const id = setInterval(() => {
-    const frame = SPINNER_FRAMES[frameIdx % SPINNER_FRAMES.length] ?? "⠋";
-    process.stdout.write(`\r${pc.cyan(frame)} ${current}`);
+    paint();
     frameIdx++;
   }, 80);
   id.unref();
@@ -32,6 +40,8 @@ export function createSpinner(initialText: string): Spinner {
       current = text;
     },
     stop: () => {
+      if (stopped) return;
+      stopped = true;
       clearInterval(id);
       // Clear the spinner line so stdout writes do not bleed into an alternate-screen TUI.
       process.stdout.write("\r\x1b[2K");
