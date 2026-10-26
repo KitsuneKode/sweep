@@ -3,7 +3,7 @@ import type { RiskTier, ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { bold, fg, t, type StyledText } from "@opentui/core";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { ActionButton } from "./ActionButton.js";
 import { buildBrandLine, concatStyled, riskGlyph } from "./presentation.js";
 import { compactBytesLabel } from "./sidebar.js";
@@ -153,6 +153,10 @@ export function LedgerBand({
   onRiskFilter,
 }: LedgerBandProps) {
   const ledger = useMemo(() => buildLedger(candidates), [candidates]);
+  const sized = useMonotonicFraction(
+    candidates.length > 0 ? sizedCount / candidates.length : 0,
+    scanning,
+  );
   const safeBytes = useMemo(() => queueSafeBytes(visible, selectedIds), [visible, selectedIds]);
   const colors = riskColor(tokens);
   const tilde = ledger.partial ? "~" : "";
@@ -180,7 +184,7 @@ export function LedgerBand({
   const percent =
     ledger.reclaimable > 0 ? Math.round((summary.selectedBytes / ledger.reclaimable) * 100) : 0;
   const ruleLabel = scanning
-    ? ` ${candidates.length > 0 ? Math.min(99, Math.round((sizedCount / candidates.length) * 100)) : 0}% sized`
+    ? ` ${Math.min(99, Math.floor(sized * 100))}% sized`
     : queued
       ? summary.selectedBytesPartial
         ? " partial bytes"
@@ -263,8 +267,8 @@ export function LedgerBand({
         <text
           content={concatStyled(
             buildQueueRule(
-              scanning ? sizedCount : summary.selectedBytes,
-              scanning ? candidates.length : ledger.reclaimable,
+              scanning ? sized : summary.selectedBytes,
+              scanning ? 1 : ledger.reclaimable,
               ruleWidth,
               scanning ? tokens.info : tokens.accent,
               tokens.border,
@@ -296,4 +300,28 @@ export function LedgerBand({
       </box>
     </box>
   );
+}
+
+/**
+ * A progress meter must never run backwards. `sized / found` can: discovery
+ * keeps adding to `found` while sizing catches up, so the bar reached 100%
+ * and fell back to 80%. Within one scan the shown fraction holds its high
+ * point until the real one passes it; a new scan starts from zero. The exact
+ * "N of M sized" text beside it stays literal.
+ */
+export function useMonotonicFraction(fraction: number, active: boolean): number {
+  const high = useRef(0);
+  const wasActive = useRef(active);
+  // A scan that starts again starts from zero.
+  if (active && !wasActive.current) high.current = 0;
+  wasActive.current = active;
+  high.current = holdFraction(high.current, fraction, active);
+  return active ? high.current : clampFraction(fraction);
+}
+
+const clampFraction = (value: number) => Math.max(0, Math.min(1, value));
+
+/** The next shown fraction: the real one, but never below the high point while active. */
+export function holdFraction(high: number, fraction: number, active: boolean): number {
+  return active ? Math.max(high, clampFraction(fraction)) : clampFraction(fraction);
 }
