@@ -1,4 +1,12 @@
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import {
+  createRootRoute,
+  HeadContent,
+  Outlet,
+  Scripts,
+  useRouterState,
+} from "@tanstack/react-router";
+import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import { LoadError, NotFound } from "../components/not-found";
 import { RootProvider } from "fumadocs-ui/provider/tanstack";
 import css from "../styles.css?url";
@@ -34,8 +42,30 @@ function Root() {
           </a>
           <Outlet />
         </RootProvider>
+        <Insights />
         <Scripts />
       </body>
     </html>
+  );
+}
+
+/**
+ * Vercel Web Analytics and Speed Insights: cookieless, served from the site's
+ * own origin, and inert outside a Vercel deployment. Pageviews carry the path
+ * and the matched route pattern (`/docs/$`), never query strings.
+ */
+function Insights() {
+  const { path, route } = useRouterState({
+    select: (state) => ({
+      path: state.location.pathname,
+      route: state.matches.at(-1)?.routeId ?? null,
+    }),
+    structuralSharing: true,
+  });
+  return (
+    <>
+      <Analytics path={path} route={route} />
+      <SpeedInsights route={route ?? undefined} />
+    </>
   );
 }
