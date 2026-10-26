@@ -446,3 +446,15 @@ describe("buildHeaderStats queue counts", () => {
     expect(absent).not.toContain("engine");
   });
 });
+
+describe("queue checkbox states", () => {
+  test("none, some and all each have their own glyph", async () => {
+    const { queueState, QUEUE_GLYPH } = await import("./presentation.js");
+    expect(queueState(0, 89)).toBe("none");
+    expect(queueState(1, 89)).toBe("some");
+    expect(queueState(89, 89)).toBe("all");
+    expect(queueState(0, 0)).toBe("none");
+    expect(new Set(Object.values(QUEUE_GLYPH)).size).toBe(3);
+    expect(QUEUE_GLYPH.some).not.toBe(QUEUE_GLYPH.all);
+  });
+});
