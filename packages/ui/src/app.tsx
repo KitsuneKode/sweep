@@ -109,7 +109,9 @@ import {
   type ThemeTokens,
 } from "./theme.js";
 import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
-import type { UiScanControl } from "./streaming.js";
+import type { FolderSwitcher, UiScanControl } from "./streaming.js";
+import { FolderJump } from "./FolderJump.js";
+import { rankJumpTargets, type JumpTarget } from "./folder-jump.js";
 
 export { runSweepUiStreaming } from "./streaming.js";
 export type { SweepUiStreamingOptions } from "./streaming.js";
@@ -140,6 +142,9 @@ export interface SweepAppProps {
   operations?: UiOperationSession;
   preferences?: ViewPreferences;
   onPreferencesChange?: (value: ViewPreferences) => void;
+  /** ctrl-o: switch the folder under review. Absent for static plans. */
+  folders?: FolderSwitcher;
+  initialNotice?: string;
 }
 
 function styledContentFallback(message: string, closing: boolean): ReactNode {
@@ -231,6 +236,8 @@ const HELP_VIEW: ReadonlyArray<HelpRow> = [
   ["o", "sort size · name · age"],
   ["enter · i", "open item details"],
   ["ctrl-k / F2", "search actions and settings"],
+  ["ctrl-o", "switch folder - fuzzy or a path"],
+  ["backspace", "up one folder in the tree"],
   ["y", "copy row path"],
   ["S", "save queue as a plan"],
 ];
@@ -718,6 +725,8 @@ export function SweepApp({
   operations: suppliedOperations,
   preferences,
   onPreferencesChange,
+  folders,
+  initialNotice,
 }: SweepAppProps) {
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) =>
     createUiState(p, {
@@ -731,6 +740,13 @@ export function SweepApp({
   const [filterCursor, setFilterCursor] = useState(0);
   const filterCursorRef = useRef(0);
   const [showMenu, setShowMenuState] = useState(false);
+  const [showJump, setShowJumpState] = useState(false);
+  const [jumpTargets, setJumpTargets] = useState<JumpTarget[]>([]);
+  const [jumpQuery, setJumpQuery] = useState("");
+  const jumpQueryRef = useRef("");
+  const [jumpCursor, setJumpCursor] = useState(0);
+  const jumpCursorRef = useRef(0);
+  const [jumpError, setJumpError] = useState<string | null>(null);
   type ConfigSave = { path: string; delta: ProjectSweeprcDelta; revision: string };
   const [configSave, setConfigSave] = useState<ConfigSave | null>(null);
   const configSaveRef = useRef<ConfigSave | null>(null);
@@ -795,7 +811,12 @@ export function SweepApp({
   // on an empty queue, space on a blocked row). Outcomes that went as asked
   // are "success"; plain information is "neutral", so amber keeps meaning
   // "look at this".
-  const [notice, setNoticeState] = useState<Notice | null>(null);
+  // A folder switch arrives with a one-line note (where we are, config warnings).
+  const [notice, setNoticeState] = useState<Notice | null>(
+    initialNotice
+      ? { text: initialNotice, tone: initialNotice.startsWith("config:") ? "warning" : "neutral" }
+      : null,
+  );
   const setNotice = useCallback((text: string | null, tone: NoticeTone = "warning") => {
     setNoticeState(text === null ? null : { text, tone });
   }, []);
@@ -815,6 +836,7 @@ export function SweepApp({
     | "scanError"
     | "applying"
     | "menu"
+    | "jump"
     | "filter"
     | "folderInfo"
     | "configSave"
@@ -1437,6 +1459,41 @@ export function SweepApp({
     setShowFilterState(open);
   };
 
+  const setJump = (open: boolean) => {
+    if (open) {
+      if (!folders || !openModal("jump")) return;
+      jumpQueryRef.current = "";
+      jumpCursorRef.current = 0;
+      setJumpQuery("");
+      setJumpCursor(0);
+      setJumpError(null);
+      // One bounded look around per open; typing only re-ranks it.
+      setJumpTargets(folders.list());
+    } else closeModal("jump");
+    setShowJumpState(open);
+  };
+  const jumpResults = useMemo(
+    () => (showJump ? rankJumpTargets(jumpTargets, jumpQuery, state.targetDir) : []),
+    [showJump, jumpTargets, jumpQuery, state.targetDir],
+  );
+  const updateJumpQuery = (value: string) => {
+    jumpQueryRef.current = value.slice(0, 512);
+    jumpCursorRef.current = 0;
+    setJumpQuery(jumpQueryRef.current);
+    setJumpCursor(0);
+    setJumpError(null);
+  };
+  const pickJump = (index: number) => {
+    // Never act on a list painted for an older query.
+    if (!folders || !openModalsRef.current.has("jump") || jumpQueryRef.current !== jumpQuery)
+      return;
+    const choice = jumpResults[index];
+    if (!choice) return;
+    const refusal = folders.go(choice.path);
+    // On success this instance unmounts; on refusal the card stays and says why.
+    if (refusal !== null) setJumpError(refusal);
+  };
+
   const setMenu = (open: boolean) => {
     if (open) {
       if (!openModal("menu")) return;
@@ -1714,6 +1771,12 @@ export function SweepApp({
       disabled: false,
     },
     {
+      label: "Switch to another folder…",
+      shortcut: "ctrl+o",
+      run: () => setJump(true),
+      disabled: !folders,
+    },
+    {
       label: "Browse all folders",
       shortcut: "",
       run: () => mutate((s) => setScopeFilter(s, null)),
@@ -1869,6 +1932,33 @@ export function SweepApp({
       } else if (key.name === "c") {
         applyFilterEdit(clearFacets);
       }
+      return;
+    }
+    if (!preempted && openModalsRef.current.has("jump")) {
+      if ((key.name === "c" && key.ctrl) || key.name === "ctrl+c") {
+        key.preventDefault();
+        noteCtrlCHandled();
+        setJump(false);
+        finalize({ type: "abort" });
+      } else if (key.name === "escape" || (key.ctrl && !key.meta && key.name === "o")) {
+        key.preventDefault();
+        setJump(false);
+      } else if (["return", "enter"].includes(key.name)) {
+        key.preventDefault();
+        pickJump(jumpCursorRef.current);
+      } else if (["up", "down", "tab"].includes(key.name)) {
+        key.preventDefault();
+        const count = jumpResults.length;
+        if (count === 0) return;
+        const delta = key.name === "up" || (key.name === "tab" && key.shift) ? -1 : 1;
+        jumpCursorRef.current = (jumpCursorRef.current + delta + count) % count;
+        setJumpCursor(jumpCursorRef.current);
+      }
+      return;
+    }
+    if (key.ctrl && !key.meta && key.name === "o" && folders && openModalsRef.current.size === 0) {
+      key.preventDefault();
+      setJump(true);
       return;
     }
     if (!preempted && openModalsRef.current.has("menu")) {
@@ -2084,7 +2174,7 @@ export function SweepApp({
           ? { kind: "confirm" }
           : configSave
             ? { kind: "configSave" }
-            : patternInfo !== null || folderInfo !== null || showMenu || showFilter
+            : patternInfo !== null || folderInfo !== null || showMenu || showFilter || showJump
               ? { kind: "help" }
               : showInspect
                 ? { kind: "inspect" }
@@ -2283,6 +2373,19 @@ export function SweepApp({
             onToggle={toggleFilterOption}
             onClear={() => applyFilterEdit(clearFacets)}
             onClose={() => setFilterPicker(false)}
+          />
+        ) : null}
+        {showJump ? (
+          <FolderJump
+            tokens={tokens}
+            targetDir={state.targetDir}
+            query={jumpQuery}
+            results={jumpResults}
+            cursor={jumpCursor}
+            queuedCount={summary.selectedCount}
+            error={jumpError}
+            onInput={updateJumpQuery}
+            onPick={pickJump}
           />
         ) : null}
         {folderInfo ? (

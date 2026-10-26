@@ -15,6 +15,7 @@ sweep ui ~/projects
 # Queue safe items → Review queue → confirm → read the cleanup receipt.
 # Click a folder name to browse; use its checkbox to queue artifacts.
 # Ctrl+K (or F2) searches actions, settings and shortcuts.
+# Ctrl+O switches to another folder: fuzzy-find a nearby project or type a path.
 ```
 
 The terminal interface starts with an empty queue. Browsing, sorting and filtering

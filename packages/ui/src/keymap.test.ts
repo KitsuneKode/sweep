@@ -830,3 +830,13 @@ describe("scope queue gestures", () => {
     expect(state.selectionTouched.has("cand_1")).toBe(true);
   });
 });
+
+describe("parentScope", () => {
+  test("steps up one folder, then out to everything", async () => {
+    const { parentScope } = await import("./keymap.js");
+    expect(parentScope("apps/web/src")).toBe("apps/web");
+    expect(parentScope("apps")).toBeNull();
+    expect(parentScope("")).toBeNull();
+    expect(parentScope(null)).toBeNull();
+  });
+});

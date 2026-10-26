@@ -16,8 +16,15 @@ import type {
   SelectionPolicy,
   SweepConfig,
 } from "@kitsunekode/sweep-protocol";
-import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
+import { PROTOCOL_VERSION, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
+import { readHistory } from "@kitsunekode/sweep-core/history";
 import { SweepApp, UiErrorBoundary } from "./app.js";
+import {
+  discoverJumpTargets,
+  tildePath,
+  type JumpTarget,
+  type RecentClean,
+} from "./folder-jump.js";
 import type { SweepUiOutcome, UiApplyResult, UiApplyRequest, UiApplyFn } from "./outcome.js";
 import { openUiSession } from "./runtime.js";
 import type { SweepUiInitOptions } from "./state.js";
@@ -92,6 +99,41 @@ export interface SweepUiStreamingOptions {
    */
   apply?: UiApplyFn;
   init?: SweepUiInitOptions;
+  /**
+   * Re-run the host's target resolution for a folder picked in the session
+   * (ctrl-o): the same guardrails and `.sweeprc` lookup as a fresh `sweep ui
+   * <path>`. Throws with a user-facing message to refuse. Absent = no switching.
+   */
+  switchTarget?: (path: string) => SwitchedTarget;
+}
+
+export interface SwitchedTarget {
+  targetDir: string;
+  config: SweepConfig;
+  init?: SweepUiInitOptions;
+  /** Config warnings: stderr would paint over the UI, so they arrive here. */
+  warnings?: string[];
+}
+
+/** What the app needs to offer and perform a folder switch. */
+export interface FolderSwitcher {
+  list: () => JumpTarget[];
+  /** Null when the switch happened; otherwise why it was refused. */
+  go: (path: string) => string | null;
+}
+
+/** Recent cleanups, newest first, one per folder - suggestions only. */
+function recentCleans(): RecentClean[] {
+  try {
+    const seen = new Set<string>();
+    return [...readHistory(100)]
+      .reverse()
+      .filter((entry) => !seen.has(entry.targetDir) && seen.add(entry.targetDir))
+      .slice(0, 8)
+      .map(({ targetDir, ts, bytesFreed }) => ({ targetDir, ts, bytesFreed }));
+  } catch {
+    return [];
+  }
 }
 
 const BATCH_FLUSH_MS = 60;
@@ -137,7 +179,16 @@ export async function runSweepUiStreaming(
     latestPreferences = value;
   };
   const session = await openUiSession();
+  // The folder under review. ctrl-o swaps all three together; nothing else
+  // in the session may hold on to an older target.
+  let target: SwitchedTarget = {
+    targetDir: options.targetDir,
+    config: options.config,
+    ...(options.init ? { init: options.init } : {}),
+  };
   let currentConfig = options.config;
+  let generation = 0;
+  let switchNotice: string | undefined;
   // Mutable so `E` can flip backends between generations; `start` reads it
   // fresh each run so an in-flight scan is never disturbed mid-flight.
   let activeEngine = options.engine;
@@ -206,7 +257,7 @@ export async function runSweepUiStreaming(
         let finalPlan: ScanPlan | undefined;
         if (activeEngine === "rust") {
           const { scanToPlanViaRust } = await import("@kitsunekode/sweep-core/rust-engine");
-          const plan = await scanToPlanViaRust(options.targetDir, {
+          const plan = await scanToPlanViaRust(target.targetDir, {
             config: currentConfig,
             resourceProfile: options.resourceProfile,
             waitForConsumer: () => batcher.waitForConsumer(),
@@ -222,7 +273,7 @@ export async function runSweepUiStreaming(
           skippedDirs = plan.summary.skippedDirs ?? 0;
           finalPlan = plan;
         } else {
-          const result = await scan(options.targetDir, currentConfig, false, {
+          const result = await scan(target.targetDir, currentConfig, false, {
             resourceProfile: options.resourceProfile,
             waitForConsumer: () => batcher.waitForConsumer(),
             onEntry: record,
@@ -233,7 +284,7 @@ export async function runSweepUiStreaming(
           });
           scannedDirs = result.scannedDirs;
           skippedDirs = result.skippedDirs;
-          finalPlan = buildPlan(options.targetDir, result, options.selectionPolicy);
+          finalPlan = buildPlan(target.targetDir, result, options.selectionPolicy);
         }
 
         await batcher.finish();
@@ -247,7 +298,7 @@ export async function runSweepUiStreaming(
       }
     },
     syncPatterns(disabledPatterns, extraPatterns) {
-      currentConfig = buildRescanConfig(options.config, {
+      currentConfig = buildRescanConfig(target.config, {
         disabledPatterns,
         extraPatterns,
       });
@@ -266,27 +317,70 @@ export async function runSweepUiStreaming(
       : {}),
   });
 
-  try {
-    session.root.render(
-      <UiErrorBoundary onError={session.viewFailed}>
-        <SweepApp
-          plan={emptyPlan(options.targetDir, options.selectionPolicy)}
-          engine={options.engine}
-          {...(options.dryRun ? { dryRun: true } : {})}
-          {...(options.trash ? { trash: true } : {})}
-          {...(options.init ? { init: options.init } : {})}
-          initiallyScanning
-          scan={makeControl()}
-          operations={session.operations}
-          {...(preferences ? { preferences } : {})}
-          onPreferencesChange={onPreferencesChange}
-          onDone={session.finish}
-        />
-      </UiErrorBoundary>,
-    );
-  } catch (error) {
-    session.viewFailed(error);
-  }
+  // A switched-to folder keeps the theme and sort the user just chose.
+  const currentPreferences = () => latestPreferences ?? preferences;
+  let render: () => void = () => {};
+  const folders: FolderSwitcher | undefined = options.switchTarget
+    ? {
+        list: () => discoverJumpTargets(target.targetDir, recentCleans()),
+        go: (path) => {
+          if (session.operations.busy || session.operations.closing)
+            return "Wait for the running cleanup to finish, then switch.";
+          let next: SwitchedTarget;
+          try {
+            next = options.switchTarget!(path);
+          } catch (error) {
+            // One readable sentence: guardrail messages carry their own line breaks.
+            const message = error instanceof Error ? error.message : String(error);
+            return sanitizeTerminalText(
+              message
+                .split("\n")
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .join(" "),
+            ).slice(0, 240);
+          }
+          target = next;
+          currentConfig = next.config;
+          generation++;
+          switchNotice = next.warnings?.[0]
+            ? `config: ${sanitizeTerminalText(next.warnings[0]).slice(0, 160)}`
+            : `now reviewing ${sanitizeTerminalText(tildePath(next.targetDir))}`;
+          // A fresh app instance: the old one's unmount aborts its scan, and
+          // no queue, filter or scope from the previous folder survives.
+          render();
+          return null;
+        },
+      }
+    : undefined;
+
+  render = () => {
+    try {
+      session.root.render(
+        <UiErrorBoundary onError={session.viewFailed}>
+          <SweepApp
+            key={generation}
+            plan={emptyPlan(target.targetDir, options.selectionPolicy)}
+            engine={options.engine}
+            {...(options.dryRun ? { dryRun: true } : {})}
+            {...(options.trash ? { trash: true } : {})}
+            {...(target.init ? { init: target.init } : {})}
+            initiallyScanning
+            scan={makeControl()}
+            {...(folders ? { folders } : {})}
+            {...(switchNotice ? { initialNotice: switchNotice } : {})}
+            operations={session.operations}
+            {...(currentPreferences() ? { preferences: currentPreferences()! } : {})}
+            onPreferencesChange={onPreferencesChange}
+            onDone={session.finish}
+          />
+        </UiErrorBoundary>,
+      );
+    } catch (error) {
+      session.viewFailed(error);
+    }
+  };
+  render();
   const outcome = await session.done;
   if (
     latestPreferences &&
