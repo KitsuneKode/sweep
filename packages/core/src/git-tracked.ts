@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
+import { isRustEngineAvailable, resolveRustEngineBinary } from "./rust-engine.js";
 
 /**
  * Build output is never committed. A candidate that contains (or is) a file
@@ -57,8 +58,35 @@ function findRepoRoot(start: string, cache: Map<string, string | null>): string 
  * The subset of `paths` that are, or contain, git-tracked files. Paths outside
  * any repository, and repositories git cannot read, are reported as untracked:
  * this check only ever adds protection, it never removes any.
+ *
+ * The native engine answers this by reading each repository's index itself,
+ * in parallel and without running git (about ten times faster on a tree of
+ * many repositories). Without it, or if it fails, git answers.
  */
 export function gitTrackedPaths(paths: readonly string[]): Set<string> {
+  if (paths.length === 0) return new Set();
+  return gitTrackedPathsViaEngine(paths) ?? gitTrackedPathsViaGit(paths);
+}
+
+/** Null when the engine is unavailable or did not answer cleanly. */
+export function gitTrackedPathsViaEngine(paths: readonly string[]): Set<string> | null {
+  if (!isRustEngineAvailable()) return null;
+  const result = spawnSync(resolveRustEngineBinary(), ["tracked"], {
+    input: `${paths.join("\0")}\0`,
+    encoding: "utf8",
+    timeout: 60_000,
+    killSignal: "SIGKILL",
+    maxBuffer: 256 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  if (result.status !== 0 || typeof result.stdout !== "string") return null;
+  // Only ever answer about paths that were asked about.
+  const asked = new Set(paths);
+  return new Set(result.stdout.split("\0").filter((path) => asked.has(path)));
+}
+
+/** One hardened `git ls-files` per repository. */
+export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
   const tracked = new Set<string>();
   if (paths.length === 0) return tracked;
   const rootCache = new Map<string, string | null>();
