@@ -62,8 +62,17 @@ describe("native terminal worst-case review", () => {
           },
         );
         try {
+          // Mount first: the keyboard handler attaches on the first commit,
+          // and a key pressed before it would be lost.
+          await act(async () => {
+            await setup.renderOnce();
+          });
           await act(async () => {
             if (mode === "Huge") setup.mockInput.pressKey(KeyCodes.END);
+            await setup.renderOnce();
+          });
+          // OpenTUI 0.6 paints a committed cursor move on the following frame.
+          await act(async () => {
             await setup.renderOnce();
           });
           const frame = setup.captureCharFrame();

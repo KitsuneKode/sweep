@@ -108,20 +108,18 @@ test("a narrow rendered pane keeps sizes visible beside CJK and emoji names", as
 });
 
 test("artifact hover survives an unchanged view and clears when its row is removed", async () => {
-  const candidates = ["a", "b", "c"].map(
-    (id): ScanCandidate => ({
-      id,
-      name: `modules-${id}`,
-      path: `/tmp/hover/${id}`,
-      kind: "node_modules",
-      estimatedBytes: 1,
-      entryType: "directory",
-      isSymlink: false,
-      riskTier: "safe",
-      reasons: [],
-      selectedByDefault: false,
-    }),
-  );
+  const candidates = ["a", "b", "c"].map((id): ScanCandidate => ({
+    id,
+    name: `modules-${id}`,
+    path: `/tmp/hover/${id}`,
+    kind: "node_modules",
+    estimatedBytes: 1,
+    entryType: "directory",
+    isSymlink: false,
+    riskTier: "safe",
+    reasons: [],
+    selectedByDefault: false,
+  }));
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const initial: UiDisplayRow[] = candidates
     .slice(0, 2)
