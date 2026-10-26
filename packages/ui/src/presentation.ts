@@ -192,15 +192,17 @@ export function buildArtifactRowContent(
   const blocked = candidate.riskTier === "blocked";
   // Queue and risk have independent shapes, even on a focused or monochrome row.
   const markShape = blocked ? BLOCKED_MARK : selected ? SELECTED_MARK : UNSELECTED_MARK;
+  // The ring says queued or not; the risk glyph beside it says how risky.
+  // Only dangerous rings keep their colour - rare enough that it should shout.
   const markColor = isCurrent
     ? tokens.selectionText
     : blocked
       ? tokens.blocked
-      : candidate.riskTier === "safe"
-        ? selected
-          ? tokens.accent
-          : tokens.textDim
-        : colors[candidate.riskTier];
+      : selected
+        ? tokens.accent
+        : candidate.riskTier === "dangerous"
+          ? colors.dangerous
+          : tokens.textDim;
   const mark = fg(markColor)(markShape);
   // Safe is the common case; its mark recedes so caution and danger stand out.
   const risk = fg(
@@ -251,7 +253,9 @@ export function buildArtifactRowContent(
     // Touched within the week reads as "probably in use": the one age the
     // eye should catch before deleting.
     const recent = metrics !== undefined && isRecent(candidate.modifiedMs, metrics.now);
-    const ageColor = isCurrent ? tokens.selectionText : recent ? tokens.warning : tokens.textDim;
+    // Recent means "in use", not "risky": it takes the info hue, so orange
+    // stays reserved for the caution tier.
+    const ageColor = isCurrent ? tokens.selectionText : recent ? tokens.info : tokens.textDim;
     const age = metrics ? formatAge(candidate.modifiedMs, metrics.now) : "";
     parts.push(
       t`${" ".repeat(COLUMN_GAP)}${fg(ageColor)(padCells(age, widths.ageWidth, "right"))}`,
@@ -299,15 +303,18 @@ export function splitNameCell(
   }
 
   const minName = Math.min(cellWidth(name), width);
-  const parentBudget = width - minName - 1;
+  const parentBudget = width - minName - 2;
   if (parentBudget < 4) {
     return { nameText: truncateEnd(name, width), parentText: "" };
   }
 
+  // The folder follows the name it qualifies; the cell pads after it, so
+  // paths start where the eye already is instead of floating to the edge.
   const parentShown = truncateMiddle(parent, parentBudget);
-  const nameBudget = width - cellWidth(parentShown) - 1;
-  const namePadded = padCells(name, nameBudget);
-  return { nameText: namePadded, parentText: ` ${parentShown}` };
+  return {
+    nameText: name,
+    parentText: padCells(`  ${parentShown}`, width - cellWidth(name)),
+  };
 }
 
 function formatSizeCell(bytes: number, width: number, partial: boolean): string {
@@ -557,7 +564,7 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
   const now = Date.now();
   const ageText = describeAge(candidate.modifiedMs, now);
   const age = ageText
-    ? fg(isRecent(candidate.modifiedMs, now) ? tokens.warning : tokens.textMuted)(`  ${ageText}`)
+    ? fg(isRecent(candidate.modifiedMs, now) ? tokens.info : tokens.textMuted)(`  ${ageText}`)
     : "";
   const path = fg(tokens.textSecondary)(truncateMiddle(sanitizeTerminalText(candidate.path), 64));
   const flag = candidate.isSymlink
@@ -763,7 +770,7 @@ export function buildSidebarLine(options: SidebarLineOptions): StyledText {
   // ncdu-style share of space: the eye finds the heavy folders before it reads.
   const bar =
     showBytes && barWidth > 0
-      ? fg(bytesTone(bytes, tokens).strong ? tokens.accent : tokens.border)(
+      ? fg(bytesTone(bytes, tokens).strong ? tokens.textMuted : tokens.border)(
           sizeBar(bytes, maxBytes, barWidth),
         )
       : "";

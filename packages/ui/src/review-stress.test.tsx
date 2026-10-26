@@ -82,7 +82,11 @@ describe("native terminal worst-case review", () => {
           expect(outcomes).toEqual([]);
           for (const line of frame.split("\n")) expect(cellWidth(line)).toBeLessThanOrEqual(width);
           if (mode === "Huge") {
-            expect(frame).toMatch(/9993/);
+            // End reached the last artifact: the cursor rail sits on the
+            // list's bottom row, directly above the pane border.
+            const lines = frame.split("\n");
+            const cursorLine = lines.findIndex((line) => line.includes("\u258C"));
+            expect(lines[cursorLine + 1]).toContain("\u2570");
             const pending: Renderable[] = [setup.renderer.root];
             let mounted = 0;
             while (pending.length) {

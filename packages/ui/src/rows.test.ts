@@ -6,6 +6,7 @@ import {
   lastSelectableRow,
   moveItemRowIndex,
   clearRowsCache,
+  owningHeaderIndex,
   type UiDisplayRow,
 } from "./rows.js";
 import {
@@ -73,14 +74,22 @@ test.skipIf(process.platform === "win32")(
     const state = createUiState(
       planWith([make("literal", "/repo/a\\b/target"), make("nested", "/repo/a/b/target")]),
     );
-    expect(buildDisplayRows(state).filter((row) => row.kind === "header")).toHaveLength(2);
+    // Two folders, never merged: each artifact stands alone under its own path.
+    expect(
+      buildDisplayRows(state).map((row) => (row.kind === "item" ? row.groupLabel : row.label)),
+    ).toHaveLength(2);
+    expect(
+      new Set(
+        buildDisplayRows(state).map((row) => (row.kind === "item" ? row.groupLabel : row.label)),
+      ).size,
+    ).toBe(2);
     const scoped = setScopeFilter(state, "a/b");
     expect(getVisibleCandidates(scoped).map((c) => c.id)).toEqual(["nested"]);
     const queued = toggleScopeSelection(state, "a/b");
     expect([...queued.state.selectedIds]).toEqual(["nested"]);
     expect(queued.queued).toBe(1);
     expect(buildDisplayRows(scoped).filter((row) => row.kind === "item")).toEqual([
-      { kind: "item", candidateId: "nested", groupLabel: "a/b/" },
+      { kind: "item", candidateId: "nested", groupLabel: "a/b/", standalone: true },
     ]);
     const literal = setScopeFilter({ ...state, orderPinned: true }, "a\\b");
     expect(getVisibleCandidates(literal).map((c) => c.id)).toEqual(["literal"]);
@@ -111,7 +120,7 @@ function planWith(candidates: ScanPlan["candidates"]): ScanPlan {
 }
 
 describe("buildDisplayRows", () => {
-  test("emits a heading even when a parent has only one artifact", () => {
+  test("lists a folder's only artifact as one standalone row naming its folder", () => {
     const state = createUiState(
       planWith([
         {
@@ -141,16 +150,16 @@ describe("buildDisplayRows", () => {
       ]),
     );
 
-    // A lone item with no heading reads as a member of the group above it -
-    // the heading is what keeps "which scope does this row belong to" stable.
+    // No header to repeat the folder: the row carries it, and header-relative
+    // keys see it as ungrouped rather than part of the group above.
     const rows = buildDisplayRows(state);
-    expect(rows.map((row) => row.kind)).toEqual(["header", "item", "header", "item"]);
-    expect(
-      rows
-        .filter((row) => row.kind === "header")
-        .map((row) => (row.kind === "header" ? row.label : ""))
-        .sort(),
-    ).toEqual(["apps/cli/", "apps/docs/"]);
+    expect(rows.map((row) => row.kind)).toEqual(["item", "item"]);
+    expect(rows.every((row) => row.kind === "item" && row.standalone)).toBe(true);
+    expect(rows.map((row) => (row.kind === "item" ? row.groupLabel : "")).sort()).toEqual([
+      "apps/cli/",
+      "apps/docs/",
+    ]);
+    expect(owningHeaderIndex(rows, 1)).toBe(-1);
   });
 
   test("keeps a heading when several artifacts share a parent", () => {
@@ -361,13 +370,15 @@ test("selection refreshes headers while reusing ordered item rows", () => {
     reasons: [],
     selectedByDefault: false,
   };
-  const state = createUiState(planWith([candidate]));
+  const sibling = { ...candidate, id: "b", path: "/repo/app/.turbo", name: ".turbo" };
+  const state = createUiState(planWith([candidate, sibling]));
   const before = buildDisplayRows(state);
   const after = buildDisplayRows({ ...state, selectedIds: new Set(["a"]) });
   expect(after[1]).toBe(before[1]);
-  expect(after[0]).toMatchObject({ selectedCount: 1, bytes: 42 });
+  expect(after[0]).toMatchObject({ selectedCount: 1, bytes: 84 });
   const filtered = buildDisplayRows({ ...state, filter: "is:queued" });
   expect(filtered).toHaveLength(0);
+  // One queued artifact left in the folder: it stands alone.
   const queued = buildDisplayRows({ ...state, filter: "is:queued", selectedIds: new Set(["a"]) });
-  expect(queued).toHaveLength(2);
+  expect(queued).toHaveLength(1);
 });

@@ -23,6 +23,12 @@ export type UiDisplayRow =
        * parent path when it would just repeat this.
        */
       groupLabel: string;
+      /**
+       * A folder's only artifact, listed without a header. The row names its
+       * own folder, so it never reads as part of the group above, and
+       * header-relative keys (fold, sticky header) treat it as ungrouped.
+       */
+      standalone?: true;
     };
 
 function itemComparator(sortBy: UiSortBy): (a: ScanCandidate, b: ScanCandidate) => number {
@@ -257,13 +263,22 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
       state.selectedIds.has(candidate.id),
     ).length;
 
+    // A folder with one artifact is one row: a header would only repeat it.
+    // The row carries its folder path, so it cannot be mistaken for part of
+    // the group above. Live (pinned) scans keep every header - there a
+    // second artifact arriving would push a heading in above the cursor.
+    if (groupCandidates.length === 1) {
+      rows.push({
+        kind: "item",
+        candidateId: groupCandidates[0]!.id,
+        groupLabel: group.label,
+        standalone: true,
+      });
+      continue;
+    }
+
     const collapsed = state.collapsedGroups.has(group.key);
     const bytes = groupCandidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
-    // Every group gets a header - even single-item ones. An orphan row under
-    // the previous group's heading reads as belonging to that group, which is
-    // how a root-level artifact could end up looking like it lived inside the
-    // group above it. While pinned this is doubly required: without it a
-    // group's second artifact would push a heading in above the cursor.
     rows.push({
       kind: "header",
       groupKey: group.key,
@@ -374,7 +389,10 @@ export function lastSelectableRow(rows: UiDisplayRow[]): number {
 /** Index of the header that owns `rowIndex`, or -1 at the top level. */
 export function owningHeaderIndex(rows: UiDisplayRow[], rowIndex: number): number {
   for (let i = Math.min(rowIndex, rows.length - 1); i >= 0; i--) {
-    if (rows[i]?.kind === "header") return i;
+    const row = rows[i];
+    if (row?.kind === "header") return i;
+    // A standalone row belongs to no header; the one above is a neighbour's.
+    if (row?.kind === "item" && row.standalone) return -1;
   }
   return -1;
 }

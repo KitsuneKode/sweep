@@ -587,7 +587,7 @@ describe("sweep ui state", () => {
   });
 
   test("toggleGroup keeps the cursor on its candidate when a group above folds", () => {
-    // Rows: header(pkg-a), cand_a, header(pkg-b), cand_b1, cand_b2.
+    // Rows: cand_a (alone in pkg-a), header(pkg-b), cand_b1, cand_b2.
     let state = createUiState(createMultiScopePlan());
     const b1Index = buildDisplayRows(state).findIndex(
       (row) => row.kind === "item" && row.candidateId === "cand_b1",
@@ -603,17 +603,17 @@ describe("sweep ui state", () => {
 
   test("toggleGroup snaps to a neighbor when the cursor's own group folds", () => {
     let state = createUiState(createMultiScopePlan());
-    const aIndex = buildDisplayRows(state).findIndex(
-      (row) => row.kind === "item" && row.candidateId === "cand_a",
+    const bIndex = buildDisplayRows(state).findIndex(
+      (row) => row.kind === "item" && row.candidateId === "cand_b1",
     );
-    state = setRowIndex(state, aIndex);
+    state = setRowIndex(state, bIndex);
 
-    state = toggleGroup(state, "pkg-a");
+    state = toggleGroup(state, "pkg-b");
 
-    // cand_a left the display - the cursor must still rest on a real item.
+    // pkg-b's rows left the display - the cursor must still rest on a real item.
     const current = getCurrentCandidate(state);
     expect(current).toBeDefined();
-    expect(current?.id).not.toBe("cand_a");
+    expect(current?.id).toBe("cand_a");
     const rows = buildDisplayRows(state);
     expect(rows[state.rowIndex]?.kind).toBe("item");
   });

@@ -87,6 +87,35 @@ async function mount(onDone: (outcome: SweepUiOutcome) => void) {
 }
 
 describe("sweep TUI render", () => {
+  test("the filter picker toggles a facet into the filter and closes on enter", async () => {
+    const outcomes: SweepUiOutcome[] = [];
+    const setup = await mount((outcome) => outcomes.push(outcome));
+    const press = async (key: string) => {
+      await act(async () => {
+        setup.mockInput.pressKey(key);
+        await setup.flush();
+        await setup.renderOnce();
+      });
+      // A committed change paints on the following frame.
+      await act(async () => {
+        await setup.renderOnce();
+      });
+    };
+    await press("f");
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("RISK");
+    expect(frame).toContain("KIND");
+    // Cursor starts on the first option; space toggles it on.
+    await press(" ");
+    frame = setup.captureCharFrame();
+    expect(frame).toMatch(/● /);
+    await press("\r");
+    frame = setup.captureCharFrame();
+    expect(frame).not.toContain("RISK");
+    expect(frame).toMatch(/Filter 1/);
+    expect(outcomes).toEqual([]);
+  });
+
   test("pattern saves review the file, reject stale content and preserve other settings", async () => {
     const root = mkdtempSync(join(tmpdir(), "sweep-config-review-"));
     configRoots.push(root);
@@ -237,9 +266,21 @@ describe("sweep TUI render", () => {
       const frame = setup.captureCharFrame();
       expect(outcomes).toEqual([]);
       expect(frame).toContain(word);
-      expect(frame).toContain("Largest first");
       expect(frame).not.toMatch(/Delete \d+ item|Move \d+ item|Remove \d+ item/);
       expect(frame).toContain("SEARCH");
+      // The bar shows the query while filtering; leave search to read the
+      // sort, which the burst's `o` must not have changed.
+      await act(async () => {
+        setup.mockInput.pressKey("\x1b[27u");
+        await setup.flush();
+      });
+      await act(async () => {
+        setup.mockInput.pressKey("\x1b[27u");
+        await setup.flush();
+        await setup.renderOnce();
+      });
+      expect(setup.captureCharFrame()).toContain("Largest first");
+      expect(outcomes).toEqual([]);
     },
   );
 

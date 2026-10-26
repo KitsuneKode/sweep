@@ -94,6 +94,14 @@ import {
 } from "./state.js";
 import { getVisibleCandidates } from "./state/selectors.js";
 import {
+  clearFacets,
+  facetOptions,
+  facetTallies,
+  readFacets,
+  toggleFacet,
+} from "./filter-facets.js";
+import { FilterPicker } from "./FilterPicker.js";
+import {
   cycleThemeMode,
   noticeColor,
   resolveTheme,
@@ -219,6 +227,7 @@ const HELP_VIEW: ReadonlyArray<HelpRow> = [
   [null, "view"],
   ["/", "filter list · tab cycles panes"],
   ["1 - 4", "risk filter"],
+  ["f", "filter by risk · kind · size · age"],
   ["o", "sort size · name · age"],
   ["enter · i", "open item details"],
   ["ctrl-k / F2", "search actions and settings"],
@@ -718,6 +727,9 @@ export function SweepApp({
     }),
   );
   const [showHelp, setShowHelpState] = useState(false);
+  const [showFilter, setShowFilterState] = useState(false);
+  const [filterCursor, setFilterCursor] = useState(0);
+  const filterCursorRef = useRef(0);
   const [showMenu, setShowMenuState] = useState(false);
   type ConfigSave = { path: string; delta: ProjectSweeprcDelta; revision: string };
   const [configSave, setConfigSave] = useState<ConfigSave | null>(null);
@@ -803,6 +815,7 @@ export function SweepApp({
     | "scanError"
     | "applying"
     | "menu"
+    | "filter"
     | "folderInfo"
     | "configSave"
     | "patternInfo";
@@ -1113,6 +1126,33 @@ export function SweepApp({
   }, []);
 
   const visibleItems = useMemo(() => getVisibleCandidates(state), [state]);
+  // Facet counts describe the current folder scope, before any filter, so
+  // they hold still while options are toggled.
+  const scopeCandidates = useMemo(
+    () => getVisibleCandidates({ ...state, filter: "", riskFilter: "all" }),
+    [state.candidates, state.scopeFilter, state.targetDir],
+  );
+  const filterOptions = useMemo(() => facetOptions(scopeCandidates), [scopeCandidates]);
+  const filterTallies = useMemo(
+    () => (showFilter ? facetTallies(scopeCandidates, filterOptions, state.selectedIds) : []),
+    [showFilter, scopeCandidates, filterOptions, state.selectedIds],
+  );
+  const toggleFilterOption = (index: number) => {
+    const option = filterOptions[index];
+    if (!option || !openModalsRef.current.has("filter")) return;
+    filterCursorRef.current = index;
+    setFilterCursor(index);
+    applyFilterEdit((current) => toggleFacet(current, option));
+  };
+  /**
+   * The picker is the one overlay whose job is to edit state, and only the
+   * filter string. `mutate` refuses input while any overlay is open, so the
+   * picker dispatches this narrow edit itself - nothing else can ride along.
+   */
+  const applyFilterEdit = (edit: (filter: string) => string) => {
+    if (!openModalsRef.current.has("filter") || openModalsRef.current.size !== 1) return;
+    dispatch({ type: "mutate", fn: (s) => setFilter(s, edit(s.filter)) });
+  };
   const displayRows = useMemo(() => buildDisplayRows(state), [state]);
   const candidatesById = useMemo(() => candidateIndex(state.candidates), [state.candidates]);
 
@@ -1386,6 +1426,15 @@ export function SweepApp({
     if (pendingSingleIdRef.current !== null) confirmSingle();
     else applyPlan();
     setPendingApply(false);
+  };
+
+  const setFilterPicker = (open: boolean) => {
+    if (open) {
+      if (!openModal("filter")) return;
+      filterCursorRef.current = 0;
+      setFilterCursor(0);
+    } else closeModal("filter");
+    setShowFilterState(open);
   };
 
   const setMenu = (open: boolean) => {
@@ -1743,6 +1792,12 @@ export function SweepApp({
       disabled: false,
     },
     { label: "Help and shortcuts", shortcut: "?", run: () => setShowHelp(true), disabled: false },
+    {
+      label: "Filter by risk, kind, size or age",
+      shortcut: "f",
+      run: () => setFilterPicker(true),
+      disabled: false,
+    },
   ];
   const matchingCommands = (query: string) => {
     const terms = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
@@ -1792,6 +1847,28 @@ export function SweepApp({
         closeFolderInfo();
         finalize({ type: "abort" });
       } else if (["escape", "q"].includes(key.name)) closeFolderInfo();
+      return;
+    }
+    if (!preempted && openModalsRef.current.has("filter")) {
+      key.preventDefault();
+      if ((key.name === "c" && key.ctrl) || key.name === "ctrl+c") {
+        noteCtrlCHandled();
+        setFilterPicker(false);
+        finalize({ type: "abort" });
+      } else if (["escape", "return", "enter", "f", "q"].includes(key.name)) {
+        setFilterPicker(false);
+      } else if (["up", "down", "k", "j", "tab"].includes(key.name)) {
+        const count = filterOptions.length;
+        if (count === 0) return;
+        const delta =
+          key.name === "up" || key.name === "k" || (key.name === "tab" && key.shift) ? -1 : 1;
+        filterCursorRef.current = (filterCursorRef.current + delta + count) % count;
+        setFilterCursor(filterCursorRef.current);
+      } else if (key.name === "space") {
+        toggleFilterOption(filterCursorRef.current);
+      } else if (key.name === "c") {
+        applyFilterEdit(clearFacets);
+      }
       return;
     }
     if (!preempted && openModalsRef.current.has("menu")) {
@@ -1858,6 +1935,7 @@ export function SweepApp({
         requestRescan,
         toggleEngine,
         toggleSort: () => mutate(toggleSortBy),
+        openFilterPicker: () => setFilterPicker(true),
         dismissScanError: () => setScanError(null),
         setInspect,
         toggleTrash,
@@ -2006,7 +2084,7 @@ export function SweepApp({
           ? { kind: "confirm" }
           : configSave
             ? { kind: "configSave" }
-            : patternInfo !== null || folderInfo !== null || showMenu
+            : patternInfo !== null || folderInfo !== null || showMenu || showFilter
               ? { kind: "help" }
               : showInspect
                 ? { kind: "inspect" }
@@ -2092,6 +2170,7 @@ export function SweepApp({
 
         <box width="100%" flexGrow={1} minHeight={0} flexShrink={1}>
           <ReviewPane
+            onOpenFilter={() => setFilterPicker(true)}
             state={state}
             plan={plan}
             tokens={tokens}
@@ -2189,6 +2268,23 @@ export function SweepApp({
           />
         ) : null}
         {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
+        {showFilter ? (
+          <FilterPicker
+            tokens={tokens}
+            options={filterOptions}
+            tallies={filterTallies}
+            facets={readFacets(state.filter)}
+            cursor={filterCursor}
+            matched={{
+              count: visibleItems.length,
+              total: scopeCandidates.length,
+              bytes: visibleItems.reduce((sum, item) => sum + item.estimatedBytes, 0),
+            }}
+            onToggle={toggleFilterOption}
+            onClear={() => applyFilterEdit(clearFacets)}
+            onClose={() => setFilterPicker(false)}
+          />
+        ) : null}
         {folderInfo ? (
           <Modal
             tokens={tokens}
