@@ -145,3 +145,40 @@ test("queued-byte bounds also hold when Bun stdout hides its buffered length", (
   writer.dispose();
   out.destroy();
 });
+
+test("flush waits for the data itself, not a zero-byte write that completes early", async () => {
+  // Bun's stdout acknowledges `write("", cb)` before earlier bytes reach a
+  // slow pipe reader; exiting on that receipt truncated piped --json output.
+  let delivered = 0;
+  const out = new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      if (chunk.length === 0) return callback();
+      setTimeout(() => {
+        delivered += chunk.length;
+        callback();
+      }, 20);
+    },
+  });
+  const realWrite = out.write.bind(out);
+  // Model the runtime: an empty write's callback fires at once.
+  out.write = ((chunk: unknown, ...rest: unknown[]) => {
+    const callback = rest.find((value) => typeof value === "function") as
+      | ((error?: Error | null) => void)
+      | undefined;
+    if (chunk === "" && callback) {
+      queueMicrotask(() => callback());
+      return true;
+    }
+    return realWrite(chunk as string, ...(rest as []));
+  }) as typeof out.write;
+  const writer = new JsonOutput(out, 1000);
+  try {
+    writer.write("a".repeat(1000));
+    writer.write("b".repeat(1000));
+    await writer.flush();
+    expect(delivered).toBe(2000);
+  } finally {
+    writer.dispose();
+    out.destroy();
+  }
+});

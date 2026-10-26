@@ -11,6 +11,13 @@ export class JsonOutput {
   private pending: Promise<void> | undefined;
   private blocked = false;
   private blockedBytes = 0;
+  /**
+   * Settles when the most recent real write is handed to the OS. Write
+   * callbacks run in order, so this is a receipt for every byte before it.
+   * Bun fires a zero-byte write's callback before earlier writes reach a slow
+   * pipe reader, so `write("", cb)` cannot serve as that receipt.
+   */
+  private lastWrite: Promise<Error | null | undefined> = Promise.resolve(undefined);
   private readonly onError = (error: Error) => {
     this.failure ??= error;
   };
@@ -41,7 +48,11 @@ export class JsonOutput {
     // Bun stdout can return false while writableNeedDrain/Length stay false/0.
     // The return value is the authoritative backpressure signal.
     const wasBlocked = this.blocked;
-    if (!this.out.write(chunk)) this.blocked = true;
+    let accepted = true;
+    this.lastWrite = new Promise((resolve) => {
+      accepted = this.out.write(chunk, resolve);
+    });
+    if (!accepted) this.blocked = true;
     if (wasBlocked) this.blockedBytes += bytes;
     else if (this.blocked) {
       this.blockedBytes = Math.max(this.out.writableHighWaterMark, this.out.writableLength, bytes);
@@ -112,8 +123,9 @@ export class JsonOutput {
       if (!delivery) this.out.once("drain", onDrain);
       this.out.once("error", onFailure);
       this.out.once("close", onClose);
-      // A zero-byte callback waits for preceding writes even if needDrain is false.
-      if (delivery || (!this.blocked && !this.out.writableNeedDrain)) this.out.write("", done);
+      if (delivery) void this.lastWrite.then(done);
+      // Not blocked: nothing to wait for beyond what is already queued.
+      else if (!this.blocked && !this.out.writableNeedDrain) done();
     });
     if (delivery) return pending;
     this.pending = pending.finally(() => {
