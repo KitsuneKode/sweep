@@ -297,6 +297,23 @@ export const ERROR_CODES: { code: string; meaning: string; retry: boolean }[] = 
 ];
 
 /** Measured p50s (docs/benchmark-results.json, warm cache, engine only). */
+/**
+ * One real tree (~/Projects: 64,742 folders, 4,182 artifacts), warm cache,
+ * Intel Core i5-13450HX, median of repeated runs, measured 2026-10-26.
+ * sweep is the whole CLI run (`sweep scan --json`); the others are their own
+ * CLIs sizing the same folder. Played back at real speed.
+ */
+export const RACE = {
+  tree: { folders: 64_742, artifacts: 4_182 },
+  firstResultMs: 2,
+  runners: [
+    { id: "sweep", label: "sweep", ms: 930, streams: true, note: "finds and sizes every artifact" },
+    { id: "gdu", label: "gdu", ms: 1_050, streams: false, note: "sizes every folder" },
+    { id: "dust", label: "dust", ms: 1_420, streams: false, note: "sizes every folder" },
+    { id: "du", label: "du -s", ms: 3_810, streams: false, note: "sizes every folder, one thread" },
+  ],
+} as const;
+
 export const BENCH_FACTS = [
   { figure: "1.9 ms", label: "to the first result", detail: "Rust engine, 32 candidates" },
   { figure: "26.4 ms", label: "for 1,024 candidates", detail: "Rust engine, scan to plan" },
@@ -305,5 +322,9 @@ export const BENCH_FACTS = [
     label: "faster than the JS engine",
     detail: "262.8 ms against 26.4 ms, wide tree",
   },
-  { figure: "No p99", label: "production guarantee", detail: "Local qualification, not a promise" },
+  {
+    figure: "0 bytes",
+    label: "changed by a scan",
+    detail: "Scans read; only an approved apply writes",
+  },
 ];
