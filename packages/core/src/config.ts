@@ -43,12 +43,22 @@ export const DEFAULT_CONFIG: SweepConfig = {
 };
 
 /** Starter `.sweeprc` scaffold written by `sweep init`. */
+/**
+ * What `sweep init` writes when it has nothing to add: real defaults, no
+ * placeholders. A config is a set of decisions; an example pattern that
+ * matches nothing is a decision nobody made.
+ */
 export const INIT_SWEEPRC_TEMPLATE = {
-  patterns: [".custom-output"],
-  ignore: ["packages/vendor-patched"],
+  patterns: [],
+  ignore: [],
   maxSizeGB: null,
-  depth: -1,
 } as const;
+
+export interface InitSweeprc {
+  patterns: string[];
+  ignore: string[];
+  maxSizeGB: number | null;
+}
 
 const CONFIG_FIELD_TYPES = {
   patterns: "string[]",
@@ -232,7 +242,11 @@ export function validateProjectConfigFile(configPath: string, cwd: string): Conf
   return { ok: true, path: configPath };
 }
 
-export function writeInitSweeprc(configPath: string, force = false): "created" | "exists" {
+export function writeInitSweeprc(
+  configPath: string,
+  force = false,
+  contents: InitSweeprc = { ...INIT_SWEEPRC_TEMPLATE, patterns: [], ignore: [] },
+): "created" | "exists" {
   // lstat before existsSync: a symlinked .sweeprc (possibly dangling) would
   // make writeFileSync follow the link and overwrite whatever it points at.
   try {
@@ -249,7 +263,7 @@ export function writeInitSweeprc(configPath: string, force = false): "created" |
     // ENOENT - nothing there, safe to create.
   }
 
-  writeFileSync(configPath, `${JSON.stringify(INIT_SWEEPRC_TEMPLATE, null, 2)}\n`, "utf-8");
+  writeFileSync(configPath, `${JSON.stringify(contents, null, 2)}\n`, "utf-8");
   return "created";
 }
 

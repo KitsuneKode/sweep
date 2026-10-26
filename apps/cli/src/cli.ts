@@ -33,7 +33,7 @@ Examples:
   $ sweep clean ~/projects/app    Same as default, explicit clean command
   $ sweep --dry-run               Preview deletions without changes
   $ sweep --trash                 Move candidates to .sweep-trash-<ts>/ (reversible)
-  $ sweep init                    Scaffold .sweeprc in the current directory
+  $ sweep init                    Scan, then write .sweeprc for this project
   $ sweep scan . --json           Emit a machine-readable cleanup plan
   $ sweep ui .                    Interactive TUI for monorepo review
   $ sweep doctor --json           Environment + config + dry-scan report
@@ -317,7 +317,7 @@ export function makeProgram(): Command {
 
   program
     .command("init")
-    .description("Scaffold a starter .sweeprc in the target directory")
+    .description("Look at a project and write a .sweeprc for what it holds")
     .argument("[path]", "Directory to initialize", ".")
     .option("-f, --force", "Overwrite an existing .sweeprc", false)
     .action(function (this: Command, pathArg: string) {

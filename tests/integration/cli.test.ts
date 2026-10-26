@@ -270,6 +270,32 @@ describe("CLI scan/apply", () => {
     expect(plan.candidates[0]?.reasons).toContain("custom-pattern");
   });
 
+  test("init scans first, writes only decisions, and never overwrites by surprise", () => {
+    mkdirSync(dir("node_modules", "pkg"), { recursive: true });
+    mkdirSync(dir("dist"));
+    writeFileSync(dir("package.json"), "{}");
+    writeFileSync(dir("dist", "a.js"), "x");
+
+    const preview = runCli(["init", tmpDir, "--dry-run"]);
+    expect(preview.exitCode).toBe(0);
+    expect(preview.stdout).toContain("node_modules");
+    expect(preview.stdout).toContain("dist");
+    expect(existsSync(dir(".sweeprc"))).toBe(false);
+
+    // No terminal: opt-in names are reported, never silently enabled.
+    const created = runCli(["init", tmpDir]);
+    expect(created.exitCode).toBe(0);
+    expect(JSON.parse(readFileSync(dir(".sweeprc"), "utf8"))).toEqual({
+      patterns: [],
+      ignore: [],
+      maxSizeGB: null,
+    });
+
+    const again = runCli(["init", tmpDir]);
+    expect(again.exitCode).toBe(2);
+    expect(again.stderr).toContain("already exists");
+  });
+
   test("an unattended run removes dangerous items only with --allow-dangerous", () => {
     mkdirSync(dir("custom-cache"));
     writeFileSync(dir("custom-cache", "keep.txt"), "x");
