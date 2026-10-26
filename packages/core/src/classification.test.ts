@@ -156,3 +156,21 @@ describe("isInsideToolHome", () => {
     expect(isInsideToolHome("/usr/share/x/node_modules", "")).toBe(true);
   });
 });
+
+describe("project identity files are never candidates", () => {
+  test.each(["src", "package.json", "Cargo.toml", ".env", ".env.production", ".sweeprc"])(
+    "%s matched by a custom pattern is blocked",
+    (name) => {
+      const path = dir("repo", name);
+      const result = classifyEntry(entry(path, name, "directory"));
+      expect(result.riskTier).toBe("blocked");
+      expect(result.reasons).toContain("protected-project-file");
+      expect(toCandidate(entry(path, name, "directory")).selectedByDefault).toBe(false);
+    },
+  );
+
+  test("artifact names that merely look similar stay classifiable", () => {
+    const path = dir("repo", ".envrc-cache");
+    expect(classifyEntry(entry(path, ".envrc-cache", "directory")).riskTier).not.toBe("blocked");
+  });
+});

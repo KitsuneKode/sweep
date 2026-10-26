@@ -147,6 +147,10 @@ pub(crate) fn classify_with_home(
     if protected_vcs {
         reasons.push("protected-vcs-path".to_owned());
     }
+    let protected_project = guardrails::is_protected_project_name(input.name);
+    if protected_project {
+        reasons.push("protected-project-file".to_owned());
+    }
     if input.is_symlink {
         reasons.push("symlink".to_owned());
     }
@@ -160,7 +164,7 @@ pub(crate) fn classify_with_home(
         .to_owned(),
     );
 
-    if protected_vcs {
+    if protected_vcs || protected_project {
         return (RiskTier::Blocked, reasons);
     }
     if input.is_symlink {

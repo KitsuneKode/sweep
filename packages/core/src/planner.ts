@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import type {
   PathFailure,
   RiskTier,
@@ -28,6 +28,7 @@ import {
   hasCanonicalPathSpelling,
   isPathWithinRoot,
   isSameResolvedPath,
+  isProtectedProjectName,
   pathHasProtectedVcsSegment,
 } from "./guardrails.js";
 
@@ -205,6 +206,15 @@ export function revalidateCandidates(
       });
       continue;
     }
+    // A saved plan is input, not authority: an edited plan can claim any tier.
+    if (isProtectedProjectName(basename(candidate.path))) {
+      failedPaths.push({
+        path: candidate.path,
+        code: "protected_path",
+        error: "candidate is a protected project file (manifest, lockfile, env or src)",
+      });
+      continue;
+    }
 
     try {
       const stat = lstatSync(candidate.path, { bigint: true });
@@ -332,6 +342,8 @@ export function classifyEntry(entry: ScanEntry): { riskTier: RiskTier; reasons: 
   const reasons: string[] = [];
   const protectedVcs = pathHasProtectedVcsSegment(entry.path);
   if (protectedVcs) reasons.push("protected-vcs-path");
+  const protectedProject = isProtectedProjectName(entry.name);
+  if (protectedProject) reasons.push("protected-project-file");
   if (entry.isSymlink) reasons.push("symlink");
   const match = catalogMatchFor(entry.name);
   reasons.push(
@@ -342,7 +354,7 @@ export function classifyEntry(entry: ScanEntry): { riskTier: RiskTier; reasons: 
         : "custom-pattern",
   );
 
-  if (protectedVcs) return { riskTier: "blocked", reasons };
+  if (protectedVcs || protectedProject) return { riskTier: "blocked", reasons };
   if (entry.isSymlink) return { riskTier: "caution", reasons };
   // Only names a shipping-default pattern covers can earn the safe tier. Opt-in
   // catalog names (dist, build, out, coverage, ...) are dangerous for the same
