@@ -9,6 +9,10 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # v2 requires Changesets CLI v3; the repo is on CLI v2. Move both together.
+      - dependency-name: changesets/action
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: bun
     directory: /
