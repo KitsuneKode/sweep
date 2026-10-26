@@ -255,6 +255,15 @@ function aliasesProtectedRoot(resolved: string): boolean {
   return false;
 }
 
+/** Say what to do instead: a home folder is not a "system root" to its owner. */
+function protectedPathHint(resolved: string): string {
+  const home = normalize(homedir());
+  if (resolved === home || (CASE_FOLD_BLOCKED && resolved.toLowerCase() === home.toLowerCase())) {
+    return `  That is your home folder. Point sweep at the folder that holds your projects, e.g. \`sweep ${join("~", "Projects")}\`.`;
+  }
+  return `  sweep must be run inside a project directory, not at a system root.`;
+}
+
 /** Blocked-root + depth policy on one already-resolved absolute path. */
 function assertResolvedSafe(resolved: string): void {
   const isBlocked =
@@ -266,7 +275,7 @@ function assertResolvedSafe(resolved: string): void {
   if (isBlocked) {
     throw new GuardrailError(
       `Refusing to operate on protected path: ${sanitizeTerminalText(resolved)}\n` +
-        `  sweep must be run inside a project directory, not at a system root.`,
+        protectedPathHint(resolved),
     );
   }
 

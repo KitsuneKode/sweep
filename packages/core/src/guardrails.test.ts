@@ -318,3 +318,16 @@ test.skipIf(process.platform === "win32")(
     }
   },
 );
+
+describe("protected path hints", () => {
+  test("the home folder refusal suggests a projects folder instead of 'system root'", () => {
+    let message = "";
+    try {
+      assertSafeCwd(homedir());
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain("That is your home folder");
+    expect(message).not.toContain("system root");
+  });
+});
