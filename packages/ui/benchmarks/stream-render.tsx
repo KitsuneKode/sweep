@@ -176,7 +176,7 @@ try {
   // notice. Their final assertion covers completion state; full counts are
   // asserted in the default-width probe and reducer correctness tests.
   if (
-    !(width < 100 ? frame.includes("NORMAL") : frame.includes(`${count} found`)) ||
+    !(width < 100 ? frame.includes("NORMAL") : frame.includes(`${count.toLocaleString()} found`)) ||
     frame.includes("SCANNING") ||
     frame.includes("INCOMPLETE")
   )
