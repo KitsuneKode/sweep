@@ -176,7 +176,7 @@ describe("layout across terminal sizes", () => {
     expect(frame).not.toContain("─ folders ─");
     expect(frame).not.toContain("Age");
     expect(frame).toContain("artifacts");
-    expect(frame).toContain("? keys");
+    expect(frame).toContain(" ?  keys");
     expectFits(frame, 52);
   });
 

@@ -4,6 +4,7 @@ import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import type { SweepUiSummary } from "./state.js";
 import {
   artifactRowWidths,
+  buildFooterHints,
   buildArtifactRowContent,
   buildGroupHeaderContent,
   buildHeaderStats,
@@ -292,7 +293,34 @@ describe("presentation formatters", () => {
     );
     expect(line).toContain("apps/cli/");
     expect(line).toContain("3");
-    expect(line).toContain("1KiB");
+    expect(line).toContain("1.0 KiB");
+  });
+
+  test("a single-artifact heading names its folder and size without a count", () => {
+    const line = plain(
+      buildGroupHeaderContent(
+        {
+          kind: "header",
+          groupKey: "apps/cli",
+          label: "apps/cli/",
+          itemCount: 1,
+          selectedCount: 0,
+          collapsed: false,
+          bytes: 2048,
+        },
+        darkTheme,
+        artifactRowWidths(80),
+      ),
+    );
+    expect(line).toMatch(/apps\/cli\/ +2\.0 KiB$/);
+  });
+
+  test("footer keys render as filled keycaps, apart from what they do", () => {
+    const hints = buildFooterHints({ kind: "help" }, darkTheme);
+    const cap = hints.chunks.find((chunk) => chunk.text === " esc ");
+    expect(cap).toBeDefined();
+    expect(cap!.bg).toBeDefined();
+    expect(hints.chunks.find((chunk) => chunk.text === "close")?.bg).toBeUndefined();
   });
 
   test("a collapsed heading points right and an expanded one points down", () => {
