@@ -8,6 +8,52 @@ const PROTECTED_VCS_DIR_NAMES: &[&str] = &[
     ".git", ".svn", ".hg", ".bzr", ".jj", ".sl", "_darcs", ".pijul",
 ];
 
+/// Names that identify or configure a project, never build output. A pattern -
+/// including one from an untrusted repository's `.sweeprc` - can match them,
+/// but they classify as blocked so no policy or flag can select them.
+/// TS parity: `PROTECTED_PROJECT_NAMES` in `guardrails.ts`.
+const PROTECTED_PROJECT_NAMES: &[&str] = &[
+    "src",
+    ".sweeprc",
+    "package.json",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "bun.lock",
+    "bun.lockb",
+    "deno.json",
+    "deno.jsonc",
+    "deno.lock",
+    "cargo.toml",
+    "cargo.lock",
+    "go.mod",
+    "go.sum",
+    "pyproject.toml",
+    "poetry.lock",
+    "uv.lock",
+    "pipfile",
+    "pipfile.lock",
+    "requirements.txt",
+    "setup.py",
+    "setup.cfg",
+    "gemfile",
+    "gemfile.lock",
+    "composer.json",
+    "composer.lock",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "mix.exs",
+    "mix.lock",
+    "pubspec.yaml",
+    "pubspec.lock",
+    "package.swift",
+];
+
 /// Fresh identities catch canonical system aliases and same-device bind
 /// aliases. Mounts may change during a long UI session, so do not cache these.
 fn aliases_protected_root(resolved: &Path, roots: &HashSet<PathBuf>) -> bool {
@@ -338,9 +384,45 @@ pub fn path_has_protected_vcs_segment(entry_path: &str) -> bool {
     })
 }
 
+/// Whether an entry name is a protected project file (manifest, lockfile,
+/// `.sweeprc`, `src`) or an env file (`.env`, `.env.local`, ...). Compared
+/// case-insensitively everywhere: `Cargo.toml` and `cargo.toml` are both
+/// authored files on every platform.
+pub fn is_protected_project_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == ".env"
+        || lower.starts_with(".env.")
+        || PROTECTED_PROJECT_NAMES.contains(&lower.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_identity_files_are_protected() {
+        for name in [
+            "src",
+            "package.json",
+            "Cargo.toml",
+            ".env",
+            ".env.local",
+            ".sweeprc",
+            "go.mod",
+        ] {
+            assert!(is_protected_project_name(name), "{name}");
+        }
+        for name in [
+            "node_modules",
+            "target",
+            ".next",
+            "dist",
+            "environment",
+            ".envrc-cache",
+        ] {
+            assert!(!is_protected_project_name(name), "{name}");
+        }
+    }
 
     #[test]
     fn assert_safe_cwd_rejects_root() {

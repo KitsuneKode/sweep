@@ -78,7 +78,20 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       if (opts.json) {
         writeJson(plan);
       } else {
-        console.log("Nothing selected by the current policy. Use --select or --include-dangerous.");
+        // Point at review, not at blanket flags: what the policy left out is
+        // exactly what needs a human look (custom patterns, symlinks, names
+        // that can hold authored files).
+        const counts = plan.summary.riskCounts;
+        const unselected = [
+          counts.caution > 0 ? `${counts.caution} caution` : "",
+          counts.dangerous > 0 ? `${counts.dangerous} dangerous` : "",
+          counts.blocked > 0 ? `${counts.blocked} blocked` : "",
+        ].filter(Boolean);
+        console.log(
+          unselected.length > 0
+            ? `Nothing selected: only ${unselected.join(", ")} found. Review them one by one with \`sweep ui\`.`
+            : "Nothing to clean here.",
+        );
       }
       await drainStdout();
       exitWith(EXIT.OK);

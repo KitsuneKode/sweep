@@ -28,6 +28,64 @@ export const PROTECTED_VCS_DIR_NAMES = new Set([
 ]);
 
 /**
+ * Names that identify or configure a project, never build output. A pattern -
+ * including one from an untrusted repository's `.sweeprc` - can match them,
+ * but they classify as blocked so no policy or flag can select them.
+ * Rust parity: `PROTECTED_PROJECT_NAMES` in `sweep-engine`.
+ */
+export const PROTECTED_PROJECT_NAMES: ReadonlySet<string> = new Set([
+  "src",
+  ".sweeprc",
+  "package.json",
+  "package-lock.json",
+  "npm-shrinkwrap.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "bun.lock",
+  "bun.lockb",
+  "deno.json",
+  "deno.jsonc",
+  "deno.lock",
+  "cargo.toml",
+  "cargo.lock",
+  "go.mod",
+  "go.sum",
+  "pyproject.toml",
+  "poetry.lock",
+  "uv.lock",
+  "pipfile",
+  "pipfile.lock",
+  "requirements.txt",
+  "setup.py",
+  "setup.cfg",
+  "gemfile",
+  "gemfile.lock",
+  "composer.json",
+  "composer.lock",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+  "settings.gradle",
+  "settings.gradle.kts",
+  "mix.exs",
+  "mix.lock",
+  "pubspec.yaml",
+  "pubspec.lock",
+  "package.swift",
+]);
+
+/**
+ * True for a protected project file (manifest, lockfile, `.sweeprc`, `src`) or
+ * an env file (`.env`, `.env.local`, ...). Case-insensitive on every platform:
+ * `Cargo.toml` and `cargo.toml` are both authored files.
+ */
+export function isProtectedProjectName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === ".env" || lower.startsWith(".env.") || PROTECTED_PROJECT_NAMES.has(lower);
+}
+
+/**
  * Paths that must never be the target directory.
  * Evaluated AFTER resolve() - these are canonical absolute paths.
  * Built once at module load (not per-call) for performance.
