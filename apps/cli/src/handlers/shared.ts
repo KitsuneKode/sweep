@@ -392,15 +392,22 @@ export async function runScanWithDisplay(
   const spinner = quiet ? null : createSpinner(spinnerLabel ?? "Scanning...");
 
   try {
+    const label = spinnerLabel ?? "Scanning...";
     const { result, plan, engineUsed } = await runScanToPlan(targetDir, config, {
       ...scanOptions,
-      onEntry: () => {
-        spinner?.stop();
-      },
-      onEntrySized: () => {
-        spinner?.stop();
+      // A long scan stays visibly alive: counts tick, the current folder shows.
+      onProgress: (progress) => {
+        const found = progress.found === 1 ? "1 found" : `${progress.found} found`;
+        const where =
+          progress.currentDir && progress.currentDir !== "."
+            ? ` · ${sanitizeTerminalText(progress.currentDir)}`
+            : "";
+        spinner?.update(
+          `${label.replace(/\.+$/, "")}  ${progress.scannedDirs} dirs · ${found}${where}`,
+        );
       },
     });
+    spinner?.stop();
 
     if (!quiet) {
       const { printGroupedScanPlan } = await import("@kitsunekode/sweep-display");

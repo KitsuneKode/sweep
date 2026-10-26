@@ -5,6 +5,7 @@ import { formatBytes, formatScanElapsed } from "./bytes.js";
 import { groupCandidatesByKind } from "./grouping.js";
 import { formatRiskBadge, riskBadgeLabel } from "./risk.js";
 import { createSpinner } from "./spinner.js";
+import { printScanReport } from "./report.js";
 
 export interface PrintGroupedScanPlanOptions {
   verbose?: boolean;
@@ -19,6 +20,13 @@ const SYMLINK_ALIAS_REASON = "symlink-alias";
 
 export { formatBytes, formatScanElapsed } from "./bytes.js";
 export { createSpinner, type Spinner } from "./spinner.js";
+export {
+  displayPath,
+  formatScanReport,
+  printScanReport,
+  truncateMiddle,
+  type ScanReportOptions,
+} from "./report.js";
 export { formatRiskBadge, riskBadgeLabel, type RiskBadgeLabel } from "./risk.js";
 export {
   groupCandidatesByKind,
@@ -83,6 +91,10 @@ export function printGroupedScanPlan(
   targetDir: string,
   options: PrintGroupedScanPlanOptions = {},
 ): void {
+  if (isTTY()) {
+    printScanReport(plan, targetDir, options);
+    return;
+  }
   const verbose = options.verbose ?? false;
   const selectedIds = new Set(plan.selectedCandidateIds);
 
@@ -245,7 +257,16 @@ function printGroupedCandidates(
 }
 
 export function printDryRunNotice(): void {
-  console.log(pc.dim(pc.italic("  Dry run. No files deleted.")));
+  if (!isTTY()) {
+    console.log("  Dry run. No files deleted.");
+    console.log();
+    return;
+  }
+  console.log(` ${pc.dim("Dry run · nothing was deleted.")}`);
+  console.log(
+    `   ${pc.cyan("sweep")}      ${pc.dim("clean what is selected, after one confirmation")}`,
+  );
+  console.log(`   ${pc.cyan("sweep ui")}   ${pc.dim("choose item by item")}`);
   console.log();
 }
 
