@@ -149,7 +149,7 @@ describe("layout across terminal sizes", () => {
 
     expect(frame).toContain("folders");
     expect(frame).toContain("artifacts");
-    expect(frame).toContain("Age");
+    expect(frame).toContain("Idle");
     expect(frame).toContain("2y");
     expect(frame).toMatch(/8mo\s+█+\s+300\.0 MiB/);
     expect(frame).toContain("Viewing: all folders");
@@ -162,7 +162,7 @@ describe("layout across terminal sizes", () => {
     const setup = await mount(100, 30);
     const frame = setup.captureCharFrame();
 
-    expect(frame).toContain("Age");
+    expect(frame).toContain("Idle");
     // The size bar sits between the age and the size on each row.
     expect(frame).toMatch(/8mo\s+300\.0 MiB/);
     expect(frame).not.toMatch(/8mo\s+█/);
@@ -174,7 +174,7 @@ describe("layout across terminal sizes", () => {
     const frame = setup.captureCharFrame();
 
     expect(frame).not.toContain("─ folders ─");
-    expect(frame).not.toContain("Age");
+    expect(frame).not.toContain("Idle");
     expect(frame).toContain("artifacts");
     expect(frame).toContain(" ?  keys");
     expectFits(frame, 52);

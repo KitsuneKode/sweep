@@ -1,4 +1,18 @@
+import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+
 const MINUTE_MS = 60_000;
+
+/**
+ * When the work this artifact belongs to was last touched: the owning
+ * project's activity (git and its own files, never build output) once the
+ * plan carries it, else the artifact's own mtime while a scan still streams.
+ * Every age the UI shows, sorts or filters on reads through this.
+ */
+export function lastActiveMs(
+  candidate: Pick<ScanCandidate, "modifiedMs" | "projectActiveMs">,
+): number | undefined {
+  return candidate.projectActiveMs ?? candidate.modifiedMs;
+}
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 

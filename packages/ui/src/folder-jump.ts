@@ -120,7 +120,10 @@ export function discoverJumpTargets(
   };
 
   const parent = dirname(targetDir);
-  if (parent !== targetDir) add({ path: parent, source: "up" });
+  // Home and the filesystem root are protected targets: offering them would
+  // only ever end in a refusal. Typing the path still reaches the check.
+  const reachable = (path: string) => path !== homedir() && dirname(path) !== path;
+  if (parent !== targetDir && reachable(parent)) add({ path: parent, source: "up" });
 
   const temporary = resolve(scratch);
   for (const entry of recent) {

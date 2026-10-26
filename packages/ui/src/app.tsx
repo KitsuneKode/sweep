@@ -86,6 +86,8 @@ import {
   setFilter,
   setRiskFilter,
   selectSafeOnly,
+  selectIdleSafe,
+  idleSafeCandidates,
   setScopeFilter,
   setThemeMode,
   visualRange,
@@ -1047,7 +1049,7 @@ export function SweepApp({
               const found = finalPlan?.candidates.length;
               const base =
                 found !== undefined
-                  ? `scan complete: ${found} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
+                  ? `scan complete: ${found.toLocaleString()} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
                   : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
               setNotice(
                 `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}${isColdRequested() ? " · cold" : ""}`,
@@ -1715,6 +1717,11 @@ export function SweepApp({
     requestSingleApply(id);
   };
   const editingPatterns = state.focus === "patterns" || state.focus === "patternInput";
+  const idleSafe = useMemo(
+    () => idleSafeCandidates({ candidates: state.candidates }),
+    [state.candidates],
+  );
+  const idleSafeBytes = idleSafe.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
   const menuCommands = [
     {
       label: `Review queue (${summary.selectedCount})`,
@@ -1738,6 +1745,22 @@ export function SweepApp({
         editingPatterns ||
         !getCurrentCandidate(state) ||
         getCurrentCandidate(state)?.riskTier === "blocked",
+    },
+    {
+      // The recommendation: what nobody is using, across the whole target.
+      label:
+        idleSafe.length > 0
+          ? `Queue safe items in projects idle 30+ days (${idleSafe.length.toLocaleString()} · ${formatBytes(idleSafeBytes)})`
+          : "Queue safe items in projects idle 30+ days",
+      shortcut: "",
+      run: () => {
+        mutate(selectIdleSafe);
+        setNotice(
+          `queued ${idleSafe.length.toLocaleString()} items in idle projects · ${formatBytes(idleSafeBytes)}`,
+          "success",
+        );
+      },
+      disabled: editingPatterns || state.scanning || idleSafe.length === 0,
     },
     {
       label: "Queue safe items in this view",

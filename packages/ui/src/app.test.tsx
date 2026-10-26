@@ -1231,7 +1231,7 @@ describe("folder switcher (ctrl-o)", () => {
     let frame = setup.captureCharFrame();
     expect(frame).toContain("switch folder");
     expect(frame).toContain("other-app");
-    expect(frame).toContain("up one level");
+    expect(frame).toContain("parent");
 
     // Enter on the first row (up) is refused by the host: the card stays and says why.
     await act(async () => {

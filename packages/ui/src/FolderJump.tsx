@@ -18,7 +18,7 @@ const SOURCE_GLYPH: Record<JumpSource, string> = {
 };
 const SOURCE_LABEL: Record<JumpSource, string> = {
   typed: "path",
-  up: "up one level",
+  up: "parent",
   cleaned: "",
   inside: "",
   beside: "",
@@ -63,13 +63,17 @@ export function FolderJump({
   onInput,
   onPick,
 }: FolderJumpProps) {
-  const { height } = useTerminalDimensions();
+  const { width: screenWidth, height } = useTerminalDimensions();
   const room = Math.max(3, Math.min(12, height - 14));
   const start = Math.max(0, Math.min(cursor - Math.floor(room / 2), results.length - room));
   const shown = results.slice(start, start + room);
-  const inner = WIDTH - 8;
-  const detailWidth = 16;
-  const pathWidth = inner - detailWidth - 4;
+  // Columns follow the card's real width: Modal shrinks it on a narrow
+  // terminal, and a fixed layout would clip the detail column and the hint.
+  const cardWidth = Math.max(24, Math.min(WIDTH, screenWidth - 2));
+  // Border, padding and the scroll gutter: 8 cells at full size, 6 compact.
+  const inner = cardWidth - (cardWidth < 44 ? 6 : 8);
+  const detailWidth = inner >= 52 ? 16 : inner >= 40 ? 10 : 0;
+  const pathWidth = Math.max(8, inner - detailWidth - 4);
 
   // A refusal is the one line worth reading in full: it wraps, never clips.
   const status = error
@@ -78,7 +82,7 @@ export function FolderJump({
       ? t`${fg(tokens.warning)(`${queuedCount} queued`)}${fg(tokens.textDim)(
           " · switching clears the queue; nothing is removed",
         )}`
-      : t`${fg(tokens.textDim)("Rescans there with that folder's own .sweeprc and guardrails.")}`;
+      : t`${fg(tokens.textDim)("Rescans there with that folder's own .sweeprc and checks.")}`;
 
   return (
     <Modal
@@ -103,7 +107,7 @@ export function FolderJump({
         focused
         value={query}
         maxLength={512}
-        placeholder="name, or a path: ~/code, ../other"
+        placeholder="sweep, ~/code, ../api"
         backgroundColor={tokens.surfaceInset}
         focusedBackgroundColor={tokens.surfaceInset}
         textColor={tokens.text}
@@ -150,7 +154,7 @@ export function FolderJump({
         })
       )}
       <text content="" />
-      <text content={status} wrapMode={error ? "word" : "none"} />
+      <text content={status} wrapMode="word" />
     </Modal>
   );
 }

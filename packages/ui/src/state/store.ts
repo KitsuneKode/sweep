@@ -937,6 +937,42 @@ export function selectSafeOnly(state: SweepUiState): SweepUiState {
   return { ...state, selectedIds, selectionTouched };
 }
 
+/** Projects untouched this long are the easy call: nobody is using them. */
+export const IDLE_RECOMMENDATION_MS = 30 * 86_400_000;
+
+/**
+ * Safe artifacts across the whole target whose project nobody has worked on
+ * for `minIdleMs`. Only measured activity counts: an artifact whose project
+ * activity is unknown is never "idle". Workspace stubs stay out, as with `s`.
+ */
+export function idleSafeCandidates(
+  state: Pick<SweepUiState, "candidates">,
+  minIdleMs = IDLE_RECOMMENDATION_MS,
+  now = Date.now(),
+) {
+  return state.candidates.filter(
+    (candidate) =>
+      candidate.riskTier === "safe" &&
+      !candidate.reasons.includes("workspace-stub") &&
+      candidate.projectActiveMs !== undefined &&
+      now - candidate.projectActiveMs >= minIdleMs,
+  );
+}
+
+export function selectIdleSafe(
+  state: SweepUiState,
+  minIdleMs = IDLE_RECOMMENDATION_MS,
+  now = Date.now(),
+): SweepUiState {
+  const selectedIds = new Set(state.selectedIds);
+  const selectionTouched = new Set(state.selectionTouched);
+  for (const candidate of idleSafeCandidates(state, minIdleMs, now)) {
+    selectedIds.add(candidate.id);
+    selectionTouched.add(candidate.id);
+  }
+  return { ...state, selectedIds, selectionTouched };
+}
+
 export function selectVisible(state: SweepUiState, includeDangerous: boolean): SweepUiState {
   const selectedIds = new Set(state.selectedIds);
   const selectionTouched = new Set(state.selectionTouched);
