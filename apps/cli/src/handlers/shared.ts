@@ -1,3 +1,4 @@
+import { gitTrackedPaths } from "@kitsunekode/sweep-core/git-tracked";
 import { assertPlanResources } from "@kitsunekode/sweep-core/plan";
 import { noteApplyBackendEntered, noteApplyReportTrusted } from "../apply-lifecycle.js";
 import { beginApplySession, type ApplySession } from "@kitsunekode/sweep-core/apply-session";
@@ -164,6 +165,7 @@ export function warnIgnoredOptions(
     if (opts.yes) ignored.add("--yes");
     if (opts.trash) ignored.add("--trash");
     if (opts.forceLarge) ignored.add("--force-large");
+    if (opts.allowDangerous) ignored.add("--allow-dangerous");
     if (opts.dryRun) ignored.add("--dry-run");
   }
   if (!shape.structured) {
@@ -415,6 +417,33 @@ export async function runScanWithDisplay(
   }
 }
 
+/**
+ * Dangerous items never leave in an unattended run by accident. With `--yes`
+ * they need `--allow-dangerous`; either way every one is listed by path before
+ * anything is removed, so the consent is to named items, not to a count.
+ * Blocked items cannot be selected at all and never reach this point.
+ */
+export function assertDangerousConsent(
+  plan: ScanPlan,
+  options: { yes?: boolean; allowDangerous?: boolean; json?: boolean },
+): void {
+  const selectedIds = new Set(plan.selectedCandidateIds);
+  const dangerous = plan.candidates.filter(
+    (candidate) => selectedIds.has(candidate.id) && candidate.riskTier === "dangerous",
+  );
+  if (dangerous.length === 0) return;
+  if (options.yes && !options.allowDangerous) {
+    throw new GuardrailError(
+      `${dangerous.length} dangerous item(s) selected. An unattended run removes them only with --allow-dangerous; review them first with \`sweep ui\` or --dry-run.`,
+    );
+  }
+  if (options.json) return;
+  console.error(`${dangerous.length} dangerous item(s) will be removed:`);
+  for (const candidate of dangerous) {
+    console.error(`  ✗ ${sanitizeTerminalText(candidate.path)}  (${candidate.reasons.join(", ")})`);
+  }
+}
+
 export async function confirmPlanDeletion(
   plan: ScanPlan,
   options: { yes?: boolean; trash?: boolean },
@@ -505,6 +534,21 @@ export async function executePlanDeletion(
   // Re-assert the target guardrail here - not just in callers - so the trash
   // mkdir below can never run against a root a forged plan would fail on.
   assertSafeCwd(plan.targetDir);
+  // Tiers in a plan are claims. Whatever the plan says, nothing git tracks is
+  // removed: ask git again, at the last moment, about exactly what is queued.
+  {
+    const selectedIds = new Set(plan.selectedCandidateIds);
+    const queued = plan.candidates.filter(
+      (candidate) => selectedIds.has(candidate.id) && !candidate.isSymlink,
+    );
+    const tracked = gitTrackedPaths(queued.map((candidate) => candidate.path));
+    if (tracked.size > 0) {
+      const first = sanitizeTerminalText([...tracked][0]!);
+      throw new GuardrailError(
+        `${tracked.size} queued item(s) contain git-tracked files (e.g. ${first}). Nothing was removed.`,
+      );
+    }
+  }
   // A plan's target leaf must be a REAL directory: both scanners refuse
   // leaf-symlink roots, so a plan carrying one is forged input. This is the
   // /proc/self/cwd class - canonicalized it resolves to wherever the victim

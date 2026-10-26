@@ -9,6 +9,7 @@
     "./config": "./src/config.ts",
     "./engine": "./src/engine.ts",
     "./filesystem-identity": "./src/filesystem-identity.ts",
+    "./git-tracked": "./src/git-tracked.ts",
     "./guardrails": "./src/guardrails.ts",
     "./planner": "./src/planner.ts",
     "./plan": "./src/plan.ts",

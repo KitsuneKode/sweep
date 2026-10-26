@@ -18,6 +18,7 @@ import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import { expectApplyOutput } from "../apply-lifecycle.js";
 import {
   applyNoColor,
+  assertDangerousConsent,
   drainStdout,
   executePlanDeletion,
   promptConfirm,
@@ -95,6 +96,12 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
     }
 
     assertSizeLimit(getSelectedBytes(plan), config.maxSizeGB, opts.forceLarge ?? false);
+    // A saved plan is no lane around consent: the same rule as a live clean.
+    assertDangerousConsent(plan, {
+      yes: opts.yes,
+      ...(opts.allowDangerous ? { allowDangerous: true } : {}),
+      ...(opts.json ? { json: true } : {}),
+    });
 
     if (!opts.yes) {
       const totalBytes = getSelectedBytes(plan);

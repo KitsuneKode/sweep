@@ -53,12 +53,15 @@ check or proof that a plan from another person is trustworthy.
 | `--config path`                              | Use an explicit JSON config file                  |
 | `--select default`, `safe`, `all`, or `none` | Choose initial selection policy                   |
 | `--include-dangerous`                        | Allow dangerous candidates in selection policy    |
+| `--allow-dangerous`                          | With `--yes`, let dangerous items be removed      |
 | `--json`                                     | Structured output for commands that support it    |
 | `--quiet`, `-q`                              | Reduce incidental output                          |
 | `--no-color`                                 | Disable terminal colors                           |
 
 `--select all` still does not select blocked paths and requires explicit dangerous
-inclusion for dangerous matches. Read the plan's actual selection before applying.
+inclusion for dangerous matches. A `--yes` run with dangerous items selected
+refuses unless `--allow-dangerous` is also passed. Git-tracked content and
+project files are always blocked. Read the plan's actual selection before applying.
 
 `--yes` skips the plain CLI confirmation. `--force-large` overrides the configured
 size ceiling and requires `--yes`; these are deliberate automation options, not
