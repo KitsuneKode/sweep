@@ -1,4 +1,5 @@
 import { Command, InvalidArgumentError, Option } from "commander";
+import { parseIdleDuration } from "@kitsunekode/sweep-core/project-activity";
 import {
   PROTOCOL_VERSION,
   SCAN_PLAN_SCHEMA,
@@ -86,6 +87,17 @@ function addScanOptions<T extends Command>(command: T): T {
           .default("default"),
       )
       .option("--include-dangerous", "Include dangerous candidates in selection", false)
+      .option(
+        "--idle <age>",
+        "Only select artifacts in projects untouched for at least <age> (e.g. 30d, 3m, 1y)",
+        (text: string) => {
+          try {
+            return parseIdleDuration(text);
+          } catch (error) {
+            throw new InvalidArgumentError((error as Error).message);
+          }
+        },
+      )
       .option("--config <path>", "Explicit config file path")
       .option(
         "--max-size-gb <gib>",

@@ -47,6 +47,7 @@ export async function handleScan(
         exact: false,
         waitForConsumer: waitForStdoutConsumer,
         selectionPolicy,
+        ...(opts.idle !== undefined ? { idleMs: opts.idle } : {}),
         engine,
         projectConfig,
         resourceProfile: opts.resourceProfile,
@@ -90,6 +91,7 @@ export async function handleScan(
     if (opts.json) {
       const { plan } = await runScanToPlan(targetDir, config, {
         selectionPolicy,
+        ...(opts.idle !== undefined ? { idleMs: opts.idle } : {}),
         engine,
         projectConfig,
         resourceProfile: opts.resourceProfile,
@@ -101,6 +103,7 @@ export async function handleScan(
 
     await runScanWithDisplay(targetDir, config, {
       selectionPolicy,
+      ...(opts.idle !== undefined ? { idleMs: opts.idle } : {}),
       engine,
       projectConfig,
       resourceProfile: opts.resourceProfile,

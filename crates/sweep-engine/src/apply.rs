@@ -1496,6 +1496,7 @@ mod tests {
             risk_tier: RiskTier::Safe,
             reasons: vec!["default-pattern".to_owned()],
             selected_by_default: true,
+            project_active_ms: None,
         }
     }
 
@@ -1570,6 +1571,7 @@ mod tests {
                     risk_tier: RiskTier::Safe,
                     reasons: vec!["default-pattern".to_owned()],
                     selected_by_default: true,
+                    project_active_ms: None,
                 },
             ],
             summary: ScanPlanSummary {
@@ -1772,6 +1774,7 @@ mod tests {
                 risk_tier: RiskTier::Safe,
                 reasons: vec!["default-pattern".to_owned()],
                 selected_by_default: true,
+                project_active_ms: None,
             }],
             summary: ScanPlanSummary {
                 candidate_count: 1,

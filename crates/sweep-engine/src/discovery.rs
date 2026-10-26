@@ -738,6 +738,7 @@ impl DiscoveryIndex {
                 .map(|s| text.get(*s).to_owned())
                 .collect(),
             selected_by_default: record.default,
+            project_active_ms: None,
         }
     }
 

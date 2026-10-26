@@ -164,7 +164,7 @@ describe("scan report", () => {
           ["a", "b"],
         ),
         "/work",
-        { columns: 80 },
+        { columns: 80, disk: null },
       ),
     );
     const headline = lines.find((line) => line.includes("to reclaim"));
@@ -211,7 +211,7 @@ describe("scan report", () => {
           many.map((c) => c.id),
         ),
         "/work",
-        { columns: 80 },
+        { columns: 80, disk: null },
       ),
     );
     expect(lines.some((line) => line.includes("+ 5 more"))).toBe(true);
@@ -221,8 +221,47 @@ describe("scan report", () => {
     expect(lines.some((line) => line.includes("1 blocked"))).toBe(true);
   });
 
+  test("advice: warns about projects worked on today and suggests --idle for idle ones", () => {
+    const now = Date.parse("2026-10-26T12:00:00Z");
+    const day = 86_400_000;
+    const lines = plain(
+      formatScanReport(
+        plan(
+          [
+            candidate({
+              id: "hot",
+              name: "target",
+              kind: "target",
+              path: "/work/app/target",
+              estimatedBytes: 4096,
+              projectActiveMs: now - 3_600_000,
+            }),
+            candidate({
+              id: "old",
+              name: "node_modules",
+              kind: "node_modules",
+              path: "/work/legacy/node_modules",
+              estimatedBytes: 2048,
+              projectActiveMs: now - 90 * day,
+            }),
+          ],
+          ["hot", "old"],
+        ),
+        "/work",
+        { columns: 100, disk: { free: 10 * 1024 ** 3, total: 200 * 1024 ** 3 }, now },
+      ),
+    );
+    const text = lines.join("\n");
+    expect(text).toContain("4.0 KiB of that is in projects worked on today (app)");
+    expect(text).toContain("2.0 KiB is in projects idle 30+ days");
+    expect(text).toContain("sweep --idle 30d");
+    expect(text).toContain("10.0 GiB free of 200.0 GiB");
+    expect(text).toContain("idle 3mo");
+    expect(text).toContain("idle 1h");
+  });
+
   test("an empty scan says so plainly", () => {
-    const lines = plain(formatScanReport(plan([], []), "/work", { columns: 80 }));
+    const lines = plain(formatScanReport(plan([], []), "/work", { columns: 80, disk: null }));
     expect(lines.some((line) => line.includes("Nothing to clean."))).toBe(true);
     expect(lines.some((line) => line.includes("to reclaim"))).toBe(false);
   });

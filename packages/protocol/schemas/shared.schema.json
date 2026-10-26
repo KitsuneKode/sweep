@@ -85,6 +85,11 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "projectActiveMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "isSymlink": {
           "type": "boolean"
         },

@@ -46,6 +46,7 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
     const { result, plan } = await runScanWithDisplay(targetDir, config, {
       exact: false,
       selectionPolicy,
+      ...(opts.idle !== undefined ? { idleMs: opts.idle } : {}),
       engine,
       projectConfig,
       resourceProfile: opts.resourceProfile,

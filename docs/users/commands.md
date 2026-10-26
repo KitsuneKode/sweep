@@ -52,6 +52,7 @@ check or proof that a plan from another person is trustworthy.
 | `--depth n`                                  | Limit discovery depth; `-1` means unlimited depth |
 | `--config path`                              | Use an explicit JSON config file                  |
 | `--select default`, `safe`, `all`, or `none` | Choose initial selection policy                   |
+| `--idle 30d` (`2w`, `3m`, `1y`)              | Select only artifacts in projects idle that long  |
 | `--include-dangerous`                        | Allow dangerous candidates in selection policy    |
 | `--allow-dangerous`                          | With `--yes`, let dangerous items be removed      |
 | `--json`                                     | Structured output for commands that support it    |
@@ -62,6 +63,15 @@ check or proof that a plan from another person is trustworthy.
 inclusion for dangerous matches. A `--yes` run with dangerous items selected
 refuses unless `--allow-dangerous` is also passed. Git-tracked content and
 project files are always blocked. Read the plan's actual selection before applying.
+
+Every artifact carries when its project was last worked on: the git index and
+HEAD reflog, and the project root's own files, never its build output. A
+rebuild does not make a forgotten project look busy. `--idle 30d` keeps the
+selection to projects nobody has touched for 30 days; artifacts in active
+projects stay listed, unselected, and a project with no readable activity
+counts as active. The scan report shows each project's idle time, warns when
+the selection includes projects worked on today, and shows how much would be
+cleared from idle projects alone.
 
 `--yes` skips the plain CLI confirmation. `--force-large` overrides the configured
 size ceiling and requires `--yes`; these are deliberate automation options, not

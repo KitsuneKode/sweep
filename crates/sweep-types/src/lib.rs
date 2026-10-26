@@ -201,6 +201,10 @@ pub struct ScanCandidate {
     pub risk_tier: RiskTier,
     pub reasons: Vec<String>,
     pub selected_by_default: bool,
+    /// When a person last worked on the owning project (epoch ms). Computed
+    /// by the JS planner; the engine carries it through plans untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_active_ms: Option<u64>,
 }
 
 // Serde does not support deny_unknown_fields with flatten. Keep the public
@@ -227,6 +231,8 @@ struct CandidateInput {
     #[serde(deserialize_with = "candidate_reasons")]
     reasons: Vec<String>,
     selected_by_default: bool,
+    #[serde(default, deserialize_with = "optional_safe_integer")]
+    project_active_ms: Option<u64>,
 }
 
 fn artifact_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
@@ -257,6 +263,7 @@ impl From<CandidateInput> for ScanCandidate {
             risk_tier: input.risk_tier,
             reasons: input.reasons,
             selected_by_default: input.selected_by_default,
+            project_active_ms: input.project_active_ms,
         }
     }
 }

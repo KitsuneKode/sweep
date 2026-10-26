@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { gitTrackedPaths } from "./git-tracked.js";
+import { ProjectActivityIndex } from "./project-activity.js";
 
 export const GIT_TRACKED_REASON = "git-tracked";
 import type {
@@ -67,7 +68,9 @@ export function buildPlan(
 
 /** Recompute candidate insights and selection after scan (JS and Rust engines). */
 export function applyPlanInsights(plan: ScanPlan): ScanPlan {
-  const candidates = normalizeSelectionDefaults(blockGitTracked(enrichCandidates(plan.candidates)));
+  const candidates = withProjectActivity(
+    normalizeSelectionDefaults(blockGitTracked(enrichCandidates(plan.candidates))),
+  );
   const selectedCandidateIds = compileSelectedCandidateIds(candidates, plan.selectionPolicy);
   const riskCounts = countRiskTiers(candidates);
 
@@ -81,6 +84,39 @@ export function applyPlanInsights(plan: ScanPlan): ScanPlan {
       selectedCount: selectedCandidateIds.length,
       riskCounts,
     },
+  };
+}
+
+/** Stamp each candidate with when its project was last worked on. */
+function withProjectActivity(candidates: ScanCandidate[]): ScanCandidate[] {
+  const index = new ProjectActivityIndex(new Set(candidates.map((candidate) => candidate.path)));
+  return candidates.map((candidate) => {
+    const { activeMs } = index.forArtifact(candidate.path);
+    const { projectActiveMs: _stale, ...rest } = candidate;
+    return activeMs === undefined ? rest : { ...rest, projectActiveMs: Math.floor(activeMs) };
+  });
+}
+
+/**
+ * Keep the selection to projects nobody has touched for `minIdleMs`: the
+ * kondo/npkill question "what is safe to clear because no one is using it".
+ * Artifacts in active projects stay listed, just not selected. A project with
+ * no readable activity is treated as active - unknown is never "idle".
+ */
+export function restrictSelectionToIdle(
+  plan: ScanPlan,
+  minIdleMs: number,
+  now = Date.now(),
+): ScanPlan {
+  const byId = new Map(plan.candidates.map((candidate) => [candidate.id, candidate]));
+  const selectedCandidateIds = plan.selectedCandidateIds.filter((id) => {
+    const active = byId.get(id)?.projectActiveMs;
+    return active !== undefined && now - active >= minIdleMs;
+  });
+  return {
+    ...plan,
+    selectedCandidateIds,
+    summary: { ...plan.summary, selectedCount: selectedCandidateIds.length },
   };
 }
 
