@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   buildScopeSidebarRows,
+  sidebarHint,
   scopeFilterToSidebarIndex,
   sidebarColumnLayout,
   sidebarCountWidth,
@@ -126,5 +127,15 @@ describe("column widths on large trees", () => {
     const rows = Array.from({ length: 50_000 }, (_, i) => row(i, i));
     expect(sidebarCountWidth(rows)).toBe(5);
     expect(sidebarBytesWidth(rows)).toBe(6);
+  });
+});
+
+describe("sidebarHint", () => {
+  test("keeps the full hint when it fits and drops words instead of clipping", () => {
+    expect(sidebarHint(false, 40)).toBe("Names browse · [ ] queues");
+    expect(sidebarHint(false, 22)).toBe("[ ] queues");
+    expect(sidebarHint(true, 40)).toBe("Enter browse · space queue");
+    expect(sidebarHint(true, 20)).toBe("space queue");
+    expect(sidebarHint(false, 2)).toBe("");
   });
 });

@@ -60,3 +60,31 @@ test("disabled buttons never dispatch", async () => {
   });
   expect(count).toBe(0);
 });
+
+test("primary leads only while enabled, so a dead action is never advertised", async () => {
+  const frameOf = async (node: React.ReactNode) => {
+    const setup = await testRender(node, { width: 24, height: 2 });
+    try {
+      await act(async () => {
+        await setup.renderOnce();
+      });
+      return JSON.stringify(setup.captureSpans().lines[0]);
+    } finally {
+      await act(async () => setup.renderer.destroy());
+    }
+  };
+  const label = "Review queue (5)";
+  const plain = await frameOf(<ActionButton tokens={darkTheme} label={label} onPress={() => {}} />);
+  const lead = await frameOf(
+    <ActionButton tokens={darkTheme} label={label} primary onPress={() => {}} />,
+  );
+  expect(lead).not.toBe(plain);
+
+  const disabledPlain = await frameOf(
+    <ActionButton tokens={darkTheme} label={label} disabled onPress={() => {}} />,
+  );
+  const disabledPrimary = await frameOf(
+    <ActionButton tokens={darkTheme} label={label} primary disabled onPress={() => {}} />,
+  );
+  expect(disabledPrimary).toBe(disabledPlain);
+});
