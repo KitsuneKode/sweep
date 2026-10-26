@@ -161,7 +161,21 @@ describe("writeInitSweeprc", () => {
     mkdirSync(dir("project"), { recursive: true });
     const configPath = dir("project", ".sweeprc");
     expect(writeInitSweeprc(configPath)).toBe("created");
-    expect(loadConfig(dir("project")).patterns).toContain(".custom-output");
+    // No placeholders: the default file adds nothing to the built-in set.
+    expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({
+      patterns: [],
+      ignore: [],
+      maxSizeGB: null,
+    });
+    mkdirSync(dir("elsewhere"), { recursive: true });
+    expect(loadConfig(dir("project")).patterns).toEqual(loadConfig(dir("elsewhere")).patterns);
+  });
+
+  test("writes the patterns init chose and nothing else", () => {
+    mkdirSync(dir("project"), { recursive: true });
+    const configPath = dir("project", ".sweeprc");
+    writeInitSweeprc(configPath, false, { patterns: ["dist"], ignore: [], maxSizeGB: null });
+    expect(loadConfig(dir("project")).patterns).toContain("dist");
   });
 
   test("refuses to overwrite without force", () => {

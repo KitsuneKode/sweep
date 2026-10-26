@@ -8,6 +8,7 @@
     "./cold": "./src/cold.ts",
     "./config": "./src/config.ts",
     "./engine": "./src/engine.ts",
+    "./glob-match": "./src/glob-match.ts",
     "./filesystem-identity": "./src/filesystem-identity.ts",
     "./git-tracked": "./src/git-tracked.ts",
     "./guardrails": "./src/guardrails.ts",

@@ -4,7 +4,15 @@ description: Use .sweeprc to choose matches, exclusions, depth and cleanup size 
 ---
 
 Sweep reads JSON from `.sweeprc`; no extension or YAML configuration is implied.
-Create a starter file with `sweep init .`, or write:
+
+`sweep init` looks before it writes. It scans the folder (read-only), shows the
+built-in artifacts it found and any opt-in names such as `dist`, `.venv` or
+`coverage`, and in a terminal asks about each opt-in name. The file records
+only your answers. Without a terminal, opt-in names are reported and left off.
+`sweep init --dry-run` prints the file instead of writing it, and an existing
+`.sweeprc` is never replaced without `--force`.
+
+Or write one by hand:
 
 ```json
 {

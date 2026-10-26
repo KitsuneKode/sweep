@@ -441,3 +441,4 @@ export function printError(message: string): void {
   // covered, not just the ones that remembered to escape their input.
   console.error(`\n  ${pc.red("✗")} ${sanitizeMultilineTerminalText(message)}\n`);
 }
+export { printInitNextSteps, printInitReport, type InitFinding, type InitReport } from "./init.js";
