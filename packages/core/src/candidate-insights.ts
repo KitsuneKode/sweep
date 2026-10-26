@@ -71,7 +71,7 @@ function markSymlinkAliases(candidates: ScanCandidate[]): ScanCandidate[] {
     // probing every dir: O(path depth) per symlink.
     const resolved = canonicalPath(candidate.path);
     let hostMatch: ScanCandidate | undefined;
-    for (let cursor: string | undefined = resolved; cursor !== undefined; ) {
+    for (let cursor: string | undefined = resolved; cursor !== undefined;) {
       const hit = dirByReal.get(cursor) ?? dirByLexical.get(cursor);
       if (hit !== undefined && hit.id !== candidate.id) {
         hostMatch = hit;

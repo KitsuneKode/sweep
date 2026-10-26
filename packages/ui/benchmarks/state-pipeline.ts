@@ -19,21 +19,18 @@ const quantile = (values: number[], p: number) =>
   values.slice().sort((a, b) => a - b)[Math.ceil(values.length * p) - 1]!;
 const rows: Array<Record<string, unknown>> = [];
 for (const n of [1000, 10000, 50000]) {
-  const candidates = Array.from(
-    { length: n },
-    (_, i): ScanCandidate => ({
-      id: `cand_${i}`,
-      path: `/tmp/sweep-benchmark/projects/pkg_${Math.floor(i / 10)}/cache_${i}`,
-      name: `cache_${i}`,
-      kind: "custom",
-      estimatedBytes: (n - i) * 1024,
-      isSymlink: false,
-      entryType: "directory",
-      riskTier: "safe",
-      reasons: ["default-pattern"],
-      selectedByDefault: true,
-    }),
-  );
+  const candidates = Array.from({ length: n }, (_, i): ScanCandidate => ({
+    id: `cand_${i}`,
+    path: `/tmp/sweep-benchmark/projects/pkg_${Math.floor(i / 10)}/cache_${i}`,
+    name: `cache_${i}`,
+    kind: "custom",
+    estimatedBytes: (n - i) * 1024,
+    isSymlink: false,
+    entryType: "directory",
+    riskTier: "safe",
+    reasons: ["default-pattern"],
+    selectedByDefault: true,
+  }));
   const plan: ScanPlan = {
     protocolVersion: "1",
     targetDir: "/tmp/sweep-benchmark",

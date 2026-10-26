@@ -7,6 +7,9 @@ import { layoutOptions } from "../../lib/layout";
 import { docJsonLd, pageHead } from "../../lib/site";
 import { mdxComponents } from "../../components/mdx";
 
+// Fumadocs types frontmatter titles as optional; every page in docs/ sets one.
+const DEFAULT_TITLE = "Sweep documentation";
+
 export const Route = createFileRoute("/docs/$")({
   loader: async ({ params }) => {
     const page = source.getPage(params._splat?.split("/").filter(Boolean) ?? []);
@@ -19,13 +22,13 @@ export const Route = createFileRoute("/docs/$")({
     const crumbs = [{ name: "Docs", path: "/docs" }];
     for (let depth = 1; depth < segments.length; depth++) {
       const parent = source.getPage(segments.slice(0, depth));
-      if (parent) crumbs.push({ name: parent.data.title, path: parent.url });
+      if (parent) crumbs.push({ name: parent.data.title ?? DEFAULT_TITLE, path: parent.url });
     }
-    if (segments.length) crumbs.push({ name: page.data.title, path: page.url });
+    if (segments.length) crumbs.push({ name: page.data.title ?? DEFAULT_TITLE, path: page.url });
     return {
       path: page.path,
       url: page.url,
-      title: page.data.title,
+      title: page.data.title ?? DEFAULT_TITLE,
       description: page.data.description ?? "Sweep documentation",
       crumbs,
     };
