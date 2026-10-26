@@ -2,8 +2,8 @@
 /*
  * Landing page only (linked from routes/index.tsx).
  * A dark instrument panel: warm olive-black, one chartreuse signal, the
- * product's own interface as the pictures. The page is a framed grid with
- * visible rails; every panel carries a folder tab, the motif sweep scans.
+ * product's own interface as the pictures. Sections are separated by space
+ * and tone, never rules; every panel carries a folder tab, the motif sweep scans.
  * Motion is opt-in (prefers-reduced-motion: no-preference); the static page
  * is the complete page.
  */
@@ -17,6 +17,7 @@
     .sw-rules,
     .sw-statusline,
     .sw-log,
+    .sw-report,
     .sw-auto-panel pre
   ) {
   --bg: oklch(15.5% 0.012 128);
@@ -80,6 +81,23 @@
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --t-press: 140ms;
   --t-hover: 180ms;
+
+  /* Motion scale (transitions.dev). Values are picked by what a motion
+     does - a text reveal, a panel opening, a swap - never by nearest number. */
+  --duration-stagger: 40ms;
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-swap: ease-in-out;
+  --distance-micro: 4px;
+  --distance-small: 6px;
+  --distance-base: 8px;
+  --distance-medium: 12px;
+  --blur-small: 2px;
+  --blur-medium: 3px;
 
   font-family: var(--font-text);
   font-size: var(--step-body);
@@ -147,6 +165,7 @@
     .sw-rules,
     .sw-statusline,
     .sw-log,
+    .sw-report,
     .sw-auto-panel pre
   ) {
   color: var(--text);
@@ -259,9 +278,8 @@ body:has(.sw) {
   transform: scale(0.97);
 }
 .sw-btn-ghost {
-  background: var(--bg-raise-2);
+  background: color-mix(in oklch, var(--text) 8%, var(--bg));
   color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--line-strong);
 }
 .sw-btn-light {
   background: var(--text);
@@ -288,9 +306,7 @@ body:has(.sw) {
   position: sticky;
   inset-block-start: 0;
   z-index: 20;
-  background: color-mix(in oklch, var(--bg) 88%, transparent);
-  border-block-end: 1px solid var(--line);
-  backdrop-filter: blur(10px) saturate(1.2);
+  background: var(--bg);
 }
 .sw-top-inner {
   display: flex;
@@ -355,35 +371,14 @@ body:has(.sw) {
   gap: 0.5rem;
 }
 
-/* ── The frame: one column with visible rails ───────────────────────── */
+/* ── The frame: one column, sections separated by space alone ────────── */
 .sw-frame {
   position: relative;
   max-inline-size: var(--frame);
   margin-inline: auto;
-  border-inline: 1px solid var(--line);
 }
 .sw-frame > section {
   position: relative;
-  border-block-end: 1px solid var(--line);
-}
-/* Crosshairs where the rails meet each section edge. */
-.sw-frame > section::before,
-.sw-frame > section::after {
-  content: "";
-  position: absolute;
-  inset-block-end: -5px;
-  z-index: 2;
-  inline-size: 9px;
-  block-size: 9px;
-  background:
-    linear-gradient(var(--line-strong), var(--line-strong)) center / 1px 100% no-repeat,
-    linear-gradient(var(--line-strong), var(--line-strong)) center / 100% 1px no-repeat;
-}
-.sw-frame > section::before {
-  inset-inline-start: -5px;
-}
-.sw-frame > section::after {
-  inset-inline-end: -5px;
 }
 
 .sw-section {
@@ -448,26 +443,6 @@ body:has(.sw) {
   flex: 999 1 0;
   min-inline-size: min(100%, 34rem);
 }
-.sw-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  justify-self: start;
-  padding-block: 0.3rem;
-  padding-inline: 0.7rem;
-  border-radius: 999px;
-  background: var(--bg-raise);
-  box-shadow: inset 0 0 0 1px var(--line);
-  color: var(--text-soft);
-  font-size: var(--step-small);
-}
-.sw-chip-dot {
-  inline-size: 0.45rem;
-  block-size: 0.45rem;
-  border-radius: 50%;
-  background: var(--signal);
-  box-shadow: 0 0 0 3px var(--signal-soft);
-}
 .sw-hero h1 {
   font-size: var(--step-display);
   font-weight: 600;
@@ -495,28 +470,26 @@ body:has(.sw) {
   padding: 0.5rem;
   border-radius: calc(var(--radius) + 6px);
   background: var(--bg-raise);
-  box-shadow:
-    inset 0 0 0 1px var(--line-strong),
-    0 40px 80px -40px oklch(0% 0 none / 0.8),
-    0 0 0 8px color-mix(in oklch, var(--signal) 4%, transparent);
 }
 
 /* Phase strip: four cells across the frame, the current one lit. */
 .sw-phases {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
-  border-block-start: 1px solid var(--line);
+  gap: 0.25rem;
+  margin-inline: var(--pad);
 }
 .sw-phases li {
   position: relative;
   display: grid;
   gap: 0.3rem;
   padding-block: 1.4rem 1.6rem;
-  padding-inline: var(--pad);
-  box-shadow: 1px 0 0 var(--line);
+  padding-inline: 1.25rem;
+  border-radius: 6px;
+  background: var(--bg-raise);
   color: var(--text-faint);
   font-size: var(--step-small);
-  transition: color 300ms var(--ease-out);
+  transition: color var(--duration-fast) var(--ease-smooth-out);
 }
 .sw-phases li::before {
   content: "";
@@ -562,9 +535,98 @@ body:has(.sw) {
   font-size: var(--step-h3);
   font-weight: 560;
   letter-spacing: -0.02em;
-  transition: color 300ms var(--ease-out);
+  transition: color var(--duration-fast) var(--ease-smooth-out);
 }
 .sw-phases li[aria-current="step"] .sw-phases-name {
+  color: var(--text);
+}
+
+/* ── Idle projects: a report fragment beside three plain facts ─────── */
+.sw-idle {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+  gap: clamp(2rem, 1rem + 3vw, 4rem);
+  align-items: start;
+}
+.sw-report {
+  position: relative;
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 1.25rem;
+  border-radius: var(--radius);
+  background: var(--bg-sunk);
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-stretch: 87.5%;
+  line-height: 1.6;
+}
+.sw-report > .sw-panel-tab {
+  inset-inline-start: 1.25rem;
+}
+.sw-report-head {
+  color: var(--text);
+}
+.sw-report-head strong {
+  color: var(--signal);
+  font-weight: 600;
+}
+.sw-report-dim {
+  color: var(--text-faint);
+}
+.sw-report-warn {
+  color: var(--caution);
+}
+.sw-report-tip span {
+  color: var(--signal);
+}
+.sw-report ul {
+  display: grid;
+  gap: 0.2rem;
+  margin-block-start: 0.6rem;
+}
+.sw-report li {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr) 8ch 9ch;
+  gap: 0.5rem;
+  color: var(--text-faint);
+}
+.sw-report li[data-picked="true"] {
+  color: var(--text);
+}
+.sw-report li[data-picked="true"] > :first-child {
+  color: var(--signal);
+}
+.sw-report li > :nth-child(2) {
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sw-report li > :nth-child(3),
+.sw-report li > :nth-child(4) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+.sw-idle-facts {
+  display: grid;
+  gap: 1.75rem;
+}
+.sw-idle-facts dt {
+  color: var(--text);
+  font-size: var(--step-lead);
+  font-weight: 600;
+  line-height: 1.25;
+}
+.sw-idle-facts dd {
+  margin: 0.4rem 0 0;
+  max-inline-size: 46ch;
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+.sw-idle-facts code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
   color: var(--text);
 }
 
@@ -865,7 +927,7 @@ body:has(.sw) {
   flex-wrap: wrap;
   align-items: center;
   gap: 1.25rem 2.5rem;
-  padding-block: 1.75rem;
+  padding-block: clamp(2.5rem, 1.5rem + 3vw, 4rem) 1.75rem;
   padding-inline: var(--pad);
   overflow: clip;
 }
@@ -950,7 +1012,7 @@ body:has(.sw) {
   border-radius: var(--radius);
   background: var(--bg-raise);
   box-shadow: inset 0 0 0 1px var(--line);
-  transition: box-shadow 300ms var(--ease-out);
+  transition: box-shadow var(--t-hover) var(--ease-out);
 }
 @media (hover: hover) and (pointer: fine) {
   .sw-panel:hover .sw-panel-stage {
@@ -971,11 +1033,12 @@ body:has(.sw) {
     inset 0 1px 0 var(--line),
     inset 1px 0 0 var(--line);
   color: var(--text-faint);
-  font-family: var(--font-mono);
   font-size: 0.8125rem;
-  font-stretch: 87.5%;
   line-height: 1.5;
   white-space: nowrap;
+  max-inline-size: calc(100% - 2rem);
+  overflow: clip;
+  text-overflow: ellipsis;
   clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 100%, 0 100%);
 }
 .sw-window > .sw-panel-tab {
@@ -1289,15 +1352,17 @@ body:has(.sw) {
 .sw-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
-  gap: 1.5rem 0;
+  gap: 0.25rem;
 }
+/* Facts sit on tone tiles, not between rules. */
 .sw-facts li {
   display: grid;
   gap: 0.2rem;
   align-content: start;
-  padding-block: 0.25rem;
+  padding-block: 1.1rem 1.25rem;
   padding-inline: 1.25rem;
-  box-shadow: inset 1px 0 0 var(--line);
+  border-radius: 6px;
+  background: var(--bg-raise);
   color: var(--text-soft);
   font-size: var(--step-small);
 }
@@ -1345,10 +1410,13 @@ body:has(.sw) {
   justify-content: space-between;
   gap: 1rem;
   min-block-size: 2.75rem;
-  border-block-end: 1px solid var(--line);
 }
-.sw-keylist li:last-child {
-  border-block-end: 0;
+/* Alternate rows step in tone so the eye tracks across without rules. */
+.sw-keylist li:nth-child(odd) {
+  margin-inline: -0.75rem;
+  padding-inline: 0.75rem;
+  border-radius: 6px;
+  background: var(--bg-raise);
 }
 .sw kbd {
   display: inline-flex;
@@ -1710,8 +1778,7 @@ body:has(.sw) {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  padding-block-start: 1.25rem;
-  border-block-start: 1px solid var(--line);
+  padding-block-start: 2rem;
   color: var(--text-faint);
   font-size: var(--step-small);
 }
@@ -1731,22 +1798,34 @@ body:has(.sw) {
 
 /* ── Motion, opt-in ─────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: no-preference) {
+  /* Text reveal: a blurred rise. */
   @keyframes sw-rise {
     from {
       opacity: 0;
-      transform: translateY(18px);
+      filter: blur(var(--blur-medium));
+      transform: translateY(var(--distance-medium));
+    }
+  }
+  /* Panel reveal: a shorter rise with a cross-blur. */
+  @keyframes sw-panel-in {
+    from {
+      opacity: 0;
+      filter: blur(var(--blur-small));
+      transform: translateY(var(--distance-base));
     }
   }
   @keyframes sw-stream {
     from {
       opacity: 0;
-      transform: translateX(-6px);
+      transform: translateX(calc(-1 * var(--distance-base)));
     }
   }
+  /* Text swap: barely moves. */
   @keyframes sw-swap {
     from {
       opacity: 0;
-      transform: translateY(6px);
+      filter: blur(var(--blur-small));
+      transform: translateY(var(--distance-micro));
     }
   }
   @keyframes sw-marquee {
@@ -1754,42 +1833,35 @@ body:has(.sw) {
       transform: translateX(calc(-100% - 2.25rem));
     }
   }
-  @keyframes sw-pulse {
-    50% {
-      box-shadow: 0 0 0 6px transparent;
-    }
-  }
 
   /* One orchestrated load: chip, headline, lead, actions, then the window. */
+  /* Headline, lead, actions: large items, so the stagger steps by 80ms and
+     the whole sequence lands inside 300ms. */
   .sw-hero-title > *,
   .sw-hero-copy > * {
-    animation: sw-rise 800ms var(--ease-out) both;
-  }
-  .sw-hero-title > :nth-child(2) {
-    animation-delay: 70ms;
+    animation: sw-rise var(--duration-very-slow) var(--ease-swap) both;
   }
   .sw-hero-copy > :nth-child(1) {
-    animation-delay: 160ms;
+    animation-delay: var(--duration-micro);
   }
   .sw-hero-copy > :nth-child(2) {
-    animation-delay: 230ms;
+    animation-delay: calc(2 * var(--duration-micro));
   }
   .sw-hero-copy > :nth-child(3) {
-    animation-delay: 290ms;
+    animation-delay: calc(3 * var(--duration-micro));
   }
   .sw-window {
-    animation: sw-rise 1000ms 260ms var(--ease-out) both;
-  }
-  .sw-chip-dot {
-    animation: sw-pulse 2.4s ease-in-out infinite;
+    animation: sw-panel-in var(--duration-slow) calc(3 * var(--duration-micro))
+      var(--ease-smooth-out) both;
   }
   .qd-row {
-    animation: sw-stream 360ms calc(400ms + var(--i) * 90ms) var(--ease-out) both;
+    animation: sw-stream var(--duration-fast)
+      calc(var(--duration-slow) + var(--i) * var(--duration-stagger)) var(--ease-smooth-out) both;
   }
   .qd-review,
   .qd-receipt,
   .sw-inspect dl {
-    animation: sw-swap 280ms var(--ease-out) both;
+    animation: sw-swap var(--duration-quick) var(--ease-swap) both;
   }
   .qd-meter-fill {
     transition: transform 420ms var(--ease-out);
@@ -1798,13 +1870,13 @@ body:has(.sw) {
     transition: scale var(--t-press) var(--ease-out);
   }
   .sw-phases li::before {
-    transition: transform 500ms var(--ease-out);
+    transition: transform var(--duration-fast) var(--ease-smooth-out);
   }
-  /* The stage marker travels between cells: on-screen movement. */
+  /* The stage marker slides between cells, like a sliding tab. */
   .sw-phases::after {
     transition:
-      inset-inline-start 400ms var(--ease-in-out),
-      inline-size 400ms var(--ease-in-out);
+      inset-inline-start var(--duration-fast) var(--ease-smooth-out),
+      inline-size var(--duration-fast) var(--ease-smooth-out);
   }
   @keyframes sw-detail {
     from {
@@ -1822,15 +1894,17 @@ body:has(.sw) {
     }
   }
   .qd-receipt dl > div {
-    animation: sw-print 240ms calc(120ms + var(--i, 0) * 50ms) var(--ease-out) both;
+    animation: sw-print var(--duration-fast)
+      calc(var(--duration-micro) + var(--i, 0) * var(--duration-stagger)) var(--ease-smooth-out)
+      both;
   }
   /* A refused toggle shakes its head once. */
   @keyframes sw-refuse {
     25% {
-      transform: translateX(-3px);
+      transform: translateX(calc(-1 * var(--distance-small)));
     }
     65% {
-      transform: translateX(3px);
+      transform: translateX(var(--distance-small));
     }
   }
   .qd-box[data-refused] {
@@ -1839,11 +1913,12 @@ body:has(.sw) {
   @keyframes sw-icon-in {
     from {
       opacity: 0;
+      filter: blur(var(--blur-small));
       transform: scale(0.8);
     }
   }
   .sw-icon-swap {
-    animation: sw-icon-in 180ms var(--ease-out);
+    animation: sw-icon-in var(--duration-fast) var(--ease-swap);
   }
   .sw-matrix-on {
     transition: clip-path 260ms var(--ease-out);
@@ -1867,12 +1942,14 @@ body:has(.sw) {
   /* Staggered entrances; hidden only after script marks them as waiting. */
   .sw [data-reveal] {
     transition:
-      opacity 700ms var(--d, 0ms) var(--ease-out),
-      transform 800ms var(--d, 0ms) var(--ease-out);
+      opacity var(--duration-very-slow) var(--d, 0ms) var(--ease-swap),
+      filter var(--duration-very-slow) var(--d, 0ms) var(--ease-swap),
+      transform var(--duration-very-slow) var(--d, 0ms) var(--ease-swap);
   }
   .sw [data-reveal="wait"] {
     opacity: 0;
-    transform: translateY(20px);
+    filter: blur(var(--blur-medium));
+    transform: translateY(var(--distance-medium));
   }
 }
 /* Under reduced motion the catalog wraps instead of travelling. */
