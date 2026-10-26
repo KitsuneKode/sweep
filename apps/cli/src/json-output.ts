@@ -123,7 +123,19 @@ export class JsonOutput {
       if (!delivery) this.out.once("drain", onDrain);
       this.out.once("error", onFailure);
       this.out.once("close", onClose);
-      if (delivery) void this.lastWrite.then(done);
+      if (delivery) {
+        // Two receipts, both required. The last write's own callback covers
+        // Bun, which acknowledges an empty write early. The empty write covers
+        // bytes written to the stream directly (human receipts), and surfaces
+        // a closed pipe even when this writer has written nothing itself.
+        let pendingReceipts = 2;
+        const receipt = (error?: Error | null) => {
+          if (error) done(error);
+          else if (--pendingReceipts === 0) done();
+        };
+        void this.lastWrite.then(receipt);
+        this.out.write("", receipt);
+      }
       // Not blocked: nothing to wait for beyond what is already queued.
       else if (!this.blocked && !this.out.writableNeedDrain) done();
     });
