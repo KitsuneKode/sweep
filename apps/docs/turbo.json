@@ -3,8 +3,8 @@
   "tasks": {
     "build": {
       "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/docs/**"],
-      "outputs": ["dist/**", ".tanstack/**", "src/routeTree.gen.ts"],
-      "env": ["DOCS_SITE_URL"]
+      "outputs": ["dist/**", ".vercel/output/**", ".tanstack/**", "src/routeTree.gen.ts"],
+      "env": ["DOCS_SITE_URL", "VERCEL"]
     },
     "typecheck": {
       "dependsOn": ["build"],

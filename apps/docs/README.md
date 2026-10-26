@@ -36,7 +36,10 @@ commands also require Cargo for workspace discovery.
   requested page; search indexing stays on the server.
 - Fumadocs provides navigation, search, code copying, themes and the table of
   contents. Markdown `.md` links map to site routes without rewriting the source.
-- No analytics, third-party fonts, runtime MDX execution or cleanup API is added.
+- No third-party fonts, runtime MDX execution or cleanup API is added.
+- Vercel Web Analytics and Speed Insights are the only measurement: cookieless,
+  first-party (`/_vercel/insights`, `/_vercel/speed-insights`), no-ops outside
+  Vercel. Pageviews record the path and route pattern, never query strings.
 - The CLI build/publish filters exclude this app. Its dependencies and assets
   never belong in the npm package or standalone binary.
 
@@ -54,11 +57,16 @@ robots disallows crawling, and the sitemap returns 404. The URL is validated and
 included in Turbo's cache key; no domain is inferred from request headers.
 
 Production output includes prerendered HTML in `dist/client` and the SSR entry in
-`dist/server`. `vite preview` is for local review. Select and qualify a hosting
-adapter before deployment; do not deploy just the static directory while retaining
-server search routes. Serve hashed assets with immutable cache headers, HTML with
-revalidation, and compressed responses at the host. Do not apply an SPA fallback
-that turns missing pages into status 200.
+`dist/server`. `vite preview` is for local review.
+
+The site is hosted on Vercel at <https://sweep.kitsunekode.in> (project root
+`apps/docs`, settings in `vercel.json`). When `VERCEL` is set, the Nitro plugin
+emits `.vercel/output`: prerendered pages and hashed assets as static files
+(assets `immutable`), with one Node function for search, robots, sitemap,
+benchmark data and real 404s. Local builds keep `dist/`. `DOCS_SITE_URL` is set
+only for the Production environment, so preview deployments stay `noindex`.
+Vercel's automatic Turborepo build is bypassed on purpose: `turbo` needs Cargo
+for workspace discovery, which the build image does not have.
 
 Before publishing, check the chosen domain's canonical URLs, sitemap and robots;
 search, deep links and 404 status; mobile/keyboard navigation; and rendered page
