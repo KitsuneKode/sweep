@@ -3,6 +3,7 @@
 mod apply;
 mod classify;
 pub mod discovery;
+pub mod git_index;
 mod guardrails;
 
 use camino::Utf8Path;

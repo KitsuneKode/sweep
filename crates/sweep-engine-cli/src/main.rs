@@ -108,6 +108,7 @@ fn run() -> Result<(), CliFailure> {
         Some("scan") => run_scan(),
         Some("apply") => run_apply(),
         Some("index") => run_index(),
+        Some("tracked") => run_tracked(),
         Some("--capabilities") => write_json_stdout(
             &serde_json::json!({"applyControl": true, "planIdentity": true, "applyPreparation": true, "applyActivity": true}),
         ),
@@ -120,12 +121,59 @@ fn run() -> Result<(), CliFailure> {
                 "usage: sweep-engine scan <target-dir>  # optional ScanOptions JSON on stdin"
             );
             eprintln!("       sweep-engine apply               # reads ScanPlan JSON from stdin");
+            eprintln!(
+                "       sweep-engine tracked             # NUL-separated paths in, git-tracked ones out"
+            );
             Err(CliFailure {
                 code: EXIT_GUARDRAIL,
                 message: "missing or unknown subcommand".to_owned(),
             })
         }
     }
+}
+
+/// Which of the NUL-separated absolute paths on stdin are, or contain,
+/// git-tracked files. Answers NUL-separated on stdout, in input order.
+fn run_tracked() -> Result<(), CliFailure> {
+    use std::io::{Read, Write};
+    const MAX_INPUT: u64 = 256 * 1024 * 1024;
+    let mut input = Vec::new();
+    std::io::stdin()
+        .lock()
+        .take(MAX_INPUT + 1)
+        .read_to_end(&mut input)
+        .map_err(|err| CliFailure::invalid_input(format!("failed to read stdin: {err}")))?;
+    if input.len() as u64 > MAX_INPUT {
+        return Err(CliFailure::invalid_input("tracked input exceeds 256 MiB"));
+    }
+    let mut paths = Vec::new();
+    for raw in input.split(|&byte| byte == 0).filter(|raw| !raw.is_empty()) {
+        let text = std::str::from_utf8(raw)
+            .map_err(|_| CliFailure::invalid_input("tracked paths must be UTF-8"))?;
+        let path = std::path::PathBuf::from(text);
+        if !path.is_absolute() {
+            return Err(CliFailure::invalid_input("tracked paths must be absolute"));
+        }
+        paths.push(path);
+    }
+    let tracked = sweep_engine::git_index::tracked_paths(&paths);
+    let mut out = Vec::new();
+    for path in &paths {
+        if tracked.contains(path) {
+            if let Some(text) = path.to_str() {
+                out.extend_from_slice(text.as_bytes());
+                out.push(0);
+            }
+        }
+    }
+    let mut stdout = std::io::stdout().lock();
+    stdout
+        .write_all(&out)
+        .and_then(|()| stdout.flush())
+        .map_err(|err| CliFailure {
+            code: EXIT_FAILURE,
+            message: format!("failed to write tracked paths: {err}"),
+        })
 }
 
 #[derive(Deserialize)]
