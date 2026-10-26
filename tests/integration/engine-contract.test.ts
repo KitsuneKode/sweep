@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
@@ -59,7 +60,27 @@ function fixtureConfig(request: FixtureRequest): SweepConfig {
   };
 }
 
-function loadFixtureCases(): Array<{ name: string; root: string; request: FixtureRequest }> {
+/**
+ * Fixtures are committed to this repository, so scanned in place every
+ * artifact in them is git-tracked - and sweep rightly blocks tracked content.
+ * Scan a copy outside any repository, as a user's untracked build output.
+ */
+const STAGING_ROOT = mkdtempSync(join(tmpdir(), "sweep-contract-"));
+afterAll(() => rmSync(STAGING_ROOT, { recursive: true, force: true }));
+function stageFixture(name: string, source: string): string {
+  const root = join(STAGING_ROOT, name);
+  if (!existsSync(root)) {
+    cpSync(source, root, { recursive: true, verbatimSymlinks: true, preserveTimestamps: true });
+  }
+  return root;
+}
+
+function loadFixtureCases(): Array<{
+  name: string;
+  root: string;
+  request: FixtureRequest;
+  source: string;
+}> {
   return readdirSync(FIXTURES_ROOT, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
@@ -71,10 +92,14 @@ function loadFixtureCases(): Array<{ name: string; root: string; request: Fixtur
       }
 
       const request = JSON.parse(readFileSync(requestPath, "utf8")) as FixtureRequest;
-      return { name: entry.name, root, request };
+      // Goldens are read from the source; scans run against the staged copy.
+      return { name: entry.name, root: stageFixture(entry.name, root), request, source: root };
     })
-    .filter((fixture): fixture is { name: string; root: string; request: FixtureRequest } =>
-      Boolean(fixture),
+    .filter(
+      (
+        fixture,
+      ): fixture is { name: string; root: string; request: FixtureRequest; source: string } =>
+        Boolean(fixture),
     );
 }
 
@@ -82,10 +107,10 @@ function rustAvailable(): boolean {
   return LOCAL_BINARY !== undefined;
 }
 
-function assertMatchesGolden(actual: ScanPlan, fixtureRoot: string): void {
+function assertMatchesGolden(actual: ScanPlan, fixtureRoot: string, goldenRoot: string): void {
   expect(actual.targetIdentity).toBeDefined();
   for (const candidate of actual.candidates) expect(candidate.identity).toBeDefined();
-  const expectedPath = join(fixtureRoot, "expected.plan.json");
+  const expectedPath = join(goldenRoot, "expected.plan.json");
   const expected = JSON.parse(readFileSync(expectedPath, "utf8")) as ScanPlan;
   expect(normalizePlan(actual, fixtureRoot)).toEqual(expected);
 }
@@ -133,7 +158,7 @@ describe("engine contract fixtures", () => {
       }
 
       const { plan } = await scanToPlan(fixture.root, fixtureConfig(fixture.request), options);
-      assertMatchesGolden(plan, fixture.root);
+      assertMatchesGolden(plan, fixture.root, fixture.source);
     });
 
     test.skipIf(!NATIVE_AVAILABLE)(`rust engine: ${fixture.name}`, async () => {
@@ -146,7 +171,7 @@ describe("engine contract fixtures", () => {
         selectionPolicy: fixture.request.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
         exact: fixture.request.exact ?? false,
       });
-      assertMatchesGolden(plan, fixture.root);
+      assertMatchesGolden(plan, fixture.root, fixture.source);
       assertValidCreatedAt(plan);
     });
   }

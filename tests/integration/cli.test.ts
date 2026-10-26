@@ -270,6 +270,31 @@ describe("CLI scan/apply", () => {
     expect(plan.candidates[0]?.reasons).toContain("custom-pattern");
   });
 
+  test("an unattended run removes dangerous items only with --allow-dangerous", () => {
+    mkdirSync(dir("custom-cache"));
+    writeFileSync(dir("custom-cache", "keep.txt"), "x");
+    const args = [
+      tmpDir,
+      "--pattern",
+      "custom-cache",
+      "--select",
+      "all",
+      "--include-dangerous",
+      "-y",
+    ];
+
+    const refused = runCli(args);
+    expect(refused.exitCode).toBe(2);
+    expect(refused.stderr).toContain("--allow-dangerous");
+    expect(existsSync(dir("custom-cache", "keep.txt"))).toBe(true);
+
+    const allowed = runCli([...args, "--allow-dangerous"]);
+    expect(allowed.exitCode).toBe(0);
+    // Consent is to named items: each one is printed before it goes.
+    expect(allowed.stderr).toContain(dir("custom-cache"));
+    expect(existsSync(dir("custom-cache"))).toBe(false);
+  });
+
   test("scan can opt dangerous candidates back in with --include-dangerous", () => {
     mkdirSync(dir("custom-cache"));
 

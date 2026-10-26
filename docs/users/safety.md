@@ -42,6 +42,34 @@ near an unlink syscall. Avoid cleaning trees whose paths or mounts are being
 actively replaced. Do not run as administrator merely
 to bypass a refusal.
 
+## What is never removed
+
+Some things are not Sweep's to remove, whatever a pattern or flag says. They
+appear in a scan as **blocked** and cannot be selected:
+
+- **Anything git tracks.** Build output is never committed, so a folder that
+  holds a tracked or staged file is authored work. Sweep asks git once per
+  repository, with the repository's `core.fsmonitor` disabled so scanning a
+  cloned project never runs a program from its config, and asks again just
+  before removal.
+- **Project files**: `src`, `.sweeprc`, `.env` and `.env.*`, and manifests and
+  lockfiles such as `package.json`, `Cargo.toml`, `go.mod` and `pyproject.toml`.
+  A repository's own `.sweeprc` can add patterns, but it cannot make these
+  removable.
+- **Version-control internals** (`.git`, `.hg`, `.jj`, ...) and system roots.
+
+## Dangerous items need consent by name
+
+Dangerous items (custom and opt-in patterns, names that can hold authored files)
+are never pre-selected. Interactively, they are listed by path before you
+confirm. An unattended run (`--yes`) refuses them unless you also pass
+`--allow-dangerous`; it still prints each path before removing it.
+
+```sh
+sweep --dry-run --select all --include-dangerous   # look first
+sweep --select all --include-dangerous -y --allow-dangerous
+```
+
 ## Delete versus trash
 
 Permanent deletion removes the selected entry and, for a directory, its contents.

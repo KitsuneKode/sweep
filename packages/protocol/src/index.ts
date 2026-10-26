@@ -171,6 +171,11 @@ export interface CliOptions {
   json?: boolean;
   /** Move candidates to .sweep-trash-<ts>/ under the target instead of deleting. */
   trash?: boolean;
+  /**
+   * Consent for an unattended (`--yes`) run to remove dangerous-tier items.
+   * Without it a `--yes` run refuses rather than deleting them silently.
+   */
+  allowDangerous?: boolean;
 }
 
 export interface ScanCandidate extends ScanEntry {

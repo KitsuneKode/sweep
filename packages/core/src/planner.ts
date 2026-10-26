@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { gitTrackedPaths } from "./git-tracked.js";
+
+export const GIT_TRACKED_REASON = "git-tracked";
 import type {
   PathFailure,
   RiskTier,
@@ -64,7 +67,7 @@ export function buildPlan(
 
 /** Recompute candidate insights and selection after scan (JS and Rust engines). */
 export function applyPlanInsights(plan: ScanPlan): ScanPlan {
-  const candidates = normalizeSelectionDefaults(enrichCandidates(plan.candidates));
+  const candidates = normalizeSelectionDefaults(blockGitTracked(enrichCandidates(plan.candidates)));
   const selectedCandidateIds = compileSelectedCandidateIds(candidates, plan.selectionPolicy);
   const riskCounts = countRiskTiers(candidates);
 
@@ -79,6 +82,28 @@ export function applyPlanInsights(plan: ScanPlan): ScanPlan {
       riskCounts,
     },
   };
+}
+
+/**
+ * Anything git tracks is authored, not built: block it whatever its name.
+ * Blocked and symlink rows are skipped - the first is final, and a link's
+ * tracked state says nothing about what it points at.
+ */
+function blockGitTracked(candidates: ScanCandidate[]): ScanCandidate[] {
+  const checkable = candidates.filter(
+    (candidate) => candidate.riskTier !== "blocked" && !candidate.isSymlink,
+  );
+  const tracked = gitTrackedPaths(checkable.map((candidate) => candidate.path));
+  if (tracked.size === 0) return candidates;
+  return candidates.map((candidate) =>
+    tracked.has(candidate.path)
+      ? {
+          ...candidate,
+          riskTier: "blocked" as const,
+          reasons: [...candidate.reasons, GIT_TRACKED_REASON],
+        }
+      : candidate,
+  );
 }
 
 function normalizeSelectionDefaults(candidates: ScanCandidate[]): ScanCandidate[] {

@@ -134,6 +134,11 @@ function addCleanAction(command: Command): Command {
     .option("-n, --dry-run", "Preview deletions without making changes", false)
     .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
     .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
+    .option(
+      "--allow-dangerous",
+      "With --yes, allow dangerous items to be removed (each is listed first)",
+      false,
+    )
     .action(function (this: Command, pathArg: string) {
       void handleClean(pathArg, this.optsWithGlobals<CliOptions>());
     });
@@ -230,6 +235,11 @@ export function makeProgram(): Command {
     .option("-n, --dry-run", "Preview the plan's deletions without making changes", false)
     .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
     .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
+    .option(
+      "--allow-dangerous",
+      "With --yes, allow dangerous items to be removed (each is listed first)",
+      false,
+    )
     .option("--json", "Emit JSON apply results", false)
     .action(function (this: Command) {
       const opts = this.optsWithGlobals<

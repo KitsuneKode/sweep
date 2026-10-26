@@ -12,6 +12,7 @@ import { applyReviewedPlan } from "./apply-plan.js";
 import { expectApplyOutput } from "../apply-lifecycle.js";
 import {
   applyNoColor,
+  assertDangerousConsent,
   confirmPlanDeletion,
   drainStdout,
   resolveEngineBackend,
@@ -96,6 +97,12 @@ export async function handleClean(pathArg: string, opts: CliOptions): Promise<vo
       await drainStdout();
       exitWith(EXIT.OK);
     }
+
+    assertDangerousConsent(plan, {
+      yes: opts.yes,
+      ...(opts.allowDangerous ? { allowDangerous: true } : {}),
+      ...(opts.json ? { json: true } : {}),
+    });
 
     if (
       !(await confirmPlanDeletion(plan, {

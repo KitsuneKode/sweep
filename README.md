@@ -102,6 +102,7 @@ sweep doctor --json     # config + environment + dry-scan report
 | `--disabled-pattern <p>` |       | Disable a default pattern for this run                        |
 | `--select <mode>`        |       | `default`, `safe`, `all`, or `none`                           |
 | `--include-dangerous`    |       | Include dangerous custom matches                              |
+| `--allow-dangerous`      |       | With `--yes`, allow dangerous items to be removed             |
 | `--depth <n>`            |       | Max recursion depth (`-1` = unlimited)                        |
 | `--config <path>`        |       | Explicit config file                                          |
 | `--engine <backend>`     |       | `auto` (default), `rust`, or `js`                             |
