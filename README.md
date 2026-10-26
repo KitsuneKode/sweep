@@ -44,6 +44,11 @@ curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh |
 **Platforms:** Linux (x64, arm64), macOS (x64, arm64), Windows (x64) - Node.js ≥ 20.3
 for plain CLI commands; the full-screen UI needs Bun and OpenTUI (or the embedded standalone build). Standalone binaries are attached to GitHub releases.
 
+**For AI agents:** `npx skills add KitsuneKode/sweep` installs a skill that teaches
+coding agents the safe workflow: scan to a plan, show you every selected path, apply
+only the plan you approve. The docs site also serves
+[`llms.txt`](https://sweep.kitsunekode.in/llms.txt).
+
 **Shell completions:**
 
 ```bash
