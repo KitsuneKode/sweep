@@ -87,6 +87,21 @@ export function useCountUp(target: number, enabled: boolean, ms = 420): number {
   return shown;
 }
 
+/**
+ * Whether meters draw in pixels here: the terminal speaks kitty graphics and
+ * has reported its pixel size. Callers that lay a meter over text use it to
+ * leave a gap only when an image will fill it.
+ */
+export function useKittyGraphics(): boolean {
+  const renderer = useRenderer();
+  return (
+    renderer.capabilities?.kitty_graphics === true &&
+    renderer.resolution !== null &&
+    renderer.width > 0 &&
+    renderer.height > 0
+  );
+}
+
 export function Meter(props: MeterProps & { previewColor: string }) {
   const renderer = useRenderer();
   const motion = useMotionEnabled();

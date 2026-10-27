@@ -1,8 +1,9 @@
 import type { BoxRenderable, MouseEvent } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { SelectableRow, useHoverState } from "./SelectableRow.js";
-import { buildSidebarLine, type ScopeRowState, QUEUE_GLYPH, queueState } from "./presentation.js";
+import { rowBackground, SelectableRow, useHoverState } from "./SelectableRow.js";
+import { buildSidebarRow, type ScopeRowState, QUEUE_GLYPH, queueState } from "./presentation.js";
+import { Meter, useKittyGraphics } from "./Meter.js";
 import { isScopeAncestor } from "./scope-tree.js";
 import {
   buildScopeSidebarRows,
@@ -242,6 +243,25 @@ const ScopeRow = memo(function ScopeRow({
 }: ScopeRowProps) {
   const rowRef = useRef<BoxRenderable | null>(null);
   const branch = row.hasChildren ? (expanded ? "▾" : "▸") : " ";
+  const kitty = useKittyGraphics();
+  const line = buildSidebarRow({
+    label: row.key === null ? "All folders" : row.key === "" ? "Target root" : row.label,
+    count: row.count,
+    bytes: row.bytes,
+    selectedCount: row.selectedCount,
+    state: rowState,
+    guide,
+    branch,
+    markActive: false,
+    countWidth: layout.countWidth,
+    bytesWidth: layout.bytesWidth,
+    maxLabelWidth: layout.maxLabelWidth,
+    showBytes: layout.showBytes,
+    barWidth: layout.barWidth,
+    maxBytes,
+    tokens,
+    barGap: kitty,
+  });
 
   return (
     <SelectableRow
@@ -274,26 +294,30 @@ const ScopeRow = memo(function ScopeRow({
         />
         <text content={rowState === "active" ? " ›" : "  "} fg={tokens.accent} />
         <box flexGrow={1} minWidth={0}>
-          <text
-            wrapMode="none"
-            content={buildSidebarLine({
-              label: row.key === null ? "All folders" : row.key === "" ? "Target root" : row.label,
-              count: row.count,
-              bytes: row.bytes,
-              selectedCount: row.selectedCount,
-              state: rowState,
-              guide,
-              branch,
-              markActive: false,
-              countWidth: layout.countWidth,
-              bytesWidth: layout.bytesWidth,
-              maxLabelWidth: layout.maxLabelWidth,
-              showBytes: layout.showBytes,
-              barWidth: layout.barWidth,
-              maxBytes,
-              tokens,
-            })}
-          />
+          <text wrapMode="none" content={line.content} />
+          {line.bar ? (
+            <box
+              position="absolute"
+              left={line.bar.column}
+              top={0}
+              width={line.bar.width}
+              height={1}
+            >
+              <Meter
+                width={line.bar.width}
+                value={line.bar.fraction}
+                fill={line.bar.color}
+                previewColor={line.bar.color}
+                track={null}
+                animate={false}
+                variant="blocks"
+                thickness={0.42}
+                background={
+                  rowBackground(isCursor, rowState === "active", hovered, tokens) ?? tokens.bg
+                }
+              />
+            </box>
+          ) : null}
         </box>
       </box>
     </SelectableRow>

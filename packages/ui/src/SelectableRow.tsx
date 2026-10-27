@@ -23,7 +23,7 @@ export interface SelectableRowProps {
  * rest of the UI is filtered to. One background for both makes the pane
  * unreadable the moment focus moves away.
  */
-function rowBackground(
+export function rowBackground(
   selected: boolean,
   emphasized: boolean,
   hovered: boolean,

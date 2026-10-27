@@ -6,7 +6,7 @@ import { MacOSScrollAccel } from "@opentui/core";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   artifactRowWidths,
-  buildArtifactRowContent,
+  buildArtifactRow,
   buildGroupHeaderContent,
   buildListColumnHeader,
   type RowMetrics,
@@ -15,6 +15,7 @@ import {
 import type { UiDisplayRow } from "./rows.js";
 import { owningHeaderIndex } from "./rows.js";
 import { nextScrollTop } from "./scroll.js";
+import { Meter, useKittyGraphics } from "./Meter.js";
 import { ScrollbarColumn, scrollbarModel } from "./ScrollbarColumn.js";
 import type { ThemeTokens } from "./theme.js";
 
@@ -386,6 +387,18 @@ const ItemRow = memo(function ItemRow({
 }: ItemRowProps) {
   const element = useRef<BoxRenderable | null>(null);
   const queuePress = useRef(false);
+  const kitty = useKittyGraphics();
+  const row = buildArtifactRow(
+    candidate,
+    isSelected,
+    isCurrent,
+    widths,
+    tokens,
+    targetDir,
+    groupLabel,
+    metrics,
+    kitty,
+  );
   const rowBg = isCurrent
     ? focused
       ? tokens.selectionBg
@@ -445,19 +458,24 @@ const ItemRow = memo(function ItemRow({
       {...(rowBg ? { backgroundColor: rowBg } : {})}
       {...mouseProps}
     >
-      <text
-        content={buildArtifactRowContent(
-          candidate,
-          isSelected,
-          isCurrent,
-          widths,
-          tokens,
-          targetDir,
-          groupLabel,
-          metrics,
-        )}
-        wrapMode="none"
-      />
+      <text content={row.content} wrapMode="none" />
+      {row.bar ? (
+        // The kitty bar sits over the blank cells the text left for it, on
+        // the colour painted behind this row so its edges never show a box.
+        <box position="absolute" left={row.bar.column} top={0} width={row.bar.width} height={1}>
+          <Meter
+            width={row.bar.width}
+            value={row.bar.fraction}
+            fill={row.bar.color}
+            previewColor={row.bar.color}
+            track={null}
+            animate={false}
+            variant="blocks"
+            thickness={0.42}
+            background={rowBg ?? tokens.bg}
+          />
+        </box>
+      ) : null}
     </box>
   );
 });
