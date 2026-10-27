@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { nativePlatformById, NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 import { defaultBinaryPath } from "./binary-path.js";
 import { assertNativeBinary } from "./binary-format.js";
+import { nativePackageJson } from "./package-json.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const NATIVE_PACKAGES = join(REPO_ROOT, "native-packages");
@@ -103,22 +104,5 @@ if (platform.os !== "win32") {
   chmodSync(destBinary, 0o755);
 }
 
-const packageJson = {
-  name: platform.npmName,
-  version,
-  description: `Native sweep-engine binary for ${platform.os} ${platform.cpu}`,
-  os: [platform.os],
-  cpu: [platform.cpu],
-  files: ["bin"],
-  license: "MIT",
-  repository: {
-    type: "git",
-    url: "git+https://github.com/KitsuneKode/sweep.git",
-  },
-  publishConfig: {
-    access: "public",
-  },
-};
-
-writeFileSync(join(outDir, "package.json"), `${JSON.stringify(packageJson, null, 2)}\n`);
+writeFileSync(join(outDir, "package.json"), nativePackageJson(platform, version));
 console.log(`packed ${platform.npmName}@${version} → ${outDir}`);

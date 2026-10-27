@@ -13,7 +13,7 @@ export function assertPublicationSource(
     );
   if (trackedChanges.trim())
     throw new Error(
-      "Publication requires a clean source checkout. Commit and qualify the changes before publishing.",
+      `Publication requires a clean source checkout. Commit and qualify the changes before publishing.\nChanged:\n${trackedChanges.trimEnd()}`,
     );
 }
 
