@@ -1,376 +1,132 @@
 # sweep
 
-> Find and remove generated project artifacts.
+> Clear the build output of projects you stopped working on. Nothing you wrote, and nothing you did not choose.
 
 [![CI](https://github.com/KitsuneKode/sweep/actions/workflows/ci.yml/badge.svg)](https://github.com/KitsuneKode/sweep/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@kitsunekode/sweep)](https://www.npmjs.com/package/@kitsunekode/sweep)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-`sweep` deletes build artifacts - `node_modules`, `dist`, `.next`, `target`, and more - recursively across monorepos, with path validation, protected-root guardrails, and explicit review before cleanup.
-
-Like [`npkill`](https://github.com/voidcosmos/npkill), Sweep helps review project cleanup. It also finds build outputs, supports saved plans and automation, and streams discoveries into a terminal UI.
+`sweep` finds `node_modules`, `target`, `.next`, `.turbo` and other build output
+across a folder of projects, tells you which projects nobody has touched in
+months, and removes only what you pick. A scan never changes your disk.
 
 ```bash
-sweep ui ~/projects
-# Queue safe items → Review queue → confirm → read the cleanup receipt.
-# Click a folder name to browse; use its checkbox to queue artifacts.
-# Ctrl+K (or F2) searches actions, settings and shortcuts.
-# Ctrl+O switches to another folder: fuzzy-find a nearby project or type a path.
+npx @kitsunekode/sweep --dry-run ~/Projects   # see what it would clear; changes nothing
 ```
 
-The terminal interface starts with an empty queue. Browsing, sorting and filtering
-do not select anything. Review names every selected artifact, including items
-queued outside the folder you are viewing.
+Or install it and review in the terminal UI with `sweep ui ~/Projects`:
 
----
+```
+  sweep  ~/Projects                                                         31.0 GiB free
+
+  57.4 GiB you can reclaim  ·  112 projects  ·  586 MiB idle 30+ days, i queues it
+
+  Idle 30+ days                                                26 projects  ·  586.3 MiB
+  › ○  template-nextjs-monorepo   244.7 MiB    30d   templates     .turbo · .next +1
+    ○  kata-machine               194.5 MiB    7mo   dsa           node_modules
+       + 18 more projects  ·  2.3 MiB
+
+  Worked on recently                                            86 projects  ·  56.9 GiB
+    ○  sweep                        4.9 GiB     3m   cli-tools     ! 23 caution  target +4
+```
+
+Space queues a project, Enter opens it, `i` queues every idle project,
+Ctrl+Enter (or the Ctrl+K menu) reviews the queue. Every removal is confirmed and ends in a receipt.
+
+## Why sweep
+
+- **It knows what you still use.** Each project's idle time comes from its git
+  history and its own files, never from its build output, so a reinstall does
+  not make a forgotten project look busy. `sweep --idle 30d` selects only
+  projects nobody has touched for a month.
+- **It will not remove your work.** Anything git tracks, project files (`src`,
+  manifests, lockfiles, `.env*`), version-control folders and system roots are
+  blocked whatever a pattern or flag says. Each path is checked again right
+  before removal.
+- **It is fast.** A Rust engine finds and sizes 4,000 artifacts across 65,000
+  folders in under a second, and the terminal UI fills in while it scans.
+- **It fits scripts and agents.** Plans are JSON you can save, inspect and
+  apply later; exit codes are stable; [`llms.txt`](https://sweep.kitsunekode.in/llms.txt)
+  and an agent skill teach coding agents the same safe workflow.
 
 ## Install
 
 ```bash
-npm install -g @kitsunekode/sweep
-bun add -g @kitsunekode/sweep
-
-# One-shot
-npx @kitsunekode/sweep .
-bunx @kitsunekode/sweep .
-
-# Homebrew
-brew install kitsunekode/tap/sweep
-
-# Standalone binary (no Node/Bun needed, checksum-verified)
+brew install kitsunekode/tap/sweep     # macOS and Linux
 curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
+npm install -g @kitsunekode/sweep      # commands only, Node.js 20.3+
+bun add -g @kitsunekode/sweep @opentui/core   # commands and the terminal UI
 ```
 
-**Platforms:** Linux (x64, arm64), macOS (x64, arm64), Windows (x64) - Node.js ≥ 20.3
-for plain CLI commands; the full-screen UI needs Bun and OpenTUI (or the embedded standalone build). Standalone binaries are attached to GitHub releases.
+Homebrew and the install script fetch one self-contained binary with the
+terminal UI built in (no Node or Bun needed, checksums verified). From npm,
+every command runs on Node; `sweep ui` also needs Bun and `@opentui/core`.
+Linux (x64, arm64), macOS (x64, arm64) and Windows (x64) are supported.
 
-**For AI agents:** `npx skills add KitsuneKode/sweep` installs a skill that teaches
-coding agents the safe workflow: scan to a plan, show you every selected path, apply
-only the plan you approve. The docs site also serves
-[`llms.txt`](https://sweep.kitsunekode.in/llms.txt).
+For coding agents: `npx skills add KitsuneKode/sweep`.
 
-**Shell completions:**
+## Use it
 
 ```bash
-sweep completions zsh  > ~/.zsh/completions/_sweep        # dir must be in $fpath
-sweep completions bash > ~/.local/share/bash-completion/completions/sweep
-sweep completions fish > ~/.config/fish/completions/sweep.fish
+sweep ui ~/Projects          # review and choose, projects first
+sweep --dry-run              # see what a cleanup would remove; changes nothing
+sweep --idle 30d             # clean only projects idle for 30 days or more
+sweep --trash                # move to a local trash folder instead of deleting
+sweep init                   # look around, then write a .sweeprc from your answers
 ```
 
----
+| Command                       | What it does                                               |
+| ----------------------------- | ---------------------------------------------------------- |
+| `sweep` / `sweep clean`       | Scan, show what would go, confirm, remove                  |
+| `sweep ui`                    | Interactive review; `--view full` opens the folder view    |
+| `sweep scan`                  | Scan only; `--json` for a plan, `--json-stream` for events |
+| `sweep plan`                  | Write a saved plan to stdout for a later `apply`           |
+| `sweep apply --plan <file>`   | Apply a saved plan after re-checking every path            |
+| `sweep inspect --plan <file>` | Show a plan's contents and totals without applying it      |
+| `sweep init`                  | Scan, ask about each opt-in pattern, write `.sweeprc`      |
+| `sweep stats`                 | Totals from your cleanup history                           |
+| `sweep doctor`                | Check config, tools and engine                             |
+| `sweep completions <shell>`   | Shell completions for bash, zsh or fish                    |
+
+Common options: `--dry-run`, `--trash`, `--idle <age>`, `--yes` (skip the
+prompt), `--pattern <name>`, `--ignore <name or path>`, `--json`. Removing
+dangerous items without a prompt also needs `--allow-dangerous`, and every one is
+named before it goes. [All commands and options](https://sweep.kitsunekode.in/docs/users/commands).
+
+## What it cleans
+
+On by default, because nobody writes these by hand: `node_modules`, `.next`,
+`.nuxt`, `.svelte-kit`, `.turbo`, `.vite`, `.parcel-cache`, `.nyc_output`,
+`target` (beside a `Cargo.toml`) and `*.tsbuildinfo`.
+
+Opt in to generic names that can hold your own files (`dist`, `build`, `out`,
+`coverage`, `__pycache__`, `.venv`, `.gradle` and more) with `sweep init`, a
+`.sweeprc`, or `--pattern`. They are never pre-selected.
+
+## Safety, in short
+
+- Scans, plans, dry runs and browsing in the terminal UI never write.
+- Blocked items cannot be queued at all; dangerous items only one at a time,
+  behind a red confirmation.
+- Every path is re-checked right before removal: a folder replaced, moved or
+  turned into a symlink since the scan is refused, not removed.
+- Symlinks are removed as links, never followed.
+- Ctrl+C stops scheduling new removals; the receipt lists completed, failed
+  and unattempted items separately.
+
+[The full safety model](https://sweep.kitsunekode.in/docs/users/safety).
 
 ## Documentation
 
-[User and developer guides](https://github.com/KitsuneKode/sweep/blob/main/docs/index.md) cover safe first use, terminal controls,
-configuration, troubleshooting, measured benchmarks and upcoming release gates.
-The docs describe the current source; your installed release may differ.
-
-## Quick start
-
-```bash
-sweep init              # scaffold .sweeprc (optional - defaults work out of the box)
-sweep --dry-run         # preview what would be deleted
-sweep                   # scan, confirm, delete
-sweep ui .              # interactive TUI for monorepos
-sweep doctor --json     # config + environment + dry-scan report
-```
-
----
-
-## Commands
-
-| Command                       | Description                                      |
-| ----------------------------- | ------------------------------------------------ |
-| `sweep` / `sweep clean`       | Default cleanup flow with prompt and guardrails  |
-| `sweep scan`                  | Scan only - list candidates, no deletion         |
-| `sweep plan`                  | Emit a saved-plan JSON document                  |
-| `sweep ui`                    | OpenTUI interactive picker (TTY required)        |
-| `sweep apply --plan <path>`   | Apply a saved JSON plan                          |
-| `sweep inspect --plan <path>` | Show a plan's provenance and totals - no apply   |
-| `sweep stats`                 | Retained history + estimated cleanup bytes       |
-| `sweep init`                  | Create a starter `.sweeprc`                      |
-| `sweep doctor`                | Validate config, check tooling, dry-scan preview |
-| `sweep completions <shell>`   | Print completion script for bash, zsh, or fish   |
-
-`path` defaults to `.` on all path-taking commands.
-
-### Common flags
-
-| Flag                     | Short | Description                                                   |
-| ------------------------ | ----- | ------------------------------------------------------------- |
-| `--dry-run`              | `-n`  | Preview deletions - no changes                                |
-| `--trash`                |       | Move to `.sweep-trash-<ts>/` instead of deleting              |
-| `--yes`                  | `-y`  | Skip confirmation (CI / scripts)                              |
-| `--force-large`          |       | Allow deletion over `maxSizeGB` (requires `--yes`)            |
-| `--max-size-gb <gib>`    |       | Per-run byte ceiling in GiB; `none` disables a configured cap |
-| `--pattern <p>`          | `-p`  | Add extra pattern (repeatable)                                |
-| `--ignore <p>`           | `-i`  | Ignore name, glob, or path prefix (repeatable)                |
-| `--disabled-pattern <p>` |       | Disable a default pattern for this run                        |
-| `--select <mode>`        |       | `default`, `safe`, `all`, or `none`                           |
-| `--include-dangerous`    |       | Include dangerous custom matches                              |
-| `--allow-dangerous`      |       | With `--yes`, allow dangerous items to be removed             |
-| `--depth <n>`            |       | Max recursion depth (`-1` = unlimited)                        |
-| `--config <path>`        |       | Explicit config file                                          |
-| `--engine <backend>`     |       | `auto` (default), `rust`, or `js`                             |
-| `--cold`                 |       | Dev: fresh engine probe + page-cache drop attempt             |
-| `--no-color`             |       | Disable color output                                          |
-| `--quiet`                | `-q`  | Suppress non-essential output                                 |
-| `--verbose`              |       | Per-candidate scan progress                                   |
-
-`--json` is global (structured output for `scan`, `apply`, `doctor`, and the
-default `clean` flow). `scan` additionally offers `--json-stream` - newline-
-delimited `ScanEvent`s while the scan runs.
-
-### Examples
-
-```bash
-sweep clean ~/projects/myapp
-sweep --dry-run -p .cache -p .output
-sweep scan . --json > sweep-plan.json
-sweep apply --plan sweep-plan.json --yes
-sweep init --force
-sweep doctor .
-```
-
----
-
-## Interactive UI (`sweep ui`)
-
-The TUI boots **immediately** and fills in live as the scan streams - no spinner
-phase. Review, filter, and delete without leaving the terminal.
-
-### The screen
-
-- **Scope tree** - artifacts grouped by directory; `h`/`l` (or clicking the
-  header) collapses/expands groups, `w`/`e` folds/unfolds all
-- **Status mark** - one glyph per row: `●` queued / `○` idle / `⊘` blocked
-  (hard-locked). Color carries the risk tier - safe is accent, caution amber,
-  dangerous red
-- **Group headers** - every group is headed `▾ apps/web/ · 3 · 2.4GB`, even
-  single-item ones, so no orphan row reads as part of the group above it. The
-  owning header sticks at the top while its group scrolls past
-- **Age and size** - each row shows how long ago the artifact last changed
-  (`3h`, `12d`, `8mo`, `2y`) and a thin bar scaled to the largest listed
-  artifact. Anything touched in the last week is tinted amber: probably in
-  use. Both columns drop out on narrow panes
-- **Reclaim meter** - live selected-vs-total bytes with percentage
-- **Insights** - under the scope tree: found bytes by risk tier, and how much
-  has sat untouched for 30 days or more (shown when the terminal is tall enough)
-- **Statusline** - mode chip (`SCANNING`, `NORMAL`, …), contextual hints,
-  active filters; dead keys report why they did nothing
-- **Scale** - the list is windowed: only visible rows render; cached row and scope indexes keep
-  cursor movement independent of the full candidate count. While a scan runs, rows
-  hold discovery order so nothing moves under the cursor; the list re-sorts
-  once when the scan completes
-
-### Keys
-
-Arrows work everywhere; letter keys are speed aliases.
-
-| Key                                | Action                             | Notes                                                       |
-| ---------------------------------- | ---------------------------------- | ----------------------------------------------------------- |
-| `↑↓` / `j k`                       | move cursor                        |                                                             |
-| `g` / `G` or `Home/End`            | first / last item                  |                                                             |
-| `Ctrl-U` / `Ctrl-D` or `PgUp/PgDn` | page up / down                     | moves one viewport                                          |
-| `Space`                            | toggle selection                   | blocked items never toggle                                  |
-| `s` / `a` / `u`                    | select safe · safe+caution · clear | bulk never touches dangerous                                |
-| `Enter`                            | open details or browse a folder    | never deletes                                               |
-| `Ctrl+Enter`                       | review queue                       | where supported; Review queue button always confirms        |
-| `F2`                               | actions and settings               | mouse pages expose selection, filters and appearance        |
-| `h` / `l` (or click header)        | collapse / expand group            | tree-style triage                                           |
-| `w` / `e`                          | collapse all · expand all          |                                                             |
-| `o`                                | sort size · name · age             | size-desc default; age is stalest first                     |
-| `/` then type                      | filter artifacts                   | text or operators (below); `esc` clears                     |
-| `x` / `d`                          | confirm only the focused artifact  | also works inside inspect; never expands to the queue       |
-| `i`                                | inspect the row                    | kind, path, reasons                                         |
-| `v`                                | visual range                       | extend with `↑↓`, `Space` queues the span                   |
-| `y`                                | copy the row's path                | via OSC 52, works over SSH                                  |
-| `S`                                | save the queue as a plan file      | `sweep-plan-<time>.json`, for `apply --plan`                |
-| `Tab` / `Shift+Tab`                | cycle panes                        | artifacts ↔ scopes ↔ filter                                 |
-| `1–4`                              | risk filter                        | all / safe / caution / dangerous                            |
-| `p`                                | pattern editor                     | grouped catalog; `/` finds, `a` adds, `w` writes `.sweeprc` |
-| `r`                                | rescan from disk                   | honors pattern edits; safe mid-scan                         |
-| `t`                                | theme                              | dark · light · auto                                         |
-| `m`                                | activity animation                 | pause · resume; work and cancellation continue              |
-| `Esc`                              | **walk back one layer**            | never quits - see below                                     |
-| `q` / `Ctrl-C`                     | quit                               | `Ctrl-C` works even inside modals/search                    |
-
-In the confirm dialog, `t` switches between permanent deletion and local trash.
-Trash keeps the occupied storage; restoration requires a manual move.
-
-### Filter operators
-
-Type in `/`. Terms are separated by spaces and every term must match; bare
-words are substring matches over name, path, kind and risk.
-
-| Term            | Matches                                           |
-| --------------- | ------------------------------------------------- |
-| `kind:target`   | artifact kind contains the value                  |
-| `risk:caution`  | exact risk tier                                   |
-| `path:crates/`  | path contains the value                           |
-| `>100MB` `<1GB` | size comparison (`>=`, `<=` too; `B KB MB GB TB`) |
-| `older:30d`     | untouched for at least that long (`m h d w mo y`) |
-| `newer:7d`      | changed within that window                        |
-| `is:queued`     | also `is:unqueued`, `is:symlink`, `is:stub`       |
-| `!term`         | negates any term, e.g. `!kind:dist`               |
-
-Artifacts with no known modified time never match `older:` or `newer:`.
-Half-typed operators fall back to plain text instead of hiding the list.
-
-`Space` on a visual range never queues dangerous or blocked artifacts, the same
-rule as bulk select.
-
-**Esc philosophy:** pressing `Esc` unwinds exactly one thing per press - closes
-the help modal, leaves the filter, clears the risk filter, clears scope,
-clears text, expands groups. It can never exit the process or lose your
-selection to a mis-press.
-
-### Mouse
-
-Wheel moves the cursor three rows per notch - the view follows it, so the
-selection is never pointed at a row you can't see. Click focuses a row, click
-again queues it, click a group header to fold it. The scrollbar supports click-to-seek and dragging.
-
----
-
-## Config (`.sweeprc`)
-
-The easiest way to get one is the TUI: `p` opens the pattern catalog, toggle
-what you want, `w` writes `.sweeprc` into the scanned directory (an existing
-file is never clobbered - `W` overwrites on a second look). Or `sweep init`
-scaffolds a starter file, or create `.sweeprc` manually (JSON):
-
-```json
-{
-  "patterns": [".custom-output"],
-  "ignore": ["packages/vendor-patched"],
-  "maxSizeGB": 10,
-  "depth": -1
-}
-```
-
-All fields are optional. `patterns` and `ignore` merge with defaults - they do not replace them.
-Globs support `*` (any run of characters) and `?` (exactly one character); both match the artifact name only, never the path.
-
-Disable a default pattern:
-
-```json
-{ "disabledPatterns": ["node_modules"] }
-```
-
-**Lookup order:** CLI flags → `.sweeprc` (walks up from target) → global config → built-in defaults. The global config is `config.json` inside the sweep config dir: `$XDG_CONFIG_HOME/sweep`, or `%APPDATA%\sweep` on Windows, or `~/.config/sweep` otherwise. `SWEEP_CONFIG_DIR` overrides everything.
-
----
-
-## Patterns: defaults vs the catalog
-
-`sweep` ships a curated pattern catalog, grouped by ecosystem in the `p` pane.
-The only entries enabled by default are **machine-created, canonical names** -
-directories nobody authors by hand:
-
-| Pattern                            | What it is                     |
-| ---------------------------------- | ------------------------------ |
-| `node_modules`                     | npm/yarn/pnpm/bun dependencies |
-| `.next`, `.nuxt`, `.svelte-kit`    | framework build dirs           |
-| `.turbo`, `.vite`, `.parcel-cache` | tool caches                    |
-| `.nyc_output`                      | nyc coverage cache             |
-| `target`                           | cargo build output             |
-| `*.tsbuildinfo`                    | TypeScript incremental info    |
-
-Everything else in the catalog - `dist`, `build`, `out`, `coverage`,
-`__pycache__`, `.venv`, `Pods`, `.gradle`, `.dart_tool`, `cmake-build-*` and
-more - is **opt-in**. Generic names can hold files you wrote yourself, and a
-cleanup tool must never presume otherwise. Turn them on with `p` + `space`,
-`.sweeprc` `patterns`, or `--pattern`. Opt-ins scan in as the `dangerous` tier:
-they are never pre-selected and always need a deliberate queue + confirm.
-
----
-
-## Safety
-
-**Nothing is ever deleted on its own.** Scan, plan, and the TUI are read-only;
-deletion requires `Enter` on a non-empty selection, and risky selections get a
-red confirmation naming exactly what goes.
-
-Layered guarantees:
-
-1. **Hard-blocked targets** (not configurable): `/`, `/home`, `/usr`, your home
-   root, Windows system roots, and anything inside `.git`/`.svn`/`.hg`.
-2. **Tiered selection**: blocked items cannot be selected at all; dangerous
-   items only via deliberate per-item toggle + red confirm; bulk `a` covers
-   safe and caution tiers exclusively.
-3. **Path revalidation** immediately before each deletion - changed symlinks,
-   vanished paths, or anything escaping the target directory aborts that path
-   without touching the rest.
-4. **Optional byte ceiling** - there is no default size cap. A configured numeric
-   `maxSizeGB` refuses larger removal without a deliberate override. Use
-   `--max-size-gb` for one run; `null` in config means no byte cap. Resource bounds
-   still apply. Dry-run previews never need destructive authorization.
-5. **Symlinks are removed, never followed.** Path traversal (`..`, null bytes)
-   rejected; unsafe patterns rejected at parse time.
-6. **Partial-failure honesty** - the final report lists every path that failed
-   and why; exit code reflects it. A scan that couldn't read part of the tree
-   says so (`N skipped` in the TUI, counts in `scan --json`) instead of looking
-   complete.
-7. **Ctrl+C requests cancellation** mid-apply - Sweep stops scheduling new
-   deletions and waits for in-flight work to settle. It does not undo removals.
-   Keep the outcome report; a missing final report means the outcome is unknown.
-
-### Reversible cleanup (`--trash`)
-
-```bash
-sweep --trash                 # clean, but move instead of delete
-sweep clean . --trash -y      # same, non-interactive
-```
-
-Instead of deleting, candidates are moved into `.sweep-trash-<timestamp>/`
-inside the target - atomic renames on the same filesystem, with each entry's
-original relative path preserved. Trash dirs are excluded from future scans
-automatically. This is local holding storage, not a backup or automatic restore
-system: deleting the trash directory, external edits or storage failure can
-lose its contents. Review the outcome report before relying on a completed move.
-On Windows, each relative destination is an exclusive slot; its `payload`
-contains the moved file or directory. Restore that payload to the original path.
-
-**History:** every apply appends to `history.jsonl` in the sweep config dir
-(`~/.config/sweep`, `%APPDATA%\sweep` on Windows; `SWEEP_CONFIG_DIR` overrides).
-`sweep stats` shows totals from retained history, capped to the newest 8 MiB.
-Bytes are plan estimates for completed removals or trash moves, not a physical
-disk-reclaim measurement or a lifetime counter.
-
----
-
-## Environment variables
-
-| Variable               | Purpose                                                                          |
-| ---------------------- | -------------------------------------------------------------------------------- |
-| `SWEEP_CONFIG_DIR`     | Overrides the config dir (`config.json`, `history.jsonl` live here)              |
-| `SWEEP_ENGINE_PATH`    | Points `--engine rust` / `auto` at a custom `sweep-engine` binary                |
-| `SWEEP_COLD`           | `1` = `--cold` behavior without the flag (dev cold-start runs)                   |
-| `NO_COLOR`             | Disables all color output (same effect as `--no-color`)                          |
-| `SWEEP_REDUCED_MOTION` | `1` or `true` starts TUI loader animation paused; `m` changes it for the session |
-
----
+[sweep.kitsunekode.in/docs](https://sweep.kitsunekode.in/docs) covers the
+terminal UI and its keys, configuration, automation and agents, trash and
+recovery, troubleshooting and the measured benchmarks.
 
 ## Exit codes
 
-| Code | Meaning                          |
-| ---- | -------------------------------- |
-| `0`  | Success                          |
-| `1`  | User aborted                     |
-| `2`  | Guardrail violation              |
-| `3`  | Config parse or validation error |
-| `4`  | Operation failed (scan/apply/IO) |
-| `5`  | Doctor warnings                  |
+`0` success · `1` aborted · `2` refused by a guardrail · `3` invalid config or
+plan · `4` failure · `5` doctor warnings.
 
----
+## License
 
-## CI
-
-```bash
-sweep --yes --dry-run    # preview in logs
-sweep --yes              # non-interactive cleanup
-sweep doctor --json      # machine-readable health check
-```
-
-Non-TTY environments disable color and spinners automatically.
+MIT
