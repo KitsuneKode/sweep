@@ -186,9 +186,10 @@ export function resolveTheme(mode: ThemeMode, terminalBackground?: string | null
           ? darkTheme
           : lightTheme;
   if (!process.env.NO_COLOR) {
-    // A forced theme against the terminal's polarity keeps its own canvas:
-    // dark text on a dark terminal would not be readable.
-    return terminalBackground && terminalDark === (theme === darkTheme)
+    // Only auto sits on the terminal's own canvas. Dark and light are the
+    // look someone chose on purpose: sweep's own solid canvas, the same in
+    // every terminal, whatever its background or transparency.
+    return mode === "auto" && terminalBackground && terminalDark === (theme === darkTheme)
       ? onTerminal(theme, terminalBackground)
       : theme;
   }
