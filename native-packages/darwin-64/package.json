@@ -1,6 +1,6 @@
 {
   "name": "@kitsunekode/sweep-engine-darwin-64",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Native sweep-engine binary for darwin x64",
   "license": "MIT",
   "repository": {
