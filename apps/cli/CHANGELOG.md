@@ -2,6 +2,8 @@
 
 ## 0.5.0
 
+The first release since 0.3.0; it carries every change made since then.
+
 ### Minor Changes
 
 - fa87aae: `sweep ui` opens on a calm projects view: one row per project (git work tree or
@@ -74,47 +76,6 @@
   (marked `~`), then replaces them with fresh measurements. Sizes come from
   `size-cache.json` in the configuration directory, are only reused for the same
   folder identity, and are never used by the CLI or by any removal.
-
-### Patch Changes
-
-- f721671: The projects view reads as one compact list on any terminal width: lines stop
-  at 104 columns, each section shows its eight largest projects with the rest
-  folded into one row, location and kinds sit in aligned quiet columns, and the
-  mouse wheel moves the cursor.
-- 4b1055d: The git-tracked check is about ten times faster on trees with many
-  repositories: the native engine reads each repository's index directly and in
-  parallel instead of running `git` once per repository. On a 4,000-candidate
-  tree the check drops from about 240 ms to 22 ms. Split and sparse indexes, and
-  installs without the engine, still use the hardened `git ls-files` path.
-- 4890a36: Pointing sweep at your home folder now says so and suggests a projects folder
-  (`sweep ~/Projects`) instead of calling it a system root.
-- 3e16eb8: Fix `--json` output being cut short when piped under Bun. Large results (over
-  roughly 64 KiB) could be truncated with a successful exit code because the
-  final flush trusted an empty write's callback, which Bun completes before
-  earlier bytes reach a slow reader. The flush now waits for the data itself.
-- 46feb6c: The terminal UI's scan meter no longer runs backwards. It showed sized items
-  over found items, and found keeps growing while discovery continues, so the bar
-  could reach 100% and drop back to 80%. It now holds its high point within a
-  scan; the exact "N of M sized" count beside it is unchanged.
-- ba47d86: Project rows name the items that need a look: "! 3 caution" or "✗ 1 dangerous",
-  so a risky project is visible before you open it.
-- 63760ec: Project files can no longer be cleaned, whatever pattern or flag is used:
-  `src`, manifests and lockfiles (`package.json`, `Cargo.toml`, `go.mod`, ...),
-  `.env` files and `.sweeprc` classify as blocked, and `apply` re-checks them in
-  saved plans. A repository's own `.sweeprc` could previously add patterns for
-  them. When nothing is pre-selected, sweep now says what it found and points to
-  `sweep ui` for review instead of suggesting blanket flags.
-- 47aab94: Folder checkboxes in the terminal UI show three distinct states: an open ring
-  (nothing queued), a half disc (some queued) and a full disc (all queued).
-  Before, a folder with a single queued item looked fully queued.
-- 13765c2: Fix `sweep ui` in the standalone binaries (Homebrew and the install script):
-  it refused to start with "requires @opentui/core" although the terminal UI is
-  embedded in the binary.
-
-## 0.4.0
-
-### Minor Changes
-
 - b39b06b: Triage by age, in the TUI and in the plan format.
 
   - Scan results now carry `modifiedMs`, the artifact's own last-modified time (optional in the plan schema, produced by both the JS and Rust engines). The list shows an Age column and a size bar, `o` cycles size, name and age (stalest first), and the cursor row says how long ago it changed. Anything touched in the last week is tinted as probably in use.
@@ -250,6 +211,39 @@
 
 ### Patch Changes
 
+- f721671: The projects view reads as one compact list on any terminal width: lines stop
+  at 104 columns, each section shows its eight largest projects with the rest
+  folded into one row, location and kinds sit in aligned quiet columns, and the
+  mouse wheel moves the cursor.
+- 4b1055d: The git-tracked check is about ten times faster on trees with many
+  repositories: the native engine reads each repository's index directly and in
+  parallel instead of running `git` once per repository. On a 4,000-candidate
+  tree the check drops from about 240 ms to 22 ms. Split and sparse indexes, and
+  installs without the engine, still use the hardened `git ls-files` path.
+- 4890a36: Pointing sweep at your home folder now says so and suggests a projects folder
+  (`sweep ~/Projects`) instead of calling it a system root.
+- 3e16eb8: Fix `--json` output being cut short when piped under Bun. Large results (over
+  roughly 64 KiB) could be truncated with a successful exit code because the
+  final flush trusted an empty write's callback, which Bun completes before
+  earlier bytes reach a slow reader. The flush now waits for the data itself.
+- 46feb6c: The terminal UI's scan meter no longer runs backwards. It showed sized items
+  over found items, and found keeps growing while discovery continues, so the bar
+  could reach 100% and drop back to 80%. It now holds its high point within a
+  scan; the exact "N of M sized" count beside it is unchanged.
+- ba47d86: Project rows name the items that need a look: "! 3 caution" or "✗ 1 dangerous",
+  so a risky project is visible before you open it.
+- 63760ec: Project files can no longer be cleaned, whatever pattern or flag is used:
+  `src`, manifests and lockfiles (`package.json`, `Cargo.toml`, `go.mod`, ...),
+  `.env` files and `.sweeprc` classify as blocked, and `apply` re-checks them in
+  saved plans. A repository's own `.sweeprc` could previously add patterns for
+  them. When nothing is pre-selected, sweep now says what it found and points to
+  `sweep ui` for review instead of suggesting blanket flags.
+- 47aab94: Folder checkboxes in the terminal UI show three distinct states: an open ring
+  (nothing queued), a half disc (some queued) and a full disc (all queued).
+  Before, a folder with a single queued item looked fully queued.
+- 13765c2: Fix `sweep ui` in the standalone binaries (Homebrew and the install script):
+  it refused to start with "requires @opentui/core" although the terminal UI is
+  embedded in the binary.
 - e2dd306: Anchor native Linux deletion to directory descriptors, refuse nested mount and
   bind-mount crossings, bound retained directory handles, and check cancellation
   within artifacts. JS checks Linux mount boundaries before recursive operations.
@@ -501,10 +495,6 @@
   times during secure native removal, preserving identity and cancellation checks.
   Allow preview release versions through preflight and complete zsh option values.
 
-## 0.3.1
-
-### Patch Changes
-
 - 3adabd3: Fix an uninstallable package. 0.3.0 shipped with Bun's `workspace:` and
   `catalog:` dependency protocols left unresolved in the published manifest, so
   every `npm install @kitsunekode/sweep` failed with `EUNSUPPORTEDPROTOCOL` and
@@ -519,6 +509,8 @@
 
 ## 0.3.0
 
+0.3.0 cannot be installed from npm: it was published with workspace dependency ranges. Use 0.5.0.
+
 ### Minor Changes
 
 - 7081664: Streaming TUI with live Rust scan progress, safer default selection, and ignore-glob / abort fixes.
@@ -530,6 +522,28 @@
   Ignore globs like `*.cache` work, and ignore/pattern matching is case-insensitive on macOS and Windows. Scan abort cancels in-flight `du`. Nested apply no longer double-deletes. Windows junctions are treated as symlinks.
 
   `sweep doctor` dry-scans and treats a missing `.sweeprc` as defaults rather than a warning.
+
+- Trust-first cleanup improvements, engine parity coverage, and a redesigned interactive UI.
+
+  **Trust & CLI**
+
+  - Restore grouped scan summary and delete confirmation on `sweep` / `clean`
+  - Default scan engine to `js`; Rust honors `.sweeprc` and CLI scan flags when `--engine rust` or `auto`
+  - Fix `sweep ui` plan handoff, config parse exit codes, and `doctor` non-zero on warnings
+
+  **Interactive UI**
+
+  - Group artifacts by directory scope for monorepo-friendly review
+  - Minimal single-line list with a context strip for full paths and match reasons
+
+  **Testing & engines**
+
+  - Colocate package unit tests; keep integration tests under `tests/integration`
+  - Add golden engine-contract fixtures with optional JS/Rust parity checks
+
+  **Docs**
+
+  - Add `.docs/testing.md` and refresh README / workspace references
 
 ### Patch Changes
 
@@ -569,32 +583,6 @@
   folder tree that opens to the active scope, and the cursor, active scope, and
   ancestor rows are now visually distinct. Scanning shows a dot-matrix loader, and
   the statusline key hints follow the active pane and dialog.
-
-## 0.2.0
-
-### Minor Changes
-
-- Trust-first cleanup improvements, engine parity coverage, and a redesigned interactive UI.
-
-  **Trust & CLI**
-
-  - Restore grouped scan summary and delete confirmation on `sweep` / `clean`
-  - Default scan engine to `js`; Rust honors `.sweeprc` and CLI scan flags when `--engine rust` or `auto`
-  - Fix `sweep ui` plan handoff, config parse exit codes, and `doctor` non-zero on warnings
-
-  **Interactive UI**
-
-  - Group artifacts by directory scope for monorepo-friendly review
-  - Minimal single-line list with a context strip for full paths and match reasons
-
-  **Testing & engines**
-
-  - Colocate package unit tests; keep integration tests under `tests/integration`
-  - Add golden engine-contract fixtures with optional JS/Rust parity checks
-
-  **Docs**
-
-  - Add `.docs/testing.md` and refresh README / workspace references
 
 ## 0.1.0
 
