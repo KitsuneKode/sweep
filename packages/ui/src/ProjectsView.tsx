@@ -178,7 +178,13 @@ export function ProjectsView(props: ProjectsViewProps) {
   const shown = rows.slice(top, top + room);
 
   const projectRows = rows.flatMap((row) => (row.kind === "project" ? [row.project] : []));
-  const longestName = Math.max(10, ...projectRows.map((project) => cellWidth(project.name)));
+  // Opened items sit two cells deeper, and must fit as whole names too:
+  // short project names left "node_modules" clipped to "node…les".
+  const longestName = Math.max(
+    10,
+    ...projectRows.map((project) => cellWidth(project.name)),
+    ...rows.flatMap((row) => (row.kind === "artifact" ? [cellWidth(row.candidate.name) + 2] : [])),
+  );
   // The size bar only where the detail keeps room to say something.
   const barW = inner >= 84 ? BAR_W : 0;
   const barGap = barW > 0 ? barW + 2 : 0;

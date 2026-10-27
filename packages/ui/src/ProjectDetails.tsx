@@ -101,7 +101,7 @@ export function ProjectDetails({
         wrapMode="none"
       />
       <text
-        content={t`${fg(tokens.textMuted)(clipStart(`in ${sanitizeTerminalText(where)}`, inner))}`}
+        content={t`${fg(tokens.textMuted)(`in ${clipStart(sanitizeTerminalText(where), inner - 3)}`)}`}
         wrapMode="none"
       />
       <text content="" />

@@ -1,4 +1,4 @@
-import { bg, fg, t } from "@opentui/core";
+import { bg, bold, fg, t } from "@opentui/core";
 import { usePress } from "./ActionButton.js";
 import type { KeyInput } from "./keymap.js";
 import type { FooterHint } from "./presentation.js";
@@ -53,7 +53,9 @@ function Hint({
   const content =
     variant === "caps"
       ? t`${bg(lit ? tokens.border : tokens.controlBg)(fg(tokens.text)(` ${hint.key} `))}${fg(lit ? tokens.text : tokens.textMuted)(` ${hint.label}`)}`
-      : t`${fg(lit ? tokens.text : tokens.textSecondary)(hint.key)}${fg(lit ? tokens.textSecondary : tokens.textDim)(` ${hint.label}`)}`;
+      : hint.next
+        ? t`${bold(fg(tokens.accent)(hint.key))}${fg(lit ? tokens.text : tokens.accent)(` ${hint.label}`)}`
+        : t`${fg(lit ? tokens.text : tokens.textSecondary)(hint.key)}${fg(lit ? tokens.textSecondary : tokens.textDim)(` ${hint.label}`)}`;
   return (
     <box {...press.props} height={1} flexShrink={0}>
       <text content={content} wrapMode="none" />

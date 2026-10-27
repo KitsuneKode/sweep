@@ -48,6 +48,7 @@ import { noteCtrlCHandled, registerUiApplyCancellation } from "./runtime.js";
 import {
   buildBrandLine,
   buildContextLine,
+  applyNotice,
   footerHintItems,
   keycap,
   buildHeaderStats,
@@ -124,6 +125,7 @@ import {
   buildProjects,
   moveCursor as moveProjectCursor,
   settleCursor,
+  type Project,
   type ProjectSection,
 } from "./projects.js";
 import { rankJumpTargets, type JumpTarget } from "./folder-jump.js";
@@ -241,7 +243,7 @@ const HELP_MOVE: ReadonlyArray<HelpRow> = [
   ["↑↓ / j k", "cursor · wheel scrolls"],
   ["g / G", "first / last row"],
   ["ctrl-u/d", "page up · down"],
-  ["h · l", "collapse · expand group"],
+  ["h · l", "fold · open a group or project"],
   ["w · e", "collapse all · expand all"],
 ];
 
@@ -249,10 +251,11 @@ const HELP_QUEUE: ReadonlyArray<HelpRow> = [
   [null, "queue"],
   ["space", "queue / unqueue row"],
   ["v", "visual range - space queues"],
-  ["a · s", "queue visible · safe"],
+  ["a · s", "queue all removable · safe only"],
   ["u / U", "clear entire queue / visible only"],
-  ["x · d", "review this item’s removal"],
-  ["c · ctrl+enter", "review queue (always confirms)"],
+  ["x · d", "remove this item or project (confirms)"],
+  ["c · ctrl+enter", "review the queue (confirms)"],
+  ["y · t · esc", "in a review: remove · trash · cancel"],
 ];
 
 const HELP_VIEW: ReadonlyArray<HelpRow> = [
@@ -483,6 +486,7 @@ function ConfirmOverlay({
   applyPolicy,
   lowerBound,
   otherQueuedCount,
+  heading,
   linkOnly,
   feedback,
   onConfirm,
@@ -508,6 +512,8 @@ function ConfirmOverlay({
   dryRun?: boolean;
   trash?: boolean;
   otherQueuedCount?: number;
+  /** What this dialog removes, in words: the item, the project, or the queue. */
+  heading?: string;
   linkOnly?: boolean;
   feedback?: string | undefined;
   onConfirm: () => void;
@@ -576,7 +582,9 @@ function ConfirmOverlay({
     >
       <text
         fg={tokens.textMuted}
-        content={otherQueuedCount === undefined ? "Apply the queued selection" : "Only this item"}
+        content={
+          heading ?? (otherQueuedCount === undefined ? "The queued items" : "Only this item")
+        }
       />
       {outsideViewCount > 0 ? (
         <text
@@ -826,8 +834,16 @@ function calmHintItems(context: {
 }): FooterHint[] {
   const parts: FooterHint[] = [
     { key: "space", label: "queue", press: { name: "space" } },
-    // With a queue, reviewing it is the next step: it never falls off the end.
-    ...(context.queued ? [{ key: "c", label: "review", press: { name: "c" } }] : []),
+    // With a queue, reviewing it is the next step and clearing it the way
+    // back: neither falls off the end. Without one, `a` queues everything
+    // removable at once (never dangerous items).
+    ...(context.queued
+      ? [
+          { key: "c", label: "review", press: { name: "c" }, next: true },
+          { key: "u", label: "clear", press: { name: "u" } },
+        ]
+      : [{ key: "a", label: "queue all", press: { name: "a" } }]),
+    { key: "x", label: "remove", press: { name: "x" } },
     { key: "enter", label: "open", press: { name: "return" } },
   ];
   if (!context.scanning && context.idleBytes > 0)
@@ -839,17 +855,19 @@ function calmHintItems(context: {
   parts.push(
     { key: "/", label: "search", press: { name: "/" } },
     { key: "b", label: "full view", press: { name: "b" } },
-    { key: "?", label: "keys", press: { name: "?" } },
   );
-  let budget = context.width - 4;
+  // `? keys` is the way out for anyone lost: its room is held first, and it
+  // always ends the line, however narrow the terminal.
+  const help: FooterHint = { key: "?", label: "keys", press: { name: "?" } };
+  const cost = (part: FooterHint) => part.key.length + part.label.length + 4;
+  let budget = context.width - 4 - cost(help);
   const kept: FooterHint[] = [];
   for (const part of parts) {
-    const cost = part.key.length + part.label.length + 4;
-    if (cost > budget) break;
+    if (cost(part) > budget) break;
     kept.push(part);
-    budget -= cost;
+    budget -= cost(part);
   }
-  return kept;
+  return [...kept, help];
 }
 
 export function SweepApp({
@@ -930,6 +948,11 @@ export function SweepApp({
   // Non-null while the confirm dialog is scoped to one row (x/d): the same
   // dialog renders, but `y` applies only that candidate.
   const [pendingSingleId, setPendingSingleIdState] = useState<string | null>(null);
+  /**
+   * A confirm scoped to one project's removable items (`x` on a project row),
+   * not the whole queue. Other queued items stay queued either way.
+   */
+  const pendingScopeRef = useRef<{ ids: readonly string[]; label: string } | null>(null);
   const pendingSingleIdRef = useRef<string | null>(null);
   const setPendingSingleId = (id: string | null) => {
     pendingSingleIdRef.current = id;
@@ -1075,7 +1098,9 @@ export function SweepApp({
         const captured = captureReviewedApply(
           plan,
           fresh,
-          pendingSingleIdRef.current === null ? fresh.selectedIds : [pendingSingleIdRef.current],
+          pendingSingleIdRef.current !== null
+            ? [pendingSingleIdRef.current]
+            : (pendingScopeRef.current?.ids ?? fresh.selectedIds),
         );
         reviewedApplyRef.current = captured;
         setReviewedApply(captured);
@@ -1086,6 +1111,7 @@ export function SweepApp({
       } catch (error) {
         closeModal("confirm");
         setPendingSingleId(null);
+        pendingScopeRef.current = null;
         setNotice(sanitizeTerminalText(error instanceof Error ? error.message : String(error)));
         return false;
       }
@@ -1095,6 +1121,7 @@ export function SweepApp({
       closeModal("confirm");
       setPendingApplyState(false);
       setPendingSingleId(null);
+      pendingScopeRef.current = null;
       reviewedApplyRef.current = null;
       setReviewedApply(null);
       setReviewedOutsideView(0);
@@ -1302,6 +1329,11 @@ export function SweepApp({
     [state.themeMode, terminalBackground],
   );
   const summary = useMemo(() => getUiSummary(state), [state]);
+  // The first-steps line under the calm list stays until something is queued.
+  const [everQueued, setEverQueued] = useState(false);
+  useEffect(() => {
+    if (summary.selectedCount > 0) setEverQueued(true);
+  }, [summary.selectedCount > 0]);
   // A receipt describes the last removal; queueing again starts a new story.
   useEffect(() => {
     if (summary.selectedCount > 0) setReceipt(null);
@@ -1484,12 +1516,14 @@ export function SweepApp({
         return true;
       case "x":
       case "d":
+        // Remove without queueing: the row's own confirm, nothing else in it.
+        if (row?.kind === "artifact") requestSingleApply(row.candidate.id);
+        else if (row?.kind === "project") requestProjectApply(row.project);
+        return true;
       case "y":
       case "v":
       case "p":
-        setNotice(
-          "press b for the full view: removal by item, copy, ranges and patterns live there",
-        );
+        setNotice("press b for the full view: copy, ranges and patterns live there");
         return true;
       default:
         return false;
@@ -1675,15 +1709,24 @@ export function SweepApp({
             trash: Boolean(result.trashDir),
             stopped,
           });
-          const verb = result.trashDir ? "moved to trash" : "deleted";
-          const reviewedPath =
-            scopedPlan.selectedCandidateIds.length === 1 ? ` · path: ${name}` : "";
           const clean = !stopped && merged.failed === 0;
           // The calm view says a clean result in its answer line; the notice
           // stays for anything that went wrong, and in the full view.
           if (!clean || viewRef.current !== "projects")
             setNotice(
-              `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${getUiSummary(merged.state).selectedCount} still queued · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${reviewedPath}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
+              applyNotice({
+                removed: merged.removedIds.length,
+                what: scopedPlan.selectedCandidateIds.length === 1 ? name : undefined,
+                trash: Boolean(result.trashDir),
+                freedBytes: merged.freedBytes,
+                stillQueued: getUiSummary(merged.state).selectedCount,
+                failed: merged.failed,
+                unattempted: merged.unattempted,
+                stopped,
+                firstFailure: merged.firstFailure
+                  ? sanitizeTerminalText(merged.firstFailure)
+                  : undefined,
+              }),
               stopped || merged.failed > 0 ? "warning" : "success",
             );
         } catch (error) {
@@ -1722,8 +1765,41 @@ export function SweepApp({
     const selectedPlan = reviewedApplyRef.current;
     if (!selectedPlan || pendingSingleIdRef.current !== null) return;
     if (selectedPlan.selectedCandidateIds.length === 0) return;
-    runInSessionApply(selectedPlan, `${selectedPlan.selectedCandidateIds.length} queued artifacts`);
+    const scope = pendingScopeRef.current;
+    runInSessionApply(
+      selectedPlan,
+      scope ? scope.label : `${selectedPlan.selectedCandidateIds.length} queued artifacts`,
+    );
   }, [runInSessionApply]);
+
+  /**
+   * `x` on a project row: confirm the project's removable items only (safe
+   * and caution, never dangerous or blocked), whatever else is queued.
+   */
+  const requestProjectApply = (project: Project) => {
+    const s = readFreshState();
+    if (s.scanning) {
+      setNotice("scan still running - wait or esc out");
+      return;
+    }
+    if (s.scanIncomplete) {
+      setNotice("scan incomplete: press r to retry before applying");
+      return;
+    }
+    if (project.queueable.length === 0) {
+      setNotice(
+        project.dangerous > 0
+          ? "only dangerous items here: open the project and press x on one to review it"
+          : "nothing removable in this project",
+      );
+      return;
+    }
+    pendingScopeRef.current = {
+      ids: project.queueable,
+      label: sanitizeTerminalText(project.name),
+    };
+    if (!setPendingApply(true)) pendingScopeRef.current = null;
+  };
 
   /**
    * `x`/`d` on a row: confirm an apply scoped to exactly that candidate.
@@ -2662,7 +2738,21 @@ export function SweepApp({
             {...(trash ? { trash: true } : {})}
             filter={state.filter}
             searchFocused={state.focus === "search"}
-            {...(notice ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` } : {})}
+            {...(notice && (everQueued || notice.tone === "warning")
+              ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` }
+              : !everQueued && !state.scanning && projects.length > 0
+                ? {
+                    // First steps, in plain words, until something is queued:
+                    // the one thing a first look needs is how to start and
+                    // that nothing goes without a confirm.
+                    notice:
+                      dimensions.width >= 110
+                        ? t`${fg(tokens.textSecondary)("New here? ")}${fg(tokens.text)("space")}${fg(tokens.textMuted)(" picks a project, ")}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" shows what would go. Nothing is deleted until you press ")}${fg(tokens.text)("y")}${fg(tokens.textMuted)(".")}`
+                        : t`${fg(tokens.text)("space")}${fg(tokens.textMuted)(" picks · ")}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" reviews · nothing goes until ")}${fg(tokens.text)("y")}`,
+                  }
+                : notice
+                  ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` }
+                  : {})}
             footer={
               <KeyHints
                 variant="plain"
@@ -3080,6 +3170,7 @@ export function SweepApp({
                   : 0
               }
               linkOnly={pendingSingleCandidate.isSymlink}
+              heading={`Only ${sanitizeTerminalText(relativePath(state.targetDir, pendingSingleCandidate.path))}`}
               otherQueuedCount={
                 summary.selectedCount - Number(state.selectedIds.has(pendingSingleCandidate.id))
               }
@@ -3127,7 +3218,15 @@ export function SweepApp({
               tokens={tokens}
               disk={disk}
               selectedCount={reviewedApply?.selectedCandidateIds.length ?? 0}
-              outsideViewCount={reviewedOutsideView}
+              outsideViewCount={pendingScopeRef.current ? 0 : reviewedOutsideView}
+              {...(pendingScopeRef.current
+                ? {
+                    heading: `Only ${pendingScopeRef.current.label}'s build output`,
+                    otherQueuedCount: [...state.selectedIds].filter(
+                      (id) => !pendingScopeRef.current!.ids.includes(id),
+                    ).length,
+                  }
+                : {})}
               directoryCount={
                 reviewedApply?.candidates.filter((c) => c.entryType === "directory" && !c.isSymlink)
                   .length ?? 0

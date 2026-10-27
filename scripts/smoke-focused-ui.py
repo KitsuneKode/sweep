@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
         other = "bravo" if viewed == "alpha" else "alpha"
         if not (root / other / "node_modules/file").exists():
             raise RuntimeError("scoped apply deleted the other queued artifact")
-        wait_until(lambda: "1 deleted" in text() and "1 still queued" in text() and "estimated bytes removed" in text())
+        wait_until(lambda: f"removed {viewed}/node_modules" in text() and "1 still queued" in text() and "freed" in text())
         if options.exit_signal:
             os.kill(proc.pid, getattr(signal, options.exit_signal))
         else:

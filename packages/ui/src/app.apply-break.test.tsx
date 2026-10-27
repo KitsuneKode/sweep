@@ -828,8 +828,10 @@ describe("adversarial: apply resolution state surgery", () => {
       await settle();
       const frame = setup.captureCharFrame();
       expect(frame).toContain(`${1 - attempt} found`);
-      expect(frame).toContain(`${1 - attempt} still queued`);
-      expect(frame).toContain(`path: ${candidate.path.replace(`${plan.targetDir}/`, "")}`);
+      // Zero counts are left out of the notice; the removed path is named.
+      if (1 - attempt > 0) expect(frame).toContain(`${1 - attempt} still queued`);
+      else expect(frame).not.toContain("still queued");
+      expect(frame).toContain(`removed ${candidate.path.replace(`${plan.targetDir}/`, "")}`);
     }
     expect(completed).toEqual(new Set(plan.selectedCandidateIds));
   });
@@ -839,7 +841,7 @@ describe("adversarial: apply resolution state surgery", () => {
       () => {},
     );
     await openSingleConfirm();
-    expect(setup.captureCharFrame()).toContain("Only this item");
+    expect(setup.captureCharFrame()).toMatch(/Only \S+/);
     expect(setup.captureCharFrame()).toContain("1 other queued item stays queued");
     await act(async () => {
       setup.mockInput.pressKey("\x1b[13;5u");
@@ -876,9 +878,9 @@ describe("adversarial: apply resolution state surgery", () => {
     const frame = setup.captureCharFrame();
     expect(frame).not.toContain("Removing");
     // The applied row is gone from the list (its name survives only inside
-    // the "deleted X" notice); the summary recomputed to one candidate.
+    // the "removed X" notice); the summary recomputed to one candidate.
     expect(frame).toContain("1 found");
-    expect(frame).toContain("1 deleted");
+    expect(frame).toContain("✓ removed");
     expect(frame).toContain("1 still queued");
     // Input works again: a second single apply can be requested.
     await act(async () => {
@@ -1043,7 +1045,7 @@ test("pausing activity during apply keeps its scope and leaves cancellation resp
     await setup.flush();
   });
   await settle();
-  expect(setup.captureCharFrame()).toContain("1 unattempted");
+  expect(setup.captureCharFrame()).toContain("1 not attempted");
   expect(applyCalls).toHaveLength(1);
 });
 
