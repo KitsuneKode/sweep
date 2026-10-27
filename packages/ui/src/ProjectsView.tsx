@@ -491,6 +491,9 @@ export function ProjectsView(props: ProjectsViewProps) {
                       animate={false}
                       variant="blocks"
                       thickness={0.42}
+                      // Kitty fills an image's clear pixels with the terminal's
+                      // colour, so the bar carries the row's own behind it.
+                      background={index === cursor ? tokens.selectionSoftBg : tokens.bg}
                     />
                   ) : null}
                   {parts.tail ? <text content={parts.tail} wrapMode="none" flexShrink={1} /> : null}
