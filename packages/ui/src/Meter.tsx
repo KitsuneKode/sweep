@@ -63,6 +63,28 @@ export function useEased(target: number, enabled: boolean): number {
   return shown;
 }
 
+/**
+ * Counts from zero up to `target` once, on mount: for a rare result (bytes
+ * just freed) the number arriving is the moment. Off with reduced motion.
+ */
+export function useCountUp(target: number, enabled: boolean, ms = 420): number {
+  const [shown, setShown] = useState(enabled ? 0 : target);
+  useEffect(() => {
+    if (!enabled) {
+      setShown(target);
+      return;
+    }
+    const started = performance.now();
+    const timer = setInterval(() => {
+      const progress = Math.min(1, (performance.now() - started) / ms);
+      setShown(target * easeOut(progress));
+      if (progress >= 1) clearInterval(timer);
+    }, 16);
+    return () => clearInterval(timer);
+  }, [target, enabled, ms]);
+  return shown;
+}
+
 export function Meter(props: MeterProps & { previewColor: string }) {
   const renderer = useRenderer();
   const motion = useMotionEnabled();

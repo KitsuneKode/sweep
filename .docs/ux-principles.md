@@ -139,7 +139,10 @@ without changing the view or selection. Right/middle clicks and drags cannot
 activate queue controls. Buttons require a left press and release over the same
 control. Headers collapse on left click. The scrollbar is a real track: click or drag it to seek the list.
 The ledger's tier entries filter the list by risk and toggle back to all, the
-same filter `Esc` unwinds. Keyboard remains sufficient for every action.
+same filter `Esc` unwinds. Every statusline hint is a button: a click sends
+that hint's key through the same handler a keypress takes, so the mouse can
+never do what the keyboard would not. A transient notice gets its own line and
+never hides the hints. Keyboard remains sufficient for every action.
 
 Actions/settings pages have mouse Previous/Next controls and visible keyboard
 navigation. Appearance preferences contain only theme, sort and motion. They
@@ -228,6 +231,11 @@ completed artifact operations, not files or bytes inside a directory; final
 success requires the authoritative report. Esc, Ctrl+C and the visible stop
 control request cancellation, keep the session open and wait for the report.
 Cancellation does not restore contents already removed.
+
+The confirm draws the volume before and after removal in one bar. Trash on
+the same volume keeps the bytes, so trash mode draws no gain. After a clean
+removal, the projects view says what came back in its answer line until the
+next queue; failures and stops keep their notice.
 
 ## Color and activity
 

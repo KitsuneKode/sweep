@@ -2,9 +2,11 @@ import { formatBytes } from "@kitsunekode/sweep-display";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, fg, t, type MouseEvent, type StyledText } from "@opentui/core";
 import { dirname } from "node:path";
-import { useRef } from "react";
+import { type ReactNode, useRef } from "react";
 import { formatAge } from "./age.js";
-import { Meter } from "./Meter.js";
+import { Meter, useCountUp } from "./Meter.js";
+import { useMotionEnabled } from "./motion.js";
+import { ProjectDetails } from "./ProjectDetails.js";
 import { concatStyled, QUEUE_GLYPH, queueState } from "./presentation.js";
 import { SECTION_TITLE, type Project, type ProjectRow } from "./projects.js";
 import { cellWidth, clipCells, clipStart } from "./text-cells.js";
@@ -36,12 +38,57 @@ export interface ProjectsViewProps {
   filter: string;
   searchFocused: boolean;
   /** One line under the list: a notice when there is one, else the key hints. */
-  footer: StyledText;
+  footer: ReactNode;
+  /** What the last removal gave back; the answer line says it until the next queue. */
+  receipt?: ProjectsReceipt | null | undefined;
+  /** One transient line above the footer; the hints never give way to it. */
+  notice?: StyledText | undefined;
   onFilterInput: (value: string) => void;
   onFilterSubmit: () => void;
   onRowPress: (index: number, onMark: boolean) => void;
   /** Wheel moves the cursor, never the viewport alone (ux-principles). */
   onCursorDelta: (delta: number) => void;
+}
+
+export interface ProjectsReceipt {
+  freedBytes: number;
+  removed: number;
+  failed: number;
+  trash: boolean;
+  stopped: boolean;
+}
+
+/**
+ * The success state, said once in the answer line's place: a check, the
+ * bytes counting up to what came back, and the disk as it is now. A short
+ * count is the delight; a removal is rare enough to earn it.
+ */
+function ReceiptLine({
+  receipt,
+  diskFree,
+  tokens,
+}: {
+  receipt: ProjectsReceipt;
+  diskFree: number | null;
+  tokens: ThemeTokens;
+}) {
+  const motion = useMotionEnabled();
+  const counted = useCountUp(receipt.freedBytes, motion);
+  const clean = receipt.failed === 0 && !receipt.stopped;
+  const mark = clean ? fg(tokens.positive)("✓ ") : fg(tokens.warning)("! ");
+  const verb = receipt.trash ? " moved to trash" : " freed";
+  const rest = [
+    plural(receipt.removed, "item"),
+    receipt.failed > 0 ? `${receipt.failed} failed` : "",
+    receipt.stopped ? "stopped early" : "",
+    diskFree !== null && !receipt.trash ? `${formatBytes(diskFree)} free now` : "",
+  ].filter(Boolean);
+  return (
+    <text
+      content={t`${mark}${bold(fg(clean ? tokens.positive : tokens.text)(formatBytes(Math.round(counted))))}${fg(tokens.text)(verb)}${fg(tokens.textMuted)(`  ·  ${rest.join("  ·  ")}`)}`}
+      wrapMode="none"
+    />
+  );
 }
 
 /**
@@ -55,6 +102,11 @@ const SIZE_W = 10;
 const IDLE_W = 5;
 const BAR_W = 8;
 const RECENT_MS = 7 * 86_400_000;
+/** The details margin: shown once the list keeps its size bars beside it. */
+const PANEL_LIST_MIN = 84;
+const PANEL_MIN = 38;
+const PANEL_MAX = 52;
+const PANEL_GAP = 3;
 
 /** A row in three parts, so the size bar between them can be drawn in pixels. */
 interface RowParts {
@@ -100,8 +152,18 @@ function kindSummary(project: Project, width: number): string {
 export function ProjectsView(props: ProjectsViewProps) {
   const { tokens, width, height, rows, cursor, now, scanning, footer, filter, searchFocused } =
     props;
-  // The app frame and this view each pad one cell per side.
-  const inner = Math.max(20, Math.min(CONTENT_MAX, width - 6));
+  // The app frame and this view each pad one cell per side. A wide terminal
+  // gives the cursor's project a details margin; the list keeps its bars.
+  const panelW =
+    width - 6 >= PANEL_LIST_MIN + PANEL_GAP + PANEL_MIN
+      ? Math.min(PANEL_MAX, width - 6 - PANEL_GAP - PANEL_LIST_MIN)
+      : 0;
+  const inner = Math.max(
+    20,
+    Math.min(CONTENT_MAX, width - 6 - (panelW > 0 ? panelW + PANEL_GAP : 0)),
+  );
+  const focusRow = rows[cursor];
+  const focusProject = focusRow && "project" in focusRow ? focusRow.project : null;
   const showSearch = searchFocused || filter.length > 0;
   // Header (brand, blank, answer, meter), search, the list, blank, footer.
   const chrome = 4 + (showSearch ? 2 : 0) + 2;
@@ -244,12 +306,17 @@ export function ProjectsView(props: ProjectsViewProps) {
       // (dangerous items stay out of a project-level queue) and needs a look.
       const risk = riskLabel(p);
       const where = p.parent ? sanitizeTerminalText(p.parent) : "";
+      // With the details margin open, what a project holds is said there.
       const detail =
         restW <= 0
           ? ""
-          : whereW >= 8 && restW > whereW + 6
-            ? `${padCells(clipStart(where, whereW), whereW)}  ${kindSummary(p, restW - whereW - 2)}`
-            : kindSummary(p, restW);
+          : panelW > 0
+            ? restW >= 16
+              ? clipStart(where, restW)
+              : ""
+            : whereW >= 8 && restW > whereW + 6
+              ? `${padCells(clipStart(where, whereW), whereW)}  ${kindSummary(p, restW - whereW - 2)}`
+              : kindSummary(p, restW);
       return {
         lead: t`${pointer} ${mark}  ${name}  ${fg(tokens.textSecondary)(size)}  `,
         ...(barW > 0
@@ -314,13 +381,23 @@ export function ProjectsView(props: ProjectsViewProps) {
   };
 
   return (
-    <box width={inner + 2} height="100%" flexDirection="column" paddingLeft={1} paddingRight={1}>
-      <box height={1} flexDirection="row" justifyContent="space-between">
+    <box
+      width={inner + 2 + (panelW > 0 ? panelW + PANEL_GAP : 0)}
+      height="100%"
+      flexDirection="column"
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      <box height={1} width={inner} flexDirection="row" justifyContent="space-between">
         <text content={brand} wrapMode="none" />
         <text content={status} wrapMode="none" />
       </box>
       <text content="" />
-      <text content={answerLine} wrapMode="none" />
+      {props.receipt && props.selectedCount === 0 && !scanning ? (
+        <ReceiptLine receipt={props.receipt} diskFree={props.diskFree} tokens={tokens} />
+      ) : (
+        <text content={answerLine} wrapMode="none" />
+      )}
       {scanning ? (
         <Meter
           width={inner}
@@ -366,60 +443,79 @@ export function ProjectsView(props: ProjectsViewProps) {
           <text content="" />
         </>
       ) : null}
-      <box
-        flexGrow={1}
-        flexDirection="column"
-        onMouseScroll={(event: MouseEvent) => {
-          const direction = event.scroll?.direction;
-          if (direction === "up") props.onCursorDelta(-3);
-          else if (direction === "down") props.onCursorDelta(3);
-        }}
-      >
-        {shown.length === 0 ? (
-          <text
-            content={t`${fg(tokens.textMuted)(
-              scanning
-                ? "Nothing yet. Projects appear here as they are found."
-                : filter
-                  ? "No project matches. Esc clears the search."
-                  : "Nothing to clean here.",
-            )}`}
-          />
-        ) : (
-          shown.map((row, offset) => {
-            const index = top + offset;
-            const parts = line(index, row);
-            return (
-              <box
-                key={`${index}-${row.kind}`}
-                height={1}
-                flexDirection="row"
-                backgroundColor={index === cursor ? tokens.selectionSoftBg : tokens.bg}
-                onMouseDown={(event: MouseEvent) =>
-                  props.onRowPress(index, event.x - 1 <= LEAD - 1)
-                }
-              >
-                <text content={parts.lead} wrapMode="none" flexShrink={0} />
-                {parts.bar ? (
-                  <Meter
-                    width={barW}
-                    value={parts.bar.fraction}
-                    fill={parts.bar.color}
-                    previewColor={parts.bar.color}
-                    track={null}
-                    animate={false}
-                    variant="blocks"
-                    thickness={0.42}
-                  />
-                ) : null}
-                {parts.tail ? <text content={parts.tail} wrapMode="none" flexShrink={1} /> : null}
-              </box>
-            );
-          })
-        )}
+      <box flexGrow={1} minHeight={0} flexDirection="row">
+        <box
+          width={inner}
+          flexShrink={0}
+          flexDirection="column"
+          onMouseScroll={(event: MouseEvent) => {
+            const direction = event.scroll?.direction;
+            if (direction === "up") props.onCursorDelta(-3);
+            else if (direction === "down") props.onCursorDelta(3);
+          }}
+        >
+          {shown.length === 0 ? (
+            <text
+              content={t`${fg(tokens.textMuted)(
+                scanning
+                  ? "Nothing yet. Projects appear here as they are found."
+                  : filter
+                    ? "No project matches. Esc clears the search."
+                    : "Nothing to clean here.",
+              )}`}
+            />
+          ) : (
+            shown.map((row, offset) => {
+              const index = top + offset;
+              const parts = line(index, row);
+              return (
+                <box
+                  key={`${index}-${row.kind}`}
+                  height={1}
+                  flexDirection="row"
+                  backgroundColor={index === cursor ? tokens.selectionSoftBg : tokens.bg}
+                  onMouseDown={(event: MouseEvent) =>
+                    props.onRowPress(index, event.x - 1 <= LEAD - 1)
+                  }
+                >
+                  <text content={parts.lead} wrapMode="none" flexShrink={0} />
+                  {parts.bar ? (
+                    <Meter
+                      width={barW}
+                      value={parts.bar.fraction}
+                      fill={parts.bar.color}
+                      previewColor={parts.bar.color}
+                      track={null}
+                      animate={false}
+                      variant="blocks"
+                      thickness={0.42}
+                    />
+                  ) : null}
+                  {parts.tail ? <text content={parts.tail} wrapMode="none" flexShrink={1} /> : null}
+                </box>
+              );
+            })
+          )}
+        </box>
+        {panelW > 0 ? (
+          <>
+            <box width={PANEL_GAP} flexShrink={0} />
+            <ProjectDetails
+              project={focusProject}
+              focusName={focusRow?.kind === "artifact" ? focusRow.candidate.name : undefined}
+              selectedIds={props.selectedIds}
+              tokens={tokens}
+              width={panelW}
+              height={room}
+              now={now}
+            />
+          </>
+        ) : null}
       </box>
-      <text content="" />
-      <text content={footer} wrapMode="none" />
+      <text content={props.notice ?? ""} wrapMode="none" />
+      <box height={1} flexShrink={0} flexDirection="row">
+        {footer}
+      </box>
     </box>
   );
 }

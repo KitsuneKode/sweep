@@ -1,4 +1,4 @@
-import { bold, fg, StyledText, t } from "@opentui/core";
+import { bold, fg, type KeyEvent, StyledText, t } from "@opentui/core";
 import {
   flushSync,
   useKeyboard,
@@ -37,8 +37,10 @@ import { LedgerBand, type LedgerReceipt } from "./LedgerBand.js";
 import { captureReviewedApply } from "./reviewed-apply.js";
 import type { ViewPreferences } from "./view-preferences.js";
 import { MotionContext, motionEnabledFromEnvironment } from "./motion.js";
-import { handleKeymap } from "./keymap.js";
-import { darkTheme } from "./theme.js";
+import { handleKeymap, type KeyInput } from "./keymap.js";
+import { KeyHints } from "./KeyHints.js";
+import { darkTheme, mixHex } from "./theme.js";
+import { Meter } from "./Meter.js";
 import type { SweepUiOutcome } from "./outcome.js";
 import { UiOperationSession } from "./operation-session.js";
 import { writePlanExport } from "./plan-export.js";
@@ -46,7 +48,7 @@ import { noteCtrlCHandled, registerUiApplyCancellation } from "./runtime.js";
 import {
   buildBrandLine,
   buildContextLine,
-  buildFooterHints,
+  footerHintItems,
   keycap,
   buildHeaderStats,
   buildRiskTally,
@@ -54,6 +56,7 @@ import {
   relativePath,
   riskGlyph,
   type FooterContext,
+  type FooterHint,
 } from "./presentation.js";
 import { cellWidth } from "./text-cells.js";
 import { buildDisplayRows } from "./rows.js";
@@ -412,6 +415,56 @@ function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: number }) 
   );
 }
 
+export interface DiskSpace {
+  free: number;
+  total: number;
+}
+
+/**
+ * The volume before and after, in one bar: the solid part stays used, the
+ * soft part is what this removal gives back, the track is free already.
+ * The confirm is the one moment the size is about to become real, so it is
+ * shown against the whole disk rather than against the queue.
+ */
+function DiskAfter({
+  tokens,
+  disk,
+  bytes,
+  width,
+  dryRun,
+}: {
+  tokens: ThemeTokens;
+  disk: DiskSpace;
+  bytes: number;
+  width: number;
+  dryRun?: boolean;
+}) {
+  const used = Math.max(0, disk.total - disk.free);
+  const gain = Math.min(bytes, used);
+  return (
+    <>
+      <text content="" />
+      <text
+        content={
+          // A gain below the display's precision would read "37 GiB → 37 GiB".
+          formatBytes(disk.free) === formatBytes(disk.free + gain)
+            ? t`${fg(tokens.textMuted)("disk  ")}${fg(tokens.textSecondary)(`${formatBytes(disk.free)} free`)}${fg(tokens.textDim)("  ")}${bold(fg(tokens.positive)(`+${formatBytes(gain)}`))}${fg(tokens.textMuted)(dryRun ? " if removed" : " after")}`
+            : t`${fg(tokens.textMuted)("disk  ")}${fg(tokens.textSecondary)(`${formatBytes(disk.free)} free`)}${fg(tokens.textDim)("  →  ")}${bold(fg(tokens.positive)(formatBytes(disk.free + gain)))}${fg(tokens.textMuted)(dryRun ? " if removed" : " after")}`
+        }
+        wrapMode="none"
+      />
+      <Meter
+        width={width}
+        value={(used - gain) / disk.total}
+        preview={used / disk.total}
+        fill={mixHex(tokens.meterTrack, tokens.textSecondary, 0.7)}
+        previewColor={tokens.positive}
+        track={tokens.meterTrack}
+      />
+    </>
+  );
+}
+
 function ConfirmOverlay({
   tokens,
   selectedCount,
@@ -433,8 +486,11 @@ function ConfirmOverlay({
   canConfirm = true,
   onOverrideSizeLimit,
   sizeLimitOverridden = false,
+  disk,
 }: {
   tokens: ThemeTokens;
+  /** The volume the queue lives on, to draw what removal gives back. */
+  disk?: DiskSpace | null | undefined;
   selectedCount: number;
   selectedBytes: number;
   dangerousCount: number;
@@ -462,6 +518,10 @@ function ConfirmOverlay({
   const accent = dangerous && !trash ? tokens.danger : tokens.accent;
   const shown = previewPaths.slice(0, 3);
   const hidden = selectedCount - shown.length;
+  // Trash on the same volume keeps the bytes, so only deletion draws a gain.
+  const showDisk = disk !== null && disk !== undefined && disk.total > 0 && !trash;
+  const { width: screenWidth } = useTerminalDimensions();
+  const meterWidth = Math.max(8, Math.min(48, screenWidth - 12));
 
   return (
     <Modal
@@ -470,11 +530,11 @@ function ConfirmOverlay({
       titleColor={accent}
       width={56}
       height={
-        applyPolicy && applyPolicy.maxSizeGB !== null
+        (applyPolicy && applyPolicy.maxSizeGB !== null
           ? 24
           : selectedCount === 1 && !dangerous
             ? 18
-            : 22
+            : 22) + (showDisk ? 3 : 0)
       }
       footer={
         <>
@@ -526,6 +586,15 @@ function ConfirmOverlay({
       <text
         content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "partial estimate; actual bytes may differ" : "estimated size")}`}
       />
+      {showDisk ? (
+        <DiskAfter
+          tokens={tokens}
+          disk={disk}
+          bytes={selectedBytes}
+          width={meterWidth}
+          {...(dryRun ? { dryRun: true } : {})}
+        />
+      ) : null}
       {shown.map((path) => (
         <text
           key={path}
@@ -742,33 +811,38 @@ function displayTargetPath(path: string): string {
 }
 
 /** The calm view's one line of hints: only what applies right now. */
-function buildCalmHints(
-  tokens: ThemeTokens,
-  context: { scanning: boolean; idleBytes: number; queued: boolean; width: number },
-) {
-  const parts: [string, string][] = [
-    ["space", "queue"],
-    ["enter", "open"],
+function calmHintItems(context: {
+  scanning: boolean;
+  idleBytes: number;
+  queued: boolean;
+  width: number;
+}): FooterHint[] {
+  const parts: FooterHint[] = [
+    { key: "space", label: "queue", press: { name: "space" } },
+    { key: "enter", label: "open", press: { name: "return" } },
   ];
   if (!context.scanning && context.idleBytes > 0)
-    parts.push(["i", `queue idle ${formatBytes(context.idleBytes)}`]);
-  if (context.queued) parts.push(["ctrl+enter", "review"]);
-  parts.push(["/", "search"], ["b", "full view"], ["?", "keys"]);
+    parts.push({
+      key: "i",
+      label: `queue idle ${formatBytes(context.idleBytes)}`,
+      press: { name: "i" },
+    });
+  if (context.queued)
+    parts.push({ key: "ctrl+enter", label: "review", press: { name: "return", ctrl: true } });
+  parts.push(
+    { key: "/", label: "search", press: { name: "/" } },
+    { key: "b", label: "full view", press: { name: "b" } },
+    { key: "?", label: "keys", press: { name: "?" } },
+  );
   let budget = context.width - 4;
-  const kept: [string, string][] = [];
+  const kept: FooterHint[] = [];
   for (const part of parts) {
-    const cost = part[0].length + part[1].length + 4;
+    const cost = part.key.length + part.label.length + 4;
     if (cost > budget) break;
     kept.push(part);
     budget -= cost;
   }
-  return new StyledText(
-    kept.flatMap(([key, label], index) => [
-      ...(index > 0 ? [fg(tokens.textDim)("   ")] : []),
-      fg(tokens.textSecondary)(key),
-      fg(tokens.textDim)(` ${label}`),
-    ]),
-  );
+  return kept;
 }
 
 export function SweepApp({
@@ -1214,6 +1288,10 @@ export function SweepApp({
     [state.themeMode, terminalBackground],
   );
   const summary = useMemo(() => getUiSummary(state), [state]);
+  // A receipt describes the last removal; queueing again starts a new story.
+  useEffect(() => {
+    if (summary.selectedCount > 0) setReceipt(null);
+  }, [summary.selectedCount > 0]);
   const dimensions = useTerminalDimensions();
   const sidebarWidth =
     dimensions.width >= 140 ? 48 : dimensions.width >= 110 ? 38 : dimensions.width >= 90 ? 32 : 26;
@@ -1235,6 +1313,8 @@ export function SweepApp({
 
   // ── The projects view: one row per project, grouped by idle time ──────
   const [view, setView] = useState(initialView);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
   const [openSections, setOpenSections] = useState<ReadonlySet<ProjectSection>>(() => new Set());
   const [allArtifacts, setAllArtifacts] = useState<ReadonlySet<string>>(() => new Set());
@@ -1264,10 +1344,10 @@ export function SweepApp({
     state.candidates.length > 0 ? state.scanSizedCount / state.candidates.length : 0,
     state.scanning,
   );
-  const diskFree = useMemo(() => {
+  const disk = useMemo((): DiskSpace | null => {
     try {
       const stats = statfsSync(state.targetDir);
-      return stats.bavail * stats.bsize;
+      return { free: stats.bavail * stats.bsize, total: stats.blocks * stats.bsize };
     } catch {
       return null;
     }
@@ -1588,10 +1668,14 @@ export function SweepApp({
           const verb = result.trashDir ? "moved to trash" : "deleted";
           const reviewedPath =
             scopedPlan.selectedCandidateIds.length === 1 ? ` · path: ${name}` : "";
-          setNotice(
-            `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${getUiSummary(merged.state).selectedCount} still queued · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${reviewedPath}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
-            stopped || merged.failed > 0 ? "warning" : "success",
-          );
+          const clean = !stopped && merged.failed === 0;
+          // The calm view says a clean result in its answer line; the notice
+          // stays for anything that went wrong, and in the full view.
+          if (!clean || viewRef.current !== "projects")
+            setNotice(
+              `${stopped ? "stopped · " : ""}${merged.removedIds.length} ${verb} · ${getUiSummary(merged.state).selectedCount} still queued · ${merged.failed} failed · ${merged.unattempted} unattempted · ~${formatBytes(merged.freedBytes)} estimated bytes ${result.trashDir ? "moved" : "removed"}${reviewedPath}${merged.firstFailure ? ` · ${sanitizeTerminalText(merged.firstFailure)}` : ""}`,
+              stopped || merged.failed > 0 ? "warning" : "success",
+            );
         } catch (error) {
           if (applyAbortRef.current !== controller) return;
           if (receivedReport) {
@@ -2163,7 +2247,7 @@ export function SweepApp({
     command.run();
   };
 
-  useKeyboard((key) => {
+  const onKey = (key: KeyEvent) => {
     const preempted =
       openModalsRef.current.has("scanError") || openModalsRef.current.has("applying");
     if (
@@ -2356,7 +2440,31 @@ export function SweepApp({
           renderer.height >= 12,
       },
     );
-  });
+  };
+  useKeyboard(onKey);
+  // A click on a footer hint is that key, sent through the same handler.
+  const pressKey = (input: KeyInput) => {
+    let prevented = false;
+    onKey({
+      name: input.name ?? "",
+      ctrl: input.ctrl === true,
+      meta: input.meta === true,
+      shift: input.shift === true,
+      option: false,
+      sequence: input.name && input.name.length === 1 ? input.name : "",
+      number: false,
+      raw: "",
+      eventType: "press",
+      source: "raw",
+      get defaultPrevented() {
+        return prevented;
+      },
+      preventDefault() {
+        prevented = true;
+      },
+      stopPropagation() {},
+    } as unknown as KeyEvent);
+  };
 
   // Bracketed paste carrying an ETX byte is content, not ctrl+c - tell the
   // runtime's deadman the chord was handled so a paste can't kill the session.
@@ -2480,7 +2588,7 @@ export function SweepApp({
                     ? { kind: "visual" }
                     : { kind: "pane", focus: state.focus };
 
-  const footerContent = buildFooterHints(footerContext, tokens, {
+  const footerHints = footerHintItems(footerContext, {
     ...(dryRun ? { dryRun: true } : {}),
     ...(state.patternsDirty ? { patternsDirty: true } : {}),
     ...(dimensions.width < 72 ? { compact: true } : dimensions.width < 108 ? { medium: true } : {}),
@@ -2538,20 +2646,25 @@ export function SweepApp({
             selectedBytes={summary.selectedBytes}
             selectedCount={summary.selectedCount}
             selectedIds={state.selectedIds}
-            diskFree={diskFree}
+            diskFree={disk?.free ?? null}
+            receipt={receipt}
             {...(dryRun ? { dryRun: true } : {})}
             {...(trash ? { trash: true } : {})}
             filter={state.filter}
             searchFocused={state.focus === "search"}
+            {...(notice ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` } : {})}
             footer={
-              notice
-                ? t`${fg(noticeColor(notice.tone, tokens))(notice.text)}`
-                : buildCalmHints(tokens, {
-                    scanning: state.scanning,
-                    idleBytes: idleSafeBytes,
-                    queued: summary.selectedCount > 0,
-                    width: dimensions.width,
-                  })
+              <KeyHints
+                variant="plain"
+                tokens={tokens}
+                onPress={pressKey}
+                hints={calmHintItems({
+                  scanning: state.scanning,
+                  idleBytes: idleSafeBytes,
+                  queued: summary.selectedCount > 0,
+                  width: dimensions.width,
+                })}
+              />
             }
             onFilterInput={(value) => mutate((s) => setFilter(s, value))}
             onFilterSubmit={() => focusPanel("list")}
@@ -2688,7 +2801,7 @@ export function SweepApp({
                 />
               )}
               <box flexGrow={1} minWidth={0} flexShrink={1} paddingLeft={1} flexDirection="row">
-                <text content={footerContent} wrapMode="none" />
+                <KeyHints hints={footerHints} tokens={tokens} onPress={pressKey} />
                 {roomForChips && riskFilterLabel ? (
                   <text
                     content={t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`}
@@ -2943,6 +3056,7 @@ export function SweepApp({
           ) : pendingSingleCandidate ? (
             <ConfirmOverlay
               tokens={tokens}
+              disk={disk}
               selectedCount={1}
               directoryCount={
                 pendingSingleCandidate.entryType === "directory" &&
@@ -2996,6 +3110,7 @@ export function SweepApp({
           ) : (
             <ConfirmOverlay
               tokens={tokens}
+              disk={disk}
               selectedCount={reviewedApply?.selectedCandidateIds.length ?? 0}
               outsideViewCount={reviewedOutsideView}
               directoryCount={

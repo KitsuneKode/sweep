@@ -16,6 +16,7 @@ import {
   visiblePatternRows,
 } from "./state.js";
 import { type ThemeTokens, riskColor } from "./theme.js";
+import type { KeyInput } from "./keymap.js";
 import { cellWidth, clipCells, padCells } from "./text-cells.js";
 
 function padCount(value: number, width = 2): string {
@@ -610,80 +611,129 @@ export type FooterContext =
   | { kind: "pane"; focus: UiFocus };
 
 /**
+ * One statusline hint: the key as shown, what it does, and the keypress a
+ * click on it sends. A hint with no `press` (↑↓ move) is a description only.
+ */
+export interface FooterHint {
+  key: string;
+  label: string;
+  press?: KeyInput;
+}
+
+const press = (name: string, ctrl = false): KeyInput => (ctrl ? { name, ctrl } : { name });
+
+/**
  * Statusline key hints.
  *
  * Every reachable state names its own keys - including the overlays, which
  * previously covered the footer and left the user with no visible way out.
+ * Each hint is also a button: a click sends the same key through the keymap.
  */
+export function footerHintItems(
+  context: FooterContext,
+  options: { dryRun?: boolean; patternsDirty?: boolean; compact?: boolean; medium?: boolean } = {},
+): FooterHint[] {
+  const h = (key: string, label: string, sent?: KeyInput): FooterHint =>
+    sent ? { key, label, press: sent } : { key, label };
+  const move = h("↑↓", "move");
+  const queue = h("space", "queue", press("space"));
+  const keys = h("?", "keys", press("?"));
+  const actions = h("Ctrl+K", "actions", press("k", true));
+  const quit = h("ctrl-c", "quit", press("c", true));
+
+  // Narrow terminals: never clip a hint mid-word - swap to a minimal set.
+  // Modal hints are already short enough to survive, so this only rewrites
+  // the long pane hint rows.
+  if (options.compact && context.kind === "pane") return [move, queue, keys];
+  // Mid widths keep the actions palette, the way to everything else.
+  if (options.medium && context.kind === "pane" && context.focus === "list")
+    return [move, queue, actions, keys];
+
+  switch (context.kind) {
+    case "confirm":
+      // One hint per distinct action - "n cancel · esc back" says one thing twice.
+      return [
+        h("y", "confirm", press("y")),
+        h("n/esc", "cancel", press("escape")),
+        h("t", "trash", press("t")),
+        quit,
+      ];
+    case "configSave":
+      return [h("y", "save patterns", press("y")), h("n/esc", "cancel", press("escape"))];
+    case "help":
+      return [h("esc", "close", press("escape")), quit];
+    case "inspect":
+      return [h("i/esc", "close", press("escape")), quit];
+    case "visual":
+      return [
+        h("↑↓", "extend"),
+        h("space", "queue range", press("space")),
+        h("v/esc", "cancel", press("escape")),
+      ];
+    case "scanError":
+      return [
+        h("r", "retry", press("r")),
+        h("esc", "dismiss", press("escape")),
+        h("q", "quit", press("q")),
+      ];
+    case "applying":
+      return [h("ctrl-c", "stop scheduling - report still lands", press("c", true))];
+    case "pane":
+      break;
+  }
+
+  switch (context.focus) {
+    case "patterns":
+      return [
+        h("space", "toggle", press("space")),
+        h("/", "find", press("/")),
+        h("a", "add", press("a")),
+        h("d", "del custom", press("d")),
+        h("w", "save .sweeprc", press("w")),
+        h("r", options.patternsDirty ? "rescan*" : "rescan", press("r")),
+        h("esc", "back", press("escape")),
+      ];
+    case "patternInput":
+      return [h("enter", "done", press("return")), h("esc", "back", press("escape")), quit];
+    case "sidebar":
+      return [
+        move,
+        h("l/h", "expand/fold"),
+        h("enter", "browse", press("return")),
+        h("space", "queue folder", press("space")),
+        keys,
+      ];
+    case "search":
+      return [
+        h("enter", "list", press("return")),
+        h("esc", "clear", press("escape")),
+        h("tab", "panes", press("tab")),
+        quit,
+      ];
+    default:
+      return [
+        move,
+        queue,
+        h("enter", "details", press("return")),
+        actions,
+        h("/", "filter", press("/")),
+      ];
+  }
+}
+
+/** The hints as one styled line: keys as keycaps, spacing between hints. */
 export function buildFooterHints(
   context: FooterContext,
   tokens: ThemeTokens,
   options: { dryRun?: boolean; patternsDirty?: boolean; compact?: boolean; medium?: boolean } = {},
 ): StyledText {
-  // Keys read as keycaps: a filled cell sets them apart from what they do,
-  // so the eye can scan the keys alone. Spacing, not dots, separates hints.
-  const key = (label: string) => keycap(label, tokens);
-  const hint = (label: string) => fg(tokens.textMuted)(label);
-  const sep = fg(tokens.textMuted)("  ");
-
-  // Narrow terminals: never clip a hint mid-word - swap to a minimal set.
-  // Modal hints are already short enough to survive, so this only rewrites
-  // the long pane hint rows.
-  if (options.compact && context.kind === "pane") {
-    return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("?")} ${hint("keys")}`;
-  }
-  // Mid widths keep the actions palette, the way to everything else.
-  if (options.medium && context.kind === "pane" && context.focus === "list") {
-    return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("Ctrl+K")} ${hint("actions")}${sep}${key("?")} ${hint("keys")}`;
-  }
-
-  if (context.kind === "confirm") {
-    // One hint per distinct action - "n cancel · esc back" says one thing twice.
-    return t`${key("y")} ${hint("confirm")}${sep}${key("n/esc")} ${hint("cancel")}${sep}${key("t")} ${hint("trash")}${sep}${key("ctrl-c")} ${hint("quit")}`;
-  }
-
-  if (context.kind === "configSave") {
-    return t`${key("y")} ${hint("save patterns")}${sep}${key("n/esc")} ${hint("cancel")}`;
-  }
-
-  if (context.kind === "help") {
-    return t`${key("esc")} ${hint("close")}${sep}${key("ctrl-c")} ${hint("quit")}`;
-  }
-
-  if (context.kind === "inspect") {
-    return t`${key("i/esc")} ${hint("close")}${sep}${key("ctrl-c")} ${hint("quit")}`;
-  }
-
-  if (context.kind === "visual") {
-    return t`${key("↑↓")} ${hint("extend")}${sep}${key("space")} ${hint("queue range")}${sep}${key("v/esc")} ${hint("cancel")}`;
-  }
-
-  if (context.kind === "scanError") {
-    return t`${key("r")} ${hint("retry")}${sep}${key("esc")} ${hint("dismiss")}${sep}${key("q")} ${hint("quit")}`;
-  }
-
-  if (context.kind === "applying") {
-    return t`${key("ctrl-c")} ${hint("stop scheduling - report still lands")}`;
-  }
-
-  if (context.focus === "patterns") {
-    const rescan = options.patternsDirty ? "rescan*" : "rescan";
-    return t`${key("space")} ${hint("toggle")}${sep}${key("/")} ${hint("find")}${sep}${key("a")} ${hint("add")}${sep}${key("d")} ${hint("del custom")}${sep}${key("w")} ${hint("save .sweeprc")}${sep}${key("r")} ${hint(rescan)}${sep}${key("esc")} ${hint("back")}`;
-  }
-
-  if (context.focus === "patternInput") {
-    return t`${key("enter")} ${hint("done")}${sep}${key("esc")} ${hint("back")}${sep}${key("ctrl-c")} ${hint("quit")}`;
-  }
-
-  if (context.focus === "sidebar") {
-    return t`${key("↑↓")} ${hint("move")}${sep}${key("l/h")} ${hint("expand/fold")}${sep}${key("enter")} ${hint("browse")}${sep}${key("space")} ${hint("queue folder")}${sep}${key("?")} ${hint("keys")}`;
-  }
-
-  if (context.focus === "search") {
-    return t`${key("enter")} ${hint("list")}${sep}${key("esc")} ${hint("clear")}${sep}${key("tab")} ${hint("panes")}${sep}${key("ctrl-c")} ${hint("quit")}`;
-  }
-
-  return t`${key("↑↓")} ${hint("move")}${sep}${key("space")} ${hint("queue")}${sep}${key("enter")} ${hint("details")}${sep}${key("Ctrl+K")} ${hint("actions")}${sep}${key("/")} ${hint("filter")}`;
+  return new StyledText(
+    footerHintItems(context, options).flatMap((item, index) => [
+      ...(index > 0 ? [fg(tokens.textMuted)("  ")] : []),
+      keycap(item.key, tokens),
+      fg(tokens.textMuted)(` ${item.label}`),
+    ]),
+  );
 }
 
 /** Statusline mode segment label for the focused panel. */
