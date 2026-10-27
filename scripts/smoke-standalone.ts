@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 const executable = resolve(process.argv[2] ?? "sweep");
 const owned = mkdtempSync(join(tmpdir(), "sweep-standalone-smoke-"));
@@ -48,6 +49,47 @@ try {
   if (!plan.targetIdentity || !plan.candidates[0]?.identity)
     throw new Error("Standalone scan omitted approval identity snapshots");
   console.log("ok: embedded Rust scan without Node, Bun or external engine on PATH");
+
+  // The probe proves the UI module loaded; only a real session proves the
+  // native renderer did. Run `sweep ui` under a pseudo-terminal until the
+  // projects view answers, then quit. (Windows has no `script` to lend a PTY.)
+  if (process.platform !== "win32") {
+    const command = `${JSON.stringify(executable)} ui --dry-run ${JSON.stringify(owned)}`;
+    const ptyArgs =
+      process.platform === "darwin"
+        ? ["script", "-q", "/dev/null", "sh", "-c", command]
+        : ["script", "-qec", command, "/dev/null"];
+    const session = Bun.spawn(ptyArgs, {
+      cwd: owned,
+      env: { ...env, PATH: "/usr/bin:/bin", TERM: "xterm-256color", COLUMNS: "100", LINES: "30" },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    let screen = "";
+    const reader = (async () => {
+      for await (const chunk of session.stdout) screen += new TextDecoder().decode(chunk);
+    })();
+    const deadline = Date.now() + 15_000;
+    while (
+      !/you can reclaim|Nothing to clean|scan complete:/.test(screen) &&
+      Date.now() < deadline
+    ) {
+      if (/Failed to initialize OpenTUI|requires @opentui/.test(screen)) break;
+      await Bun.sleep(100);
+    }
+    const ready = /you can reclaim|Nothing to clean|scan complete:/.test(screen);
+    session.stdin.write("q");
+    await session.stdin.flush();
+    const exited = await Promise.race([session.exited, Bun.sleep(5_000).then(() => "timeout")]);
+    if (exited === "timeout") session.kill("SIGKILL");
+    await reader.catch(() => {});
+    if (!ready) {
+      const visible = stripVTControlCharacters(screen).slice(-800);
+      throw new Error(`Standalone UI did not render: ${visible}`);
+    }
+    console.log("ok: standalone terminal UI rendered and quit through a PTY");
+  }
 } finally {
   rmSync(owned, { recursive: true, force: true });
 }
