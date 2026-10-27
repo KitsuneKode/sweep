@@ -119,7 +119,6 @@ import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
 import type { FolderSwitcher, UiScanControl } from "./streaming.js";
 import { FolderJump } from "./FolderJump.js";
 import { ProjectsView } from "./ProjectsView.js";
-import { useMonotonicFraction } from "./LedgerBand.js";
 import {
   buildProjectRows,
   buildProjects,
@@ -166,6 +165,13 @@ export interface SweepAppProps {
    * "folders": the full review (folder tree, columns, legend). `b` switches.
    */
   initialView?: "projects" | "folders";
+  /**
+   * The terminal's background, asked before the first frame. When given, the
+   * app does not ask again and its first frame already has the right theme.
+   */
+  terminalBackground?: string | null;
+  /** `--theme` with no saved preferences yet. */
+  initialTheme?: "auto" | "dark" | "light";
 }
 
 function styledContentFallback(message: string, closing: boolean): ReactNode {
@@ -861,10 +867,13 @@ export function SweepApp({
   folders,
   initialNotice,
   initialView = "folders",
+  terminalBackground: knownBackground,
+  initialTheme,
 }: SweepAppProps) {
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) =>
     createUiState(p, {
       ...(preferences ? { themeMode: preferences.themeMode, sortBy: preferences.sortBy } : {}),
+      ...(initialTheme ? { themeMode: initialTheme } : {}),
       ...init,
       startUnselected: init?.startUnselected ?? true,
     }),
@@ -1265,8 +1274,12 @@ export function SweepApp({
   // The terminal's own background, asked once: the canvas adopts it (colour,
   // opacity) and every tint is mixed from it. Unanswered, the brand canvas stays.
   const paletteRenderer = useRenderer();
-  const [terminalBackground, setTerminalBackground] = useState<string | null>(null);
+  const [terminalBackground, setTerminalBackground] = useState<string | null>(
+    knownBackground ?? null,
+  );
   useEffect(() => {
+    // Already asked before the first frame: asking again could only flash.
+    if (knownBackground !== undefined) return;
     let live = true;
     try {
       paletteRenderer
@@ -1283,7 +1296,7 @@ export function SweepApp({
     return () => {
       live = false;
     };
-  }, [paletteRenderer]);
+  }, [paletteRenderer, knownBackground]);
   const tokens = useMemo(
     () => resolveTheme(state.themeMode, terminalBackground),
     [state.themeMode, terminalBackground],
@@ -1341,10 +1354,6 @@ export function SweepApp({
     projectCursorRef.current = index;
     setProjectCursorState(index);
   };
-  const sizedFraction = useMonotonicFraction(
-    state.candidates.length > 0 ? state.scanSizedCount / state.candidates.length : 0,
-    state.scanning,
-  );
   const disk = useMemo((): DiskSpace | null => {
     try {
       const stats = statfsSync(state.targetDir);
@@ -2640,7 +2649,6 @@ export function SweepApp({
             cursor={projectCursor}
             now={Date.now()}
             scanning={state.scanning}
-            sizedFraction={sizedFraction}
             sizedLabel={`scanning  ${state.scanSizedCount.toLocaleString()} of ${state.candidates.length.toLocaleString()} sized`}
             reclaimableBytes={projects.reduce((sum, project) => sum + project.queueableBytes, 0)}
             projectCount={projects.length}

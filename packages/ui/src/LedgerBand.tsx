@@ -3,8 +3,9 @@ import type { RiskTier, ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { bold, fg, t, type StyledText } from "@opentui/core";
-import { useMemo, useRef } from "react";
+import { useMemo } from "react";
 import { ActionButton } from "./ActionButton.js";
+import { ScanMeter } from "./Meter.js";
 import { buildBrandLine, concatStyled, riskGlyph } from "./presentation.js";
 import { compactBytesLabel } from "./sidebar.js";
 import type { SweepUiSummary } from "./state.js";
@@ -153,10 +154,6 @@ export function LedgerBand({
   onRiskFilter,
 }: LedgerBandProps) {
   const ledger = useMemo(() => buildLedger(candidates), [candidates]);
-  const sized = useMonotonicFraction(
-    candidates.length > 0 ? sizedCount / candidates.length : 0,
-    scanning,
-  );
   const safeBytes = useMemo(() => queueSafeBytes(visible, selectedIds), [visible, selectedIds]);
   const colors = riskColor(tokens);
   const tilde = ledger.partial ? "~" : "";
@@ -184,7 +181,7 @@ export function LedgerBand({
   const percent =
     ledger.reclaimable > 0 ? Math.round((summary.selectedBytes / ledger.reclaimable) * 100) : 0;
   const ruleLabel = scanning
-    ? ` ${Math.min(99, Math.floor(sized * 100))}% sized`
+    ? ""
     : queued
       ? summary.selectedBytesPartial
         ? " partial bytes"
@@ -264,20 +261,33 @@ export function LedgerBand({
       </box>
 
       <box width="100%" height={1} flexDirection="row" gap={1}>
-        <text
-          content={concatStyled(
-            buildQueueRule(
-              scanning ? sized : summary.selectedBytes,
-              scanning ? 1 : ledger.reclaimable,
-              ruleWidth,
-              scanning ? tokens.info : tokens.accent,
-              tokens.border,
-            ),
-            t`${fg(scanning ? tokens.info : tokens.accent)(ruleLabel)}`,
-          )}
-          wrapMode="none"
-          flexGrow={1}
-        />
+        {scanning ? (
+          // No fraction while the end is unknown: the bar glides, and the
+          // "N of M sized" count above carries the numbers.
+          <box flexGrow={1} height={1}>
+            <ScanMeter
+              width={ruleWidth}
+              fill={tokens.info}
+              track={tokens.border}
+              background={tokens.bg}
+            />
+          </box>
+        ) : (
+          <text
+            content={concatStyled(
+              buildQueueRule(
+                summary.selectedBytes,
+                ledger.reclaimable,
+                ruleWidth,
+                tokens.accent,
+                tokens.border,
+              ),
+              t`${fg(tokens.accent)(ruleLabel)}`,
+            )}
+            wrapMode="none"
+            flexGrow={1}
+          />
+        )}
         <ActionButton tokens={tokens} label="Actions" hint="Ctrl+K" onPress={onMenu} />
         {width >= 64 ? (
           <ActionButton
@@ -300,28 +310,4 @@ export function LedgerBand({
       </box>
     </box>
   );
-}
-
-/**
- * A progress meter must never run backwards. `sized / found` can: discovery
- * keeps adding to `found` while sizing catches up, so the bar reached 100%
- * and fell back to 80%. Within one scan the shown fraction holds its high
- * point until the real one passes it; a new scan starts from zero. The exact
- * "N of M sized" text beside it stays literal.
- */
-export function useMonotonicFraction(fraction: number, active: boolean): number {
-  const high = useRef(0);
-  const wasActive = useRef(active);
-  // A scan that starts again starts from zero.
-  if (active && !wasActive.current) high.current = 0;
-  wasActive.current = active;
-  high.current = holdFraction(high.current, fraction, active);
-  return active ? high.current : clampFraction(fraction);
-}
-
-const clampFraction = (value: number) => Math.max(0, Math.min(1, value));
-
-/** The next shown fraction: the real one, but never below the high point while active. */
-export function holdFraction(high: number, fraction: number, active: boolean): number {
-  return active ? Math.max(high, clampFraction(fraction)) : clampFraction(fraction);
 }

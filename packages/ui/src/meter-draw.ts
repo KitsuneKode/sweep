@@ -111,6 +111,74 @@ export function meterPixels(
   return pixels;
 }
 
+/**
+ * An indeterminate meter: the track, and a soft run of `fill` from `from` to
+ * `to` (fractions of the width, clipped) with rounded ends.
+ */
+export function glidePixels(
+  width: number,
+  height: number,
+  from: number,
+  to: number,
+  fill: string,
+  track: string,
+  thickness = 0.28,
+  background: string | null = null,
+): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4);
+  const ground = background && /^#[0-9a-f]{6}/i.test(background) ? rgb(background) : null;
+  const radius = Math.max(1.25, (height * thickness) / 2);
+  const cy = height / 2;
+  const x0 = radius;
+  const span = Math.max(0, width - 2 * radius);
+  const a = x0 + span * clamp01(from);
+  const b = x0 + span * clamp01(to);
+  const trackRgb = rgb(track);
+  const fillRgb = rgb(fill);
+  for (let y = 0; y < height; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const px = x + 0.5;
+      const cover = (start: number, end: number) => {
+        const dx = px < start ? start - px : px > end ? px - end : 0;
+        return Math.min(1, Math.max(0, radius + 0.5 - Math.hypot(dx, dy)));
+      };
+      const t = cover(x0, x0 + span);
+      const f = b > a ? cover(a, b) : 0;
+      // Fill over track, both straight alpha.
+      const alpha = f + t * (1 - f);
+      const mix = (c: 0 | 1 | 2) =>
+        alpha > 0 ? (fillRgb[c] * f + trackRgb[c] * t * (1 - f)) / alpha : 0;
+      if (ground) {
+        pixels[i] = Math.round(mix(0) * alpha + ground[0] * (1 - alpha));
+        pixels[i + 1] = Math.round(mix(1) * alpha + ground[1] * (1 - alpha));
+        pixels[i + 2] = Math.round(mix(2) * alpha + ground[2] * (1 - alpha));
+        pixels[i + 3] = 255;
+      } else if (alpha > 0) {
+        pixels[i] = Math.round(mix(0));
+        pixels[i + 1] = Math.round(mix(1));
+        pixels[i + 2] = Math.round(mix(2));
+        pixels[i + 3] = Math.round(alpha * 255);
+      }
+    }
+  }
+  return pixels;
+}
+
+/** The text glide: a heavy run over a light track. */
+export function glideLine(
+  width: number,
+  from: number,
+  to: number,
+  fill: string,
+  track: string,
+): StyledText {
+  const a = Math.max(0, Math.min(width, Math.round(clamp01(from) * width)));
+  const b = Math.max(a, Math.min(width, Math.round(clamp01(to) * width)));
+  return t`${fg(track)("─".repeat(a))}${fg(fill)("━".repeat(b - a))}${fg(track)("─".repeat(width - b))}`;
+}
+
 export interface StackSegment {
   fraction: number;
   color: string;

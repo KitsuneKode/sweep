@@ -4,7 +4,7 @@ import { bold, fg, t, type MouseEvent, type StyledText } from "@opentui/core";
 import { dirname } from "node:path";
 import { type ReactNode, useRef } from "react";
 import { formatAge } from "./age.js";
-import { Meter, useCountUp } from "./Meter.js";
+import { Meter, ScanMeter, useCountUp } from "./Meter.js";
 import { useMotionEnabled } from "./motion.js";
 import { ProjectDetails } from "./ProjectDetails.js";
 import { concatStyled, QUEUE_GLYPH, queueState } from "./presentation.js";
@@ -22,7 +22,6 @@ export interface ProjectsViewProps {
   now: number;
   scanning: boolean;
   /** 0..1, already monotonic. */
-  sizedFraction: number;
   sizedLabel: string;
   reclaimableBytes: number;
   /** Safe bytes in projects idle 30+ days: the easy win, one key away. */
@@ -399,11 +398,11 @@ export function ProjectsView(props: ProjectsViewProps) {
         <text content={answerLine} wrapMode="none" />
       )}
       {scanning ? (
-        <Meter
+        // The end of a scan is unknown until it arrives: the bar glides and
+        // claims no fraction; "N of M sized" above is the only number.
+        <ScanMeter
           width={inner}
-          value={props.sizedFraction}
           fill={tokens.info}
-          previewColor={tokens.info}
           track={tokens.meterTrack}
           background={tokens.bg}
         />

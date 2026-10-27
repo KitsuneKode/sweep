@@ -158,6 +158,8 @@ export interface CliOptions {
   select: SelectionMode;
   /** `sweep ui --view`: the screen the session opens on. */
   view?: "projects" | "full";
+  /** `sweep ui --theme` or SWEEP_THEME: auto follows the terminal's background. */
+  theme?: "auto" | "dark" | "light";
   /** --idle: only select artifacts in projects idle at least this long (ms). */
   idle?: number;
   /** Absent unless the user passed --depth - config layers stay reachable. */
