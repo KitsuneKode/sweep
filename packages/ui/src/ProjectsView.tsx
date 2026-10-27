@@ -1,17 +1,12 @@
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
-import { bold, fg, t, type StyledText } from "@opentui/core";
+import { bold, fg, t, type MouseEvent, type StyledText } from "@opentui/core";
 import { useRef } from "react";
 import { formatAge } from "./age.js";
 import { buildQueueRule } from "./LedgerBand.js";
 import { concatStyled, QUEUE_GLYPH, queueState } from "./presentation.js";
-import { SECTION_TITLE, type ProjectRow } from "./projects.js";
-import { cellWidth, clipCells } from "./text-cells.js";
-
-/** Pad to a width in terminal cells (CJK and emoji take two). */
-function padCells(text: string, width: number): string {
-  return text + " ".repeat(Math.max(0, width - cellWidth(text)));
-}
+import { SECTION_TITLE, type Project, type ProjectRow } from "./projects.js";
+import { cellWidth, clipCells, clipStart } from "./text-cells.js";
 import type { ThemeTokens } from "./theme.js";
 
 export interface ProjectsViewProps {
@@ -44,27 +39,55 @@ export interface ProjectsViewProps {
   onFilterInput: (value: string) => void;
   onFilterSubmit: () => void;
   onRowPress: (index: number, onMark: boolean) => void;
-}
-
-const MARK_COL = 4; // "› ○ " - the cursor and the checkbox
-
-function spaced(bytes: number): string {
-  return formatBytes(bytes);
+  /** Wheel moves the cursor, never the viewport alone (ux-principles). */
+  onCursorDelta: (delta: number) => void;
 }
 
 /**
- * The calm default screen. No boxes, no column headers: a sentence that
- * answers "how much can I get back", then projects in two groups - what
- * nobody is using, and what someone is - one row each. Detail is one key away
- * and never in the way.
+ * A line of this view never runs wider than this: on a wide terminal the name,
+ * its size and its idle time stay within one glance instead of spreading
+ * across 200 columns.
+ */
+const CONTENT_MAX = 104;
+const LEAD = 5; // "› ○  " - cursor, checkbox, gap
+const SIZE_W = 10;
+const IDLE_W = 5;
+const RECENT_MS = 7 * 86_400_000;
+
+function padCells(text: string, width: number): string {
+  return text + " ".repeat(Math.max(0, width - cellWidth(text)));
+}
+function styledWidth(text: StyledText): number {
+  return text.chunks.reduce((sum, chunk) => sum + cellWidth(chunk.text), 0);
+}
+function plural(count: number, word: string): string {
+  return `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
+}
+/** "node_modules · .next +2": the biggest two, then how many more. */
+function kindSummary(project: Project, width: number): string {
+  // As many whole names as fit, biggest first; never a name cut mid-word.
+  for (let count = Math.min(2, project.kinds.length); count >= 1; count--) {
+    const rest = project.kinds.length - count;
+    const text = `${project.kinds.slice(0, count).join(" · ")}${rest > 0 ? ` +${rest}` : ""}`;
+    if (cellWidth(text) <= width) return text;
+  }
+  return clipCells(project.kinds[0] ?? "", width);
+}
+
+/**
+ * The calm default screen. No boxes and no column headers. A sentence answers
+ * "how much can I get back"; projects follow in two groups, what nobody is
+ * using and what someone is, the biggest few of each with the rest folded.
+ * Each row leads with what decides it (name, size, idle) and trails the
+ * quiet detail (where it lives, what it holds).
  */
 export function ProjectsView(props: ProjectsViewProps) {
   const { tokens, width, height, rows, cursor, now, scanning, footer, filter, searchFocused } =
     props;
   // The app frame and this view each pad one cell per side.
-  const inner = Math.max(20, width - 6);
+  const inner = Math.max(20, Math.min(CONTENT_MAX, width - 6));
   const showSearch = searchFocused || filter.length > 0;
-  // Header (brand, blank, answer, meter-or-blank), search, then the list, then footer.
+  // Header (brand, blank, answer, meter-or-blank), search, the list, blank, footer.
   const chrome = 4 + (showSearch ? 2 : 0) + 2;
   const room = Math.max(3, height - chrome);
 
@@ -77,29 +100,27 @@ export function ProjectsView(props: ProjectsViewProps) {
   topRef.current = top;
   const shown = rows.slice(top, top + room);
 
-  const sizeW = 10;
-  const idleW = 5;
-  // Columns: name | where it lives (dim) | what it holds | size | idle.
-  // The name column fits the longest name shown, up to 28 cells, so short
-  // lists sit tight and long names truncate in the middle.
   const longestName = Math.max(
-    8,
+    10,
     ...rows.flatMap((row) => (row.kind === "project" ? [cellWidth(row.project.name)] : [])),
   );
-  const nameW = Math.min(28, longestName);
-  const flex = Math.max(0, inner - MARK_COL - 1 - nameW - 2 - sizeW - 2 - idleW - 2);
-  const whereW = inner >= 90 ? Math.floor(flex * 0.45) : 0;
-  const kindsW = Math.max(0, flex - whereW - (whereW > 0 ? 2 : 0));
+  const nameW = Math.min(26, longestName, Math.max(10, inner - LEAD - SIZE_W - IDLE_W - 6));
+  const detailW = Math.max(0, inner - LEAD - nameW - 2 - SIZE_W - 2 - IDLE_W - 3);
+  // The location column only when the detail has room for both; it fits the
+  // longest location shown, up to just over half the detail.
+  const longestWhere = Math.max(
+    0,
+    ...rows.flatMap((row) => (row.kind === "project" ? [cellWidth(row.project.parent)] : [])),
+  );
+  const whereW = detailW >= 36 ? Math.min(longestWhere, Math.floor(detailW * 0.55)) : 0;
 
-  const brand = t`${bold(fg(tokens.accent)("sweep"))}  ${fg(tokens.textMuted)(
-    clipCells(sanitizeTerminalText(props.target), Math.max(8, inner - 30), true),
-  )}`;
+  // ── Header ──────────────────────────────────────────────────────────────
+  const modes = [props.dryRun ? "DRY RUN" : "", props.trash ? "TRASH" : ""].filter(Boolean);
   const progress = scanning
     ? t`${fg(tokens.info)(props.sizedLabel)}`
     : props.diskFree !== null
-      ? t`${fg(tokens.textMuted)(`${spaced(props.diskFree)} free`)}`
+      ? t`${fg(tokens.textMuted)(`${formatBytes(props.diskFree)} free`)}`
       : t``;
-  const modes = [props.dryRun ? "DRY RUN" : "", props.trash ? "TRASH" : ""].filter(Boolean);
   const status =
     modes.length > 0
       ? concatStyled(
@@ -107,27 +128,32 @@ export function ProjectsView(props: ProjectsViewProps) {
           progress,
         )
       : progress;
+  const brand = t`${bold(fg(tokens.accent)("sweep"))}  ${fg(tokens.textMuted)(
+    clipCells(
+      sanitizeTerminalText(props.target),
+      Math.max(8, inner - styledWidth(status) - 10),
+      true,
+    ),
+  )}`;
 
   const answer =
     props.selectedCount > 0
-      ? t`${bold(fg(tokens.accent)(spaced(props.selectedBytes)))}${fg(tokens.text)(" queued")}${fg(
-          tokens.textMuted,
-        )(
-          `  ·  ${props.selectedCount.toLocaleString()} item${props.selectedCount === 1 ? "" : "s"}  ·  `,
-        )}${fg(tokens.text)("ctrl+enter")}${fg(tokens.textMuted)(" to review")}`
+      ? t`${bold(fg(tokens.accent)(formatBytes(props.selectedBytes)))}${fg(tokens.text)(
+          " queued",
+        )}${fg(tokens.textMuted)(`  ·  ${plural(props.selectedCount, "item")}  ·  `)}${fg(
+          tokens.text,
+        )("ctrl+enter")}${fg(tokens.textMuted)(" to review")}`
       : props.reclaimableBytes > 0 || !scanning
-        ? t`${bold(fg(tokens.text)(spaced(props.reclaimableBytes)))}${fg(tokens.text)(
+        ? t`${bold(fg(tokens.text)(formatBytes(props.reclaimableBytes)))}${fg(tokens.text)(
             " you can reclaim",
-          )}${fg(tokens.textMuted)(
-            `  ·  ${props.projectCount.toLocaleString()} project${props.projectCount === 1 ? "" : "s"}`,
-          )}`
+          )}${fg(tokens.textMuted)(`  ·  ${plural(props.projectCount, "project")}`)}`
         : t`${fg(tokens.textMuted)("Looking for build output…")}`;
   // The easy win, named and one key away - only when it fits whole.
-  const idleHint = t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.text)(spaced(props.idleBytes))}${fg(
-    tokens.textMuted,
-  )(" idle 30+ days, ")}${fg(tokens.accent)("i")}${fg(tokens.textMuted)(" queues it")}`;
-  const styledWidth = (text: StyledText) =>
-    text.chunks.reduce((sum, chunk) => sum + cellWidth(chunk.text), 0);
+  const idleHint = t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.text)(
+    formatBytes(props.idleBytes),
+  )}${fg(tokens.textMuted)(" idle 30+ days, ")}${fg(tokens.accent)("i")}${fg(tokens.textMuted)(
+    " queues it",
+  )}`;
   const answerLine =
     props.selectedCount === 0 &&
     !scanning &&
@@ -136,15 +162,22 @@ export function ProjectsView(props: ProjectsViewProps) {
       ? concatStyled(answer, idleHint)
       : answer;
 
+  // ── Rows ────────────────────────────────────────────────────────────────
   const line = (index: number, row: ProjectRow): StyledText => {
     const isCursor = index === cursor;
     const pointer = fg(tokens.accent)(isCursor ? "›" : " ");
     if (row.kind === "spacer") return t``;
     if (row.kind === "section") {
       const label = SECTION_TITLE[row.section];
-      const meta = `${row.count.toLocaleString()} project${row.count === 1 ? "" : "s"}  ${spaced(row.bytes)}`;
-      const gap = Math.max(1, inner - label.length - meta.length);
+      const meta = `${plural(row.count, "project")}  ·  ${formatBytes(row.bytes)}`;
+      const gap = Math.max(2, inner - cellWidth(label) - cellWidth(meta));
       return t`${bold(fg(tokens.textSecondary)(label))}${" ".repeat(gap)}${fg(tokens.textMuted)(meta)}`;
+    }
+    if (row.kind === "more") {
+      const label = `+ ${plural(row.count, "more project")}  ·  ${formatBytes(row.bytes)}`;
+      return t`${pointer}    ${fg(tokens.textMuted)(label)}${fg(tokens.textDim)(
+        isCursor ? "   enter shows them" : "",
+      )}`;
     }
     if (row.kind === "project") {
       const p = row.project;
@@ -159,50 +192,52 @@ export function ProjectsView(props: ProjectsViewProps) {
           )(QUEUE_GLYPH[state])
         : fg(tokens.textDim)("·");
       const nameText = padCells(clipCells(sanitizeTerminalText(p.name), nameW, true), nameW);
-      // Where it lives, dimmed: worktree and package names alone are cryptic.
-      const where =
-        whereW > 0
-          ? `  ${padCells(clipCells(sanitizeTerminalText(p.parent), whereW, true), whereW)}`
-          : "";
       const name = isCursor ? bold(fg(tokens.text)(nameText)) : fg(tokens.text)(nameText);
-      const kinds = clipCells(p.kinds.join(" · "), kindsW, false);
-      const size = `${p.partial ? "~" : ""}${spaced(p.bytes)}`.padStart(sizeW);
-      const idle = formatAge(p.activeMs, now).padStart(idleW);
-      const recent = p.activeMs !== undefined && now - p.activeMs < 7 * 86_400_000;
-      return t`${pointer} ${mark}  ${name}${fg(tokens.textDim)(where)}  ${fg(tokens.textMuted)(
-        padCells(kinds, kindsW),
-      )}  ${fg(tokens.textSecondary)(size)}  ${fg(recent ? tokens.info : tokens.textMuted)(idle)}`;
+      const size = `${p.partial ? "~" : ""}${formatBytes(p.bytes)}`.padStart(SIZE_W);
+      const idle = formatAge(p.activeMs, now).padStart(IDLE_W);
+      const recent = p.activeMs !== undefined && now - p.activeMs < RECENT_MS;
+      // Quiet detail: the specific end of where it lives, then what it holds.
+      // One fixed location column so the kinds line up down the list.
+      const where = p.parent ? sanitizeTerminalText(p.parent) : "";
+      const detail =
+        detailW <= 0
+          ? ""
+          : whereW >= 8
+            ? `${padCells(clipStart(where, whereW), whereW)}  ${kindSummary(p, detailW - whereW - 2)}`
+            : kindSummary(p, detailW);
+      return t`${pointer} ${mark}  ${name}  ${fg(tokens.textSecondary)(size)}  ${fg(
+        recent ? tokens.info : tokens.textMuted,
+      )(idle)}   ${fg(tokens.textDim)(detail)}`;
     }
-    // An opened project's artifact: indented under it, risk named only when it matters.
+    // An opened project's artifact: the path inside it, under the name column.
     const c = row.candidate;
-    const selectable = c.riskTier !== "blocked";
     const queued = props.selectedIds.has(c.id);
-    const mark = !selectable
-      ? fg(tokens.textDim)("·")
-      : fg(queued ? tokens.accent : tokens.textDim)(queued ? "●" : "○");
-    const risk =
-      c.riskTier === "safe"
-        ? ""
-        : c.riskTier === "caution"
-          ? fg(tokens.warning)("  caution")
-          : c.riskTier === "dangerous"
-            ? fg(tokens.danger)("  dangerous")
-            : fg(tokens.textDim)("  blocked");
-    const nameW2 = Math.max(8, inner - MARK_COL - 3 - sizeW - idleW - 12);
-    // Inside a project, the path says which one: apps/web/node_modules.
+    const mark =
+      c.riskTier === "blocked"
+        ? fg(tokens.textDim)("·")
+        : fg(queued ? tokens.accent : tokens.textDim)(queued ? "●" : "○");
     const inside = c.path.startsWith(`${row.project.key}/`)
       ? c.path.slice(row.project.key.length + 1)
       : c.name;
-    const name = clipCells(sanitizeTerminalText(inside), nameW2, true);
-    const size = `${c.bytesKnown === false ? "~" : ""}${spaced(c.estimatedBytes)}`.padStart(sizeW);
-    const riskWidth = c.riskTier === "safe" ? 0 : c.riskTier.length + 2;
-    return t`${pointer}    ${mark}  ${isCursor ? bold(fg(tokens.text)(name)) : fg(tokens.textSecondary)(name)}${risk}${" ".repeat(
-      Math.max(1, inner - MARK_COL - 3 - name.length - riskWidth - sizeW - idleW - 2),
-    )}${fg(tokens.textMuted)(size)}`;
+    const pathText = padCells(clipCells(sanitizeTerminalText(inside), nameW - 2, true), nameW - 2);
+    const size = `${c.bytesKnown === false ? "~" : ""}${formatBytes(c.estimatedBytes)}`.padStart(
+      SIZE_W,
+    );
+    const risk =
+      c.riskTier === "safe"
+        ? fg(tokens.textDim)("")
+        : c.riskTier === "caution"
+          ? fg(tokens.warning)("caution")
+          : c.riskTier === "dangerous"
+            ? fg(tokens.danger)("dangerous")
+            : fg(tokens.textDim)("blocked · never removed");
+    return t`${pointer}   ${mark}  ${
+      isCursor ? bold(fg(tokens.text)(pathText)) : fg(tokens.textSecondary)(pathText)
+    }  ${fg(tokens.textMuted)(size)}  ${" ".repeat(IDLE_W)}   ${risk}`;
   };
 
   return (
-    <box width="100%" height="100%" flexDirection="column" paddingLeft={1} paddingRight={1}>
+    <box width={inner + 2} height="100%" flexDirection="column" paddingLeft={1} paddingRight={1}>
       <box height={1} flexDirection="row" justifyContent="space-between">
         <text content={brand} wrapMode="none" />
         <text content={status} wrapMode="none" />
@@ -240,7 +275,15 @@ export function ProjectsView(props: ProjectsViewProps) {
           <text content="" />
         </>
       ) : null}
-      <box flexGrow={1} flexDirection="column">
+      <box
+        flexGrow={1}
+        flexDirection="column"
+        onMouseScroll={(event: MouseEvent) => {
+          const direction = event.scroll?.direction;
+          if (direction === "up") props.onCursorDelta(-3);
+          else if (direction === "down") props.onCursorDelta(3);
+        }}
+      >
         {shown.length === 0 ? (
           <text
             content={t`${fg(tokens.textMuted)(
@@ -259,7 +302,9 @@ export function ProjectsView(props: ProjectsViewProps) {
                 key={`${index}-${row.kind}`}
                 height={1}
                 backgroundColor={index === cursor ? tokens.selectionSoftBg : tokens.bg}
-                onMouseDown={(event) => props.onRowPress(index, event.x - 1 <= MARK_COL)}
+                onMouseDown={(event: MouseEvent) =>
+                  props.onRowPress(index, event.x - 1 <= LEAD - 1)
+                }
               >
                 <text content={line(index, row)} wrapMode="none" />
               </box>

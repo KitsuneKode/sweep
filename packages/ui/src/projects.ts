@@ -41,7 +41,11 @@ export type ProjectRow =
   | { kind: "section"; section: ProjectSection; bytes: number; count: number }
   | { kind: "project"; project: Project }
   | { kind: "artifact"; project: Project; candidate: ScanCandidate }
+  | { kind: "more"; section: ProjectSection; count: number; bytes: number }
   | { kind: "spacer" };
+
+/** Projects shown per section before the rest folds into one "+ N more" row. */
+export const SECTION_PREVIEW = 8;
 
 /** The folder a project sits in, relative to the scan target: "agency/.worktrees". */
 function relativeParent(key: string, targetDir: string): string {
@@ -116,6 +120,7 @@ const SECTION_ORDER: ProjectSection[] = ["idle", "recent", "unknown"];
 export function buildProjectRows(
   projects: readonly Project[],
   expanded: ReadonlySet<string>,
+  openSections: ReadonlySet<ProjectSection> = new Set(),
 ): ProjectRow[] {
   const rows: ProjectRow[] = [];
   for (const section of SECTION_ORDER) {
@@ -128,12 +133,23 @@ export function buildProjectRows(
       bytes: members.reduce((sum, project) => sum + project.bytes, 0),
       count: members.length,
     });
-    for (const project of members) {
+    // The biggest few first; the long tail of small projects waits behind one row.
+    const shown = openSections.has(section) ? members : members.slice(0, SECTION_PREVIEW);
+    for (const project of shown) {
       rows.push({ kind: "project", project });
       if (expanded.has(project.key)) {
         for (const candidate of project.artifacts)
           rows.push({ kind: "artifact", project, candidate });
       }
+    }
+    const folded = members.slice(shown.length);
+    if (folded.length > 0) {
+      rows.push({
+        kind: "more",
+        section,
+        count: folded.length,
+        bytes: folded.reduce((sum, project) => sum + project.bytes, 0),
+      });
     }
   }
   return rows;
@@ -141,7 +157,7 @@ export function buildProjectRows(
 
 /** Rows the cursor can stop on. */
 export function isFocusable(row: ProjectRow | undefined): boolean {
-  return row?.kind === "project" || row?.kind === "artifact";
+  return row?.kind === "project" || row?.kind === "artifact" || row?.kind === "more";
 }
 
 /** Move the cursor `delta` focusable rows, clamped to the list. */

@@ -122,6 +122,7 @@ import {
   buildProjects,
   moveCursor as moveProjectCursor,
   settleCursor,
+  type ProjectSection,
 } from "./projects.js";
 import { rankJumpTargets, type JumpTarget } from "./folder-jump.js";
 
@@ -1210,14 +1211,15 @@ export function SweepApp({
   // ── The projects view: one row per project, grouped by idle time ──────
   const [view, setView] = useState(initialView);
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  const [openSections, setOpenSections] = useState<ReadonlySet<ProjectSection>>(() => new Set());
   const [projectCursorState, setProjectCursorState] = useState(0);
   const projects = useMemo(
     () => buildProjects(visibleItems, state.selectedIds, state.targetDir),
     [visibleItems, state.selectedIds, state.targetDir],
   );
   const projectRows = useMemo(
-    () => buildProjectRows(projects, expandedProjects),
-    [projects, expandedProjects],
+    () => buildProjectRows(projects, expandedProjects, openSections),
+    [projects, expandedProjects, openSections],
   );
   const projectCursor = settleCursor(projectRows, projectCursorState);
   // Keys in one stdin burst (j j Enter) must each see the previous key's
@@ -1271,13 +1273,20 @@ export function SweepApp({
       setProjectCursor(moveProjectCursor(projectRowsRef.current, projectCursorRef.current, delta));
       return true;
     };
+    const openSection = (section: ProjectSection) => {
+      const next = new Set(openSections);
+      next.add(section);
+      projectRowsRef.current = buildProjectRows(projects, expandedRef.current, next);
+      setOpenSections(next);
+      return true;
+    };
     const setOpen = (keyName: string, open: boolean) => {
       const next = new Set(expandedRef.current);
       if (open) next.add(keyName);
       else next.delete(keyName);
       expandedRef.current = next;
       // Rows change shape now, so the next key in this burst sees them.
-      projectRowsRef.current = buildProjectRows(projects, next);
+      projectRowsRef.current = buildProjectRows(projects, next, openSections);
       setExpandedProjects(next);
     };
     switch (key.name) {
@@ -1300,6 +1309,7 @@ export function SweepApp({
       case "G":
         return move(Number.MAX_SAFE_INTEGER);
       case "space":
+        if (row?.kind === "more") return openSection(row.section);
         if (row?.kind === "project") mutate((s) => toggleIdsSelection(s, row.project.queueable));
         else if (row?.kind === "artifact") {
           if (row.candidate.riskTier === "blocked")
@@ -1311,6 +1321,7 @@ export function SweepApp({
       case "enter":
       case "right":
       case "l":
+        if (row?.kind === "more") return openSection(row.section);
         if (row?.kind === "project")
           setOpen(
             row.project.key,
@@ -2509,10 +2520,19 @@ export function SweepApp({
             }
             onFilterInput={(value) => mutate((s) => setFilter(s, value))}
             onFilterSubmit={() => focusPanel("list")}
+            onCursorDelta={(delta) =>
+              setProjectCursor(
+                moveProjectCursor(projectRowsRef.current, projectCursorRef.current, delta),
+              )
+            }
             onRowPress={(index, onMark) => {
               const row = projectRows[index];
               setProjectCursor(index);
               if (!row || row.kind === "section" || row.kind === "spacer") return;
+              if (row.kind === "more") {
+                setOpenSections((current) => new Set([...current, row.section]));
+                return;
+              }
               if (onMark) {
                 if (row.kind === "project")
                   mutate((s) => toggleIdsSelection(s, row.project.queueable));
