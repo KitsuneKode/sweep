@@ -11,7 +11,7 @@
       "oxlint": "^0.13.0",
       "oxfmt": "^0.74.0",
       "@types/bun": "^1.4.4",
-      "commander": "^12.1.0",
+      "commander": "^15.0.0",
       "picocolors": "^1.1.1",
       "ajv": "^8.20.0",
       "@opentui/core": "^0.6.8",
@@ -20,10 +20,10 @@
       "@types/react": "^19.3.0",
       "turbo": "^2.11.10",
       "@changesets/cli": "^2.30.0",
-      "@commitlint/cli": "^19.6.0",
-      "@commitlint/config-conventional": "^19.6.0",
+      "@commitlint/cli": "^21.2.4",
+      "@commitlint/config-conventional": "^21.2.4",
       "husky": "^9.1.7",
-      "lint-staged": "^15.2.10"
+      "lint-staged": "^17.6.0"
     }
   },
   "type": "module",

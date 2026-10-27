@@ -198,7 +198,9 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       extraPatterns: config.patterns.filter((pattern) => !DEFAULT_PATTERN_SET.has(pattern)),
     });
 
-    await assertOpenTuiAvailable();
+    // A standalone binary registers the UI it embedded; there is no
+    // node_modules to resolve @opentui/core from, and none is needed.
+    if (!registeredUiModule) await assertOpenTuiAvailable();
 
     const { runSweepUiStreaming } = await loadSweepUi();
 
