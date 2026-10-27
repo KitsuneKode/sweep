@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
     env = {**os.environ, "TERM": "xterm-256color", "XDG_CONFIG_HOME": str(root / "config"), "SWEEP_CONFIG_DIR": str(root / "config"),
            "SWEEP_ENGINE_PATH": str(REPO / "target/release/sweep-engine")}
-    proc = subprocess.Popen([bun, "apps/cli/dist/sweep.js", "ui", str(root), "--engine", "rust"],
+    proc = subprocess.Popen([bun, "apps/cli/dist/sweep.js", "ui", str(root), "--view", "full", "--engine", "rust"],
                             cwd=REPO, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
     os.close(slave)
     output = bytearray()
