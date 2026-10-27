@@ -69,7 +69,8 @@ you queue something, how much is queued.
 - `b` switches to the full view: folder tree, columns, risk legend, removal by
   item, ranges and patterns. `b` again comes back. The queue is shared.
 
-The header names DRY RUN and TRASH modes in both views.
+The header names DRY RUN and TRASH modes in both views. To open on the full
+view, run `sweep ui --view full`.
 
 ## Everyday controls
 
