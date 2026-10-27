@@ -631,7 +631,14 @@ const press = (name: string, ctrl = false): KeyInput => (ctrl ? { name, ctrl } :
  */
 export function footerHintItems(
   context: FooterContext,
-  options: { dryRun?: boolean; patternsDirty?: boolean; compact?: boolean; medium?: boolean } = {},
+  options: {
+    dryRun?: boolean;
+    patternsDirty?: boolean;
+    compact?: boolean;
+    medium?: boolean;
+    /** Something is queued: the review key joins the list hints. */
+    queued?: boolean;
+  } = {},
 ): FooterHint[] {
   const h = (key: string, label: string, sent?: KeyInput): FooterHint =>
     sent ? { key, label, press: sent } : { key, label };
@@ -640,14 +647,17 @@ export function footerHintItems(
   const keys = h("?", "keys", press("?"));
   const actions = h("Ctrl+K", "actions", press("k", true));
   const quit = h("ctrl-c", "quit", press("c", true));
+  const review = options.queued ? [h("c", "review", press("c"))] : [];
 
   // Narrow terminals: never clip a hint mid-word - swap to a minimal set.
   // Modal hints are already short enough to survive, so this only rewrites
   // the long pane hint rows.
-  if (options.compact && context.kind === "pane") return [move, queue, keys];
+  // With a queue, the review key outranks "↑↓ move", which is only a description.
+  if (options.compact && context.kind === "pane")
+    return review.length > 0 ? [queue, ...review, keys] : [move, queue, keys];
   // Mid widths keep the actions palette, the way to everything else.
   if (options.medium && context.kind === "pane" && context.focus === "list")
-    return [move, queue, actions, keys];
+    return [move, queue, ...review, actions, keys];
 
   switch (context.kind) {
     case "confirm":
@@ -714,6 +724,7 @@ export function footerHintItems(
       return [
         move,
         queue,
+        ...review,
         h("enter", "details", press("return")),
         actions,
         h("/", "filter", press("/")),

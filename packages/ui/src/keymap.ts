@@ -521,7 +521,10 @@ export function handleKeymap(ctx: KeymapContext, actions: KeymapActions): void {
   // that isn't rendered.
   if (
     (state.focus === "list" || state.focus === "sidebar") &&
-    ((key.ctrl && isEnter) || key.name === "ctrl+enter")
+    ((key.ctrl && isEnter) ||
+      key.name === "ctrl+enter" ||
+      // Plain c reviews too: many terminals and tmux send Ctrl+Enter as Enter.
+      (key.name === "c" && !key.ctrl && !key.meta && !key.shift))
   ) {
     actions.requestApply();
     return;

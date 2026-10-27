@@ -236,7 +236,7 @@ export function ProjectsView(props: ProjectsViewProps) {
           " queued",
         )}${fg(tokens.textMuted)(`  ·  ${plural(props.selectedCount, "item")}  ·  `)}${fg(
           tokens.text,
-        )("ctrl+enter")}${fg(tokens.textMuted)(" to review")}`
+        )("c")}${fg(tokens.textMuted)(" to review")}`
       : props.reclaimableBytes > 0 || !scanning
         ? t`${bold(fg(tokens.text)(formatBytes(props.reclaimableBytes)))}${fg(tokens.text)(
             " you can reclaim",

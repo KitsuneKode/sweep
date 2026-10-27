@@ -246,7 +246,7 @@ const HELP_QUEUE: ReadonlyArray<HelpRow> = [
   ["a · s", "queue visible · safe"],
   ["u / U", "clear entire queue / visible only"],
   ["x · d", "review this item’s removal"],
-  ["ctrl+enter", "review queue (always confirms)"],
+  ["c · ctrl+enter", "review queue (always confirms)"],
 ];
 
 const HELP_VIEW: ReadonlyArray<HelpRow> = [
@@ -820,6 +820,8 @@ function calmHintItems(context: {
 }): FooterHint[] {
   const parts: FooterHint[] = [
     { key: "space", label: "queue", press: { name: "space" } },
+    // With a queue, reviewing it is the next step: it never falls off the end.
+    ...(context.queued ? [{ key: "c", label: "review", press: { name: "c" } }] : []),
     { key: "enter", label: "open", press: { name: "return" } },
   ];
   if (!context.scanning && context.idleBytes > 0)
@@ -828,8 +830,6 @@ function calmHintItems(context: {
       label: `queue idle ${formatBytes(context.idleBytes)}`,
       press: { name: "i" },
     });
-  if (context.queued)
-    parts.push({ key: "ctrl+enter", label: "review", press: { name: "return", ctrl: true } });
   parts.push(
     { key: "/", label: "search", press: { name: "/" } },
     { key: "b", label: "full view", press: { name: "b" } },
@@ -1741,7 +1741,7 @@ export function SweepApp({
       // Header rows and empty lists land here - x is per-artifact only.
       setNotice(
         inspectedId === undefined
-          ? "x reviews one artifact · Space queues · Ctrl+Enter reviews the queue"
+          ? "x reviews one artifact · Space queues · c reviews the queue"
           : "viewed artifact is no longer present - nothing to delete",
       );
       return;
@@ -2065,7 +2065,7 @@ export function SweepApp({
   const menuCommands = [
     {
       label: `Review queue (${summary.selectedCount})`,
-      shortcut: "Ctrl+Enter",
+      shortcut: "c",
       run: requestApply,
       disabled: state.scanning || state.scanIncomplete || summary.selectedCount === 0,
     },
@@ -2592,6 +2592,7 @@ export function SweepApp({
   const footerHints = footerHintItems(footerContext, {
     ...(dryRun ? { dryRun: true } : {}),
     ...(state.patternsDirty ? { patternsDirty: true } : {}),
+    ...(summary.selectedCount > 0 && !state.scanning ? { queued: true } : {}),
     ...(dimensions.width < 72 ? { compact: true } : dimensions.width < 108 ? { medium: true } : {}),
   });
   const tallyContent = buildRiskTally(summary, tokens);
@@ -2659,12 +2660,17 @@ export function SweepApp({
                 variant="plain"
                 tokens={tokens}
                 onPress={pressKey}
-                hints={calmHintItems({
-                  scanning: state.scanning,
-                  idleBytes: idleSafeBytes,
-                  queued: summary.selectedCount > 0,
-                  width: dimensions.width,
-                })}
+                hints={
+                  // A dialog on top owns the keys, so the footer names its keys.
+                  footerContext.kind === "pane"
+                    ? calmHintItems({
+                        scanning: state.scanning,
+                        idleBytes: idleSafeBytes,
+                        queued: summary.selectedCount > 0,
+                        width: dimensions.width,
+                      })
+                    : footerHints
+                }
               />
             }
             onFilterInput={(value) => mutate((s) => setFilter(s, value))}

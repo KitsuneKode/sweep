@@ -36,8 +36,9 @@ destroy review context or exit the process.
   dequeues its whole subtree. Entering a scope only narrows the view.
 - `Enter` opens item details. On a group header it folds the group; in the
   folder sidebar it browses the selected folder. Review queue is a named mouse
-  action, with Ctrl+Enter where the terminal supports the chord. The F2 menu
-  provides the same action without depending on extended key encoding.
+  action and the plain key `c`, which every terminal sends the same way;
+  Ctrl+Enter also works where the terminal sends the chord distinctly. The
+  F2 menu provides the same action. All three open the confirm, never apply.
 - Blocked items (VCS internals, protected roots) cannot be selected in any
   mode - including inside a scope-level bulk queue.
 - A visual range (`v`, then `Space`) follows the bulk-select rule: it queues

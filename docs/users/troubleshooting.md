@@ -40,7 +40,7 @@ Include expected behavior, actual behavior and whether any apply was attempted.
 ## A row remains after cleanup
 
 Read the outcome first. `x` / `d` confirms removal of the focused or inspected
-artifact; **Review queue** or Ctrl+Enter opens confirmation for the queue.
+artifact; **Review queue** or `c` opens confirmation for the queue.
 Enter opens item details. A single-item result can leave
 other queued items untouched. The cursor then moves to a surviving artifact,
 which may have the same name in another project. Compare full paths with `i`.

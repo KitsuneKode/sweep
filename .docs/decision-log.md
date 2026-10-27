@@ -45,7 +45,8 @@ The user approved this interaction contract after the grilling interview:
 - Start fresh interactive scans with no selections, including streamed discovery
   and rescans. CLI plan selection policy remains a separate explicit contract.
 - Enter opens details or browses a folder. Review queue is a named button/menu
-  action with Ctrl+Enter where supported; x reviews only the current item.
+  action and the plain key c (Ctrl+Enter too, where the terminal sends it);
+  x reviews only the current item.
 - Browsing/filtering preserves the global queue. Confirmation names hidden
   selections and owns a captured plan; applying preserves the browsing context.
 - Keep permanent deletion explicit and local trash opt-in. Explain retained

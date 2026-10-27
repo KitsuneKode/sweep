@@ -27,8 +27,8 @@ for recognized safe artifacts in the current view, or use individual checkboxes.
 Selection is explicit even when a scanner's default plan policy proposes items.
 
 Enter opens the focused item's details or browses a folder. **Review queue (N)**
-opens confirmation for the **whole queue**. Ctrl+Enter is a shortcut when the
-terminal sends that chord distinctly; the button and Ctrl+K / F2 menu work without it.
+opens confirmation for the **whole queue**; `c` is its key in every terminal.
+Ctrl+Enter also works where the terminal sends that chord distinctly.
 `x` or `d` opens confirmation
 for **only this item**, including inside inspect. The single-item dialog says
 how many other items stay queued, and the result says how many remain queued.
@@ -89,7 +89,7 @@ view, run `sweep ui --view full`.
 | `f`                 | Filter by risk, kind, size or age                  |
 | `x` or `d`          | Request confirmation for just the focused artifact |
 | Enter               | Open item details or browse a folder               |
-| Ctrl+Enter          | Review the queued selection, where supported       |
+| `c` or Ctrl+Enter   | Review the queued selection (always confirms)      |
 | `s` / `a`           | Queue safe / visible safe+caution                  |
 | `u`                 | Unqueue everything, including hidden artifacts     |
 | `U` (Shift-U)       | Unqueue visible artifacts; keep hidden selections  |
