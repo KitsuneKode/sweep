@@ -1,5 +1,33 @@
 # @kitsunekode/sweep
 
+## 0.5.1
+
+### Patch Changes
+
+- 8be9dd6: 0.5.0 cannot be installed from npm, and its native engines were published
+  without the execute bit, so they never ran. Install 0.5.1 instead. The package
+  is now published from its packed tarball, so the registry's install metadata
+  is exactly the manifest that was checked, and engine binaries are made
+  executable and checked before they are published.
+- becee24: In terminals with kitty graphics, the full view's size bars, the folder
+  sidebar's bars and the removal progress bar are now drawn in pixels, on the
+  colour painted behind each row. Other terminals keep the block-character bars.
+  The progress bar eases to each new count, and jumps under reduced motion.
+
+  The projects view's details panel opens with a disk map: one bar split by what
+  bringing each part back costs (cache, install, build), cheapest first, with
+  the size of each under it.
+
+  `sweep ui` asks the terminal for its background before drawing anything, so it
+  no longer flashes the fallback theme before settling on the terminal's own.
+  `--theme auto|dark|light` (or `SWEEP_THEME`) sets the theme; `t` still cycles
+  it and remembers the choice. While a scan runs, its bar glides instead of
+  showing a percentage it cannot know yet; the count beside it is the progress.
+
+- 4d97a17: The dark and light themes are now Sweep's own solid canvas in every terminal.
+  Only auto takes on the terminal's background and transparency; before, a dark
+  or light theme on a matching terminal blended into it the same way.
+
 ## 0.5.0
 
 The first release since 0.3.0; it carries every change made since then.
