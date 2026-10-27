@@ -5,28 +5,82 @@ description: Install Sweep and complete your first read-only review.
 
 ## Install
 
-For command-line scans and cleanup, use Node.js 20.3 or newer:
+Pick the line for how you install software. Every route except npm gives you
+one self-contained program with the terminal UI built in: no Node, Bun or Rust
+needed.
+
+| You use                     | Install                                                                                             | You get                         |
+| --------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------- |
+| Arch Linux (and Manjaro, …) | `yay -S sweep-cli-bin` or `paru -S sweep-cli-bin`                                                   | Everything, updated by pacman   |
+| Homebrew (macOS, Linux)     | `brew install kitsunekode/tap/sweep`                                                                | Everything, updated by brew     |
+| Any Linux or macOS          | the install script below                                                                            | Everything                      |
+| Windows                     | `sweep-win-x64.exe` from the [latest release](https://github.com/KitsuneKode/sweep/releases/latest) | Everything                      |
+| Node.js                     | `npm install -g @kitsunekode/sweep`                                                                 | Commands; the UI also needs Bun |
+| Bun                         | `bun add -g @kitsunekode/sweep @opentui/core`                                                       | Everything                      |
+
+Check it worked with `sweep --version`.
+
+### Arch Linux
+
+`sweep-cli-bin` installs the released binary for x86_64 or aarch64 and checks
+it against the release's checksum. Use your AUR helper:
 
 ```sh
-npm install -g @kitsunekode/sweep
-sweep --version
+yay -S sweep-cli-bin        # or: paru -S sweep-cli-bin
 ```
 
-If you use Bun:
+or build it by hand:
 
 ```sh
-bun add -g @kitsunekode/sweep @opentui/core
-sweep --version
+git clone https://aur.archlinux.org/sweep-cli-bin.git
+cd sweep-cli-bin && makepkg -si
 ```
 
-The npm package includes bundled JavaScript and selects a matching optional Rust
-engine package for supported platforms. Keep optional dependencies enabled if you
-want the native engine. [Platforms](platforms.md) explains fallback requirements.
+It conflicts with the AUR's `sweep` (an audio editor) and `sweep-bin` (a
+minesweeper game): all three install `/usr/bin/sweep`.
 
-The npm-installed full-screen UI needs Bun and `@opentui/core`. Install the
-optional UI peer where your Sweep installation can resolve it. If you only need
-scans and saved plans, Node is enough. A qualified standalone release embeds
-these dependencies; see the release's checksum and platform instructions.
+### Homebrew
+
+```sh
+brew install kitsunekode/tap/sweep
+```
+
+`brew upgrade sweep` updates it; `brew uninstall sweep` removes it.
+
+### Install script
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
+```
+
+It downloads the binary for your system, checks its SHA-256, and installs it
+to `~/.local/bin` (set `SWEEP_INSTALL_DIR` to choose another folder). Run it
+again to update.
+
+### npm or Bun
+
+```sh
+npm install -g @kitsunekode/sweep                 # commands, on Node.js 20.3+
+bun add -g @kitsunekode/sweep @opentui/core       # commands and the terminal UI
+```
+
+The package picks the precompiled Rust engine for your platform as an optional
+dependency; keep optional dependencies enabled to use it. On Node, every
+command works, but `sweep ui` needs Bun and `@opentui/core`.
+[Platforms](platforms.md) explains the fallbacks.
+
+### Updating and removing
+
+| Installed with | Update                        | Remove                         |
+| -------------- | ----------------------------- | ------------------------------ |
+| AUR            | your helper's update (`yay`)  | `sudo pacman -R sweep-cli-bin` |
+| Homebrew       | `brew upgrade sweep`          | `brew uninstall sweep`         |
+| Install script | run it again                  | `rm ~/.local/bin/sweep`        |
+| npm / Bun      | `npm i -g @kitsunekode/sweep` | `npm rm -g @kitsunekode/sweep` |
+
+Sweep keeps preferences and history in its configuration directory:
+`~/.config/sweep` (or `$XDG_CONFIG_HOME/sweep`), `%APPDATA%\sweep` on Windows.
+Remove it too for a clean slate.
 
 ## Scan one project
 

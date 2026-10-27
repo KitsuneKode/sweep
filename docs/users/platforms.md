@@ -13,12 +13,11 @@ description: Choose an engine and understand runtime, memory and filesystem limi
 | macOS Apple Silicon | Passed on hosted runner                              |
 | Windows x64         | Passed on hosted runner                              |
 
-The October 4 source checkpoint passed the
-[CI matrix](https://github.com/KitsuneKode/sweep/actions/runs/37218603503) and
-[binary workflow](https://github.com/KitsuneKode/sweep/actions/runs/37218647608).
-This verifies local tarball installation and headless standalone checks on
-those runners; it is not a published release or a physical-terminal guarantee.
-Interactive terminals still need qualification. Current performance
+Every release builds and checks each target on its own hosted runner before
+the binaries are attached to the
+[GitHub release](https://github.com/KitsuneKode/sweep/releases/latest); the
+same binaries back Homebrew, the AUR's `sweep-cli-bin` and the install script.
+Current performance
 measurements were collected on Linux x64. Alpine/musl and Windows
 ARM64 are not currently shipped targets. Refer to the specific release assets
 rather than assuming an unsupported binary will work.

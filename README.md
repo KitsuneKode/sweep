@@ -52,16 +52,20 @@ Space queues a project, Enter opens it, `i` queues every idle project,
 ## Install
 
 ```bash
-brew install kitsunekode/tap/sweep     # macOS and Linux
+yay -S sweep-cli-bin                     # Arch Linux (AUR; or paru)
+brew install kitsunekode/tap/sweep       # macOS and Linux with Homebrew
 curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
-npm install -g @kitsunekode/sweep      # commands only, Node.js 20.3+
+npm install -g @kitsunekode/sweep        # commands only, Node.js 20.3+
 bun add -g @kitsunekode/sweep @opentui/core   # commands and the terminal UI
 ```
 
-Homebrew and the install script fetch one self-contained binary with the
-terminal UI built in (no Node or Bun needed, checksums verified). From npm,
-every command runs on Node; `sweep ui` also needs Bun and `@opentui/core`.
+The AUR package, Homebrew and the install script give you one self-contained
+binary with the terminal UI built in (no Node or Bun needed, checksums
+verified). On Windows, download `sweep-win-x64.exe` from the
+[latest release](https://github.com/KitsuneKode/sweep/releases/latest). From
+npm, every command runs on Node; `sweep ui` also needs Bun and `@opentui/core`.
 Linux (x64, arm64), macOS (x64, arm64) and Windows (x64) are supported.
+[Getting started](docs/users/getting-started.md) covers updating and removing.
 
 For coding agents: `npx skills add KitsuneKode/sweep`.
 

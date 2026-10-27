@@ -1,0 +1,29 @@
+# Maintainer: Manash Pratim Bhuyan <bhuyanmanash2002 at gmail dot com>
+#
+# Source of truth: packaging/aur/sweep-cli-bin in https://github.com/KitsuneKode/sweep
+# The release workflow bumps pkgver and the checksums and pushes to the AUR.
+
+pkgname=sweep-cli-bin
+pkgver=0.5.1
+pkgrel=1
+pkgdesc="Find build output across your projects (node_modules, target, .next) and remove only what you choose"
+arch=('x86_64' 'aarch64')
+url="https://sweep.kitsunekode.in"
+license=('MIT')
+provides=('sweep-cli')
+# Both install /usr/bin/sweep: the audio editor (sweep) and a minesweeper (sweep-bin).
+conflicts=('sweep-cli' 'sweep' 'sweep-bin')
+# A Bun-compiled executable carries its program after the ELF image; strip
+# would cut it off and leave a binary that only runs the Bun runtime.
+options=('!strip' '!debug')
+source=("LICENSE-${pkgver}::https://raw.githubusercontent.com/KitsuneKode/sweep/v${pkgver}/LICENSE")
+source_x86_64=("sweep-${pkgver}-x86_64::https://github.com/KitsuneKode/sweep/releases/download/v${pkgver}/sweep-linux-x64")
+source_aarch64=("sweep-${pkgver}-aarch64::https://github.com/KitsuneKode/sweep/releases/download/v${pkgver}/sweep-linux-arm64")
+sha256sums=('8abda71c5f9755903f33daebb5002f1aa9dce78bb9a4b26c8c17af7c6e9099eb')
+sha256sums_x86_64=('a4693c92509c7c37f642b85e2eeb0dd9e910afad19f6d0d79d534222e4d08ac4')
+sha256sums_aarch64=('c86f7dcf8a2c93300a9992cf6d78b47901b9c09ef89aff0446afd264bed4334a')
+
+package() {
+  install -Dm755 "sweep-${pkgver}-${CARCH}" "$pkgdir/usr/bin/sweep"
+  install -Dm644 "LICENSE-${pkgver}" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
