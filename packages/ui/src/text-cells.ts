@@ -32,6 +32,14 @@ export function clipCells(value: string, width: number, middle = false): string 
   return `${takeCells(value, head)}…${takeCells(value, width - 1 - head, true)}`;
 }
 
+/** Keep the end of a value, where a path is most specific: "…/kitsunesnipe/.worktrees". */
+export function clipStart(value: string, width: number): string {
+  if (width <= 0) return "";
+  if (cellWidth(value) <= width) return value;
+  if (width === 1) return "…";
+  return `…${takeCells(value, width - 1, true)}`;
+}
+
 export function padCells(value: string, width: number, align: "left" | "right" = "left"): string {
   const clipped = clipCells(value, width);
   const padding = " ".repeat(Math.max(0, width - cellWidth(clipped)));
