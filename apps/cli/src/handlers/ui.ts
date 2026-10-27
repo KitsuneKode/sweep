@@ -95,6 +95,7 @@ export interface SweepUiModule {
     apply?: UiApplyFn;
     init?: UiInit;
     initialView?: "projects" | "folders";
+    theme?: "auto" | "dark" | "light";
     switchTarget?: (path: string) => {
       targetDir: string;
       config: import("@kitsunekode/sweep-protocol").SweepConfig;
@@ -232,6 +233,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
         ),
       init: uiInit(scanConfig),
       initialView: opts.view === "full" ? "folders" : "projects",
+      ...(opts.theme ? { theme: opts.theme } : {}),
       // The same resolution `sweep ui <path>` runs: protected roots and
       // unreadable folders refuse here, and the refusal is shown in the UI.
       switchTarget: (path) => {

@@ -233,6 +233,11 @@ export function makeProgram(): Command {
         .choices(["projects", "full"])
         .default("projects"),
     )
+    .addOption(
+      new Option("--theme <theme>", "Colours: auto follows the terminal's background")
+        .choices(["auto", "dark", "light"])
+        .env("SWEEP_THEME"),
+    )
     .action(function (this: Command, pathArg: string) {
       void handleUi(pathArg, this.optsWithGlobals<CliOptions>());
     });

@@ -12,6 +12,8 @@ export interface UiSession {
   done: Promise<SweepUiOutcome>;
   operations: UiOperationSession;
   viewFailed: (error: unknown) => void;
+  /** The terminal's default background, asked before the first frame; null if unanswered. */
+  terminalBackground: string | null;
 }
 
 // The raw-stdin deadman below fires on a timer so the keymap - which sees
@@ -57,6 +59,19 @@ export async function openUiSession(): Promise<UiSession> {
     useMouse: true,
     targetFps: 30,
   });
+
+  // Ask the terminal for its background before anything is drawn, so the
+  // first frame already wears the right theme: a frame in the fallback canvas
+  // followed by the terminal's own reads as a flash. The screen stays the
+  // terminal's own empty background while it answers (at most 200ms).
+  let terminalBackground: string | null = null;
+  try {
+    const palette = await renderer.getPalette({ timeout: 200 });
+    const background = palette.defaultBackground;
+    if (background && /^#[0-9a-f]{6}$/i.test(background)) terminalBackground = background;
+  } catch {
+    /* no answer: the theme falls back to the environment's hint */
+  }
 
   const root = createRoot(renderer);
   const operations = new UiOperationSession();
@@ -183,6 +198,7 @@ export async function openUiSession(): Promise<UiSession> {
     finish,
     done,
     operations,
+    terminalBackground,
     viewFailed(error) {
       operations.viewFailed(error);
       finish({ type: "abort" });

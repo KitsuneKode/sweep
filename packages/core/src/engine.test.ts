@@ -582,6 +582,9 @@ test.skipIf(!NATIVE_AVAILABLE)(
       expect(existsSync(candidate.path)).toBe(outcome.status !== "deleted");
     }
   },
+  // 4,096 files written, scanned and removed: the hosted Intel Mac runner's
+  // disk took over the default 5s on a run where every assertion held.
+  20_000,
 );
 
 for (const backend of ["js", "rust"] as const) {

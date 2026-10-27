@@ -201,6 +201,35 @@ export function buildArtifactRowContent(
   groupLabel?: string,
   metrics?: RowMetrics,
 ): StyledText {
+  return buildArtifactRow(candidate, selected, isCurrent, widths, tokens, root, groupLabel, metrics)
+    .content;
+}
+
+/** Where a row's size bar sits and what it shows, for drawing it in pixels. */
+export interface RowBar {
+  /** First cell of the bar column, from the row's left edge. */
+  column: number;
+  width: number;
+  fraction: number;
+  color: string;
+}
+
+/**
+ * The row's text plus its size bar. With `barGap` the bar column is left as
+ * blank cells and returned as `bar`, so a kitty image can be laid over it.
+ */
+export function buildArtifactRow(
+  candidate: ScanCandidate,
+  selected: boolean,
+  isCurrent: boolean,
+  widths: RowWidths,
+  tokens: ThemeTokens,
+  root?: string,
+  groupLabel?: string,
+  metrics?: RowMetrics,
+  barGap = false,
+): { content: StyledText; bar: RowBar | null } {
+  let rowBar: RowBar | null = null;
   const colors = riskColor(tokens);
   const rail = isCurrent ? fg(tokens.accent)("▌") : fg(tokens.textDim)(" ");
   const blocked = candidate.riskTier === "blocked";
@@ -283,14 +312,29 @@ export function buildArtifactRowContent(
         : sizeTone.strong
           ? tokens.textMuted
           : tokens.border;
-    const bar = sizeBar(candidate.estimatedBytes, metrics?.maxBytes ?? 0, widths.barWidth);
-    parts.push(t`${" ".repeat(COLUMN_GAP)}${fg(barColor)(bar)}`);
+    if (barGap) {
+      const maxBytes = metrics?.maxBytes ?? 0;
+      rowBar = {
+        column: parts.reduce((sum, part) => sum + styledWidth(part), 0) + COLUMN_GAP,
+        width: widths.barWidth,
+        fraction: maxBytes > 0 ? Math.min(1, Math.max(0, candidate.estimatedBytes / maxBytes)) : 0,
+        color: barColor,
+      };
+      parts.push(t`${" ".repeat(COLUMN_GAP + widths.barWidth)}`);
+    } else {
+      const bar = sizeBar(candidate.estimatedBytes, metrics?.maxBytes ?? 0, widths.barWidth);
+      parts.push(t`${" ".repeat(COLUMN_GAP)}${fg(barColor)(bar)}`);
+    }
   }
   if (widths.sizeWidth > 0) {
     const sizeChunk = sizeTone.strong ? bold(fg(sizeColor)(size)) : fg(sizeColor)(size);
     parts.push(t`${" ".repeat(SIZE_GAP)}${sizeChunk}`);
   }
-  return joinStyled(parts);
+  return { content: joinStyled(parts), bar: rowBar };
+}
+
+function styledWidth(text: Pick<StyledText, "chunks">): number {
+  return text.chunks.reduce((sum, chunk) => sum + cellWidth(chunk.text), 0);
 }
 
 /** Directory that contains the artifact, relative to the scan root. */
@@ -798,6 +842,17 @@ export interface SidebarLineOptions {
 
 /** Dense scope row: tree guide · disclosure · label · count · bytes. */
 export function buildSidebarLine(options: SidebarLineOptions): StyledText {
+  return buildSidebarRow(options).content;
+}
+
+/**
+ * The scope row plus its share-of-space bar. With `barGap` the bar's cells
+ * are left blank and returned as `bar`, for a kitty image to cover.
+ */
+export function buildSidebarRow(options: SidebarLineOptions & { barGap?: boolean }): {
+  content: StyledText;
+  bar: RowBar | null;
+} {
   const {
     label,
     count,
@@ -846,14 +901,27 @@ export function buildSidebarLine(options: SidebarLineOptions): StyledText {
   );
   const bytesText = toned(compactBytesLabel(bytes).padStart(bytesWidth), bytes, tokens);
   // ncdu-style share of space: the eye finds the heavy folders before it reads.
-  const bar =
-    showBytes && barWidth > 0
-      ? fg(bytesTone(bytes, tokens).strong ? tokens.textMuted : tokens.border)(
-          sizeBar(bytes, maxBytes, barWidth),
-        )
-      : "";
+  const barColor = bytesTone(bytes, tokens).strong ? tokens.textMuted : tokens.border;
+  const hasBar = showBytes && barWidth > 0;
+  const bar = !hasBar
+    ? ""
+    : options.barGap
+      ? " ".repeat(barWidth)
+      : fg(barColor)(sizeBar(bytes, maxBytes, barWidth));
 
   const countPart = countWidth > 0 ? t`  ${countStyled}` : t``;
   const head = concatStyled(t`${guideStyled}${marker} ${styledLabel}`, countPart);
-  return showBytes ? concatStyled(head, t`  ${bar}${bar ? " " : ""}${bytesText}`) : head;
+  if (!showBytes) return { content: head, bar: null };
+  return {
+    content: concatStyled(head, t`  ${bar}${bar ? " " : ""}${bytesText}`),
+    bar:
+      hasBar && options.barGap
+        ? {
+            column: styledWidth(head) + 2,
+            width: barWidth,
+            fraction: maxBytes > 0 ? Math.min(1, Math.max(0, bytes / maxBytes)) : 0,
+            color: barColor,
+          }
+        : null,
+  };
 }

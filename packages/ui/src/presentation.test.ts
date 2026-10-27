@@ -5,6 +5,7 @@ import type { SweepUiSummary } from "./state.js";
 import {
   artifactRowWidths,
   buildFooterHints,
+  buildArtifactRow,
   buildArtifactRowContent,
   buildGroupHeaderContent,
   buildHeaderStats,
@@ -98,6 +99,39 @@ describe("presentation formatters", () => {
     expect(line).toContain("512 B");
     expect(line.startsWith(" ")).toBe(true);
     expect(line.includes("\n")).toBe(false);
+  });
+
+  test("a pixel bar's gap sits exactly where the glyph bar was", () => {
+    const metrics = { now: Date.now(), maxBytes: 1024 };
+    for (const width of [80, 100, 140]) {
+      for (const shape of [
+        candidate(),
+        candidate({ name: "a-very-long-artifact-name-that-gets-clipped-somewhere" }),
+        candidate({ path: "/tmp/project/packages/web/node_modules", estimatedBytes: 1024 }),
+      ]) {
+        const widths = artifactRowWidths(width);
+        const args = [
+          shape,
+          false,
+          false,
+          widths,
+          darkTheme,
+          "/tmp/project",
+          undefined,
+          metrics,
+        ] as const;
+        const glyphs = plain(buildArtifactRow(...args).content);
+        const gapped = buildArtifactRow(...args, true);
+        expect(gapped.bar).not.toBeNull();
+        const bar = gapped.bar!;
+        const at = (line: string, from: number, n: number) =>
+          [...line].slice(from, from + n).join("");
+        expect(at(glyphs, bar.column, bar.width).trim()).toMatch(/^[█▏▎▍▌▋▊▉]+$/);
+        expect(at(plain(gapped.content), bar.column, bar.width)).toBe(" ".repeat(bar.width));
+        // Everything outside the bar column is identical.
+        expect(cellWidth(plain(gapped.content))).toBe(cellWidth(glyphs));
+      }
+    }
   });
 
   test("the cursor row is railed and queued rows are marked", () => {

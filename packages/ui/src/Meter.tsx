@@ -9,6 +9,11 @@ import {
   magnitudeBar,
   meterLine,
   meterPixels,
+  glideLine,
+  glidePixels,
+  stackLine,
+  stackPixels,
+  type StackSegment,
 } from "./meter-draw.js";
 import { useMotionEnabled } from "./motion.js";
 
@@ -87,6 +92,21 @@ export function useCountUp(target: number, enabled: boolean, ms = 420): number {
   return shown;
 }
 
+/**
+ * Whether meters draw in pixels here: the terminal speaks kitty graphics and
+ * has reported its pixel size. Callers that lay a meter over text use it to
+ * leave a gap only when an image will fill it.
+ */
+export function useKittyGraphics(): boolean {
+  const renderer = useRenderer();
+  return (
+    renderer.capabilities?.kitty_graphics === true &&
+    renderer.resolution !== null &&
+    renderer.width > 0 &&
+    renderer.height > 0
+  );
+}
+
 export function Meter(props: MeterProps & { previewColor: string }) {
   const renderer = useRenderer();
   const motion = useMotionEnabled();
@@ -163,4 +183,102 @@ export function Meter(props: MeterProps & { previewColor: string }) {
       wrapMode="none"
     />
   );
+}
+
+/**
+ * One bar split by share: where a total goes, part by part. Pixels in kitty,
+ * a coloured line elsewhere. Static: it describes a size, not a change.
+ */
+export function StackBar({
+  width,
+  segments,
+  background,
+  thickness = 0.5,
+}: {
+  width: number;
+  segments: StackSegment[];
+  background?: string | undefined;
+  thickness?: number;
+}) {
+  const renderer = useRenderer();
+  const kitty = useKittyGraphics();
+  const resolution = renderer.resolution;
+  const pixelWidth =
+    kitty && resolution ? Math.round((width * resolution.width) / renderer.width) : 0;
+  const pixelHeight = kitty && resolution ? Math.round(resolution.height / renderer.height) : 0;
+  const ground = background ?? null;
+  const key = segments.map((segment) => `${segment.fraction.toFixed(4)}${segment.color}`).join(",");
+  const image = useMemo(() => {
+    if (!kitty || pixelWidth < 8 || pixelHeight < 4) return null;
+    return cachedImage(
+      `stack:${pixelWidth}x${pixelHeight}:${thickness}:${ground}:${key}`,
+      () => stackPixels(pixelWidth, pixelHeight, segments, thickness, ground),
+      pixelWidth,
+      pixelHeight,
+    );
+    // `key` is the content of `segments`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kitty, pixelWidth, pixelHeight, thickness, ground, key]);
+  if (image) return <image source={image} width={width} height={1} fit="fill" protocol="kitty" />;
+  return <text content={stackLine(width, segments)} wrapMode="none" />;
+}
+
+const GLIDE_MS = 1400;
+const GLIDE_STEPS = 56;
+const GLIDE_RUN = 0.24;
+
+/**
+ * Work whose end is not known yet: a short run glides along the track at a
+ * constant speed. It claims no fraction, so the count beside it is the only
+ * number on screen. Under reduced motion the run holds still at the start.
+ */
+export function ScanMeter({
+  width,
+  fill,
+  track,
+  background,
+}: {
+  width: number;
+  fill: string;
+  track: string;
+  background?: string | undefined;
+}) {
+  const renderer = useRenderer();
+  const kitty = useKittyGraphics();
+  const motion = useMotionEnabled();
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    if (!motion) {
+      setStep(0);
+      return;
+    }
+    const started = performance.now();
+    const timer = setInterval(() => {
+      const phase = ((performance.now() - started) % GLIDE_MS) / GLIDE_MS;
+      setStep(Math.floor(phase * GLIDE_STEPS));
+    }, GLIDE_MS / GLIDE_STEPS);
+    return () => clearInterval(timer);
+  }, [motion]);
+  // Enters from the left edge, leaves past the right one.
+  const head = (step / GLIDE_STEPS) * (1 + GLIDE_RUN);
+  const from = motion ? head - GLIDE_RUN : 0;
+  const to = motion ? head : GLIDE_RUN;
+  const resolution = renderer.resolution;
+  const pixelWidth =
+    kitty && resolution ? Math.round((width * resolution.width) / renderer.width) : 0;
+  const pixelHeight = kitty && resolution ? Math.round(resolution.height / renderer.height) : 0;
+  const ground = background ?? null;
+  const image = useMemo(() => {
+    if (!kitty || pixelWidth < 8 || pixelHeight < 4) return null;
+    return cachedImage(
+      `glide:${pixelWidth}x${pixelHeight}:${step}:${motion}:${fill}:${track}:${ground}`,
+      () => glidePixels(pixelWidth, pixelHeight, from, to, fill, track, 0.28, ground),
+      pixelWidth,
+      pixelHeight,
+    );
+    // `from`/`to` follow from `step` and `motion`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kitty, pixelWidth, pixelHeight, step, motion, fill, track, ground]);
+  if (image) return <image source={image} width={width} height={1} fit="fill" protocol="kitty" />;
+  return <text content={glideLine(width, from, to, fill, track)} wrapMode="none" />;
 }

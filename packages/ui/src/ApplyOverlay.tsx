@@ -2,7 +2,8 @@ import type { ApplyProgress } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { useTerminalDimensions } from "@opentui/react";
-import { buildMeter, relativePath } from "./presentation.js";
+import { Meter } from "./Meter.js";
+import { relativePath } from "./presentation.js";
 import { DotStrip, Modal } from "./widgets.js";
 import type { ThemeTokens } from "./theme.js";
 import { useMotionEnabled } from "./motion.js";
@@ -97,7 +98,15 @@ export function ApplyOverlay({
       {percent === null ? (
         <DotStrip tokens={tokens} width={12} />
       ) : (
-        <text content={buildMeter(percent, 100, meterWidth, tokens)} wrapMode="none" />
+        // Eases to each new count (jumps under reduced motion); pixels in kitty.
+        <Meter
+          width={meterWidth}
+          value={percent / 100}
+          fill={tokens.info}
+          previewColor={tokens.info}
+          track={tokens.meterTrack}
+          background={tokens.surface}
+        />
       )}
       {!preparing && !reportPending ? <DotStrip tokens={tokens} width={12} /> : null}
       {progress?.removedEntries !== undefined ? (

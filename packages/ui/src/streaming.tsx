@@ -109,6 +109,8 @@ export interface SweepUiStreamingOptions {
   switchTarget?: (path: string) => SwitchedTarget;
   /** The screen to open on; `sweep ui --view full` starts on the folder view. */
   initialView?: "projects" | "folders";
+  /** `--theme` or SWEEP_THEME: overrides the saved theme for this session. */
+  theme?: "auto" | "dark" | "light";
 }
 
 export interface SwitchedTarget {
@@ -175,7 +177,9 @@ export async function runSweepUiStreaming(
   options: SweepUiStreamingOptions,
 ): Promise<SweepUiOutcome> {
   const preferencesRoot = resolve(sweepConfigDir());
-  const preferences = loadViewPreferences(preferencesRoot);
+  const saved = loadViewPreferences(preferencesRoot);
+  // An explicit theme wins over the saved one; `t` still cycles from there.
+  const preferences = options.theme && saved ? { ...saved, themeMode: options.theme } : saved;
   let latestPreferences: ViewPreferences | undefined;
   let initialPreferences: ViewPreferences | undefined;
   const onPreferencesChange = (value: ViewPreferences) => {
@@ -397,6 +401,8 @@ export async function runSweepUiStreaming(
             operations={session.operations}
             {...(currentPreferences() ? { preferences: currentPreferences()! } : {})}
             onPreferencesChange={onPreferencesChange}
+            terminalBackground={session.terminalBackground}
+            {...(options.theme && !currentPreferences() ? { initialTheme: options.theme } : {})}
             onDone={session.finish}
           />
         </UiErrorBoundary>,

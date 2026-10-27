@@ -1,4 +1,4 @@
-import { NativeImage, fg, t, type StyledText } from "@opentui/core";
+import { NativeImage, StyledText, fg, t } from "@opentui/core";
 
 export const EASE_MS = 180;
 
@@ -109,6 +109,163 @@ export function meterPixels(
     }
   }
   return pixels;
+}
+
+/**
+ * An indeterminate meter: the track, and a soft run of `fill` from `from` to
+ * `to` (fractions of the width, clipped) with rounded ends.
+ */
+export function glidePixels(
+  width: number,
+  height: number,
+  from: number,
+  to: number,
+  fill: string,
+  track: string,
+  thickness = 0.28,
+  background: string | null = null,
+): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4);
+  const ground = background && /^#[0-9a-f]{6}/i.test(background) ? rgb(background) : null;
+  const radius = Math.max(1.25, (height * thickness) / 2);
+  const cy = height / 2;
+  const x0 = radius;
+  const span = Math.max(0, width - 2 * radius);
+  const a = x0 + span * clamp01(from);
+  const b = x0 + span * clamp01(to);
+  const trackRgb = rgb(track);
+  const fillRgb = rgb(fill);
+  for (let y = 0; y < height; y++) {
+    const dy = y + 0.5 - cy;
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const px = x + 0.5;
+      const cover = (start: number, end: number) => {
+        const dx = px < start ? start - px : px > end ? px - end : 0;
+        return Math.min(1, Math.max(0, radius + 0.5 - Math.hypot(dx, dy)));
+      };
+      const t = cover(x0, x0 + span);
+      const f = b > a ? cover(a, b) : 0;
+      // Fill over track, both straight alpha.
+      const alpha = f + t * (1 - f);
+      const mix = (c: 0 | 1 | 2) =>
+        alpha > 0 ? (fillRgb[c] * f + trackRgb[c] * t * (1 - f)) / alpha : 0;
+      if (ground) {
+        pixels[i] = Math.round(mix(0) * alpha + ground[0] * (1 - alpha));
+        pixels[i + 1] = Math.round(mix(1) * alpha + ground[1] * (1 - alpha));
+        pixels[i + 2] = Math.round(mix(2) * alpha + ground[2] * (1 - alpha));
+        pixels[i + 3] = 255;
+      } else if (alpha > 0) {
+        pixels[i] = Math.round(mix(0));
+        pixels[i + 1] = Math.round(mix(1));
+        pixels[i + 2] = Math.round(mix(2));
+        pixels[i + 3] = Math.round(alpha * 255);
+      }
+    }
+  }
+  return pixels;
+}
+
+/** The text glide: a heavy run over a light track. */
+export function glideLine(
+  width: number,
+  from: number,
+  to: number,
+  fill: string,
+  track: string,
+): StyledText {
+  const a = Math.max(0, Math.min(width, Math.round(clamp01(from) * width)));
+  const b = Math.max(a, Math.min(width, Math.round(clamp01(to) * width)));
+  return t`${fg(track)("─".repeat(a))}${fg(fill)("━".repeat(b - a))}${fg(track)("─".repeat(width - b))}`;
+}
+
+export interface StackSegment {
+  fraction: number;
+  color: string;
+}
+
+/**
+ * One capsule split into coloured runs, left to right, each run as long as
+ * its share. A one-pixel seam of ground separates runs so neighbours of a
+ * similar tone still read as two. Shares are normalised, so they need not
+ * sum to one.
+ */
+export function stackPixels(
+  width: number,
+  height: number,
+  segments: StackSegment[],
+  thickness = 0.5,
+  background: string | null = null,
+): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4);
+  const ground = background && /^#[0-9a-f]{6}/i.test(background) ? rgb(background) : null;
+  if (ground)
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i] = ground[0];
+      pixels[i + 1] = ground[1];
+      pixels[i + 2] = ground[2];
+      pixels[i + 3] = 255;
+    }
+  const total = segments.reduce((sum, segment) => sum + Math.max(0, segment.fraction), 0);
+  if (total <= 0) return pixels;
+  const radius = Math.max(1.25, (height * thickness) / 2);
+  const cy = height / 2;
+  const x0 = radius;
+  const x1 = width - radius;
+  // Run boundaries in pixels; tiny shares still get one visible pixel.
+  const runs: { from: number; to: number; color: [number, number, number] }[] = [];
+  let at = 0;
+  for (const segment of segments) {
+    const share = Math.max(0, segment.fraction) / total;
+    if (share <= 0) continue;
+    const to = Math.min(width, Math.max(at + 1, at + share * width));
+    runs.push({ from: at, to, color: rgb(segment.color) });
+    at = to;
+  }
+  for (let y = 0; y < height; y++) {
+    const dy = y + 0.5 - cy;
+    if (Math.abs(dy) > radius + 1) continue;
+    for (let x = 0; x < width; x++) {
+      const px = x + 0.5;
+      const dx = px < x0 ? x0 - px : px > x1 ? px - x1 : 0;
+      const coverage = Math.min(1, Math.max(0, radius + 0.5 - Math.hypot(dx, dy)));
+      if (coverage <= 0) continue;
+      const run = runs.find((candidate) => px >= candidate.from && px < candidate.to);
+      if (!run) continue;
+      // The seam: the first pixel of every run after the first stays ground.
+      if (run !== runs[0] && px - run.from < 1) continue;
+      const i = (y * width + x) * 4;
+      const [r, g, b] = run.color;
+      if (ground) {
+        pixels[i] = Math.round(r * coverage + ground[0] * (1 - coverage));
+        pixels[i + 1] = Math.round(g * coverage + ground[1] * (1 - coverage));
+        pixels[i + 2] = Math.round(b * coverage + ground[2] * (1 - coverage));
+        continue;
+      }
+      pixels[i] = r;
+      pixels[i + 1] = g;
+      pixels[i + 2] = b;
+      pixels[i + 3] = Math.round(coverage * 255);
+    }
+  }
+  return pixels;
+}
+
+/** The text stack: each cell takes the colour of the share it falls in. */
+export function stackLine(width: number, segments: StackSegment[]): StyledText {
+  const total = segments.reduce((sum, segment) => sum + Math.max(0, segment.fraction), 0);
+  if (width <= 0 || total <= 0) return t`${" ".repeat(Math.max(0, width))}`;
+  const chunks: StyledText[] = [];
+  let cells = 0;
+  let acc = 0;
+  segments.forEach((segment, index) => {
+    acc += Math.max(0, segment.fraction) / total;
+    const end = index === segments.length - 1 ? width : Math.round(acc * width);
+    const n = Math.max(0, end - cells);
+    if (n > 0) chunks.push(t`${fg(segment.color)("━".repeat(n))}`);
+    cells += n;
+  });
+  return new StyledText(chunks.flatMap((chunk) => chunk.chunks));
 }
 
 const EIGHTHS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
