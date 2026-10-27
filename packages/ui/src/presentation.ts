@@ -662,6 +662,8 @@ export interface FooterHint {
   key: string;
   label: string;
   press?: KeyInput;
+  /** The next step: drawn in the accent so it is found first. */
+  next?: boolean;
 }
 
 const press = (name: string, ctrl = false): KeyInput => (ctrl ? { name, ctrl } : { name });

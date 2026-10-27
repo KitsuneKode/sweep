@@ -839,7 +839,7 @@ function calmHintItems(context: {
     // removable at once (never dangerous items).
     ...(context.queued
       ? [
-          { key: "c", label: "review", press: { name: "c" } },
+          { key: "c", label: "review", press: { name: "c" }, next: true },
           { key: "u", label: "clear", press: { name: "u" } },
         ]
       : [{ key: "a", label: "queue all", press: { name: "a" } }]),
@@ -855,17 +855,19 @@ function calmHintItems(context: {
   parts.push(
     { key: "/", label: "search", press: { name: "/" } },
     { key: "b", label: "full view", press: { name: "b" } },
-    { key: "?", label: "keys", press: { name: "?" } },
   );
-  let budget = context.width - 4;
+  // `? keys` is the way out for anyone lost: its room is held first, and it
+  // always ends the line, however narrow the terminal.
+  const help: FooterHint = { key: "?", label: "keys", press: { name: "?" } };
+  const cost = (part: FooterHint) => part.key.length + part.label.length + 4;
+  let budget = context.width - 4 - cost(help);
   const kept: FooterHint[] = [];
   for (const part of parts) {
-    const cost = part.key.length + part.label.length + 4;
-    if (cost > budget) break;
+    if (cost(part) > budget) break;
     kept.push(part);
-    budget -= cost;
+    budget -= cost(part);
   }
-  return kept;
+  return [...kept, help];
 }
 
 export function SweepApp({
@@ -1327,6 +1329,11 @@ export function SweepApp({
     [state.themeMode, terminalBackground],
   );
   const summary = useMemo(() => getUiSummary(state), [state]);
+  // The first-steps line under the calm list stays until something is queued.
+  const [everQueued, setEverQueued] = useState(false);
+  useEffect(() => {
+    if (summary.selectedCount > 0) setEverQueued(true);
+  }, [summary.selectedCount > 0]);
   // A receipt describes the last removal; queueing again starts a new story.
   useEffect(() => {
     if (summary.selectedCount > 0) setReceipt(null);
@@ -2731,7 +2738,21 @@ export function SweepApp({
             {...(trash ? { trash: true } : {})}
             filter={state.filter}
             searchFocused={state.focus === "search"}
-            {...(notice ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` } : {})}
+            {...(notice && (everQueued || notice.tone === "warning")
+              ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` }
+              : !everQueued && !state.scanning && projects.length > 0
+                ? {
+                    // First steps, in plain words, until something is queued:
+                    // the one thing a first look needs is how to start and
+                    // that nothing goes without a confirm.
+                    notice:
+                      dimensions.width >= 110
+                        ? t`${fg(tokens.textSecondary)("New here? ")}${fg(tokens.text)("space")}${fg(tokens.textMuted)(" picks a project, ")}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" shows what would go. Nothing is deleted until you press ")}${fg(tokens.text)("y")}${fg(tokens.textMuted)(".")}`
+                        : t`${fg(tokens.text)("space")}${fg(tokens.textMuted)(" picks · ")}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" reviews · nothing goes until ")}${fg(tokens.text)("y")}`,
+                  }
+                : notice
+                  ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` }
+                  : {})}
             footer={
               <KeyHints
                 variant="plain"
