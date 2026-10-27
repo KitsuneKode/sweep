@@ -9,6 +9,9 @@ import {
   magnitudeBar,
   meterLine,
   meterPixels,
+  stackLine,
+  stackPixels,
+  type StackSegment,
 } from "./meter-draw.js";
 import { useMotionEnabled } from "./motion.js";
 
@@ -178,4 +181,42 @@ export function Meter(props: MeterProps & { previewColor: string }) {
       wrapMode="none"
     />
   );
+}
+
+/**
+ * One bar split by share: where a total goes, part by part. Pixels in kitty,
+ * a coloured line elsewhere. Static: it describes a size, not a change.
+ */
+export function StackBar({
+  width,
+  segments,
+  background,
+  thickness = 0.5,
+}: {
+  width: number;
+  segments: StackSegment[];
+  background?: string | undefined;
+  thickness?: number;
+}) {
+  const renderer = useRenderer();
+  const kitty = useKittyGraphics();
+  const resolution = renderer.resolution;
+  const pixelWidth =
+    kitty && resolution ? Math.round((width * resolution.width) / renderer.width) : 0;
+  const pixelHeight = kitty && resolution ? Math.round(resolution.height / renderer.height) : 0;
+  const ground = background ?? null;
+  const key = segments.map((segment) => `${segment.fraction.toFixed(4)}${segment.color}`).join(",");
+  const image = useMemo(() => {
+    if (!kitty || pixelWidth < 8 || pixelHeight < 4) return null;
+    return cachedImage(
+      `stack:${pixelWidth}x${pixelHeight}:${thickness}:${ground}:${key}`,
+      () => stackPixels(pixelWidth, pixelHeight, segments, thickness, ground),
+      pixelWidth,
+      pixelHeight,
+    );
+    // `key` is the content of `segments`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kitty, pixelWidth, pixelHeight, thickness, ground, key]);
+  if (image) return <image source={image} width={width} height={1} fit="fill" protocol="kitty" />;
+  return <text content={stackLine(width, segments)} wrapMode="none" />;
 }

@@ -4,7 +4,7 @@ import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, fg, type StyledText, t } from "@opentui/core";
 import { concatStyled } from "./presentation.js";
 import { describeAge } from "./age.js";
-import { Meter } from "./Meter.js";
+import { Meter, StackBar } from "./Meter.js";
 import { projectFacts, type RebuildCost } from "./project-details.js";
 import type { Project } from "./projects.js";
 import { cellWidth, clipCells, clipStart } from "./text-cells.js";
@@ -75,9 +75,23 @@ export function ProjectDetails({
       : project.caution > 0
         ? `! ${project.caution} caution: enter on one says why`
         : "";
-  const fixed = 8 + (risk ? 2 : 0);
+  // The stack bar, its key and a breath after it add three lines.
+  const fixed = 11 + (risk ? 2 : 0);
   const fit = Math.max(1, Math.floor((height - fixed) / 2));
   const groups = facts.groups.slice(0, fit);
+  // Cheapest to bring back first, so the left of the bar is the easy win.
+  const costOrder: RebuildCost[] = ["cache", "install", "build", "unknown"];
+  const byCost = costOrder
+    .map((cost) => ({
+      cost,
+      bytes: facts.groups
+        .filter((group) => group.rebuild.cost === cost)
+        .reduce((sum, group) => sum + group.bytes, 0),
+    }))
+    .filter((entry) => entry.bytes > 0);
+  const costKey = byCost.map(
+    (entry) => `${entry.cost === "unknown" ? "custom" : entry.cost} ${formatBytes(entry.bytes)}`,
+  );
   const hidden = facts.groups.length - groups.length;
 
   return (
@@ -111,6 +125,21 @@ export function ProjectDetails({
         content={t`${fg(tokens.textSecondary)(`${formatBytes(project.bytes)} in ${project.artifacts.length} item${project.artifacts.length === 1 ? "" : "s"}`)}`}
         wrapMode="none"
       />
+      <StackBar
+        width={inner}
+        segments={byCost.map((entry) => ({ fraction: entry.bytes, color: costColor[entry.cost] }))}
+        background={tokens.bg}
+      />
+      <text
+        content={concatStyled(
+          ...byCost.flatMap((entry, index) => [
+            t`${fg(tokens.textDim)(index > 0 ? "  " : "")}`,
+            t`${fg(costColor[entry.cost])(costKey[index] ?? "")}`,
+          ]),
+        )}
+        wrapMode="none"
+      />
+      <text content="" />
       {groups.map((group) => {
         const lifted = group.name === focusName;
         const nameW = Math.max(6, inner - BAR_W - 2 - 11);
