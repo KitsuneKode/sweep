@@ -1,10 +1,83 @@
 # @kitsunekode/sweep
 
-## 0.4.0
+## 0.5.0
+
+The first release since 0.3.0; it carries every change made since then.
 
 ### Minor Changes
 
+- fa87aae: `sweep ui` opens on a calm projects view: one row per project (git work tree or
+  manifest folder), grouped into "Idle 30+ days" and "Worked on recently", with a
+  single line that says how much you can reclaim and how much is idle. No boxes
+  or column headers; detail opens with Enter. `i` queues idle projects, `b`
+  switches to the full folder view. Plans now carry an optional `projectRoot` per
+  candidate, and idle time is measured for the whole project.
+- 67ab1ec: Sweep now respects git: a folder holding any tracked or staged file is blocked,
+  since build output is never committed. Git is asked once per repository with
+  the repository's `core.fsmonitor` disabled, and again just before removal.
+  Unattended runs (`--yes`) refuse dangerous items unless `--allow-dangerous` is
+  passed, and every dangerous path is printed before it is removed.
+- 08a73d6: Sweep now knows when each project was last worked on (git index and reflog,
+  plus the project's own files; never its build output) and uses it:
+
+  - `--idle 30d` (also `2w`, `3m`, `1y`) selects only artifacts in projects
+    nobody has touched for that long.
+  - The scan report shows each project's idle time, warns when the selection
+    includes projects worked on today, suggests clearing idle projects first,
+    and shows free disk space before and after.
+  - Plans carry an optional `projectActiveMs` per candidate.
+
+- cd9b8da: `sweep init` now looks before it writes: a read-only scan shows the built-in
+  artifacts it found and the opt-in names worth a decision, asks about each in a
+  terminal, and writes only those answers. It no longer writes placeholder
+  patterns. `--dry-run` prints the file instead of writing it.
+- 8adbbd5: Scan and dry-run output leads with what would be reclaimed, then lists groups
+  largest first with paths relative to the folder you scanned. Long groups fold
+  into one counted line (`--verbose` lists everything), and items left behind are
+  explained: left for you to decide, or blocked. While scanning, a live line shows
+  folders walked and items found instead of going quiet after the first match.
+- 12da012: `sweep ui` sits on your terminal instead of covering it: in auto theme it asks
+  the terminal for its background, takes dark or light from it, keeps the
+  terminal's own colour and opacity as the canvas, and mixes every tint from it.
+  Project rows show their size as a bar, so where the space is reads before a
+  number does. In terminals with kitty graphics (kitty, Ghostty, WezTerm) the bars
+  and the meter under the answer line are drawn in pixels; elsewhere they are
+  glyphs. An opened project lists its six largest items and folds the rest, and
+  the risk column keeps kinds and folders lined up.
+
+  Every key hint in the footer can be clicked. On a wide terminal the projects
+  view shows the cursor's project beside the list: where it lives, its branch,
+  when it was last worked on, and per kind of artifact what it weighs and what
+  brings it back (a cache refills itself, `bun install`, `cargo build`). The
+  confirm shows the disk before and after removal, and a clean removal is
+  answered with what came back. The full view trades its boxes for quiet rules.
+
+  `c` now reviews the queue in both views, since many terminals and tmux send
+  Ctrl+Enter as a plain Enter; it still always opens the confirm first. With an
+  open dialog, the calm view's footer names that dialog's keys.
+
+- c1c2604: Filter by picking, not just typing: press `f` or click Filter to toggle risk,
+  kind, size, last-touched and queue facets, each with its own count and size.
+  The filter bar now shows the query with how many artifacts and bytes it
+  matches, folders with a single artifact take one row, and colour is reserved
+  for meaning (orange only for caution, chartreuse only for what is queued).
+- 30f1fce: The terminal UI can switch folders without restarting: Ctrl+O fuzzy-finds the
+  folder above, folders you cleaned before, and projects inside and beside the
+  current one, or takes a typed path. Each switch runs the same guardrails and
+  `.sweeprc` lookup as `sweep ui <path>`, and refusals are shown in place.
+  Backspace steps the folder tree up one level, ncdu-style.
+- 73b0bfb: The terminal UI reads project activity: the Age column is now **Idle** (when
+  the owning project was last worked on, not when the artifact was rebuilt), the
+  filter's age facets become "Project idle", and the action menu offers "Queue
+  safe items in projects idle 30+ days" with its count and size. The folder
+  switcher fits narrow terminals and no longer offers protected folders such as
+  home. Counts are digit-grouped everywhere.
+- 2fe439d: The terminal UI shows last scan's sizes as soon as each folder is found
+  (marked `~`), then replaces them with fresh measurements. Sizes come from
+  `size-cache.json` in the configuration directory, are only reused for the same
+  folder identity, and are never used by the CLI or by any removal.
 - b39b06b: Triage by age, in the TUI and in the plan format.
+
   - Scan results now carry `modifiedMs`, the artifact's own last-modified time (optional in the plan schema, produced by both the JS and Rust engines). The list shows an Age column and a size bar, `o` cycles size, name and age (stalest first), and the cursor row says how long ago it changed. Anything touched in the last week is tinted as probably in use.
   - The scope sidebar gains a risk breakdown and an "untouched 30d+" total, and its meter now reads "queued of found".
   - Filter operators in `/`: `kind:target`, `risk:caution`, `path:crate`, `>100MB`, `<1GB`, `older:30d`, `newer:7d`, `is:queued`, `is:symlink`, and `!` to negate. Bare words still match as substrings, and every term must match.
@@ -12,6 +85,7 @@
   - Partly queued groups read "1 of 3 queued". Caution is now amber instead of an olive that was hard to tell from safe, dim text meets 4.5:1 contrast in both themes, the help screen wraps instead of clipping, and the panes no longer waste a row or a column.
 
 - c90dddc: Live engine switching, scan timing, and streaming progress:
+
   - `E` inside `sweep ui` swaps the scan engine (js ↔ rust) and rescans the same
     tree. The completion notice compares timings once both engines have run
     (`rust 273ms vs js 311ms (1.1× faster)`); the header chip keeps the active
@@ -50,6 +124,7 @@
   crossbeam-epoch and anyhow within their compatible ranges for security advisories.
 
 - d69f485: Rework the pattern catalog around a strict trust boundary and add a real pattern editor to the TUI:
+
   - Defaults now ship only machine-created, ecosystem-canonical names (`node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.vite`, `.parcel-cache`, `.nyc_output`, `target`, `*.tsbuildinfo`). Generic names that can hold authored files — `dist`, `build`, `out`, `coverage`, `.venv`, `__pycache__`, `Pods`, `.gradle`, `.dart_tool`, `cmake-build-*`, and more — are still curated in the catalog but ship **opt-in**. The same catalog is mirrored in the Rust engine's `default_patterns()`.
   - Opt-in and custom matches now land in the `dangerous` risk tier on both engines: enabling a pattern consents to _scanning_ for it, never to selecting it — they are never pre-selected and never enter bulk selection. Candidate `reasons` distinguish `default-pattern`, `opt-in-pattern`, and `custom-pattern`.
   - The `p` pane is a grouped, searchable, windowed pattern editor: `/` filters the catalog, `a` adds a custom pattern (validated by the same rules config files use), `d` removes customs (catalog entries can only toggle off), `space`/`enter` toggles, and keystrokes are fully isolated from artifact-list actions.
@@ -58,6 +133,7 @@
   - macOS blocked-root checks now fold case on both sides (a `/USERS/name` spelling can no longer walk past the home-directory guard on case-insensitive APFS), and the Rust engine resolves `..` in target paths the same way the JS engine does instead of diverging on it.
 
 - ea8da98: Interactive list polish and engine default:
+
   - `--engine` now defaults to `auto`: the Rust engine runs whenever its binary
     resolves (env override, workspace build, optional platform package, PATH);
     JS remains the fallback. `--trash` still drops to JS with a warning, and
@@ -87,6 +163,7 @@
   `covered` outcomes.
 
 - d89cd74: Overhaul the interactive TUI and harden scanning:
+
   - The artifact list is windowed, so navigation and rendering stay fast on
     repositories with thousands of candidates; the mouse wheel moves the cursor
     instead of a detached viewport, and scrollbars are passive indicators.
@@ -106,6 +183,7 @@
 
 - 8960f0d: Add `--trash` (reversible cleanup: candidates move to `.sweep-trash-<ts>/` inside the target instead of being deleted — atomic renames, original paths preserved, trash dirs auto-ignored by future scans), `sweep stats` (cleanup history + lifetime reclaimed total, JSONL at `~/.config/sweep/history.jsonl`, `SWEEP_CONFIG_DIR` to override), `sweep inspect --plan` (read-only plan provenance: counts, kinds, risk tiers, selected bytes), `sweep completions` for bash/zsh/fish, and a `curl | sh` installer script for standalone binaries (now including linux-arm64). Also: `clean --json` no longer mixes scan display text into stdout.
 - ed9f37a: Traversal engine hardening and honesty:
+
   - `bytesKnown` is new on scan candidates: `false` means the subtree could not
     be fully read, so `estimatedBytes` is a partial lower bound rather than the
     real figure. TUI rows show a `~` marker and the detail pane calls it out;
@@ -133,6 +211,39 @@
 
 ### Patch Changes
 
+- f721671: The projects view reads as one compact list on any terminal width: lines stop
+  at 104 columns, each section shows its eight largest projects with the rest
+  folded into one row, location and kinds sit in aligned quiet columns, and the
+  mouse wheel moves the cursor.
+- 4b1055d: The git-tracked check is about ten times faster on trees with many
+  repositories: the native engine reads each repository's index directly and in
+  parallel instead of running `git` once per repository. On a 4,000-candidate
+  tree the check drops from about 240 ms to 22 ms. Split and sparse indexes, and
+  installs without the engine, still use the hardened `git ls-files` path.
+- 4890a36: Pointing sweep at your home folder now says so and suggests a projects folder
+  (`sweep ~/Projects`) instead of calling it a system root.
+- 3e16eb8: Fix `--json` output being cut short when piped under Bun. Large results (over
+  roughly 64 KiB) could be truncated with a successful exit code because the
+  final flush trusted an empty write's callback, which Bun completes before
+  earlier bytes reach a slow reader. The flush now waits for the data itself.
+- 46feb6c: The terminal UI's scan meter no longer runs backwards. It showed sized items
+  over found items, and found keeps growing while discovery continues, so the bar
+  could reach 100% and drop back to 80%. It now holds its high point within a
+  scan; the exact "N of M sized" count beside it is unchanged.
+- ba47d86: Project rows name the items that need a look: "! 3 caution" or "✗ 1 dangerous",
+  so a risky project is visible before you open it.
+- 63760ec: Project files can no longer be cleaned, whatever pattern or flag is used:
+  `src`, manifests and lockfiles (`package.json`, `Cargo.toml`, `go.mod`, ...),
+  `.env` files and `.sweeprc` classify as blocked, and `apply` re-checks them in
+  saved plans. A repository's own `.sweeprc` could previously add patterns for
+  them. When nothing is pre-selected, sweep now says what it found and points to
+  `sweep ui` for review instead of suggesting blanket flags.
+- 47aab94: Folder checkboxes in the terminal UI show three distinct states: an open ring
+  (nothing queued), a half disc (some queued) and a full disc (all queued).
+  Before, a folder with a single queued item looked fully queued.
+- 13765c2: Fix `sweep ui` in the standalone binaries (Homebrew and the install script):
+  it refused to start with "requires @opentui/core" although the terminal UI is
+  embedded in the binary.
 - e2dd306: Anchor native Linux deletion to directory descriptors, refuse nested mount and
   bind-mount crossings, bound retained directory handles, and check cancellation
   within artifacts. JS checks Linux mount boundaries before recursive operations.
@@ -313,6 +424,7 @@
   keeps the fatal budget and cannot be starved by sizing.
 
 - 4d5971c: Second-pass trust, parity, and scale hardening:
+
   - `sweep apply --dry-run` now previews deletions instead of silently deleting,
     and every command warns when a flag it does not honor was passed
     (`stats --dry-run`, `doctor --trash`, `ui --json`, `init --yes`,
@@ -383,10 +495,6 @@
   times during secure native removal, preserving identity and cancellation checks.
   Allow preview release versions through preflight and complete zsh option values.
 
-## 0.3.1
-
-### Patch Changes
-
 - 3adabd3: Fix an uninstallable package. 0.3.0 shipped with Bun's `workspace:` and
   `catalog:` dependency protocols left unresolved in the published manifest, so
   every `npm install @kitsunekode/sweep` failed with `EUNSUPPORTEDPROTOCOL` and
@@ -401,6 +509,8 @@
 
 ## 0.3.0
 
+0.3.0 cannot be installed from npm: it was published with workspace dependency ranges. Use 0.5.0.
+
 ### Minor Changes
 
 - 7081664: Streaming TUI with live Rust scan progress, safer default selection, and ignore-glob / abort fixes.
@@ -412,6 +522,28 @@
   Ignore globs like `*.cache` work, and ignore/pattern matching is case-insensitive on macOS and Windows. Scan abort cancels in-flight `du`. Nested apply no longer double-deletes. Windows junctions are treated as symlinks.
 
   `sweep doctor` dry-scans and treats a missing `.sweeprc` as defaults rather than a warning.
+
+- Trust-first cleanup improvements, engine parity coverage, and a redesigned interactive UI.
+
+  **Trust & CLI**
+
+  - Restore grouped scan summary and delete confirmation on `sweep` / `clean`
+  - Default scan engine to `js`; Rust honors `.sweeprc` and CLI scan flags when `--engine rust` or `auto`
+  - Fix `sweep ui` plan handoff, config parse exit codes, and `doctor` non-zero on warnings
+
+  **Interactive UI**
+
+  - Group artifacts by directory scope for monorepo-friendly review
+  - Minimal single-line list with a context strip for full paths and match reasons
+
+  **Testing & engines**
+
+  - Colocate package unit tests; keep integration tests under `tests/integration`
+  - Add golden engine-contract fixtures with optional JS/Rust parity checks
+
+  **Docs**
+
+  - Add `.docs/testing.md` and refresh README / workspace references
 
 ### Patch Changes
 
@@ -451,28 +583,6 @@
   folder tree that opens to the active scope, and the cursor, active scope, and
   ancestor rows are now visually distinct. Scanning shows a dot-matrix loader, and
   the statusline key hints follow the active pane and dialog.
-
-## 0.2.0
-
-### Minor Changes
-
-- Trust-first cleanup improvements, engine parity coverage, and a redesigned interactive UI.
-
-  **Trust & CLI**
-  - Restore grouped scan summary and delete confirmation on `sweep` / `clean`
-  - Default scan engine to `js`; Rust honors `.sweeprc` and CLI scan flags when `--engine rust` or `auto`
-  - Fix `sweep ui` plan handoff, config parse exit codes, and `doctor` non-zero on warnings
-
-  **Interactive UI**
-  - Group artifacts by directory scope for monorepo-friendly review
-  - Minimal single-line list with a context strip for full paths and match reasons
-
-  **Testing & engines**
-  - Colocate package unit tests; keep integration tests under `tests/integration`
-  - Add golden engine-contract fixtures with optional JS/Rust parity checks
-
-  **Docs**
-  - Add `.docs/testing.md` and refresh README / workspace references
 
 ## 0.1.0
 

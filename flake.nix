@@ -25,7 +25,8 @@
 
         packages.default = pkgs.stdenv.mkDerivation {
           pname = "sweep";
-          version = "0.2.0";
+          # The published package owns the version; a literal here drifts.
+          version = (builtins.fromJSON (builtins.readFile ./apps/cli/package.json)).version;
           src = ./.;
           buildInputs = [ pkgs.bun ];
           buildPhase = ''

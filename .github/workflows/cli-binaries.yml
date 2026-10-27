@@ -153,10 +153,30 @@ jobs:
           echo "number=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
+      # The release says what changed: its notes are this version's changelog
+      # section, never an empty page beside the binaries.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: apps/cli/CHANGELOG.md
+          sparse-checkout-cone-mode: false
+          path: src
+
+      - name: Release notes from the changelog
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.number }}
+        run: |
+          awk -v head="## $VERSION" '$0 == head { on = 1; next } /^## / && on { exit } on' \
+            src/apps/cli/CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::apps/cli/CHANGELOG.md has no section for $VERSION"; exit 1
+          fi
+
       - name: Attach to GitHub release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dist-bin/*
+          body_path: release-notes.md
           prerelease: ${{ steps.version.outputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
