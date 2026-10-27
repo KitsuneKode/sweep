@@ -1,5 +1,6 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
+import { releaseMeterImages } from "./meter-draw.js";
 import { releaseUiCaches } from "./state/store.js";
 import type { SweepUiOutcome } from "./outcome.js";
 import { UiOperationSession } from "./operation-session.js";
@@ -85,6 +86,7 @@ export async function openUiSession(): Promise<UiSession> {
       // ignore
     }
     releaseUiCaches();
+    releaseMeterImages();
   };
 
   const finish = (outcome: SweepUiOutcome) => {

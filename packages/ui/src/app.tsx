@@ -1187,7 +1187,32 @@ export function SweepApp({
     startScan();
   }, [scan, activeEngine, startScan]);
 
-  const tokens = useMemo(() => resolveTheme(state.themeMode), [state.themeMode]);
+  // The terminal's own background, asked once: the canvas adopts it (colour,
+  // opacity) and every tint is mixed from it. Unanswered, the brand canvas stays.
+  const paletteRenderer = useRenderer();
+  const [terminalBackground, setTerminalBackground] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    try {
+      paletteRenderer
+        .getPalette({ timeout: 300 })
+        .then((palette) => {
+          const background = palette.defaultBackground;
+          if (live && background && /^#[0-9a-f]{6}$/i.test(background))
+            setTerminalBackground(background);
+        })
+        .catch(() => {});
+    } catch {
+      /* suspended or headless: keep the brand canvas */
+    }
+    return () => {
+      live = false;
+    };
+  }, [paletteRenderer]);
+  const tokens = useMemo(
+    () => resolveTheme(state.themeMode, terminalBackground),
+    [state.themeMode, terminalBackground],
+  );
   const summary = useMemo(() => getUiSummary(state), [state]);
   const dimensions = useTerminalDimensions();
   const sidebarWidth =
@@ -1212,14 +1237,15 @@ export function SweepApp({
   const [view, setView] = useState(initialView);
   const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
   const [openSections, setOpenSections] = useState<ReadonlySet<ProjectSection>>(() => new Set());
+  const [allArtifacts, setAllArtifacts] = useState<ReadonlySet<string>>(() => new Set());
   const [projectCursorState, setProjectCursorState] = useState(0);
   const projects = useMemo(
     () => buildProjects(visibleItems, state.selectedIds, state.targetDir),
     [visibleItems, state.selectedIds, state.targetDir],
   );
   const projectRows = useMemo(
-    () => buildProjectRows(projects, expandedProjects, openSections),
-    [projects, expandedProjects, openSections],
+    () => buildProjectRows(projects, expandedProjects, openSections, allArtifacts),
+    [projects, expandedProjects, openSections, allArtifacts],
   );
   const projectCursor = settleCursor(projectRows, projectCursorState);
   // Keys in one stdin burst (j j Enter) must each see the previous key's
@@ -1276,8 +1302,15 @@ export function SweepApp({
     const openSection = (section: ProjectSection) => {
       const next = new Set(openSections);
       next.add(section);
-      projectRowsRef.current = buildProjectRows(projects, expandedRef.current, next);
+      projectRowsRef.current = buildProjectRows(projects, expandedRef.current, next, allArtifacts);
       setOpenSections(next);
+      return true;
+    };
+    const showAllArtifacts = (projectKey: string) => {
+      const next = new Set(allArtifacts);
+      next.add(projectKey);
+      projectRowsRef.current = buildProjectRows(projects, expandedRef.current, openSections, next);
+      setAllArtifacts(next);
       return true;
     };
     const setOpen = (keyName: string, open: boolean) => {
@@ -1286,7 +1319,7 @@ export function SweepApp({
       else next.delete(keyName);
       expandedRef.current = next;
       // Rows change shape now, so the next key in this burst sees them.
-      projectRowsRef.current = buildProjectRows(projects, next, openSections);
+      projectRowsRef.current = buildProjectRows(projects, next, openSections, allArtifacts);
       setExpandedProjects(next);
     };
     switch (key.name) {
@@ -1310,6 +1343,7 @@ export function SweepApp({
         return move(Number.MAX_SAFE_INTEGER);
       case "space":
         if (row?.kind === "more") return openSection(row.section);
+        if (row?.kind === "moreArtifacts") return showAllArtifacts(row.project.key);
         if (row?.kind === "project") mutate((s) => toggleIdsSelection(s, row.project.queueable));
         else if (row?.kind === "artifact") {
           if (row.candidate.riskTier === "blocked")
@@ -1322,6 +1356,7 @@ export function SweepApp({
       case "right":
       case "l":
         if (row?.kind === "more") return openSection(row.section);
+        if (row?.kind === "moreArtifacts") return showAllArtifacts(row.project.key);
         if (row?.kind === "project")
           setOpen(
             row.project.key,
@@ -1333,7 +1368,7 @@ export function SweepApp({
         return true;
       case "left":
       case "h":
-        if (row?.kind === "artifact") {
+        if (row?.kind === "artifact" || row?.kind === "moreArtifacts") {
           const parent = rows.findIndex(
             (candidate) =>
               candidate.kind === "project" && candidate.project.key === row.project.key,
@@ -2531,6 +2566,10 @@ export function SweepApp({
               if (!row || row.kind === "section" || row.kind === "spacer") return;
               if (row.kind === "more") {
                 setOpenSections((current) => new Set([...current, row.section]));
+                return;
+              }
+              if (row.kind === "moreArtifacts") {
+                setAllArtifacts((current) => new Set([...current, row.project.key]));
                 return;
               }
               if (onMark) {
