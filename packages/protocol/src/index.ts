@@ -156,6 +156,8 @@ export interface CliOptions {
   ignore: string[];
   includeDangerous: boolean;
   select: SelectionMode;
+  /** `sweep ui --view`: the screen the session opens on. */
+  view?: "projects" | "full";
   /** --idle: only select artifacts in projects idle at least this long (ms). */
   idle?: number;
   /** Absent unless the user passed --depth - config layers stay reachable. */

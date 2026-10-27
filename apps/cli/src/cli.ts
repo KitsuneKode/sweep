@@ -228,6 +228,11 @@ export function makeProgram(): Command {
     .description("Interactive cleanup UI")
     .argument("[path]", "Directory to scan interactively", ".")
     .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
+    .addOption(
+      new Option("--view <view>", "Start on the projects view or the full folder view")
+        .choices(["projects", "full"])
+        .default("projects"),
+    )
     .action(function (this: Command, pathArg: string) {
       void handleUi(pathArg, this.optsWithGlobals<CliOptions>());
     });

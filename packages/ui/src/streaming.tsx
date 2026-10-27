@@ -106,6 +106,8 @@ export interface SweepUiStreamingOptions {
    * <path>`. Throws with a user-facing message to refuse. Absent = no switching.
    */
   switchTarget?: (path: string) => SwitchedTarget;
+  /** The screen to open on; `sweep ui --view full` starts on the folder view. */
+  initialView?: "projects" | "folders";
 }
 
 export interface SwitchedTarget {
@@ -378,7 +380,7 @@ export async function runSweepUiStreaming(
             {...(options.trash ? { trash: true } : {})}
             {...(target.init ? { init: target.init } : {})}
             initiallyScanning
-            initialView="projects"
+            initialView={options.initialView ?? "projects"}
             scan={makeControl()}
             {...(folders ? { folders } : {})}
             {...(switchNotice ? { initialNotice: switchNotice } : {})}
