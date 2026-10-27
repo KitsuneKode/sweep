@@ -251,6 +251,33 @@ describe("handleKeymap", () => {
     expect(actions.mutate).toHaveBeenCalled();
   });
 
+  test("plain c reviews the queue from the list; search keeps it as text", () => {
+    const list = makeActions();
+    handleKeymap(
+      makeContext({ key: { name: "c" }, state: { ...createUiState(mockPlan()), focus: "list" } }),
+      list,
+    );
+    expect(list.requestApply).toHaveBeenCalledTimes(1);
+
+    const search = makeActions();
+    handleKeymap(
+      makeContext({ key: { name: "c" }, state: { ...createUiState(mockPlan()), focus: "search" } }),
+      search,
+    );
+    expect(search.requestApply).not.toHaveBeenCalled();
+
+    // Ctrl+C stays the quit chord, never a review.
+    const quit = makeActions();
+    handleKeymap(
+      makeContext({
+        key: { name: "c", ctrl: true },
+        state: { ...createUiState(mockPlan()), focus: "list" },
+      }),
+      quit,
+    );
+    expect(quit.requestApply).not.toHaveBeenCalled();
+  });
+
   test("enter on an item opens details without requesting apply", () => {
     const actions = makeActions();
     handleKeymap(

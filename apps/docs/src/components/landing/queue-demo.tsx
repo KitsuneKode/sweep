@@ -96,6 +96,7 @@ export function QueueDemo({ onPhaseChange }: { onPhaseChange?: (phase: Phase) =>
       } else if (phase === "choose" && !event.ctrlKey && !event.metaKey) {
         if (event.key === "s") queueSafe();
         else if (event.key === "u") clear();
+        else if (event.key === "c") review();
       }
     };
     root.addEventListener("keydown", onKey);
@@ -176,7 +177,7 @@ export function QueueDemo({ onPhaseChange }: { onPhaseChange?: (phase: Phase) =>
               disabled={!queued.size}
               onClick={review}
             >
-              Review queue <kbd>Ctrl+Enter</kbd>
+              Review queue <kbd>c</kbd>
             </button>
           </div>
         </>

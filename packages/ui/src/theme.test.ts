@@ -18,6 +18,20 @@ describe("resolveTheme", () => {
     }
   });
 
+  test("auto mode reads the terminal's own background and sits on it", () => {
+    const onKanagawa = resolveTheme("auto", "#1f1f28");
+    expect(onKanagawa.text).toBe(darkTheme.text);
+    expect(onKanagawa.bg).toBe("transparent");
+    // Tints are mixed from the terminal background, not the brand canvas.
+    expect(onKanagawa.selectionSoftBg).not.toBe(darkTheme.selectionSoftBg);
+    expect(resolveTheme("auto", "#fafaf5").text).toBe(lightTheme.text);
+  });
+
+  test("a forced theme against the terminal's polarity keeps its own canvas", () => {
+    expect(resolveTheme("light", "#1f1f28")).toEqual(lightTheme);
+    expect(resolveTheme("dark", "#1f1f28").bg).toBe("transparent");
+  });
+
   test("dark mode returns dark theme", () => {
     expect(resolveTheme("dark")).toEqual(darkTheme);
   });

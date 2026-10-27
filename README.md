@@ -31,7 +31,7 @@ Or install it and review in the terminal UI with `sweep ui ~/Projects`:
 ```
 
 Space queues a project, Enter opens it, `i` queues every idle project,
-Ctrl+Enter (or the Ctrl+K menu) reviews the queue. Every removal is confirmed and ends in a receipt.
+`c` (or the Ctrl+K menu) reviews the queue. Every removal is confirmed and ends in a receipt.
 
 ## Why sweep
 

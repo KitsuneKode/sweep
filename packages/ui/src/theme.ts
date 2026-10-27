@@ -114,17 +114,84 @@ function terminalPrefersDark(): boolean {
   return true;
 }
 
-/** NO_COLOR removes hue; contrast, focus, queue shapes and risk labels remain. */
-export function resolveTheme(mode: ThemeMode): ThemeTokens {
+function rgb(hex: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!match) return null;
+  const value = Number.parseInt(match[1]!, 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+/** `amount` of `over` laid on `base`, both #rrggbb. */
+export function mixHex(base: string, over: string, amount: number): string {
+  const a = rgb(base);
+  const b = rgb(over);
+  if (!a || !b) return base;
+  const channel = (i: number) =>
+    Math.round(a[i]! + (b[i]! - a[i]!) * amount)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${channel(0)}${channel(1)}${channel(2)}`;
+}
+
+/** Whether a #rrggbb background reads as dark (relative luminance below the midpoint). */
+export function isDarkBackground(hex: string): boolean | null {
+  const c = rgb(hex);
+  if (!c) return null;
+  const lin = (v: number) => {
+    const x = v / 255;
+    return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]) < 0.18;
+}
+
+/**
+ * Sit on the terminal instead of covering it: the canvas stays the terminal's
+ * own background (its colour, its opacity, its blur) and every tint is mixed
+ * from that background, so a selection band or a meter track is one quiet
+ * step off whatever the user chose. Dialogs keep a solid surface.
+ */
+function onTerminal(theme: ThemeTokens, background: string): ThemeTokens {
+  return {
+    ...theme,
+    bg: "transparent",
+    statusBg: "transparent",
+    surface: mixHex(background, theme.text, 0.045),
+    surfaceInset: mixHex(background, theme.text, 0.025),
+    border: mixHex(background, theme.text, 0.16),
+    // Solid: an alpha colour over a transparent canvas would vanish.
+    borderSoft: mixHex(background, theme.text, 0.13),
+    controlBg: mixHex(background, theme.text, 0.09),
+    hoverBg: mixHex(background, theme.text, 0.05),
+    meterTrack: mixHex(background, theme.text, 0.1),
+    selectionSoftBg: mixHex(background, theme.accent, 0.13),
+    selectionBg: mixHex(background, theme.accent, 0.26),
+    overlayBackdrop: `${background}cc`,
+  };
+}
+
+/**
+ * NO_COLOR removes hue; contrast, focus, queue shapes and risk labels remain.
+ * `terminalBackground` is the terminal's reported default background: in
+ * auto mode it decides dark or light, and when the theme matches it the
+ * canvas becomes the terminal's own.
+ */
+export function resolveTheme(mode: ThemeMode, terminalBackground?: string | null): ThemeTokens {
+  const terminalDark = terminalBackground ? isDarkBackground(terminalBackground) : null;
   const theme =
     mode === "dark"
       ? darkTheme
       : mode === "light"
         ? lightTheme
-        : terminalPrefersDark()
+        : (terminalDark ?? terminalPrefersDark())
           ? darkTheme
           : lightTheme;
-  if (!process.env.NO_COLOR) return theme;
+  if (!process.env.NO_COLOR) {
+    // A forced theme against the terminal's polarity keeps its own canvas:
+    // dark text on a dark terminal would not be readable.
+    return terminalBackground && terminalDark === (theme === darkTheme)
+      ? onTerminal(theme, terminalBackground)
+      : theme;
+  }
   const dark = theme === darkTheme;
   const text = dark ? "#f5f5f5" : "#1f1f1f";
   const secondary = dark ? "#c9c9c9" : "#474747";

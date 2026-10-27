@@ -157,7 +157,7 @@ export const KEY_GROUPS: { group: string; rows: [string, string][] }[] = [
     group: "Review",
     rows: [
       ["Inspect kind, path and reasons", "i"],
-      ["Review the queue", "Ctrl+Enter"],
+      ["Review the queue", "c"],
       ["Confirm only the focused item", "x"],
       ["Switch delete and local trash", "t in confirm"],
       ["Save the queue as a plan", "S"],

@@ -45,10 +45,13 @@ export type ProjectRow =
   | { kind: "project"; project: Project }
   | { kind: "artifact"; project: Project; candidate: ScanCandidate }
   | { kind: "more"; section: ProjectSection; count: number; bytes: number }
+  | { kind: "moreArtifacts"; project: Project; count: number; bytes: number }
   | { kind: "spacer" };
 
 /** Projects shown per section before the rest folds into one "+ N more" row. */
 export const SECTION_PREVIEW = 8;
+/** Artifacts an opened project lists before the small rest folds away. */
+export const ARTIFACT_PREVIEW = 6;
 
 /** The folder a project sits in, relative to the scan target: "agency/.worktrees". */
 function relativeParent(key: string, targetDir: string): string {
@@ -126,6 +129,7 @@ export function buildProjectRows(
   projects: readonly Project[],
   expanded: ReadonlySet<string>,
   openSections: ReadonlySet<ProjectSection> = new Set(),
+  allArtifacts: ReadonlySet<string> = new Set(),
 ): ProjectRow[] {
   const rows: ProjectRow[] = [];
   for (const section of SECTION_ORDER) {
@@ -143,8 +147,20 @@ export function buildProjectRows(
     for (const project of shown) {
       rows.push({ kind: "project", project });
       if (expanded.has(project.key)) {
-        for (const candidate of project.artifacts)
-          rows.push({ kind: "artifact", project, candidate });
+        // Folding one or two rows saves nothing; fold only a real tail.
+        const whole =
+          allArtifacts.has(project.key) || project.artifacts.length <= ARTIFACT_PREVIEW + 2;
+        const listed = whole ? project.artifacts : project.artifacts.slice(0, ARTIFACT_PREVIEW);
+        for (const candidate of listed) rows.push({ kind: "artifact", project, candidate });
+        const rest = project.artifacts.slice(listed.length);
+        if (rest.length > 0) {
+          rows.push({
+            kind: "moreArtifacts",
+            project,
+            count: rest.length,
+            bytes: rest.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0),
+          });
+        }
       }
     }
     const folded = members.slice(shown.length);
@@ -162,7 +178,12 @@ export function buildProjectRows(
 
 /** Rows the cursor can stop on. */
 export function isFocusable(row: ProjectRow | undefined): boolean {
-  return row?.kind === "project" || row?.kind === "artifact" || row?.kind === "more";
+  return (
+    row?.kind === "project" ||
+    row?.kind === "artifact" ||
+    row?.kind === "more" ||
+    row?.kind === "moreArtifacts"
+  );
 }
 
 /** Move the cursor `delta` focusable rows, clamped to the list. */

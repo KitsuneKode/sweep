@@ -119,13 +119,17 @@ export function ReviewPane({
           width={sidebarWidth}
           height="100%"
           flexDirection="column"
-          borderStyle="rounded"
-          border
-          borderColor={state.focus === "sidebar" ? tokens.borderFocus : tokens.borderSoft}
+          // A rule over each column instead of a box around it: the focused
+          // one is named in the accent, the other in a quiet voice.
+          borderStyle="single"
+          border={["top", "right"]}
+          borderColor={tokens.border}
           title={state.focus === "sidebar" ? " › folders " : " folders "}
+          titleColor={state.focus === "sidebar" ? tokens.accent : tokens.textMuted}
           backgroundColor={tokens.bg}
           overflow="hidden"
-          paddingX={1}
+          paddingLeft={1}
+          paddingRight={2}
           paddingBottom={0}
         >
           <ScopeSidebar
@@ -156,13 +160,14 @@ export function ReviewPane({
         height="100%"
         flexDirection="column"
         gap={0}
-        borderStyle="rounded"
-        border
-        borderColor={listFocused || searchFocused ? tokens.borderFocus : tokens.borderSoft}
+        borderStyle="single"
+        border={["top"]}
+        borderColor={tokens.border}
         title={paneTitle}
-        backgroundColor={tokens.surface}
+        titleColor={listFocused || searchFocused ? tokens.accent : tokens.textMuted}
+        backgroundColor={tokens.bg}
         overflow="hidden"
-        paddingX={1}
+        paddingX={2}
         paddingBottom={0}
       >
         {patternsPane ? null : (
