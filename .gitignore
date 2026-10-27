@@ -35,3 +35,7 @@ apps/docs/src/routeTree.gen.ts
 
 # Vercel link state and Build Output API artifacts
 .vercel/
+
+# Claude Code: personal settings and agent worktrees stay local
+.claude/settings.local.json
+.claude/worktrees/
