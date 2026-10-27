@@ -2,13 +2,29 @@
 /**
  * Release publish orchestration for changesets/action `publish` command.
  *
- * 1. Publish native `@kitsunekode/sweep-engine-*` packages (when packed under native-packages/)
- * 2. Run prepublishOnly (check, build, preflight)
- * 3. Run changeset publish for @kitsunekode/sweep
+ * 1. Run prepublishOnly (check, build, preflight)
+ * 2. Publish native `@kitsunekode/sweep-engine-*` packages (when packed under native-packages/)
+ * 3. Pack @kitsunekode/sweep and publish that tarball, then tag the release
+ *
+ * The CLI is published from a packed tarball, not with `changeset publish`.
+ * `npm publish <dir>` reads package.json before the prepack step rewrites it
+ * and sends that original copy as the registry's install metadata, so 0.3.0
+ * and 0.5.0 shipped a correct tarball under metadata full of `workspace:` and
+ * `catalog:` ranges, and every install failed. A tarball's metadata is the
+ * package.json inside it: what is checked is what installs.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
@@ -16,6 +32,7 @@ import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
 import { releasePolicy, type PreState } from "../apps/cli/scripts/release-policy.js";
 import { requirePublicationCi } from "../apps/cli/scripts/release-ci.js";
 import { assertNativeBinary } from "../packages/engine-native/scripts/binary-format.js";
+import { assertPublishable } from "../apps/cli/scripts/prepack.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_DIST_DIR = join(REPO_ROOT, "apps/cli/dist");
@@ -83,6 +100,14 @@ if (!skipNative) {
     const binPath = join(dir, "bin", platform.binaryName);
     if (existsSync(binPath)) {
       assertNativeBinary(binPath, platform);
+      // Actions artifacts drop file modes: 0.5.0's engines were published
+      // 0644, failed to spawn with EACCES, and every install quietly fell
+      // back to the JS engine. npm keeps the mode that is packed.
+      if (platform.os !== "win32") {
+        chmodSync(binPath, 0o755);
+        if ((statSync(binPath).mode & 0o111) === 0)
+          throw new Error(`${binPath} is not executable; refusing to publish it`);
+      }
       const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
         name?: string;
         version?: string;
@@ -142,8 +167,43 @@ if (!skipNative) {
   console.log("skipping native engine publish (--skip-native)");
 }
 
-console.log("\npublishing @kitsunekode/sweep...");
-run("bunx", policy.changesetArgs);
+const CLI_NAME = "@kitsunekode/sweep";
+if (alreadyPublished(CLI_NAME, version)) {
+  console.log(`\nskipping ${CLI_NAME}@${version} (already published)`);
+} else {
+  console.log(`\npublishing ${CLI_NAME}@${version}...`);
+  const packDir = mkdtempSync(join(tmpdir(), "sweep-pack-"));
+  try {
+    // `npm pack` runs prepack (resolve workspace:/catalog:) and postpack.
+    run("npm", ["pack", join(REPO_ROOT, "apps/cli"), "--pack-destination", packDir]);
+    const tarball = readdirSync(packDir).find((file) => file.endsWith(".tgz"));
+    if (!tarball) throw new Error("npm pack produced no tarball");
+    const tarballPath = join(packDir, tarball);
+    run("tar", ["-xzf", tarballPath, "-C", packDir, "package/package.json"]);
+    const manifest = JSON.parse(
+      readFileSync(join(packDir, "package", "package.json"), "utf8"),
+    ) as Record<string, unknown>;
+    if (manifest.name !== CLI_NAME || manifest.version !== version)
+      throw new Error(`Packed manifest is not ${CLI_NAME}@${version}`);
+    // The registry's install metadata is exactly this manifest.
+    assertPublishable(manifest);
+    run("npm", ["publish", tarballPath, "--access", "public", "--tag", policy.distTag]);
+  } finally {
+    rmSync(packDir, { recursive: true, force: true });
+  }
+}
+
+// The release workflow builds binaries for a new `package@version` tag, and
+// changesets/action pushes tags it sees announced in this output.
+const tagExists =
+  spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${policy.gitTag}`], {
+    cwd: REPO_ROOT,
+    stdio: "ignore",
+  }).status === 0;
+if (!tagExists) {
+  run("git", ["tag", policy.gitTag]);
+  console.log(`🦋  New tag:  ${policy.gitTag}`);
+}
 
 const distFiles = existsSync(CLI_DIST_DIR) ? readdirSync(CLI_DIST_DIR) : [];
 console.log(`\nrelease complete (apps/cli/dist: ${distFiles.join(", ") || "empty"})`);
