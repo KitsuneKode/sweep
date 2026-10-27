@@ -419,6 +419,7 @@ fn to_candidate(entry: &WalkEntry, size: sweep_fs::SubtreeSize) -> ScanCandidate
         reasons,
         selected_by_default,
         project_active_ms: None,
+        project_root: None,
     }
 }
 
@@ -888,6 +889,7 @@ mod tests {
             reasons: vec!["日本語".to_owned()],
             selected_by_default: false,
             project_active_ms: None,
+            project_root: None,
         };
         assert_eq!(candidate_field_chars(&candidate), 8 + 2 + 5 + 3);
     }

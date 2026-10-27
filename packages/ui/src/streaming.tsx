@@ -18,6 +18,7 @@ import type {
 } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { readHistory } from "@kitsunekode/sweep-core/history";
+import { ProjectActivityIndex } from "@kitsunekode/sweep-core/project-activity";
 import { SweepApp, UiErrorBoundary } from "./app.js";
 import {
   discoverJumpTargets,
@@ -236,9 +237,20 @@ export async function runSweepUiStreaming(
           ...(currentDir === undefined ? {} : { currentDir }),
         });
       };
+      // Project and idle time as each artifact arrives, not only at the end:
+      // the projects view groups correctly from the first second. Same lookup
+      // the planner uses, cached per folder; the final plan confirms it.
+      const seenPaths = new Set<string>();
+      const activity = new ProjectActivityIndex(seenPaths);
       const record = (entry: ScanEntry) => {
         if (signal.aborted) return;
-        const candidate = candidateFromEntry(entry);
+        seenPaths.add(entry.path);
+        const { root, activeMs } = activity.forArtifact(entry.path);
+        const candidate = {
+          ...candidateFromEntry(entry),
+          projectRoot: root,
+          ...(activeMs === undefined ? {} : { projectActiveMs: Math.floor(activeMs) }),
+        };
         recordCount++;
         batcher.record(candidate.id, candidate);
         return candidate;
@@ -366,6 +378,7 @@ export async function runSweepUiStreaming(
             {...(options.trash ? { trash: true } : {})}
             {...(target.init ? { init: target.init } : {})}
             initiallyScanning
+            initialView="projects"
             scan={makeControl()}
             {...(folders ? { folders } : {})}
             {...(switchNotice ? { initialNotice: switchNotice } : {})}

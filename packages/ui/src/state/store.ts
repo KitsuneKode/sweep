@@ -1038,6 +1038,23 @@ export function toggleScopeSelection(
   };
 }
 
+/**
+ * Queue a group of ids, or unqueue them when all are already queued - the
+ * folder rule, for any group (a project). Callers pass only eligible ids.
+ */
+export function toggleIdsSelection(state: SweepUiState, ids: readonly string[]): SweepUiState {
+  if (ids.length === 0) return state;
+  const selectedIds = new Set(state.selectedIds);
+  const selectionTouched = new Set(state.selectionTouched);
+  const allSelected = ids.every((id) => selectedIds.has(id));
+  for (const id of ids) {
+    selectionTouched.add(id);
+    if (allSelected) selectedIds.delete(id);
+    else selectedIds.add(id);
+  }
+  return { ...state, selectedIds, selectionTouched };
+}
+
 /** Same toggle, addressed by the sidebar cursor row instead of a scope key. */
 export function toggleSidebarScopeSelection(state: SweepUiState): ScopeToggleResult {
   const rows = sidebarRowsFor(state);

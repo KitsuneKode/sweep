@@ -55,6 +55,22 @@ enter `>1MiB`, or sort by size. Small or empty artifacts remain available for
 deliberate cleanup. Filters narrow the view; applying the queue still includes
 queued items outside that view.
 
+## Projects first
+
+`sweep ui` opens on your projects, not on a wall of folders. Each row is one
+project (a git work tree, or the nearest folder with a manifest), grouped into
+**Idle 30+ days** and **Worked on recently**, biggest first. The line at the top
+says how much you can reclaim, how much of it sits in idle projects, and once
+you queue something, how much is queued.
+
+- Space queues a whole project's safe and caution items, or unqueues them.
+- Enter opens a project to show its artifacts by path; Space then queues one.
+- `i` queues every safe item in projects idle 30+ days.
+- `b` switches to the full view: folder tree, columns, risk legend, removal by
+  item, ranges and patterns. `b` again comes back. The queue is shared.
+
+The header names DRY RUN and TRASH modes in both views.
+
 ## Everyday controls
 
 | Key                 | Action                                             |

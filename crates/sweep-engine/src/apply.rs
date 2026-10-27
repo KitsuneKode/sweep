@@ -1497,6 +1497,7 @@ mod tests {
             reasons: vec!["default-pattern".to_owned()],
             selected_by_default: true,
             project_active_ms: None,
+            project_root: None,
         }
     }
 
@@ -1572,6 +1573,7 @@ mod tests {
                     reasons: vec!["default-pattern".to_owned()],
                     selected_by_default: true,
                     project_active_ms: None,
+                    project_root: None,
                 },
             ],
             summary: ScanPlanSummary {
@@ -1775,6 +1777,7 @@ mod tests {
                 reasons: vec!["default-pattern".to_owned()],
                 selected_by_default: true,
                 project_active_ms: None,
+                project_root: None,
             }],
             summary: ScanPlanSummary {
                 candidate_count: 1,

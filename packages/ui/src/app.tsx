@@ -7,6 +7,7 @@ import {
   useTerminalDimensions,
 } from "@opentui/react";
 import type { ApplyProgress, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import { statfsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
@@ -87,6 +88,7 @@ import {
   setRiskFilter,
   selectSafeOnly,
   selectIdleSafe,
+  toggleIdsSelection,
   idleSafeCandidates,
   setScopeFilter,
   setThemeMode,
@@ -113,6 +115,14 @@ import {
 import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
 import type { FolderSwitcher, UiScanControl } from "./streaming.js";
 import { FolderJump } from "./FolderJump.js";
+import { ProjectsView } from "./ProjectsView.js";
+import { useMonotonicFraction } from "./LedgerBand.js";
+import {
+  buildProjectRows,
+  buildProjects,
+  moveCursor as moveProjectCursor,
+  settleCursor,
+} from "./projects.js";
 import { rankJumpTargets, type JumpTarget } from "./folder-jump.js";
 
 export { runSweepUiStreaming } from "./streaming.js";
@@ -147,6 +157,11 @@ export interface SweepAppProps {
   /** ctrl-o: switch the folder under review. Absent for static plans. */
   folders?: FolderSwitcher;
   initialNotice?: string;
+  /**
+   * "projects": the calm default - one row per project, grouped by idle time.
+   * "folders": the full review (folder tree, columns, legend). `b` switches.
+   */
+  initialView?: "projects" | "folders";
 }
 
 function styledContentFallback(message: string, closing: boolean): ReactNode {
@@ -239,6 +254,8 @@ const HELP_VIEW: ReadonlyArray<HelpRow> = [
   ["enter · i", "open item details"],
   ["ctrl-k / F2", "search actions and settings"],
   ["ctrl-o", "switch folder - fuzzy or a path"],
+  ["b", "projects view ↔ full view"],
+  ["i", "queue safe items in idle projects"],
   ["backspace", "up one folder in the tree"],
   ["y", "copy row path"],
   ["S", "save queue as a plan"],
@@ -715,6 +732,44 @@ function InspectOverlay({
   );
 }
 
+/** `~/x` for the calm header. */
+function displayTargetPath(path: string): string {
+  const home = process.env.HOME;
+  if (home && path === home) return "~";
+  if (home && path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
+  return path;
+}
+
+/** The calm view's one line of hints: only what applies right now. */
+function buildCalmHints(
+  tokens: ThemeTokens,
+  context: { scanning: boolean; idleBytes: number; queued: boolean; width: number },
+) {
+  const parts: [string, string][] = [
+    ["space", "queue"],
+    ["enter", "open"],
+  ];
+  if (!context.scanning && context.idleBytes > 0)
+    parts.push(["i", `queue idle ${formatBytes(context.idleBytes)}`]);
+  if (context.queued) parts.push(["ctrl+enter", "review"]);
+  parts.push(["/", "search"], ["b", "full view"], ["?", "keys"]);
+  let budget = context.width - 4;
+  const kept: [string, string][] = [];
+  for (const part of parts) {
+    const cost = part[0].length + part[1].length + 4;
+    if (cost > budget) break;
+    kept.push(part);
+    budget -= cost;
+  }
+  return new StyledText(
+    kept.flatMap(([key, label], index) => [
+      ...(index > 0 ? [fg(tokens.textDim)("   ")] : []),
+      fg(tokens.textSecondary)(key),
+      fg(tokens.textDim)(` ${label}`),
+    ]),
+  );
+}
+
 export function SweepApp({
   plan,
   dryRun,
@@ -729,6 +784,7 @@ export function SweepApp({
   onPreferencesChange,
   folders,
   initialNotice,
+  initialView = "folders",
 }: SweepAppProps) {
   const [state, dispatch] = useReducer(uiReducer, plan, (p: ScanPlan) =>
     createUiState(p, {
@@ -907,13 +963,13 @@ export function SweepApp({
       setShowHelpState(false);
     }
   };
-  const setInspect = (open: boolean) => {
+  const setInspect = (open: boolean, candidateId?: string) => {
     if (open) {
       if (!openModal("inspect")) {
         setNotice("finish this dialog first");
         return;
       }
-      inspectedIdRef.current = getCurrentCandidate(readFreshState())?.id ?? null;
+      inspectedIdRef.current = candidateId ?? getCurrentCandidate(readFreshState())?.id ?? null;
       setShowInspectState(true);
     } else {
       closeModal("inspect");
@@ -1150,6 +1206,159 @@ export function SweepApp({
   }, []);
 
   const visibleItems = useMemo(() => getVisibleCandidates(state), [state]);
+
+  // ── The projects view: one row per project, grouped by idle time ──────
+  const [view, setView] = useState(initialView);
+  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  const [projectCursorState, setProjectCursorState] = useState(0);
+  const projects = useMemo(
+    () => buildProjects(visibleItems, state.selectedIds, state.targetDir),
+    [visibleItems, state.selectedIds, state.targetDir],
+  );
+  const projectRows = useMemo(
+    () => buildProjectRows(projects, expandedProjects),
+    [projects, expandedProjects],
+  );
+  const projectCursor = settleCursor(projectRows, projectCursorState);
+  // Keys in one stdin burst (j j Enter) must each see the previous key's
+  // effect: the handler reads these refs, not this render's values.
+  const projectRowsRef = useRef(projectRows);
+  projectRowsRef.current = projectRows;
+  const projectCursorRef = useRef(projectCursor);
+  projectCursorRef.current = projectCursor;
+  const expandedRef = useRef(expandedProjects);
+  expandedRef.current = expandedProjects;
+  const setProjectCursor = (index: number) => {
+    projectCursorRef.current = index;
+    setProjectCursorState(index);
+  };
+  const sizedFraction = useMonotonicFraction(
+    state.candidates.length > 0 ? state.scanSizedCount / state.candidates.length : 0,
+    state.scanning,
+  );
+  const diskFree = useMemo(() => {
+    try {
+      const stats = statfsSync(state.targetDir);
+      return stats.bavail * stats.bsize;
+    } catch {
+      return null;
+    }
+    // Re-read after a scan or an apply, not on every keystroke.
+  }, [state.targetDir, state.scanning, receipt]);
+
+  /**
+   * Keys the projects view owns. Everything else (search, help, actions,
+   * review, quit) falls through to the shared keymap. Keys that act on the
+   * folder view's hidden cursor (x, d, y, v, p) are answered, not passed on.
+   */
+  const handleProjectKey = (key: {
+    name: string;
+    ctrl?: boolean;
+    meta?: boolean;
+    shift?: boolean;
+  }) => {
+    if (key.ctrl || key.meta) {
+      if (key.name === "d" || key.name === "u") {
+        const page = Math.max(1, dimensions.height - 10) * (key.name === "d" ? 1 : -1);
+        setProjectCursor(moveProjectCursor(projectRowsRef.current, projectCursorRef.current, page));
+        return true;
+      }
+      return false;
+    }
+    const rows = projectRowsRef.current;
+    const row = rows[projectCursorRef.current];
+    const move = (delta: number) => {
+      setProjectCursor(moveProjectCursor(projectRowsRef.current, projectCursorRef.current, delta));
+      return true;
+    };
+    const setOpen = (keyName: string, open: boolean) => {
+      const next = new Set(expandedRef.current);
+      if (open) next.add(keyName);
+      else next.delete(keyName);
+      expandedRef.current = next;
+      // Rows change shape now, so the next key in this burst sees them.
+      projectRowsRef.current = buildProjectRows(projects, next);
+      setExpandedProjects(next);
+    };
+    switch (key.name) {
+      case "up":
+      case "k":
+        return move(-1);
+      case "down":
+      case "j":
+        return move(1);
+      case "pageup":
+        return move(-Math.max(1, dimensions.height - 10));
+      case "pagedown":
+        return move(Math.max(1, dimensions.height - 10));
+      case "home":
+        return move(-Number.MAX_SAFE_INTEGER);
+      case "end":
+        return move(Number.MAX_SAFE_INTEGER);
+      case "g":
+        return move(key.shift ? Number.MAX_SAFE_INTEGER : -Number.MAX_SAFE_INTEGER);
+      case "G":
+        return move(Number.MAX_SAFE_INTEGER);
+      case "space":
+        if (row?.kind === "project") mutate((s) => toggleIdsSelection(s, row.project.queueable));
+        else if (row?.kind === "artifact") {
+          if (row.candidate.riskTier === "blocked")
+            setNotice("blocked: git-tracked or a project file, never removable");
+          else mutate((s) => toggleSelectionById(s, row.candidate.id));
+        }
+        return true;
+      case "return":
+      case "enter":
+      case "right":
+      case "l":
+        if (row?.kind === "project")
+          setOpen(
+            row.project.key,
+            !(key.name === "return" || key.name === "enter") ||
+              !expandedProjects.has(row.project.key),
+          );
+        else if (row?.kind === "artifact" && (key.name === "return" || key.name === "enter"))
+          setInspect(true, row.candidate.id);
+        return true;
+      case "left":
+      case "h":
+        if (row?.kind === "artifact") {
+          const parent = rows.findIndex(
+            (candidate) =>
+              candidate.kind === "project" && candidate.project.key === row.project.key,
+          );
+          setOpen(row.project.key, false);
+          if (parent >= 0) setProjectCursor(parent);
+        } else if (row?.kind === "project") setOpen(row.project.key, false);
+        return true;
+      case "i":
+        if (state.scanning) {
+          setNotice("idle times arrive when the scan finishes");
+          return true;
+        }
+        if (idleSafe.length === 0) {
+          setNotice("no safe items in projects idle 30+ days");
+          return true;
+        }
+        mutate(selectIdleSafe);
+        setNotice(
+          `queued ${idleSafe.length.toLocaleString()} items in idle projects · ${formatBytes(idleSafeBytes)}`,
+          "success",
+        );
+        return true;
+      case "x":
+      case "d":
+      case "y":
+      case "v":
+      case "p":
+        setNotice(
+          "press b for the full view: removal by item, copy, ranges and patterns live there",
+        );
+        return true;
+      default:
+        return false;
+    }
+  };
   // Facet counts describe the current folder scope, before any filter, so
   // they hold still while options are toggled.
   const scopeCandidates = useMemo(
@@ -2021,6 +2230,24 @@ export function SweepApp({
       setMenu(true);
       return;
     }
+    // `b` moves between the calm projects view and the full folder review.
+    if (
+      key.name === "b" &&
+      !key.ctrl &&
+      !key.meta &&
+      openModalsRef.current.size === 0 &&
+      (state.focus === "list" || state.focus === "sidebar")
+    ) {
+      key.preventDefault();
+      setView((current) => (current === "projects" ? "folders" : "projects"));
+      return;
+    }
+    if (view === "projects" && openModalsRef.current.size === 0 && state.focus === "list") {
+      if (handleProjectKey(key)) {
+        key.preventDefault();
+        return;
+      }
+    }
     handleKeymap(
       {
         key,
@@ -2247,121 +2474,183 @@ export function SweepApp({
         paddingBottom={0}
         backgroundColor={tokens.bg}
       >
-        {/* The ledger: how much can come back, and how much is chosen. */}
-        {dimensions.height >= 12 ? (
-          <LedgerBand
+        {view === "projects" && dimensions.height >= 12 ? (
+          <ProjectsView
             tokens={tokens}
             width={dimensions.width}
-            targetDir={state.targetDir}
-            candidates={state.candidates}
-            visible={visibleItems}
-            selectedIds={state.selectedIds}
-            summary={summary}
-            riskFilter={state.riskFilter}
+            height={dimensions.height}
+            target={displayTargetPath(state.targetDir)}
+            rows={projectRows}
+            cursor={projectCursor}
+            now={Date.now()}
             scanning={state.scanning}
-            incomplete={state.scanIncomplete}
-            sizedCount={state.scanSizedCount}
-            receipt={receipt}
-            stats={headerStatsLean}
-            onMenu={() => setMenu(true)}
-            onQueueSafe={() => mutate(selectSafeOnly)}
-            onReview={requestApply}
-            onRiskFilter={(tier) => mutate((s) => setRiskFilter(s, tier))}
-          />
-        ) : (
-          <box
-            width="100%"
-            flexShrink={0}
-            height={1}
-            flexDirection="row"
-            justifyContent="space-between"
-          >
-            <text content={buildBrandLine(tokens, dimensions.width)} wrapMode="none" />
-            <text content={headerStats} wrapMode="none" />
-          </box>
-        )}
-
-        <box width="100%" flexGrow={1} minHeight={0} flexShrink={1}>
-          <ReviewPane
-            onOpenFilter={() => setFilterPicker(true)}
-            state={state}
-            plan={plan}
-            tokens={tokens}
-            showSidebar={showSidebar}
-            sidebarWidth={sidebarWidth}
-            displayRows={displayRows}
-            visibleItems={visibleItems}
-            candidatesById={candidatesById}
-            onMutate={mutate}
-            onFocusPanel={focusPanel}
-            onToggleSelection={(candidateId) => mutate((s) => toggleSelectionById(s, candidateId))}
-            onToggleScopeQueue={applyScopeToggle}
-            onSubmitPatternDraft={submitPatternDraft}
-            onSavePatterns={writeSweeprc}
-            onInspectPattern={inspectPattern}
-            onViewportRows={(rows) => {
-              viewportRowsRef.current = rows;
-            }}
-            {...(state.scanning
-              ? { scanElapsedMs: Math.max(0, performance.now() - scanStartRef.current) }
-              : {})}
-          />
-        </box>
-
-        <box
-          width="100%"
-          height={1}
-          flexShrink={0}
-          flexDirection="row"
-          paddingLeft={1}
-          backgroundColor={tokens.bg}
-        >
-          <text
-            content={
+            sizedFraction={sizedFraction}
+            sizedLabel={`scanning  ${state.scanSizedCount.toLocaleString()} of ${state.candidates.length.toLocaleString()} sized`}
+            reclaimableBytes={projects.reduce((sum, project) => sum + project.queueableBytes, 0)}
+            projectCount={projects.length}
+            idleBytes={idleSafeBytes}
+            selectedBytes={summary.selectedBytes}
+            selectedCount={summary.selectedCount}
+            selectedIds={state.selectedIds}
+            diskFree={diskFree}
+            {...(dryRun ? { dryRun: true } : {})}
+            {...(trash ? { trash: true } : {})}
+            filter={state.filter}
+            searchFocused={state.focus === "search"}
+            footer={
               notice
                 ? t`${fg(noticeColor(notice.tone, tokens))(notice.text)}`
-                : buildContextLine(state, tokens)
+                : buildCalmHints(tokens, {
+                    scanning: state.scanning,
+                    idleBytes: idleSafeBytes,
+                    queued: summary.selectedCount > 0,
+                    width: dimensions.width,
+                  })
             }
-            wrapMode="none"
+            onFilterInput={(value) => mutate((s) => setFilter(s, value))}
+            onFilterSubmit={() => focusPanel("list")}
+            onRowPress={(index, onMark) => {
+              const row = projectRows[index];
+              setProjectCursor(index);
+              if (!row || row.kind === "section" || row.kind === "spacer") return;
+              if (onMark) {
+                if (row.kind === "project")
+                  mutate((s) => toggleIdsSelection(s, row.project.queueable));
+                else mutate((s) => toggleSelectionById(s, row.candidate.id));
+              } else if (row.kind === "project") {
+                setExpandedProjects((current) => {
+                  const next = new Set(current);
+                  if (next.has(row.project.key)) next.delete(row.project.key);
+                  else next.add(row.project.key);
+                  return next;
+                });
+              }
+            }}
           />
-        </box>
+        ) : (
+          <>
+            {/* The ledger: how much can come back, and how much is chosen. */}
+            {dimensions.height >= 12 ? (
+              <LedgerBand
+                tokens={tokens}
+                width={dimensions.width}
+                targetDir={state.targetDir}
+                candidates={state.candidates}
+                visible={visibleItems}
+                selectedIds={state.selectedIds}
+                summary={summary}
+                riskFilter={state.riskFilter}
+                scanning={state.scanning}
+                incomplete={state.scanIncomplete}
+                sizedCount={state.scanSizedCount}
+                receipt={receipt}
+                stats={headerStatsLean}
+                onMenu={() => setMenu(true)}
+                onQueueSafe={() => mutate(selectSafeOnly)}
+                onReview={requestApply}
+                onRiskFilter={(tier) => mutate((s) => setRiskFilter(s, tier))}
+              />
+            ) : (
+              <box
+                width="100%"
+                flexShrink={0}
+                height={1}
+                flexDirection="row"
+                justifyContent="space-between"
+              >
+                <text content={buildBrandLine(tokens, dimensions.width)} wrapMode="none" />
+                <text content={headerStats} wrapMode="none" />
+              </box>
+            )}
 
-        <box
-          width="100%"
-          height={1}
-          flexShrink={0}
-          flexDirection="row"
-          alignItems="center"
-          backgroundColor={tokens.statusBg}
-        >
-          {state.scanning ? (
-            <ScanModeChip tokens={tokens} />
-          ) : state.scanIncomplete ? (
-            <ModeChip label=" INCOMPLETE " tokens={tokens} />
-          ) : (
-            <ModeChip label={` ${modeLabel(state.focus, false, visualActive)} `} tokens={tokens} />
-          )}
-          <box flexGrow={1} minWidth={0} flexShrink={1} paddingLeft={1} flexDirection="row">
-            <text content={footerContent} wrapMode="none" />
-            {roomForChips && riskFilterLabel ? (
-              <text
-                content={t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`}
-                wrapMode="none"
+            <box width="100%" flexGrow={1} minHeight={0} flexShrink={1}>
+              <ReviewPane
+                onOpenFilter={() => setFilterPicker(true)}
+                state={state}
+                plan={plan}
+                tokens={tokens}
+                showSidebar={showSidebar}
+                sidebarWidth={sidebarWidth}
+                displayRows={displayRows}
+                visibleItems={visibleItems}
+                candidatesById={candidatesById}
+                onMutate={mutate}
+                onFocusPanel={focusPanel}
+                onToggleSelection={(candidateId) =>
+                  mutate((s) => toggleSelectionById(s, candidateId))
+                }
+                onToggleScopeQueue={applyScopeToggle}
+                onSubmitPatternDraft={submitPatternDraft}
+                onSavePatterns={writeSweeprc}
+                onInspectPattern={inspectPattern}
+                onViewportRows={(rows) => {
+                  viewportRowsRef.current = rows;
+                }}
+                {...(state.scanning
+                  ? { scanElapsedMs: Math.max(0, performance.now() - scanStartRef.current) }
+                  : {})}
               />
-            ) : null}
-            {roomForChips && scopeFilterLabel ? (
-              <text
-                content={t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`}
-                wrapMode="none"
-              />
-            ) : null}
-          </box>
-          {roomForTally ? (
-            <box paddingLeft={2} paddingRight={1} flexShrink={1}>
-              <text content={tallyContent} wrapMode="none" />
             </box>
-          ) : null}
-        </box>
+
+            <box
+              width="100%"
+              height={1}
+              flexShrink={0}
+              flexDirection="row"
+              paddingLeft={1}
+              backgroundColor={tokens.bg}
+            >
+              <text
+                content={
+                  notice
+                    ? t`${fg(noticeColor(notice.tone, tokens))(notice.text)}`
+                    : buildContextLine(state, tokens)
+                }
+                wrapMode="none"
+              />
+            </box>
+
+            <box
+              width="100%"
+              height={1}
+              flexShrink={0}
+              flexDirection="row"
+              alignItems="center"
+              backgroundColor={tokens.statusBg}
+            >
+              {state.scanning ? (
+                <ScanModeChip tokens={tokens} />
+              ) : state.scanIncomplete ? (
+                <ModeChip label=" INCOMPLETE " tokens={tokens} />
+              ) : (
+                <ModeChip
+                  label={` ${modeLabel(state.focus, false, visualActive)} `}
+                  tokens={tokens}
+                />
+              )}
+              <box flexGrow={1} minWidth={0} flexShrink={1} paddingLeft={1} flexDirection="row">
+                <text content={footerContent} wrapMode="none" />
+                {roomForChips && riskFilterLabel ? (
+                  <text
+                    content={t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`}
+                    wrapMode="none"
+                  />
+                ) : null}
+                {roomForChips && scopeFilterLabel ? (
+                  <text
+                    content={t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`}
+                    wrapMode="none"
+                  />
+                ) : null}
+              </box>
+              {roomForTally ? (
+                <box paddingLeft={2} paddingRight={1} flexShrink={1}>
+                  <text content={tallyContent} wrapMode="none" />
+                </box>
+              ) : null}
+            </box>
+          </>
+        )}
 
         {/*
         Overlay paint order mirrors keymap precedence so the overlay that owns

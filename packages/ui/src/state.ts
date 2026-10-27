@@ -34,6 +34,7 @@ export {
   rescanConfigFromState,
   selectSafeOnly,
   selectIdleSafe,
+  toggleIdsSelection,
   idleSafeCandidates,
   IDLE_RECOMMENDATION_MS,
   selectVisible,

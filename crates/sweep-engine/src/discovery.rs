@@ -739,6 +739,7 @@ impl DiscoveryIndex {
                 .collect(),
             selected_by_default: record.default,
             project_active_ms: None,
+            project_root: None,
         }
     }
 

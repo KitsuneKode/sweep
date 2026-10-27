@@ -205,6 +205,9 @@ pub struct ScanCandidate {
     /// by the JS planner; the engine carries it through plans untouched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_active_ms: Option<u64>,
+    /// The owning project's folder. Computed by the JS planner; passed through.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
 }
 
 // Serde does not support deny_unknown_fields with flatten. Keep the public
@@ -233,6 +236,8 @@ struct CandidateInput {
     selected_by_default: bool,
     #[serde(default, deserialize_with = "optional_safe_integer")]
     project_active_ms: Option<u64>,
+    #[serde(default, deserialize_with = "present_value")]
+    project_root: Option<String>,
 }
 
 fn artifact_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
@@ -264,6 +269,7 @@ impl From<CandidateInput> for ScanCandidate {
             reasons: input.reasons,
             selected_by_default: input.selected_by_default,
             project_active_ms: input.project_active_ms,
+            project_root: input.project_root,
         }
     }
 }
