@@ -60,15 +60,18 @@ function seedRiskMixParity(root: string): void {
   mkdirSync(join(root, "dist"), { recursive: true });
   mkdirSync(join(root, "dist-target"), { recursive: true });
   const targetLink = join(root, "target");
+  // Relative, so the committed link is the same in every checkout: an
+  // absolute one names this machine's path and dirties CI's tree, which the
+  // publish guard then refuses.
   try {
-    symlinkSync(join(root, "dist-target"), targetLink);
+    symlinkSync("dist-target", targetLink, "dir");
   } catch {
     try {
       unlinkSync(targetLink);
     } catch {
       /* ignore */
     }
-    symlinkSync(join(root, "dist-target"), targetLink);
+    symlinkSync("dist-target", targetLink, "dir");
   }
   writeFileSync(join(root, "node_modules", ".gitkeep"), "");
   writeFileSync(join(root, "dist", ".gitkeep"), "");
