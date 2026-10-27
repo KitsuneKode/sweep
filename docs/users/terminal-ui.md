@@ -124,6 +124,16 @@ applies. The queue starts empty; nothing queued in the previous folder is
 removed. A switch waits while a cleanup is running. Recent folders come from
 the cleanup history Sweep already keeps; the switcher stores nothing new.
 
+## Sizes before they are measured
+
+After a completed scan, the terminal UI keeps each artifact's measured size in
+`size-cache.json` under Sweep's configuration directory (owner-only
+permissions; artifact paths, filesystem identities and byte counts). The next
+scan shows those sizes as soon as a folder is found, marked `~`, and replaces
+each one when it is measured again. A cached size is only used for the same
+folder (same device and inode); a replaced folder starts unknown. The CLI and
+every removal always measure fresh. Delete the file to clear it.
+
 ## Color and motion preferences
 
 Sweep uses the terminal's font and size. Theme selection (`t`) cycles dark,
