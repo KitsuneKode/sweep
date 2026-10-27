@@ -48,8 +48,20 @@ export function meterPixels(
   fill: string,
   track: string | null,
   thickness = 0.28,
+  background: string | null = null,
 ): Uint8Array {
   const pixels = new Uint8Array(width * height * 4);
+  // Kitty shows an image's transparent pixels in the terminal's own colour,
+  // not the cell colour behind it: on a painted canvas or a highlighted row
+  // the image has to carry that colour itself.
+  const ground = background && /^#[0-9a-f]{6}/i.test(background) ? rgb(background) : null;
+  if (ground)
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i] = ground[0];
+      pixels[i + 1] = ground[1];
+      pixels[i + 2] = ground[2];
+      pixels[i + 3] = 255;
+    }
   const radius = Math.max(1.25, (height * thickness) / 2);
   const cy = height / 2;
   const x0 = radius;
@@ -84,6 +96,12 @@ export function meterPixels(
       }
       if (a <= 0) continue;
       const i = (y * width + x) * 4;
+      if (ground) {
+        pixels[i] = Math.round(r * a + ground[0] * (1 - a));
+        pixels[i + 1] = Math.round(g * a + ground[1] * (1 - a));
+        pixels[i + 2] = Math.round(b * a + ground[2] * (1 - a));
+        continue;
+      }
       pixels[i] = Math.round(r);
       pixels[i + 1] = Math.round(g);
       pixels[i + 2] = Math.round(b);

@@ -405,6 +405,7 @@ export function ProjectsView(props: ProjectsViewProps) {
           fill={tokens.info}
           previewColor={tokens.info}
           track={tokens.meterTrack}
+          background={tokens.bg}
         />
       ) : props.reclaimableBytes > 0 ? (
         // Done scanning: how much of what can come back is queued, with what
@@ -416,6 +417,7 @@ export function ProjectsView(props: ProjectsViewProps) {
           fill={tokens.accent}
           previewColor={mixHex(tokens.meterTrack, tokens.accent, 0.45)}
           track={tokens.meterTrack}
+          background={tokens.bg}
         />
       ) : (
         <text content="" />

@@ -460,6 +460,7 @@ function DiskAfter({
         fill={mixHex(tokens.meterTrack, tokens.textSecondary, 0.7)}
         previewColor={tokens.positive}
         track={tokens.meterTrack}
+        background={tokens.surface}
       />
     </>
   );

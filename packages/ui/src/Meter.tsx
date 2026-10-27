@@ -36,6 +36,8 @@ export interface MeterProps {
   variant?: "line" | "blocks";
   /** Stroke thickness as a share of the cell height, in pixels. */
   thickness?: number;
+  /** The colour painted behind the meter; "transparent" or absent leaves the terminal's. */
+  background?: string | undefined;
 }
 
 /** Follows `target`, easing toward each new value from wherever it is now. */
@@ -108,10 +110,11 @@ export function Meter(props: MeterProps & { previewColor: string }) {
   const previewStep = Math.round(preview / step);
 
   const thickness = props.thickness ?? 0.28;
+  const background = props.background ?? null;
   const image = useMemo(() => {
     if (!kitty || pixelWidth < 8 || pixelHeight < 4) return null;
     return cachedImage(
-      `${pixelWidth}x${pixelHeight}:${valueStep}:${previewStep}:${props.fill}:${props.track}:${thickness}`,
+      `${pixelWidth}x${pixelHeight}:${valueStep}:${previewStep}:${props.fill}:${props.track}:${thickness}:${background}`,
       () =>
         meterPixels(
           pixelWidth,
@@ -121,6 +124,7 @@ export function Meter(props: MeterProps & { previewColor: string }) {
           props.fill,
           props.track,
           thickness,
+          background,
         ),
       pixelWidth,
       pixelHeight,
@@ -135,6 +139,7 @@ export function Meter(props: MeterProps & { previewColor: string }) {
     props.fill,
     props.track,
     thickness,
+    background,
   ]);
 
   if (image) {

@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, fg, type StyledText, t } from "@opentui/core";
@@ -46,8 +47,9 @@ export function ProjectDetails({
   }
   const facts = projectFacts(project, selectedIds);
   const home = process.env.HOME;
-  const where =
-    home && project.key.startsWith(`${home}/`) ? `~${project.key.slice(home.length)}` : project.key;
+  // The name is the line above; this says where it lives.
+  const parent = dirname(project.key);
+  const where = home && parent.startsWith(`${home}/`) ? `~${parent.slice(home.length)}` : parent;
   const field = (label: string, value: StyledText) => (
     <text
       key={label}
@@ -85,7 +87,7 @@ export function ProjectDetails({
         wrapMode="none"
       />
       <text
-        content={t`${fg(tokens.textMuted)(clipStart(sanitizeTerminalText(where), inner))}`}
+        content={t`${fg(tokens.textMuted)(clipStart(`in ${sanitizeTerminalText(where)}`, inner))}`}
         wrapMode="none"
       />
       <text content="" />
@@ -126,6 +128,7 @@ export function ProjectDetails({
                 animate={false}
                 variant="blocks"
                 thickness={0.42}
+                background={tokens.bg}
               />
               <text
                 content={t`  ${lifted ? bold(fg(tokens.text)(name)) : fg(tokens.textSecondary)(name)}${" ".repeat(
