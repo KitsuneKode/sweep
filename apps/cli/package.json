@@ -5,13 +5,20 @@
   "keywords": [
     "artifacts",
     "build",
+    "cargo",
+    "clean",
     "cleanup",
     "cli",
     "devtools",
+    "disk-space",
     "monorepo",
-    "node_modules"
+    "node-modules",
+    "node_modules",
+    "rust",
+    "target",
+    "tui"
   ],
-  "homepage": "https://github.com/KitsuneKode/sweep#readme",
+  "homepage": "https://sweep.kitsunekode.in",
   "bugs": {
     "url": "https://github.com/KitsuneKode/sweep/issues"
   },
