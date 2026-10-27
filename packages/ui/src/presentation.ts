@@ -925,3 +925,35 @@ export function buildSidebarRow(options: SidebarLineOptions & { barGap?: boolean
         : null,
   };
 }
+
+/**
+ * What an in-session removal did, in the order someone reads it: what went
+ * and what it freed, then only what still needs attention. Zero counts are
+ * left out; they are noise beside the answer.
+ */
+export function applyNotice(result: {
+  removed: number;
+  /** The one item's path, when exactly one was reviewed. */
+  what?: string | undefined;
+  trash: boolean;
+  freedBytes: number;
+  stillQueued: number;
+  failed: number;
+  unattempted: number;
+  stopped: boolean;
+  firstFailure?: string | undefined;
+}): string {
+  const items =
+    result.what ?? `${result.removed.toLocaleString()} item${result.removed === 1 ? "" : "s"}`;
+  const verb = result.trash ? "moved to trash" : "removed";
+  const parts = [
+    result.removed > 0
+      ? `${result.stopped ? "stopped · " : "✓ "}${verb} ${items} · ~${formatBytes(result.freedBytes)} freed`
+      : `${result.stopped ? "stopped · " : ""}nothing ${verb}`,
+  ];
+  if (result.failed > 0)
+    parts.push(`${result.failed} failed${result.firstFailure ? `: ${result.firstFailure}` : ""}`);
+  if (result.unattempted > 0) parts.push(`${result.unattempted} not attempted`);
+  if (result.stillQueued > 0) parts.push(`${result.stillQueued.toLocaleString()} still queued`);
+  return parts.join(" · ");
+}
