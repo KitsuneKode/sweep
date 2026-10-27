@@ -1,0 +1,22 @@
+pkgbase = sweep-cli-bin
+	pkgdesc = Find build output across your projects (node_modules, target, .next) and remove only what you choose
+	pkgver = 0.5.2
+	pkgrel = 1
+	url = https://sweep.kitsunekode.in
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	provides = sweep-cli
+	conflicts = sweep-cli
+	conflicts = sweep
+	conflicts = sweep-bin
+	options = !strip
+	options = !debug
+	source = LICENSE-0.5.2::https://raw.githubusercontent.com/KitsuneKode/sweep/v0.5.2/LICENSE
+	sha256sums = 8abda71c5f9755903f33daebb5002f1aa9dce78bb9a4b26c8c17af7c6e9099eb
+	source_x86_64 = sweep-0.5.2-x86_64::https://github.com/KitsuneKode/sweep/releases/download/v0.5.2/sweep-linux-x64
+	sha256sums_x86_64 = dd6638ea1e2858daf42e760a87fc4ef65d22a9f8127dc7ab9cf8e8bcb86ea4e4
+	source_aarch64 = sweep-0.5.2-aarch64::https://github.com/KitsuneKode/sweep/releases/download/v0.5.2/sweep-linux-arm64
+	sha256sums_aarch64 = e30de78dfa32e555c05e9fb767a2290971aa19d5da8167b8693236dab6b5c2fd
+
+pkgname = sweep-cli-bin

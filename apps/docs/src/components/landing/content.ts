@@ -181,15 +181,18 @@ export const KEY_GROUPS: { group: string; rows: [string, string][] }[] = [
 ];
 
 /** From README.md "Install". */
+// Self-contained installs first: they include the terminal UI with nothing
+// else to set up. npm runs every command but needs Bun for `sweep ui`.
 export const INSTALL: { id: string; label: string; command: string }[] = [
-  { id: "npm", label: "npm", command: "npm install -g @kitsunekode/sweep" },
-  { id: "bun", label: "bun", command: "bun add -g @kitsunekode/sweep" },
   { id: "brew", label: "Homebrew", command: "brew install kitsunekode/tap/sweep" },
+  { id: "aur", label: "Arch", command: "yay -S sweep-cli-bin" },
   {
     id: "binary",
-    label: "Binary",
+    label: "Script",
     command: "curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh",
   },
+  { id: "npm", label: "npm", command: "npm install -g @kitsunekode/sweep" },
+  { id: "bun", label: "bun", command: "bun add -g @kitsunekode/sweep @opentui/core" },
 ];
 
 /** Every catalog name, in `PATTERN_CATALOG` order (packages/core/src/catalog.ts). */

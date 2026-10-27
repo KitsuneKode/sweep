@@ -172,6 +172,21 @@ resolution. Older kernels refuse safely; users can choose JS with the documented
 mount-snapshot and pathname limitations. Run the private namespace mount fixture
 from [testing](testing.md) before accepting a Linux deletion release.
 
+## 3. Package managers
+
+After the binaries are attached, `cli-binaries.yml` updates two downstream
+packages from the same release, each skipped with a notice until its secret
+exists:
+
+| Channel  | Package                 | Secret                | Updated by                                 |
+| -------- | ----------------------- | --------------------- | ------------------------------------------ |
+| Homebrew | `kitsunekode/tap/sweep` | `TAP_GITHUB_TOKEN`    | `bin/update-formula` in the tap repository |
+| AUR      | `sweep-cli-bin`         | `AUR_SSH_PRIVATE_KEY` | `packaging/aur/sweep-cli-bin/update.sh`    |
+
+Both take their checksums from the release's `.sha256` sidecars, so they can
+only point at binaries that were built and checked. Setup and the first AUR
+publish are in [packaging/aur/README.md](../packaging/aur/README.md).
+
 ## Known distribution gaps
 
 - musl (Alpine): requires `OPENTUI_LIBC=musl` build variant - not wired yet
