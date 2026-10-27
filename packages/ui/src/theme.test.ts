@@ -27,9 +27,11 @@ describe("resolveTheme", () => {
     expect(resolveTheme("auto", "#fafaf5").text).toBe(lightTheme.text);
   });
 
-  test("a forced theme against the terminal's polarity keeps its own canvas", () => {
+  test("dark and light are sweep's own solid canvas on any terminal", () => {
     expect(resolveTheme("light", "#1f1f28")).toEqual(lightTheme);
-    expect(resolveTheme("dark", "#1f1f28").bg).toBe("transparent");
+    expect(resolveTheme("light", "#fafaf5")).toEqual(lightTheme);
+    expect(resolveTheme("dark", "#1f1f28")).toEqual(darkTheme);
+    expect(resolveTheme("dark", "#fafaf5")).toEqual(darkTheme);
   });
 
   test("dark mode returns dark theme", () => {

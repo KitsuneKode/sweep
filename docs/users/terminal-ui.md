@@ -136,12 +136,17 @@ every removal always measure fresh. Delete the file to clear it.
 
 ## Color and motion preferences
 
-Sweep uses the terminal's font and size. In the automatic theme it asks the
-terminal for its background before drawing, takes dark or light from it and
-keeps the terminal's own colour and transparency as the canvas. To fix a
-theme, pass `sweep ui --theme dark` (or `light`, `auto`), or set
-`SWEEP_THEME` in your shell profile; the flag wins over the saved choice for
-that session. Inside the UI, `t` cycles dark, light and automatic. A nonempty `NO_COLOR` environment variable
+Sweep uses the terminal's font and size. There are three themes:
+
+- **auto** follows the terminal: it asks for the terminal's background before
+  drawing, picks dark or light from it and keeps the terminal's own colour and
+  transparency as the canvas.
+- **dark** and **light** are Sweep's own solid canvas, the same in every
+  terminal whatever its background or transparency.
+
+Pass `sweep ui --theme dark` (or `light`, `auto`), or set `SWEEP_THEME` in your
+shell profile; the flag wins over the saved choice for that session. Inside
+the UI, `t` cycles dark, light and auto. A nonempty `NO_COLOR` environment variable
 uses neutral colors; symbols and labels still identify risk, focus and queue state.
 Theme, sorting and animation changes are saved on normal session exit in
 `ui-preferences.json` under Sweep's configuration directory. Paths, selections,
