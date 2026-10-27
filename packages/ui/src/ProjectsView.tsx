@@ -199,15 +199,26 @@ export function ProjectsView(props: ProjectsViewProps) {
       // Quiet detail: the specific end of where it lives, then what it holds.
       // One fixed location column so the kinds line up down the list.
       const where = p.parent ? sanitizeTerminalText(p.parent) : "";
+      // Risk leads the detail when there is any: it changes what Space does
+      // (dangerous items stay out of a project-level queue) and needs a look.
+      const riskText =
+        p.dangerous > 0
+          ? `✗ ${p.dangerous} dangerous`
+          : p.caution > 0
+            ? `! ${p.caution} caution`
+            : "";
+      const riskColor = p.dangerous > 0 ? tokens.danger : tokens.warning;
+      const riskW = riskText ? cellWidth(riskText) + 2 : 0;
+      const restW = Math.max(0, detailW - riskW);
       const detail =
-        detailW <= 0
+        restW <= 0
           ? ""
-          : whereW >= 8
-            ? `${padCells(clipStart(where, whereW), whereW)}  ${kindSummary(p, detailW - whereW - 2)}`
-            : kindSummary(p, detailW);
+          : whereW >= 8 && restW > whereW + 6
+            ? `${padCells(clipStart(where, whereW), whereW)}  ${kindSummary(p, restW - whereW - 2)}`
+            : kindSummary(p, restW);
       return t`${pointer} ${mark}  ${name}  ${fg(tokens.textSecondary)(size)}  ${fg(
         recent ? tokens.info : tokens.textMuted,
-      )(idle)}   ${fg(tokens.textDim)(detail)}`;
+      )(idle)}   ${fg(riskColor)(riskText ? `${riskText}  ` : "")}${fg(tokens.textDim)(detail)}`;
     }
     // An opened project's artifact: the path inside it, under the name column.
     const c = row.candidate;
