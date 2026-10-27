@@ -35,6 +35,9 @@ export interface Project {
   queueable: string[];
   selected: number;
   kinds: string[];
+  /** Items that need a look before removal; shown on the row, not only inside. */
+  caution: number;
+  dangerous: number;
 }
 
 export type ProjectRow =
@@ -109,6 +112,8 @@ export function buildProjects(
       queueable,
       selected: artifacts.filter((c) => selectedIds.has(c.id)).length,
       kinds: [...new Set(artifacts.map((c) => c.name))],
+      caution: artifacts.filter((c) => c.riskTier === "caution").length,
+      dangerous: artifacts.filter((c) => c.riskTier === "dangerous").length,
     });
   }
   return projects.sort((a, b) => b.bytes - a.bytes);
