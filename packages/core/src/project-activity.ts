@@ -1,5 +1,8 @@
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+
+const HOME = resolve(homedir());
 
 /**
  * When was a project last worked on? An artifact's own mtime is the wrong
@@ -116,9 +119,40 @@ export class ProjectActivityIndex {
   ) {}
 
   /** Activity for the project that owns `artifactPath`. */
+  /**
+   * The project a person thinks of: the git work tree when there is one (a
+   * monorepo, its packages and its caches are one project; each worktree is
+   * its own), else the nearest folder with a manifest, else the artifact's
+   * parent. A dotfiles repository at the home folder never counts.
+   */
   forArtifact(artifactPath: string): ProjectActivity {
-    const root = this.projectRoot(dirname(artifactPath)) ?? dirname(artifactPath);
+    const start = dirname(artifactPath);
+    const root = this.workTree(start) ?? this.projectRoot(start) ?? start;
     return { root, activeMs: this.projectActivity(root) };
+  }
+
+  private readonly trees = new Map<string, string | null>();
+  private workTree(start: string): string | null {
+    const visited: string[] = [];
+    let dir = start;
+    let found: string | null = null;
+    for (;;) {
+      const cached = this.trees.get(dir);
+      if (cached !== undefined) {
+        found = cached;
+        break;
+      }
+      visited.push(dir);
+      const parent = dirname(dir);
+      if (parent === dir || dir === HOME) break;
+      if (this.list(dir).includes(".git")) {
+        found = dir;
+        break;
+      }
+      dir = parent;
+    }
+    for (const seen of visited) this.trees.set(seen, found);
+    return found;
   }
 
   private list(dir: string): string[] {

@@ -194,6 +194,12 @@ export interface ScanCandidate extends ScanEntry {
    * be read or the plan predates the field.
    */
   projectActiveMs?: number;
+  /**
+   * The project this artifact belongs to: the git work tree when there is one,
+   * else the nearest folder with a manifest. Groups artifacts the way a person
+   * thinks of them (one monorepo, not forty packages). Absent on older plans.
+   */
+  projectRoot?: string;
 }
 
 export interface SelectionPolicy {

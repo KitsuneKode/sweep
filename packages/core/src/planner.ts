@@ -91,9 +91,13 @@ export function applyPlanInsights(plan: ScanPlan): ScanPlan {
 function withProjectActivity(candidates: ScanCandidate[]): ScanCandidate[] {
   const index = new ProjectActivityIndex(new Set(candidates.map((candidate) => candidate.path)));
   return candidates.map((candidate) => {
-    const { activeMs } = index.forArtifact(candidate.path);
-    const { projectActiveMs: _stale, ...rest } = candidate;
-    return activeMs === undefined ? rest : { ...rest, projectActiveMs: Math.floor(activeMs) };
+    const { root, activeMs } = index.forArtifact(candidate.path);
+    const { projectActiveMs: _stale, projectRoot: _staleRoot, ...rest } = candidate;
+    return {
+      ...rest,
+      projectRoot: root,
+      ...(activeMs === undefined ? {} : { projectActiveMs: Math.floor(activeMs) }),
+    };
   });
 }
 

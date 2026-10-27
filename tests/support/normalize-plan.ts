@@ -60,6 +60,7 @@ export function normalizePlan(plan: ScanPlan, fixtureRoot: string): ScanPlan {
         ({
           modifiedMs: _modifiedMs,
           projectActiveMs: _projectActiveMs,
+          projectRoot: _projectRoot,
           identity: _identity,
           ...candidate
         }) => ({
