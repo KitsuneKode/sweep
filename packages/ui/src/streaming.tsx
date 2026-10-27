@@ -19,6 +19,7 @@ import type {
 import { PROTOCOL_VERSION, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { readHistory } from "@kitsunekode/sweep-core/history";
 import { ProjectActivityIndex } from "@kitsunekode/sweep-core/project-activity";
+import { cachedBytes, loadSizeCache, saveSizeCache } from "./size-cache.js";
 import { SweepApp, UiErrorBoundary } from "./app.js";
 import {
   discoverJumpTargets,
@@ -244,21 +245,26 @@ export async function runSweepUiStreaming(
       // the planner uses, cached per folder; the final plan confirms it.
       const seenPaths = new Set<string>();
       const activity = new ProjectActivityIndex(seenPaths);
-      const record = (entry: ScanEntry) => {
+      // Last scan's sizes, shown as estimates until this scan measures them.
+      const sizeCache = loadSizeCache();
+      const record = (entry: ScanEntry, sized = false) => {
         if (signal.aborted) return;
         seenPaths.add(entry.path);
         const { root, activeMs } = activity.forArtifact(entry.path);
-        const candidate = {
+        const found: ScanCandidate = {
           ...candidateFromEntry(entry),
           projectRoot: root,
           ...(activeMs === undefined ? {} : { projectActiveMs: Math.floor(activeMs) }),
         };
+        const cached = sized ? undefined : cachedBytes(sizeCache, found);
+        const candidate =
+          cached === undefined ? found : { ...found, estimatedBytes: cached, bytesKnown: false };
         recordCount++;
         batcher.record(candidate.id, candidate);
         return candidate;
       };
       const recordSized = (entry: ScanEntry) => {
-        const candidate = record(entry);
+        const candidate = record(entry, true);
         if (!candidate) return;
         sizedIds.add(candidate.id);
         reportProgress(scannedDirs, skippedDirs, currentDir);
@@ -277,7 +283,7 @@ export async function runSweepUiStreaming(
             waitForConsumer: () => batcher.waitForConsumer(),
             selectionPolicy: options.selectionPolicy,
             exact: false,
-            onEntry: record,
+            onEntry: (entry) => record(entry),
             onEntrySized: recordSized,
             onProgress: ({ scannedDirs: dirs, skippedDirs: skipped, currentDir }) =>
               reportProgress(dirs, skipped, currentDir),
@@ -290,7 +296,7 @@ export async function runSweepUiStreaming(
           const result = await scan(target.targetDir, currentConfig, false, {
             resourceProfile: options.resourceProfile,
             waitForConsumer: () => batcher.waitForConsumer(),
-            onEntry: record,
+            onEntry: (entry) => record(entry),
             onEntrySized: recordSized,
             onProgress: ({ scannedDirs: dirs, skippedDirs: skipped, currentDir }) =>
               reportProgress(dirs, skipped, currentDir),
@@ -302,7 +308,11 @@ export async function runSweepUiStreaming(
         }
 
         await batcher.finish();
-        if (!signal.aborted) hooks.onDone({ scannedDirs, skippedDirs, plan: finalPlan });
+        if (!signal.aborted) {
+          hooks.onDone({ scannedDirs, skippedDirs, plan: finalPlan });
+          // Only a completed scan's measurements become next time's estimates.
+          if (finalPlan) saveSizeCache(finalPlan.candidates);
+        }
       } catch (error) {
         batcher.cancel();
         if (!signal.aborted) hooks.onError(error);
