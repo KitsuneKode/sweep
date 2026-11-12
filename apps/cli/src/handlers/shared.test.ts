@@ -20,7 +20,7 @@ import {
   assertOpenTuiAvailable,
   executePlanDeletion,
   isOpenTuiAvailable,
-  openTuiInstallHint,
+  openTuiMissingMessage,
   resolveScanTarget,
 } from "./shared.js";
 
@@ -243,10 +243,11 @@ test("a missing terminal UI library names a reinstall of sweep, not a second npm
   ];
   expect(isOpenTuiAvailable(missing)).toBe(false);
   expect(() => assertOpenTuiAvailable(missing)).toThrow(GuardrailError);
-  expect(() => assertOpenTuiAvailable(missing)).toThrow(
-    /bun add -g @kitsunekode\/sweep|npm install -g @kitsunekode\/sweep/,
-  );
-  expect(openTuiInstallHint()).toMatch(/@kitsunekode\/sweep/);
+  const message = openTuiMissingMessage();
+  expect(message).toMatch(/bun add -g @kitsunekode\/sweep|npm install -g @kitsunekode\/sweep/);
+  expect(message).toContain("bun add -g @opentui/core");
+  expect(message).toContain("sweep ui <folder>");
+  expect(message).not.toContain("npm install @opentui/core");
   expect(isOpenTuiAvailable([() => "/opt/opentui/core"])).toBe(true);
 });
 

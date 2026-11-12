@@ -331,11 +331,18 @@ export function openTuiInstallHint(): string {
     : "npm install -g @kitsunekode/sweep";
 }
 
+export function openTuiMissingMessage(): string {
+  return [
+    "sweep ui needs @opentui/core, and this install does not have it.",
+    `Reinstall sweep so the UI library comes with it:  ${openTuiInstallHint()}`,
+    "A copy published before that still needs the library named:  bun add -g @opentui/core",
+    "Then run:  sweep ui <folder>",
+  ].join("\n");
+}
+
 export function assertOpenTuiAvailable(resolvers?: readonly (() => string)[]): void {
   if (isOpenTuiAvailable(resolvers)) return;
-  throw new GuardrailError(
-    `sweep ui needs @opentui/core, and this install does not include it. Reinstall with: ${openTuiInstallHint()}`,
-  );
+  throw new GuardrailError(openTuiMissingMessage());
 }
 
 let jsonOutput: JsonOutput | undefined;
