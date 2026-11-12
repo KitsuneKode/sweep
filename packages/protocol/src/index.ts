@@ -5,6 +5,20 @@ import SCAN_PLAN_SCHEMA_JSON from "../schemas/scan-plan.schema.json";
 
 export const PROTOCOL_VERSION = "1" as const;
 
+const DAY_MS = 86_400_000;
+
+/**
+ * How long a project sits before sweep calls it idle.
+ * The CLI `--idle` default, the projects view, the `i` key, and the scan
+ * report all read this so "30 days" cannot mean three different things.
+ */
+export const IDLE_WINDOW_DAYS = 30;
+export const IDLE_WINDOW_MS = IDLE_WINDOW_DAYS * DAY_MS;
+
+/** Touched inside this window still reads as in use. */
+export const RECENT_WINDOW_DAYS = 7;
+export const RECENT_WINDOW_MS = RECENT_WINDOW_DAYS * DAY_MS;
+
 /** Logical scan bounds, shared by discovery and metadata sizing. */
 export interface ScanLimits {
   maxCandidates: number;

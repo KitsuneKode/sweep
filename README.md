@@ -54,13 +54,15 @@ Space queues a project, Enter opens it, `i` queues every idle project,
 ```bash
 brew install kitsunekode/tap/sweep     # macOS and Linux
 curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
-npm install -g @kitsunekode/sweep      # commands only, Node.js 20.3+
-bun add -g @kitsunekode/sweep @opentui/core   # commands and the terminal UI
+npm install -g @kitsunekode/sweep      # commands on Node.js 20.3+
+bun add -g @kitsunekode/sweep          # commands and the terminal UI
+bunx @kitsunekode/sweep ui ~/Projects  # try the UI without a global install
 ```
 
 Homebrew and the install script fetch one self-contained binary with the
 terminal UI built in (no Node or Bun needed, checksums verified). From npm,
-every command runs on Node; `sweep ui` also needs Bun and `@opentui/core`.
+scan and cleanup run on Node. `sweep ui` runs on Bun; `@opentui/core` is
+installed with the package.
 Linux (x64, arm64), macOS (x64, arm64) and Windows (x64) are supported.
 
 For coding agents: `npx skills add KitsuneKode/sweep`.

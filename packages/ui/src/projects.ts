@@ -1,5 +1,5 @@
 import { basename, dirname } from "node:path";
-import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { IDLE_WINDOW_DAYS, IDLE_WINDOW_MS, type ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { lastActiveMs } from "./age.js";
 
 /**
@@ -9,12 +9,12 @@ import { lastActiveMs } from "./age.js";
  * away.
  */
 
-export const IDLE_SECTION_MS = 30 * 86_400_000;
+export const IDLE_SECTION_MS = IDLE_WINDOW_MS;
 
 export type ProjectSection = "idle" | "recent" | "unknown";
 
 export const SECTION_TITLE: Record<ProjectSection, string> = {
-  idle: "Idle 30+ days",
+  idle: `Idle ${IDLE_WINDOW_DAYS}+ days`,
   recent: "Worked on recently",
   unknown: "No activity found",
 };

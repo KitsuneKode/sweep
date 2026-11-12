@@ -234,7 +234,10 @@ pub fn has_project_marker(entry_path: &Utf8Path, rule: ArtifactRule) -> bool {
     if rule.sibling_markers.is_empty() && rule.inside_markers.is_empty() {
         return true;
     }
-    let is_file = |path: Utf8PathBuf| fs::metadata(path).is_ok_and(|meta| meta.is_file());
+    // symlink_metadata, not metadata: a link named Cargo.toml or CACHEDIR.TAG
+    // is not the file cargo wrote, and must not promote an authored tree.
+    let is_file =
+        |path: Utf8PathBuf| fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file());
     let parent = entry_path.parent();
     rule.sibling_markers
         .iter()
@@ -1564,6 +1567,24 @@ mod tests {
     use super::*;
     use sweep_types::ScanLimits;
     use tempfile::tempdir;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_marker_is_not_a_project_manifest() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+        let crate_dir = dir.path().join("crate");
+        let target = crate_dir.join("target");
+        fs::create_dir_all(&target).unwrap_or_else(|err| panic!("mkdir: {err}"));
+        let notes = dir.path().join("notes.txt");
+        fs::write(&notes, b"notes").unwrap_or_else(|err| panic!("write: {err}"));
+        std::os::unix::fs::symlink(&notes, crate_dir.join("Cargo.toml"))
+            .unwrap_or_else(|err| panic!("symlink: {err}"));
+        std::os::unix::fs::symlink(&notes, target.join("CACHEDIR.TAG"))
+            .unwrap_or_else(|err| panic!("symlink: {err}"));
+        let rule = artifact_rule_for("target").unwrap_or_else(|| panic!("missing target rule"));
+        let path = Utf8Path::from_path(&target).unwrap_or_else(|| panic!("utf8 path"));
+        assert!(!has_project_marker(path, rule));
+    }
 
     #[test]
     fn cancelled_sizing_returns_incomplete_and_refunds_queued_paths() {

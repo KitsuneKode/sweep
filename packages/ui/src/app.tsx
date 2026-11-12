@@ -9,7 +9,7 @@ import {
 import type { ApplyProgress, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { statfsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
+import { IDLE_WINDOW_DAYS, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { isColdRequested } from "@kitsunekode/sweep-core/cold";
 import {
@@ -59,6 +59,7 @@ import {
   type FooterContext,
   type FooterHint,
 } from "./presentation.js";
+import { rankConfirmPreview } from "./confirm-preview.js";
 import { cellWidth } from "./text-cells.js";
 import { buildDisplayRows } from "./rows.js";
 import {
@@ -1505,7 +1506,7 @@ export function SweepApp({
           return true;
         }
         if (idleSafe.length === 0) {
-          setNotice("no safe items in projects idle 30+ days");
+          setNotice(`no safe items in projects idle ${IDLE_WINDOW_DAYS}+ days`);
           return true;
         }
         mutate(selectIdleSafe);
@@ -2175,8 +2176,8 @@ export function SweepApp({
       // The recommendation: what nobody is using, across the whole target.
       label:
         idleSafe.length > 0
-          ? `Queue safe items in projects idle 30+ days (${idleSafe.length.toLocaleString()} · ${formatBytes(idleSafeBytes)})`
-          : "Queue safe items in projects idle 30+ days",
+          ? `Queue safe items in projects idle ${IDLE_WINDOW_DAYS}+ days (${idleSafe.length.toLocaleString()} · ${formatBytes(idleSafeBytes)})`
+          : `Queue safe items in projects idle ${IDLE_WINDOW_DAYS}+ days`,
       shortcut: "",
       run: () => {
         mutate(selectIdleSafe);
@@ -2585,26 +2586,10 @@ export function SweepApp({
   }, [showSidebar, state.focus, focusPanel]);
 
   const confirmPreview = useMemo(() => {
-    if (!pendingApply || pendingSingleId) return [];
-    // Only build a preview while it is visible. Keep three entries instead
-    // of sorting the entire queue on every stream batch or keypress.
-    const priority = { dangerous: 3, caution: 2, safe: 1, blocked: 0 };
-    const top: ScanCandidate[] = [];
-    for (const candidate of reviewedApply?.candidates ?? []) {
-      if (candidate.riskTier === "blocked") continue;
-      const index = top.findIndex(
-        (other) =>
-          priority[candidate.riskTier] > priority[other.riskTier] ||
-          (priority[candidate.riskTier] === priority[other.riskTier] &&
-            candidate.estimatedBytes > other.estimatedBytes),
-      );
-      top.splice(index < 0 ? top.length : index, 0, candidate);
-      if (top.length > 3) top.pop();
-    }
-    return top.map(
-      (candidate) =>
-        `${candidate.riskTier}${candidate.isSymlink ? " · link only" : ""} · ${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidate.estimatedBytes)} · ${sanitizeTerminalText(relativePath(reviewedApply!.targetDir, candidate.path))}`,
-    );
+    if (!pendingApply || pendingSingleId || !reviewedApply) return [];
+    // Only build a preview while it is visible. Dangerous paths lead, so a
+    // small risky item is named even when three huge safe folders outrank it.
+    return rankConfirmPreview(reviewedApply.candidates, reviewedApply.targetDir);
   }, [pendingApply, pendingSingleId, reviewedApply]);
 
   const headerStats = buildHeaderStats(

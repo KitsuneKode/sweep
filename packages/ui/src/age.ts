@@ -1,4 +1,6 @@
-import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { RECENT_WINDOW_MS, type ScanCandidate } from "@kitsunekode/sweep-protocol";
+
+export { RECENT_WINDOW_MS };
 
 const MINUTE_MS = 60_000;
 
@@ -15,9 +17,6 @@ export function lastActiveMs(
 }
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
-
-/** Anything touched within this window is probably still in use. */
-export const RECENT_WINDOW_MS = 7 * DAY_MS;
 
 /** Width of the widest label this module produces (`11mo`, `12d`, `10y`). */
 export const AGE_LABEL_WIDTH = 4;
