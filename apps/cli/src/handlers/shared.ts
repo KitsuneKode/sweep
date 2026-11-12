@@ -8,7 +8,8 @@ import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   ApplyProgress,
   ApplyReport,
@@ -285,19 +286,55 @@ function isSelectionMode(value: string | undefined): value is SelectionMode {
   return value === "default" || value === "safe" || value === "all" || value === "none";
 }
 
-export function isOpenTuiAvailable(): boolean {
-  try {
-    createRequire(import.meta.url).resolve("@opentui/core");
-    return true;
-  } catch {
-    return false;
-  }
+const OPEN_TUI = "@opentui/core";
+
+interface BunModuleResolver {
+  resolveSync?: (specifier: string, from: string) => string;
 }
 
-export function assertOpenTuiAvailable(): void {
-  if (isOpenTuiAvailable()) return;
+function bunModuleResolver(): BunModuleResolver | undefined {
+  return (globalThis as { Bun?: BunModuleResolver }).Bun;
+}
+
+/** Node's require from the bundle, then Bun's resolver. bunx installs dependencies
+ * into its own tree; createRequire from the bundled file misses that layout. */
+export function defaultOpenTuiResolvers(): readonly (() => string)[] {
+  const from = dirname(fileURLToPath(import.meta.url));
+  return [
+    () => createRequire(import.meta.url).resolve(OPEN_TUI),
+    () => {
+      const resolveSync = bunModuleResolver()?.resolveSync;
+      if (!resolveSync) throw new Error("bun resolver unavailable");
+      return resolveSync(OPEN_TUI, from);
+    },
+  ];
+}
+
+export function isOpenTuiAvailable(
+  resolvers: readonly (() => string)[] = defaultOpenTuiResolvers(),
+): boolean {
+  for (const resolveModule of resolvers) {
+    try {
+      resolveModule();
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
+/** One package install. `@opentui/core` ships with sweep; it is not a second manual install. */
+export function openTuiInstallHint(): string {
+  return bunModuleResolver()
+    ? "bun add -g @kitsunekode/sweep"
+    : "npm install -g @kitsunekode/sweep";
+}
+
+export function assertOpenTuiAvailable(resolvers?: readonly (() => string)[]): void {
+  if (isOpenTuiAvailable(resolvers)) return;
   throw new GuardrailError(
-    "sweep ui requires @opentui/core. Install it with: npm install @opentui/core",
+    `sweep ui needs @opentui/core, and this install does not include it. Reinstall with: ${openTuiInstallHint()}`,
   );
 }
 

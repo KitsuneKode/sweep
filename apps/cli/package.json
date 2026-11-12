@@ -65,6 +65,7 @@
     "@kitsunekode/sweep-display": "workspace:*",
     "@kitsunekode/sweep-protocol": "workspace:*",
     "@kitsunekode/sweep-ui": "workspace:*",
+    "@opentui/core": "catalog:",
     "commander": "catalog:"
   },
   "devDependencies": {
@@ -73,14 +74,6 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "typescript": "catalog:"
-  },
-  "peerDependencies": {
-    "@opentui/core": "^0.2.16"
-  },
-  "peerDependenciesMeta": {
-    "@opentui/core": {
-      "optional": true
-    }
   },
   "optionalDependencies": {
     "@kitsunekode/sweep-engine-darwin-64": "0.5.2",

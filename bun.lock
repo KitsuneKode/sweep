@@ -30,6 +30,7 @@
         "@kitsunekode/sweep-display": "workspace:*",
         "@kitsunekode/sweep-protocol": "workspace:*",
         "@kitsunekode/sweep-ui": "workspace:*",
+        "@opentui/core": "catalog:",
         "commander": "catalog:",
       },
       "devDependencies": {
@@ -46,12 +47,6 @@
         "@kitsunekode/sweep-engine-linux-arm64": "0.5.2",
         "@kitsunekode/sweep-engine-windows-64": "0.5.2",
       },
-      "peerDependencies": {
-        "@opentui/core": "^0.2.16",
-      },
-      "optionalPeers": [
-        "@opentui/core",
-      ],
     },
     "apps/docs": {
       "name": "@sweep/docs",
@@ -416,7 +411,17 @@
 
     "@kitsunekode/sweep-display": ["@kitsunekode/sweep-display@workspace:packages/display"],
 
+    "@kitsunekode/sweep-engine-darwin-64": ["@kitsunekode/sweep-engine-darwin-64@0.5.2", "", { "os": "darwin", "cpu": "x64" }, "sha512-kNW54EIOuMRggz3pGFWj/SlLyztsMFtE2Ok5nNINhe4Ejm0Iy16XFr6s+hAGYR33UXIOwLWCpqFNAM3NCPJjhg=="],
+
+    "@kitsunekode/sweep-engine-darwin-arm64": ["@kitsunekode/sweep-engine-darwin-arm64@0.5.2", "", { "os": "darwin", "cpu": "arm64" }, "sha512-aQDdNGiJx8kl0lUDtgdaX4Yzb7Px1tGpC8nfRaMJfJk9x2R9oXB6aP/yh10ZkEcqhh9lY+HFNgvxSvTCzGJInQ=="],
+
+    "@kitsunekode/sweep-engine-linux-64": ["@kitsunekode/sweep-engine-linux-64@0.5.2", "", { "os": "linux", "cpu": "x64" }, "sha512-jRZlspv5CRzoQzOtoRhM8cngPRSYKPkfJbDZL2l2p1FgvbfLa1EqGgVRpOlOR6EFuuU9T8PMFAaCkpr9czKkNg=="],
+
+    "@kitsunekode/sweep-engine-linux-arm64": ["@kitsunekode/sweep-engine-linux-arm64@0.5.2", "", { "os": "linux", "cpu": "arm64" }, "sha512-ELGcEcS4FUmShfBLNUBJnl19tkHkiVbilwW0sbbAzfbfmL5r42QL5DJ2cAefa1dO4UyW6P7ynJwD6L8CAGWeZg=="],
+
     "@kitsunekode/sweep-engine-native": ["@kitsunekode/sweep-engine-native@workspace:packages/engine-native"],
+
+    "@kitsunekode/sweep-engine-windows-64": ["@kitsunekode/sweep-engine-windows-64@0.5.2", "", { "os": "win32", "cpu": "x64" }, "sha512-nOk3sisDi0fUbz35GKqpDBvHqB9p4hyTXhXoj4N34X+W3bfAllEdcCOI4e0Rt2hPYdYhFJJnIR5zFZIdttcdww=="],
 
     "@kitsunekode/sweep-integration-tests": ["@kitsunekode/sweep-integration-tests@workspace:packages/integration-tests"],
 

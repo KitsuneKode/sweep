@@ -15,7 +15,14 @@ import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
 import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
 import type { ApplyProgress, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { assertDangerousConsent, executePlanDeletion, resolveScanTarget } from "./shared.js";
+import {
+  assertDangerousConsent,
+  assertOpenTuiAvailable,
+  executePlanDeletion,
+  isOpenTuiAvailable,
+  openTuiInstallHint,
+  resolveScanTarget,
+} from "./shared.js";
 
 const roots: string[] = [];
 const previousConfig = process.env.SWEEP_CONFIG_DIR;
@@ -227,6 +234,21 @@ function claimedPlan(path: string, name: string, riskTier: ScanCandidate["riskTi
     createdAt: "1970-01-01T00:00:00.000Z",
   };
 }
+
+test("a missing terminal UI library names a reinstall of sweep, not a second npm install", () => {
+  const missing = [
+    () => {
+      throw new Error("not installed");
+    },
+  ];
+  expect(isOpenTuiAvailable(missing)).toBe(false);
+  expect(() => assertOpenTuiAvailable(missing)).toThrow(GuardrailError);
+  expect(() => assertOpenTuiAvailable(missing)).toThrow(
+    /bun add -g @kitsunekode\/sweep|npm install -g @kitsunekode\/sweep/,
+  );
+  expect(openTuiInstallHint()).toMatch(/@kitsunekode\/sweep/);
+  expect(isOpenTuiAvailable([() => "/opt/opentui/core"])).toBe(true);
+});
 
 test("unattended consent follows the live tier, and --json still names the path", () => {
   const forged = claimedPlan("/sweep-consent/proj/custom-cache", "node_modules", "safe");
