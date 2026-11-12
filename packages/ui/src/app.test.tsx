@@ -223,6 +223,7 @@ describe("sweep TUI render", () => {
     });
     await paint();
     expect(setup.captureCharFrame()).toContain("scan preempted save");
+    expect(setup.captureCharFrame()).not.toContain("Save cleanup patterns?");
     await act(async () => {
       setup.mockInput.pressKey("y");
       await setup.flush();
@@ -1267,4 +1268,195 @@ describe("folder switcher (ctrl-o)", () => {
     });
     expect(setup.captureCharFrame()).not.toContain("switch folder");
   });
+});
+
+test("a short terminal shows the folder view and moves that cursor", async () => {
+  const plan = createPlan();
+  const now = Date.now();
+  for (const item of plan.candidates) {
+    item.projectRoot = plan.targetDir;
+    item.projectActiveMs = now;
+  }
+  const outcomes: SweepUiOutcome[] = [];
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={plan} onDone={(result) => outcomes.push(result)} />,
+    { width: 100, height: 10 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  expect(setup.captureCharFrame()).toContain("Largest first");
+  await act(async () => {
+    setup.mockInput.pressKey("j");
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  const lines = setup.captureCharFrame().split("\n");
+  const cursor = lines.find((line) => line.includes("▌"));
+  expect(cursor).toContain("node_modules");
+  expect(outcomes).toEqual([]);
+});
+
+test("the projects header follows the trash mode chosen in the review", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  const setup = await testRender(
+    <SweepApp
+      initialView="projects"
+      plan={createPlan()}
+      onDone={(result) => outcomes.push(result)}
+    />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  expect(setup.captureCharFrame()).not.toContain("TRASH");
+  await act(async () => {
+    setup.mockInput.pressKey("space");
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    setup.mockInput.pressKey("c");
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    setup.mockInput.pressKey("t");
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    setup.mockInput.pressKey("escape");
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  expect(setup.captureCharFrame()).toContain("TRASH");
+  expect(outcomes).toEqual([]);
+});
+
+test("editing patterns from the projects view opens the pattern list", async () => {
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={createPlan()} onDone={() => {}} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  expect(setup.captureCharFrame()).toContain("you can reclaim");
+  await act(async () => {
+    setup.mockInput.pressKey("k", { ctrl: true });
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    await setup.mockInput.typeText("edit");
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    setup.mockInput.pressEnter();
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("› patterns");
+  expect(frame).not.toContain("you can reclaim");
+});
+
+test("a tiny action menu says to resize and enter runs nothing", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  const setup = await testRender(
+    <SweepApp plan={createPlan()} onDone={(result) => outcomes.push(result)} />,
+    { width: 26, height: 16 },
+  );
+  teardown = () => setup.renderer.destroy();
+  const paint = async () => {
+    for (let i = 0; i < 3; i++)
+      await act(async () => {
+        await setup.flush();
+        await setup.renderOnce();
+      });
+  };
+  await paint();
+  await act(async () => {
+    setup.mockInput.pressKey(KeyCodes.F2);
+    await setup.flush();
+  });
+  await paint();
+  const opened = setup.captureCharFrame();
+  expect(opened).toContain("Search actions");
+  expect(opened).toContain("Resize the terminal");
+  await act(async () => {
+    setup.mockInput.pressEnter();
+    await setup.flush();
+  });
+  await paint();
+  expect(setup.captureCharFrame()).toContain("Search actions");
+  expect(outcomes).toEqual([]);
+});
+
+test("a scan error drops a removal review instead of restoring it", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  let hooks: UiScanHooks | undefined;
+  const control: UiScanControl = {
+    start: async (next) => {
+      hooks = next;
+    },
+    syncPatterns: () => {},
+    setEngine: () => true,
+  };
+  const setup = await testRender(
+    <SweepApp
+      plan={createPlan()}
+      scan={control}
+      initiallyScanning
+      onDone={(result) => outcomes.push(result)}
+    />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  const paint = async () =>
+    act(async () => {
+      await setup.flush();
+      await setup.renderOnce();
+    });
+  await paint();
+  await act(async () => {
+    hooks?.onDone({ scannedDirs: 2, skippedDirs: 0, plan: createPlan() });
+    await setup.flush();
+  });
+  await paint();
+  await act(async () => {
+    setup.mockInput.pressKey("s");
+    await setup.flush();
+  });
+  await paint();
+  await act(async () => {
+    setup.mockInput.pressKey("c");
+    await setup.flush();
+  });
+  await paint();
+  expect(setup.captureCharFrame()).toContain("Delete 1 item");
+  await act(async () => {
+    hooks?.onError(new Error("scan failed after review"));
+    await setup.flush();
+  });
+  await paint();
+  const during = setup.captureCharFrame();
+  expect(during).toContain("scan failed after review");
+  expect(during).not.toContain("Delete 1 item");
+  await act(async () => {
+    setup.mockInput.pressKey("n");
+    await setup.flush();
+  });
+  await paint();
+  expect(setup.captureCharFrame()).not.toContain("Delete 1 item");
+  expect(outcomes).toEqual([]);
 });

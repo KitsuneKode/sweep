@@ -1132,7 +1132,12 @@ export function SweepApp({
   };
   const setScanError = (message: string | null) => {
     if (message === null) closeModal("scanError");
-    else openModalsRef.current.add("scanError"); // preemptor - must trap input
+    else {
+      // A removal review must not sit under the error and come back armed.
+      // Other dialogs (a pattern save, help) stay, and return when this closes.
+      if (openModalsRef.current.has("confirm")) setPendingApply(false);
+      openModalsRef.current.add("scanError"); // preemptor - must trap input
+    }
     setScanErrorState(message);
   };
   const setApplying = (verb: string | null) => {
@@ -2278,7 +2283,12 @@ export function SweepApp({
     {
       label: "Edit cleanup patterns",
       shortcut: "p",
-      run: () => focusPanel("patterns"),
+      // The pattern list lives on the folder screen. Opening it from the
+      // projects view has to switch, or the keys edit a pane that is not there.
+      run: () => {
+        setView("folders");
+        focusPanel("patterns");
+      },
       disabled: false,
     },
     {
@@ -2332,6 +2342,10 @@ export function SweepApp({
     setMenu(false);
     command.run();
   };
+
+  // Below 12 rows the projects list does not fit, so the folder view is what
+  // is painted. Keys have to follow that paint, or arrows move a hidden cursor.
+  const projectsVisible = view === "projects" && dimensions.height >= 12;
 
   const onKey = (key: KeyEvent) => {
     const preempted =
@@ -2421,14 +2435,17 @@ export function SweepApp({
       ) {
         key.preventDefault();
         setMenu(false);
+      } else if (["return", "enter"].includes(key.name)) {
+        key.preventDefault();
+        // Below this size the action list is not painted. Enter must not run
+        // a row the user cannot see.
+        if (dimensions.height >= 10 && dimensions.width >= 28)
+          runMenuCommand(menuCursorRef.current);
       } else if (
-        ["return", "enter"].includes(key.name) &&
+        ["up", "down", "tab"].includes(key.name) &&
         dimensions.height >= 10 &&
         dimensions.width >= 28
       ) {
-        key.preventDefault();
-        runMenuCommand(menuCursorRef.current);
-      } else if (["up", "down", "tab"].includes(key.name)) {
         key.preventDefault();
         const count = matchingCommands(menuQueryRef.current).length;
         if (count === 0) return;
@@ -2458,7 +2475,7 @@ export function SweepApp({
       setView((current) => (current === "projects" ? "folders" : "projects"));
       return;
     }
-    if (view === "projects" && openModalsRef.current.size === 0 && state.focus === "list") {
+    if (projectsVisible && openModalsRef.current.size === 0 && state.focus === "list") {
       if (handleProjectKey(key)) {
         key.preventDefault();
         return;
@@ -2685,6 +2702,10 @@ export function SweepApp({
   // of the statusline entirely; the hints are the part that must survive.
   const roomForTally = dimensions.width >= 84;
   const roomForChips = dimensions.width >= 100;
+  const menuFits = dimensions.height >= 10 && dimensions.width >= 28;
+  // Scan error and the delete overlay own the screen. Dialogs already open
+  // stay in state (a pattern review comes back) but are not painted under them.
+  const foregroundOverlay = applying !== null || scanError !== null;
   const menuHeight = Math.min(22, Math.max(1, dimensions.height - 2));
   const menuPageSize = Math.max(
     1,
@@ -2715,7 +2736,7 @@ export function SweepApp({
         paddingBottom={0}
         backgroundColor={tokens.bg}
       >
-        {view === "projects" && dimensions.height >= 12 ? (
+        {projectsVisible ? (
           <ProjectsView
             tokens={tokens}
             width={dimensions.width}
@@ -2735,7 +2756,7 @@ export function SweepApp({
             diskFree={disk?.free ?? null}
             receipt={receipt}
             {...(dryRun ? { dryRun: true } : {})}
-            {...(trash ? { trash: true } : {})}
+            {...(trashMode ? { trash: true } : {})}
             filter={state.filter}
             searchFocused={state.focus === "search"}
             {...(notice && (everQueued || notice.tone === "warning")
@@ -2932,11 +2953,10 @@ export function SweepApp({
         {/*
         Overlay paint order mirrors keymap precedence so the overlay that owns
         input is always the one on top: inspect < help < confirm < scanError
-        < applying. Stale flags can coexist for one drain (a modal opened in
-        the same burst as a scan error), and painting the higher-precedence
-        overlay last keeps "what you see" == "what owns the keys".
+        < applying. A scan error or a delete covers the dialog already open,
+        so a click cannot land on the one underneath.
       */}
-        {showInspect && inspectCandidate ? (
+        {!foregroundOverlay && showInspect && inspectCandidate ? (
           <InspectOverlay
             tokens={tokens}
             candidate={inspectCandidate}
@@ -2946,8 +2966,10 @@ export function SweepApp({
             onReview={reviewInspected}
           />
         ) : null}
-        {showHelp ? <HelpOverlay tokens={tokens} width={dimensions.width} /> : null}
-        {showFilter ? (
+        {!foregroundOverlay && showHelp ? (
+          <HelpOverlay tokens={tokens} width={dimensions.width} />
+        ) : null}
+        {!foregroundOverlay && showFilter ? (
           <FilterPicker
             tokens={tokens}
             options={filterOptions}
@@ -2964,7 +2986,7 @@ export function SweepApp({
             onClose={() => setFilterPicker(false)}
           />
         ) : null}
-        {showJump ? (
+        {!foregroundOverlay && showJump ? (
           <FolderJump
             tokens={tokens}
             targetDir={state.targetDir}
@@ -2977,7 +2999,7 @@ export function SweepApp({
             onPick={pickJump}
           />
         ) : null}
-        {folderInfo ? (
+        {!foregroundOverlay && folderInfo ? (
           <Modal
             tokens={tokens}
             title=" Current folder "
@@ -3009,7 +3031,7 @@ export function SweepApp({
             ) : null}
           </Modal>
         ) : null}
-        {patternInfo !== null ? (
+        {!foregroundOverlay && patternInfo !== null ? (
           <Modal
             tokens={tokens}
             title=" Pattern details "
@@ -3024,7 +3046,7 @@ export function SweepApp({
             />
           </Modal>
         ) : null}
-        {configSave ? (
+        {!foregroundOverlay && configSave ? (
           <Modal
             tokens={tokens}
             title=" Save cleanup patterns? "
@@ -3083,7 +3105,7 @@ export function SweepApp({
             ) : null}
           </Modal>
         ) : null}
-        {showMenu ? (
+        {!foregroundOverlay && showMenu ? (
           <Modal
             tokens={tokens}
             title=" Search actions "
@@ -3091,18 +3113,25 @@ export function SweepApp({
             height={22}
             footer={
               <>
-                <text content="↑↓ choose · Enter open · Esc close" fg={tokens.textMuted} />
+                <text
+                  content={
+                    menuFits
+                      ? "↑↓ choose · Enter open · Esc close"
+                      : "Resize the terminal to use actions · Esc close"
+                  }
+                  fg={tokens.textMuted}
+                />
                 <box flexDirection="row" flexWrap="wrap" gap={1}>
                   <ActionButton
                     tokens={tokens}
                     label="Previous"
-                    disabled={menuTop === 0}
+                    disabled={!menuFits || menuTop === 0}
                     onPress={() => moveMenuPage(-1)}
                   />
                   <ActionButton
                     tokens={tokens}
                     label="Next"
-                    disabled={menuTop + menuPageSize >= filteredCommands.length}
+                    disabled={!menuFits || menuTop + menuPageSize >= filteredCommands.length}
                     onPress={() => moveMenuPage(1)}
                   />
                   <ActionButton tokens={tokens} label="Close" onPress={() => setMenu(false)} />
@@ -3121,7 +3150,7 @@ export function SweepApp({
               cursorColor={tokens.accent}
               onInput={updateMenuQuery}
             />
-            {dimensions.height >= 10 && dimensions.width >= 28 ? (
+            {menuFits ? (
               <text
                 content={
                   filteredCommands.length === 0
@@ -3133,7 +3162,7 @@ export function SweepApp({
             ) : (
               <text content="Resize to use actions" fg={tokens.textMuted} />
             )}
-            {dimensions.height >= 10 && dimensions.width >= 28
+            {menuFits
               ? filteredCommands
                   .slice(menuTop, menuTop + menuPageSize)
                   .map((command, localIndex) => (
@@ -3149,7 +3178,7 @@ export function SweepApp({
               : null}
           </Modal>
         ) : null}
-        {pendingApply ? (
+        {!foregroundOverlay && pendingApply ? (
           pendingSingleId !== null && !pendingSingleCandidate ? (
             <Modal tokens={tokens} title=" item unavailable " width={60}>
               <text
