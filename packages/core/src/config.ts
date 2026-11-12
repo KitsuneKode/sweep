@@ -119,6 +119,11 @@ function readConfigText(filePath: string, requireOwned = false): string {
         `Automatically discovered config at ${filePath} is owned by another user; review it and use --config explicitly if trusted`,
       );
     }
+    if (requireOwned && process.platform !== "win32" && (stat.mode & 0o022) !== 0) {
+      throw new ConfigParseError(
+        `Automatically discovered config at ${filePath} is writable by the group or others; review it and use --config explicitly if trusted`,
+      );
+    }
     const chunks: Buffer[] = [];
     let bytes = 0;
     while (true) {

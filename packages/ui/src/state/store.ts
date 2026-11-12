@@ -1,4 +1,9 @@
-import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import {
+  IDLE_WINDOW_MS,
+  type RiskTier,
+  type ScanCandidate,
+  type ScanPlan,
+} from "@kitsunekode/sweep-protocol";
 import { candidateIndex, clearCandidateIndex } from "../candidate-index.js";
 import {
   CATALOG_PATTERNS,
@@ -938,7 +943,7 @@ export function selectSafeOnly(state: SweepUiState): SweepUiState {
 }
 
 /** Projects untouched this long are the easy call: nobody is using them. */
-export const IDLE_RECOMMENDATION_MS = 30 * 86_400_000;
+export const IDLE_RECOMMENDATION_MS = IDLE_WINDOW_MS;
 
 /**
  * Safe artifacts across the whole target whose project nobody has worked on

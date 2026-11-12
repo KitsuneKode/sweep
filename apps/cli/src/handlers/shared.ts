@@ -1,5 +1,5 @@
 import { gitTrackedPaths } from "@kitsunekode/sweep-core/git-tracked";
-import { restrictSelectionToIdle } from "@kitsunekode/sweep-core/planner";
+import { classifyEntry, restrictSelectionToIdle } from "@kitsunekode/sweep-core/planner";
 import { assertPlanResources } from "@kitsunekode/sweep-core/plan";
 import { noteApplyBackendEntered, noteApplyReportTrusted } from "../apply-lifecycle.js";
 import { beginApplySession, type ApplySession } from "@kitsunekode/sweep-core/apply-session";
@@ -459,16 +459,27 @@ export function assertDangerousConsent(
   options: { yes?: boolean; allowDangerous?: boolean; json?: boolean },
 ): void {
   const selectedIds = new Set(plan.selectedCandidateIds);
-  const dangerous = plan.candidates.filter(
-    (candidate) => selectedIds.has(candidate.id) && candidate.riskTier === "dangerous",
-  );
+  const dangerous = plan.candidates.filter((candidate) => {
+    if (!selectedIds.has(candidate.id)) return false;
+    // The stored tier is a claim. Re-derive it from the path, and keep the
+    // claim when it is already dangerous so a labeled item cannot skip consent.
+    const live = classifyEntry({
+      path: candidate.path,
+      name: basename(candidate.path),
+      entryType: candidate.entryType,
+      isSymlink: candidate.isSymlink,
+      estimatedBytes: candidate.estimatedBytes,
+    }).riskTier;
+    return live === "dangerous" || candidate.riskTier === "dangerous";
+  });
   if (dangerous.length === 0) return;
   if (options.yes && !options.allowDangerous) {
     throw new GuardrailError(
       `${dangerous.length} dangerous item(s) selected. An unattended run removes them only with --allow-dangerous; review them first with \`sweep ui\` or --dry-run.`,
     );
   }
-  if (options.json) return;
+  // Named consent goes to stderr even for --json, so a script still sees
+  // which paths an unattended run is about to remove. The report stays on stdout.
   console.error(`${dangerous.length} dangerous item(s) will be removed:`);
   for (const candidate of dangerous) {
     console.error(`  ✗ ${sanitizeTerminalText(candidate.path)}  (${candidate.reasons.join(", ")})`);
