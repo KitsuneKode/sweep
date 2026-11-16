@@ -40,6 +40,22 @@ describe("opened projects", () => {
   });
 });
 
+describe("project queue", () => {
+  test("a project-level remove can take safe and caution only", () => {
+    const rows = (["safe", "caution", "dangerous", "blocked"] as const).map((riskTier) => ({
+      ...candidate(0, 10),
+      id: riskTier,
+      name: riskTier,
+      path: `/work/app/${riskTier}`,
+      riskTier,
+      projectRoot: "/work/app",
+    }));
+    const [project] = buildProjects(rows, new Set(), "/work");
+    expect(project?.queueable).toEqual(["safe", "caution"]);
+    expect(project?.dangerous).toBe(1);
+  });
+});
+
 describe("magnitude bars", () => {
   test("measure in eighths of a cell and keep a sliver for anything above zero", () => {
     expect(magnitudeBar(1, 4)).toBe("████");

@@ -538,6 +538,18 @@ describe("config hardening", () => {
     expect(() => loadConfig(dir("long-pattern"))).toThrow(/exceeds 128 characters/);
   });
 
+  test.skipIf(process.platform === "win32")(
+    "refuses a group-writable discovered config and still allows an explicit --config",
+    () => {
+      const project = dir("shared-config");
+      mkdirSync(project, { recursive: true });
+      writeConfig(project, { patterns: ["custom-cache"] });
+      chmodSync(join(project, ".sweeprc"), 0o666);
+      expect(() => loadConfig(project)).toThrow(/writable by the group or others/);
+      expect(loadConfig(project, join(project, ".sweeprc")).patterns).toContain("custom-cache");
+    },
+  );
+
   test("rejects a merged pattern list past the bound", () => {
     mkdirSync(dir("many-patterns"), { recursive: true });
     writeConfig(dir("many-patterns"), {

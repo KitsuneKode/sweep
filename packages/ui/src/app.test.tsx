@@ -1268,3 +1268,66 @@ describe("folder switcher (ctrl-o)", () => {
     expect(setup.captureCharFrame()).not.toContain("switch folder");
   });
 });
+
+test("x on a project confirms safe and caution only", async () => {
+  const plan = createPlan();
+  const now = Date.now();
+  for (const item of plan.candidates) {
+    item.projectRoot = "/tmp/sweep-ui";
+    item.projectActiveMs = now;
+  }
+  plan.candidates.push(
+    {
+      id: "cand_danger",
+      path: "/tmp/sweep-ui/build",
+      name: "build",
+      kind: "build",
+      estimatedBytes: 8,
+      isSymlink: false,
+      entryType: "directory",
+      riskTier: "dangerous",
+      reasons: ["custom-pattern"],
+      selectedByDefault: false,
+      projectRoot: "/tmp/sweep-ui",
+      projectActiveMs: now,
+    },
+    {
+      id: "cand_blocked",
+      path: "/tmp/sweep-ui/src",
+      name: "src",
+      kind: "custom",
+      estimatedBytes: 8,
+      isSymlink: false,
+      entryType: "directory",
+      riskTier: "blocked",
+      reasons: ["protected-project-file"],
+      selectedByDefault: false,
+      projectRoot: "/tmp/sweep-ui",
+      projectActiveMs: now,
+    },
+  );
+  const outcomes: SweepUiOutcome[] = [];
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={plan} onDone={(result) => outcomes.push(result)} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    setup.mockInput.pressKey("x");
+    await setup.flush();
+  });
+  expect(outcomes).toEqual([]);
+  await act(async () => {
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  expect(outcomes).toHaveLength(1);
+  const outcome = outcomes[0];
+  expect(outcome?.type).toBe("apply");
+  if (outcome?.type === "apply") {
+    expect(outcome.plan.selectedCandidateIds.sort()).toEqual(["cand_caution", "cand_safe"]);
+  }
+});

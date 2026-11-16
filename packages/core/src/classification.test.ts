@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScanEntry } from "@kitsunekode/sweep-protocol";
@@ -69,6 +69,24 @@ describe("default names need context to be safe", () => {
     );
     expect(classifyEntry(entry(path, "target", "directory")).riskTier).toBe("safe");
   });
+
+  test.skipIf(process.platform === "win32")(
+    "a symlink named like a cargo marker is not project proof",
+    () => {
+      const path = dir("spoof", "target");
+      const real = file("not a manifest\n", "elsewhere.txt");
+      symlinkSync(real, join(root, "spoof", "Cargo.toml"));
+      expect(classifyEntry(entry(path, "target", "directory")).reasons).toContain(
+        "no-project-marker",
+      );
+
+      const tagged = dir("tagged", "target");
+      symlinkSync(real, join(tagged, "CACHEDIR.TAG"));
+      expect(classifyEntry(entry(tagged, "target", "directory")).reasons).toContain(
+        "no-project-marker",
+      );
+    },
+  );
 
   test("a directory named Cargo.toml is not a manifest", () => {
     const path = dir("odd", "target");

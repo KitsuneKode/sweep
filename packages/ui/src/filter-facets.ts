@@ -1,4 +1,8 @@
-import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import {
+  IDLE_WINDOW_DAYS,
+  RECENT_WINDOW_DAYS,
+  type ScanCandidate,
+} from "@kitsunekode/sweep-protocol";
 import { compileFilter } from "./filter-query.js";
 
 /**
@@ -34,9 +38,17 @@ const SIZE_OPTIONS: FacetOption[] = [
 ];
 const AGE_OPTIONS: FacetOption[] = [
   { group: "age", value: "older:90d", label: "idle 90+ days" },
-  { group: "age", value: "older:30d", label: "idle 30+ days" },
-  { group: "age", value: "older:7d", label: "idle 7+ days" },
-  { group: "age", value: "newer:7d", label: "worked on this week" },
+  { group: "age", value: `older:${IDLE_WINDOW_DAYS}d`, label: `idle ${IDLE_WINDOW_DAYS}+ days` },
+  {
+    group: "age",
+    value: `older:${RECENT_WINDOW_DAYS}d`,
+    label: `idle ${RECENT_WINDOW_DAYS}+ days`,
+  },
+  {
+    group: "age",
+    value: `newer:${RECENT_WINDOW_DAYS}d`,
+    label: "worked on this week",
+  },
 ];
 const STATUS_OPTIONS: FacetOption[] = [
   { group: "status", value: "is:unqueued", label: "not queued" },

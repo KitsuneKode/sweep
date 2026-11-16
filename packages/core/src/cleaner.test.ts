@@ -660,6 +660,42 @@ describe("clean delete-time hardening", () => {
     }
   });
 
+  test.skipIf(process.platform === "win32")(
+    "a trash dir that is already a symlink cannot receive moves",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "sweep-trashlink-"));
+      try {
+        const targetDir = join(root, "project");
+        const outside = join(root, "outside");
+        mkdirSync(join(targetDir, "node_modules"), { recursive: true });
+        mkdirSync(outside);
+        writeFileSync(join(targetDir, "node_modules", "index.js"), "x");
+        const trashDir = join(targetDir, ".sweep-trash-planted");
+        symlinkSync(outside, trashDir);
+
+        const result = await clean(
+          [
+            {
+              path: join(targetDir, "node_modules"),
+              name: "node_modules",
+              estimatedBytes: 1,
+              isSymlink: false,
+              entryType: "directory",
+            },
+          ],
+          { trashDir, trashRoot: targetDir },
+        );
+
+        expect(result.deleted.length).toBe(0);
+        expect(result.failedPaths[0]?.code).toBe("outside_target");
+        expect(existsSync(join(targetDir, "node_modules", "index.js"))).toBe(true);
+        expect(existsSync(join(outside, "node_modules"))).toBe(false);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("onProgress reports succeeded=false for failed entries", async () => {
     const root = mkdtempSync(join(tmpdir(), "sweep-progress-"));
     try {

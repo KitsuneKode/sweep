@@ -15,7 +15,7 @@ sweep --version
 If you use Bun:
 
 ```sh
-bun add -g @kitsunekode/sweep @opentui/core
+bun add -g @kitsunekode/sweep
 sweep --version
 ```
 
@@ -23,10 +23,10 @@ The npm package includes bundled JavaScript and selects a matching optional Rust
 engine package for supported platforms. Keep optional dependencies enabled if you
 want the native engine. [Platforms](platforms.md) explains fallback requirements.
 
-The npm-installed full-screen UI needs Bun and `@opentui/core`. Install the
-optional UI peer where your Sweep installation can resolve it. If you only need
-scans and saved plans, Node is enough. A qualified standalone release embeds
-these dependencies; see the release's checksum and platform instructions.
+The full-screen UI runs on Bun. `@opentui/core` is a dependency of the package,
+so `bun add -g` and `bunx @kitsunekode/sweep ui` install it with sweep. If you
+only need scans and saved plans, Node is enough. A qualified standalone release
+embeds the UI; see the release's checksum and platform instructions.
 
 ## Scan one project
 

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -13,8 +13,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
-import type { ApplyProgress } from "@kitsunekode/sweep-protocol";
-import { executePlanDeletion, resolveScanTarget } from "./shared.js";
+import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
+import type { ApplyProgress, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import {
+  assertDangerousConsent,
+  assertOpenTuiAvailable,
+  executePlanDeletion,
+  isOpenTuiAvailable,
+  openTuiMissingMessage,
+  resolveScanTarget,
+} from "./shared.js";
 
 const roots: string[] = [];
 const previousConfig = process.env.SWEEP_CONFIG_DIR;
@@ -193,6 +201,77 @@ test("an aborted JS scan cannot become a complete programmatic plan", async () =
     }),
   ).rejects.toMatchObject({ code: 1 });
   expect(plan.candidates.every((candidate) => existsSync(candidate.path))).toBe(true);
+});
+
+function claimedPlan(path: string, name: string, riskTier: ScanCandidate["riskTier"]): ScanPlan {
+  return {
+    protocolVersion: "1",
+    targetDir: "/sweep-consent",
+    selectionPolicy: { mode: "all", includeDangerous: true },
+    candidates: [
+      {
+        id: "c1",
+        path,
+        name,
+        kind: "custom",
+        estimatedBytes: 1,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier,
+        reasons: ["custom-pattern"],
+        selectedByDefault: false,
+      },
+    ],
+    summary: {
+      candidateCount: 1,
+      estimatedTotalBytes: 1,
+      scannedDirs: 1,
+      exact: true,
+      selectedCount: 1,
+      riskCounts: { safe: 0, caution: 0, dangerous: riskTier === "dangerous" ? 1 : 0, blocked: 0 },
+    },
+    selectedCandidateIds: ["c1"],
+    createdAt: "1970-01-01T00:00:00.000Z",
+  };
+}
+
+test("a missing terminal UI library names a reinstall of sweep, not a second npm install", () => {
+  const missing = [
+    () => {
+      throw new Error("not installed");
+    },
+  ];
+  expect(isOpenTuiAvailable(missing)).toBe(false);
+  expect(() => assertOpenTuiAvailable(missing)).toThrow(GuardrailError);
+  const message = openTuiMissingMessage();
+  expect(message).toMatch(/bun add -g @kitsunekode\/sweep|npm install -g @kitsunekode\/sweep/);
+  expect(message).toContain("bun add -g @opentui/core");
+  expect(message).toContain("sweep ui <folder>");
+  expect(message).not.toContain("npm install @opentui/core");
+  expect(isOpenTuiAvailable([() => "/opt/opentui/core"])).toBe(true);
+});
+
+test("unattended consent follows the live tier, and --json still names the path", () => {
+  const forged = claimedPlan("/sweep-consent/proj/custom-cache", "node_modules", "safe");
+  expect(() => assertDangerousConsent(forged, { yes: true })).toThrow(GuardrailError);
+  expect(() => assertDangerousConsent(forged, { yes: true, allowDangerous: true })).not.toThrow();
+
+  const errors: string[] = [];
+  const spy = spyOn(console, "error").mockImplementation((message: unknown) => {
+    errors.push(String(message));
+  });
+  try {
+    assertDangerousConsent(forged, { yes: true, allowDangerous: true, json: true });
+  } finally {
+    spy.mockRestore();
+  }
+  expect(errors.join("\n")).toContain("/sweep-consent/proj/custom-cache");
+
+  const honest = claimedPlan("/sweep-consent/proj/node_modules", "node_modules", "safe");
+  expect(() => assertDangerousConsent(honest, { yes: true, json: true })).not.toThrow();
+
+  const labeled = claimedPlan("/sweep-consent/proj/node_modules", "node_modules", "dangerous");
+  expect(() => assertDangerousConsent(labeled, { yes: true })).toThrow(GuardrailError);
 });
 
 test("resource refusal never arms a journal or creates trash", async () => {

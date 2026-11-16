@@ -6,7 +6,7 @@
  * catalog and must not be presumed safe. Rust parity: `sweep-engine`
  * `artifact_context_reason` applies the same rules in the same order.
  */
-import { statSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, normalize, sep } from "node:path";
 import type { ScanEntry } from "@kitsunekode/sweep-protocol";
@@ -111,7 +111,10 @@ export function isInsideToolHome(path: string, home: string = homedir()): boolea
 
 function isRegularFile(path: string): boolean {
   try {
-    return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+    // lstat, not stat: a symlink named Cargo.toml or CACHEDIR.TAG is not the
+    // manifest or tag cargo wrote, and must not promote an authored tree.
+    const stat = lstatSync(path, { throwIfNoEntry: false });
+    return stat?.isFile() === true && stat.isSymbolicLink() === false;
   } catch {
     // Unreadable evidence is missing evidence.
     return false;

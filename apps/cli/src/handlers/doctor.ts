@@ -156,7 +156,9 @@ export async function collectDoctorChecks(
     {
       name: "opentui",
       ok: openTuiOk,
-      detail: openTuiOk ? "available" : "install @opentui/core for sweep ui",
+      detail: openTuiOk
+        ? "available"
+        : "reinstall @kitsunekode/sweep; sweep ui includes @opentui/core",
     },
     { name: "rust_engine", ok: rustOk, detail: rustOk ? rustBinary : "not found" },
     {

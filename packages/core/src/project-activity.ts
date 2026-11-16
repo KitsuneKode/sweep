@@ -107,6 +107,8 @@ export class ProjectActivityIndex {
   /** One readdir per folder, shared by root detection and activity. */
   private readonly listings = new Map<string, string[]>();
   private readonly activity = new Map<string, number | undefined>();
+  /** Repeat size updates of one artifact must not walk the tree again. */
+  private readonly byPath = new Map<string, ProjectActivity>();
   private readonly repos = new Map<string, number | undefined>();
 
   /**
@@ -126,9 +128,13 @@ export class ProjectActivityIndex {
    * parent. A dotfiles repository at the home folder never counts.
    */
   forArtifact(artifactPath: string): ProjectActivity {
+    const cached = this.byPath.get(artifactPath);
+    if (cached) return cached;
     const start = dirname(artifactPath);
     const root = this.workTree(start) ?? this.projectRoot(start) ?? start;
-    return { root, activeMs: this.projectActivity(root) };
+    const found = { root, activeMs: this.projectActivity(root) };
+    this.byPath.set(artifactPath, found);
+    return found;
   }
 
   private readonly trees = new Map<string, string | null>();

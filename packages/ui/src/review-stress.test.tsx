@@ -104,7 +104,9 @@ describe("native terminal worst-case review", () => {
         }
       }
     }
-  });
+    // Five widths times the 10k-row plan. macOS Intel crosses Bun's 5s
+    // default, and a timeout there aborts the renderer for every later test.
+  }, 20_000);
 
   test("narrow inspector keeps actions outside scrolling and exposes long reasons", async () => {
     const plan = reviewFixture("Worst");

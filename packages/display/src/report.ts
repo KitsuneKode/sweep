@@ -3,7 +3,7 @@ import { basename, dirname } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import pc from "picocolors";
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
+import { IDLE_WINDOW_MS, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes, formatScanElapsed } from "./bytes.js";
 import { groupCandidatesByKind } from "./grouping.js";
 
@@ -31,8 +31,8 @@ export interface ScanReportOptions {
 }
 
 const DAY = 86_400_000;
-/** Suggest `--idle` at this window: long enough to mean "not in use". */
-const SUGGESTED_IDLE_DAYS = 30;
+/** Suggest `--idle` at the same window the projects view calls idle. */
+const SUGGESTED_IDLE_DAYS = IDLE_WINDOW_MS / DAY;
 
 function readDisk(targetDir: string): { free: number; total: number } | null {
   try {

@@ -343,14 +343,30 @@ export async function clean(
   // instead of re-resolving to wherever the attacker pointed it. The dir is
   // created first - a not-yet-existing trash root cannot be canonicalized.
   let trashPin: TrashRootPin | undefined;
+  // A trash root that is already a symlink must fail before the pin. realpath
+  // would follow it, and the later pin check would then agree with the
+  // outside target. The CLI lstats once; this is the check at the remover.
+  let trashBlocked = false;
   if (options.trashDir) {
     try {
-      mkdirSync(options.trashDir, { recursive: true });
-      const path = realpathSync(options.trashDir);
-      const metadata = statSync(path, { bigint: true });
-      trashPin = { path, dev: metadata.dev, ino: metadata.ino };
+      let metadata;
+      try {
+        metadata = lstatSync(options.trashDir);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        mkdirSync(options.trashDir, { recursive: true, mode: 0o700 });
+        metadata = lstatSync(options.trashDir);
+      }
+      if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+        trashBlocked = true;
+      } else {
+        const path = realpathSync(options.trashDir);
+        const pinned = statSync(path, { bigint: true });
+        trashPin = { path, dev: pinned.dev, ino: pinned.ino };
+      }
     } catch {
       trashPin = undefined;
+      trashBlocked = true;
     }
   }
 
@@ -457,6 +473,12 @@ export async function clean(
           assertNoMountsWithin(mountedPath, readLinuxMountPoints(), realContainmentRoot);
         }
         if (options.trashDir && options.trashRoot) {
+          if (trashBlocked || trashPin === undefined) {
+            throw Object.assign(
+              new Error("trash directory is not a real directory inside the target"),
+              { code: "EOUTSIDE" },
+            );
+          }
           const destination = await moveToTrash(
             entry,
             options.trashDir,

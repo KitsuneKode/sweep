@@ -1,5 +1,5 @@
 import { gitTrackedPaths } from "@kitsunekode/sweep-core/git-tracked";
-import { restrictSelectionToIdle } from "@kitsunekode/sweep-core/planner";
+import { classifyEntry, restrictSelectionToIdle } from "@kitsunekode/sweep-core/planner";
 import { assertPlanResources } from "@kitsunekode/sweep-core/plan";
 import { noteApplyBackendEntered, noteApplyReportTrusted } from "../apply-lifecycle.js";
 import { beginApplySession, type ApplySession } from "@kitsunekode/sweep-core/apply-session";
@@ -8,7 +8,8 @@ import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
   ApplyProgress,
   ApplyReport,
@@ -285,20 +286,63 @@ function isSelectionMode(value: string | undefined): value is SelectionMode {
   return value === "default" || value === "safe" || value === "all" || value === "none";
 }
 
-export function isOpenTuiAvailable(): boolean {
-  try {
-    createRequire(import.meta.url).resolve("@opentui/core");
-    return true;
-  } catch {
-    return false;
-  }
+const OPEN_TUI = "@opentui/core";
+
+interface BunModuleResolver {
+  resolveSync?: (specifier: string, from: string) => string;
 }
 
-export function assertOpenTuiAvailable(): void {
-  if (isOpenTuiAvailable()) return;
-  throw new GuardrailError(
-    "sweep ui requires @opentui/core. Install it with: npm install @opentui/core",
-  );
+function bunModuleResolver(): BunModuleResolver | undefined {
+  return (globalThis as { Bun?: BunModuleResolver }).Bun;
+}
+
+/** Node's require from the bundle, then Bun's resolver. bunx installs dependencies
+ * into its own tree; createRequire from the bundled file misses that layout. */
+export function defaultOpenTuiResolvers(): readonly (() => string)[] {
+  const from = dirname(fileURLToPath(import.meta.url));
+  return [
+    () => createRequire(import.meta.url).resolve(OPEN_TUI),
+    () => {
+      const resolveSync = bunModuleResolver()?.resolveSync;
+      if (!resolveSync) throw new Error("bun resolver unavailable");
+      return resolveSync(OPEN_TUI, from);
+    },
+  ];
+}
+
+export function isOpenTuiAvailable(
+  resolvers: readonly (() => string)[] = defaultOpenTuiResolvers(),
+): boolean {
+  for (const resolveModule of resolvers) {
+    try {
+      resolveModule();
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
+/** One package install. `@opentui/core` ships with sweep; it is not a second manual install. */
+export function openTuiInstallHint(): string {
+  return bunModuleResolver()
+    ? "bun add -g @kitsunekode/sweep"
+    : "npm install -g @kitsunekode/sweep";
+}
+
+export function openTuiMissingMessage(): string {
+  return [
+    "sweep ui needs @opentui/core, and this install does not have it.",
+    `Reinstall sweep so the UI library comes with it:  ${openTuiInstallHint()}`,
+    "A copy published before that still needs the library named:  bun add -g @opentui/core",
+    "Then run:  sweep ui <folder>",
+  ].join("\n");
+}
+
+export function assertOpenTuiAvailable(resolvers?: readonly (() => string)[]): void {
+  if (isOpenTuiAvailable(resolvers)) return;
+  throw new GuardrailError(openTuiMissingMessage());
 }
 
 let jsonOutput: JsonOutput | undefined;
@@ -459,16 +503,27 @@ export function assertDangerousConsent(
   options: { yes?: boolean; allowDangerous?: boolean; json?: boolean },
 ): void {
   const selectedIds = new Set(plan.selectedCandidateIds);
-  const dangerous = plan.candidates.filter(
-    (candidate) => selectedIds.has(candidate.id) && candidate.riskTier === "dangerous",
-  );
+  const dangerous = plan.candidates.filter((candidate) => {
+    if (!selectedIds.has(candidate.id)) return false;
+    // The stored tier is a claim. Re-derive it from the path, and keep the
+    // claim when it is already dangerous so a labeled item cannot skip consent.
+    const live = classifyEntry({
+      path: candidate.path,
+      name: basename(candidate.path),
+      entryType: candidate.entryType,
+      isSymlink: candidate.isSymlink,
+      estimatedBytes: candidate.estimatedBytes,
+    }).riskTier;
+    return live === "dangerous" || candidate.riskTier === "dangerous";
+  });
   if (dangerous.length === 0) return;
   if (options.yes && !options.allowDangerous) {
     throw new GuardrailError(
       `${dangerous.length} dangerous item(s) selected. An unattended run removes them only with --allow-dangerous; review them first with \`sweep ui\` or --dry-run.`,
     );
   }
-  if (options.json) return;
+  // Named consent goes to stderr even for --json, so a script still sees
+  // which paths an unattended run is about to remove. The report stays on stdout.
   console.error(`${dangerous.length} dangerous item(s) will be removed:`);
   for (const candidate of dangerous) {
     console.error(`  ✗ ${sanitizeTerminalText(candidate.path)}  (${candidate.reasons.join(", ")})`);

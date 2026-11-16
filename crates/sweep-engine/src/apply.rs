@@ -286,6 +286,21 @@ pub fn apply_plan_controlled_with_activity(
             ));
             continue;
         }
+        // JS parity: revalidateCandidates. A saved plan can rename a leaf to
+        // look safe; the basename is what makes `.env`, `src`, and manifests
+        // unremovable. Git's index does not cover gitignored env files.
+        if std::path::Path::new(&candidate.entry.path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(guardrails::is_protected_project_name)
+        {
+            failed_paths.push(path_failure(
+                &candidate.entry.path,
+                FailureReasonCode::ProtectedPath,
+                "candidate is a protected project file (manifest, lockfile, env or src)".to_owned(),
+            ));
+            continue;
+        }
 
         match revalidate_candidate(candidate, real_root.as_deref()) {
             Ok(validated) => {
@@ -1654,6 +1669,53 @@ mod tests {
             FailureReasonCode::OutsideTarget.as_str()
         );
         assert!(victim.exists());
+    }
+
+    #[test]
+    fn apply_plan_refuses_protected_project_names() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let env = dir.path().join(".env");
+        let src = dir.path().join("src");
+        fs::write(&env, "present\n").unwrap_or_else(|err| panic!("write failed: {err}"));
+        fs::create_dir(&src).unwrap_or_else(|err| panic!("mkdir failed: {err}"));
+        fs::write(src.join("main.rs"), "fn main() {}\n")
+            .unwrap_or_else(|err| panic!("write failed: {err}"));
+
+        for (path, name) in [(env, ".env"), (src, "src")] {
+            let spelling = path.to_string_lossy().into_owned();
+            let plan = ScanPlan {
+                target_identity: None,
+                protocol_version: PROTOCOL_VERSION.to_owned(),
+                target_dir: dir.path().to_string_lossy().into_owned(),
+                selection_policy: SelectionPolicy::default(),
+                candidates: vec![candidate(
+                    &spelling,
+                    "node_modules",
+                    EntryType::Directory,
+                    false,
+                )],
+                summary: ScanPlanSummary {
+                    candidate_count: 1,
+                    estimated_total_bytes: 0,
+                    scanned_dirs: 1,
+                    skipped_dirs: 0,
+                    exact: false,
+                    selected_count: 1,
+                    risk_counts: Default::default(),
+                },
+                selected_candidate_ids: vec!["cand_node_modules".to_owned()],
+                created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+            };
+            let report = apply_plan(&approved_fixture(&plan))
+                .unwrap_or_else(|err| panic!("apply failed: {err}"));
+            assert_eq!(report.deleted_count, 0, "{name} was deleted");
+            assert_eq!(
+                report.failed_paths[0].code,
+                FailureReasonCode::ProtectedPath.as_str(),
+                "{name}"
+            );
+            assert!(path.exists(), "{name} is gone");
+        }
     }
 
     #[test]

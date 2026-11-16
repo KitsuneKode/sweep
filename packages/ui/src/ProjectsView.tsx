@@ -1,9 +1,9 @@
 import { formatBytes } from "@kitsunekode/sweep-display";
-import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
+import { IDLE_WINDOW_DAYS, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, fg, t, type MouseEvent, type StyledText } from "@opentui/core";
 import { dirname } from "node:path";
 import { type ReactNode, useRef } from "react";
-import { formatAge } from "./age.js";
+import { formatAge, RECENT_WINDOW_MS } from "./age.js";
 import { Meter, ScanMeter, useCountUp } from "./Meter.js";
 import { useMotionEnabled } from "./motion.js";
 import { ProjectDetails } from "./ProjectDetails.js";
@@ -100,7 +100,6 @@ const LEAD = 5; // "› ○  " - cursor, checkbox, gap
 const SIZE_W = 10;
 const IDLE_W = 5;
 const BAR_W = 8;
-const RECENT_MS = 7 * 86_400_000;
 /** The details margin: shown once the list keeps its size bars beside it. */
 const PANEL_LIST_MIN = 84;
 const PANEL_MIN = 38;
@@ -250,9 +249,9 @@ export function ProjectsView(props: ProjectsViewProps) {
   // The easy win, named and one key away - only when it fits whole.
   const idleHint = t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.text)(
     formatBytes(props.idleBytes),
-  )}${fg(tokens.textMuted)(" idle 30+ days, ")}${fg(tokens.accent)("i")}${fg(tokens.textMuted)(
-    " queues it",
-  )}`;
+  )}${fg(tokens.textMuted)(` idle ${IDLE_WINDOW_DAYS}+ days, `)}${fg(tokens.accent)("i")}${fg(
+    tokens.textMuted,
+  )(" queues it")}`;
   const answerLine =
     props.selectedCount === 0 &&
     !scanning &&
@@ -306,7 +305,7 @@ export function ProjectsView(props: ProjectsViewProps) {
       const name = isCursor ? bold(fg(tokens.text)(nameText)) : fg(tokens.text)(nameText);
       const size = `${p.partial ? "~" : ""}${formatBytes(p.bytes)}`.padStart(SIZE_W);
       const idle = formatAge(p.activeMs, now).padStart(IDLE_W);
-      const recent = p.activeMs !== undefined && now - p.activeMs < RECENT_MS;
+      const recent = p.activeMs !== undefined && now - p.activeMs < RECENT_WINDOW_MS;
       // Risk leads the detail when there is any: it changes what Space does
       // (dangerous items stay out of a project-level queue) and needs a look.
       const risk = riskLabel(p);
