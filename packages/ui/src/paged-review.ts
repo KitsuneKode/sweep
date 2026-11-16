@@ -75,13 +75,13 @@ export class PagedReviewSession {
       // A terminal close or native failure may land after the last reply but
       // before the operation's caller resumes. Never deliver a fresh plan then.
       this.assertOpen();
-      this.index.summary;
+      void this.index.summary;
       return result;
     } catch (error) {
       // A native protocol/transport failure poisons the generation. Release its
       // page too; ordinary local refusals keep the last verified review usable.
       try {
-        this.index.summary;
+        void this.index.summary;
       } catch {
         await this.close();
       }
