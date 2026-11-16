@@ -182,7 +182,12 @@ export function glideLine(
 export interface StackSegment {
   fraction: number;
   color: string;
+  /** Recede behind the segment someone is resting on. */
+  dim?: boolean;
 }
+
+/** How much of a dimmed segment still shows: enough to read its share, not to compete. */
+export const STACK_DIM = 0.38;
 
 /**
  * One capsule split into coloured runs, left to right, each run as long as
@@ -213,13 +218,25 @@ export function stackPixels(
   const x0 = radius;
   const x1 = width - radius;
   // Run boundaries in pixels; tiny shares still get one visible pixel.
-  const runs: { from: number; to: number; color: [number, number, number] }[] = [];
+  const runs: { from: number; to: number; color: [number, number, number]; alpha: number }[] = [];
   let at = 0;
   for (const segment of segments) {
     const share = Math.max(0, segment.fraction) / total;
     if (share <= 0) continue;
     const to = Math.min(width, Math.max(at + 1, at + share * width));
-    runs.push({ from: at, to, color: rgb(segment.color) });
+    const color = rgb(segment.color);
+    // On a painted ground a dim run is mixed toward it; on transparency it
+    // loses opacity instead, so either way it recedes by the same amount.
+    const mixed: [number, number, number] =
+      segment.dim && ground
+        ? [
+            Math.round(color[0] * STACK_DIM + ground[0] * (1 - STACK_DIM)),
+            Math.round(color[1] * STACK_DIM + ground[1] * (1 - STACK_DIM)),
+            Math.round(color[2] * STACK_DIM + ground[2] * (1 - STACK_DIM)),
+          ]
+        : color;
+    runs.push({ from: at, to, color: mixed, alpha: segment.dim && !ground ? STACK_DIM : 1 });
+
     at = to;
   }
   for (let y = 0; y < height; y++) {
@@ -245,13 +262,17 @@ export function stackPixels(
       pixels[i] = r;
       pixels[i + 1] = g;
       pixels[i + 2] = b;
-      pixels[i + 3] = Math.round(coverage * 255);
+      pixels[i + 3] = Math.round(coverage * run.alpha * 255);
     }
   }
   return pixels;
 }
 
-/** The text stack: each cell takes the colour of the share it falls in. */
+/**
+ * The text stack: each cell takes the colour of the share it falls in. A dim
+ * share is drawn with the lighter line, so the focus reads without any colour
+ * mixing and in every terminal.
+ */
 export function stackLine(width: number, segments: StackSegment[]): StyledText {
   const total = segments.reduce((sum, segment) => sum + Math.max(0, segment.fraction), 0);
   if (width <= 0 || total <= 0) return t`${" ".repeat(Math.max(0, width))}`;
@@ -262,7 +283,7 @@ export function stackLine(width: number, segments: StackSegment[]): StyledText {
     acc += Math.max(0, segment.fraction) / total;
     const end = index === segments.length - 1 ? width : Math.round(acc * width);
     const n = Math.max(0, end - cells);
-    if (n > 0) chunks.push(t`${fg(segment.color)("━".repeat(n))}`);
+    if (n > 0) chunks.push(t`${fg(segment.color)((segment.dim ? "─" : "━").repeat(n))}`);
     cells += n;
   });
   return new StyledText(chunks.flatMap((chunk) => chunk.chunks));
