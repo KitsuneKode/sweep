@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import type { ScanEvent, ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { ScanEvent, ScanPlan, StatusSummary } from "@kitsunekode/sweep-protocol";
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SWEEP = join(REPO_ROOT, "apps/cli/dist/sweep.js");
@@ -137,6 +137,25 @@ describe("CLI scan/apply", () => {
       }
     }
   }, 15_000);
+
+  test("status --json emits a small summary and never counts protected items", () => {
+    mkdirSync(dir("node_modules"));
+    writeFileSync(dir("node_modules", "a.bin"), "x".repeat(2048));
+    mkdirSync(dir("target"));
+    writeFileSync(dir("Cargo.toml"), "[package]\n");
+
+    const result = runCli(["status", tmpDir, "--json"]);
+
+    expect(result.exitCode).toBe(0);
+    const status = JSON.parse(result.stdout) as StatusSummary;
+    expect(status.protocolVersion).toBe("1");
+    expect(status.targetDir.length).toBeGreaterThan(0);
+    expect(status.reclaimableBytes).toBe(status.safeBytes + status.cautionBytes);
+    expect(status.kinds.map((entry) => entry.kind)).toContain("node_modules");
+    expect(status.idle.days).toBe(30);
+    // A summary, not a plan: no candidate list to parse.
+    expect(Object.hasOwn(status, "candidates")).toBe(false);
+  });
 
   test("scan --json emits a plan-shaped document with candidates", () => {
     mkdirSync(dir("node_modules"));
