@@ -1380,7 +1380,7 @@ test("the projects header follows the trash mode chosen in the review", async ()
   });
   expect(setup.captureCharFrame()).not.toContain("TRASH");
   await act(async () => {
-    setup.mockInput.pressKey("space");
+    setup.mockInput.pressKey(" ");
     await setup.flush();
     await setup.renderOnce();
   });
@@ -1395,7 +1395,7 @@ test("the projects header follows the trash mode chosen in the review", async ()
     await setup.renderOnce();
   });
   await act(async () => {
-    setup.mockInput.pressKey("escape");
+    setup.mockInput.pressEscape();
     await setup.flush();
     await setup.renderOnce();
   });
@@ -1522,4 +1522,74 @@ test("a scan error drops a removal review instead of restoring it", async () => 
   await paint();
   expect(setup.captureCharFrame()).not.toContain("Delete 1 item");
   expect(outcomes).toEqual([]);
+});
+
+async function press(setup: Awaited<ReturnType<typeof testRender>>, key: string) {
+  await act(async () => {
+    if (key === "escape") {
+      setup.mockInput.pressEscape();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    } else if (key === "tab") setup.mockInput.pressTab();
+    else if (key === "return") setup.mockInput.pressEnter();
+    else setup.mockInput.pressKey(key);
+    await setup.flush();
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+}
+
+test("projects view: tab stays on the one visible pane, and a key acts on what is shown", async () => {
+  const outcomes: SweepUiOutcome[] = [];
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={createPlan()} onDone={(r) => outcomes.push(r)} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await press(setup, "tab");
+  expect(setup.captureCharFrame()).toContain("one pane here");
+  await press(setup, " ");
+  // The space queued the project under the visible cursor, not a row of a
+  // sidebar nobody can see.
+  expect(setup.captureCharFrame()).toContain("queued");
+  expect(outcomes).toEqual([]);
+});
+
+test("projects view: esc closes an opened project before anything else", async () => {
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={createPlan()} onDone={() => {}} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  const before = setup.captureCharFrame();
+  await press(setup, "return");
+  const opened = setup.captureCharFrame();
+  expect(opened).not.toEqual(before);
+  await press(setup, "escape");
+  const closed = setup.captureCharFrame();
+  expect(closed).not.toContain("nothing to unwind");
+  expect(closed).toEqual(before);
+});
+
+test("projects view: a tier carried over from the full view is named where the total is", async () => {
+  const setup = await testRender(
+    <SweepApp initialView="folders" plan={createPlan()} onDone={() => {}} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await press(setup, "4");
+  await press(setup, "b");
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("dangerous only");
+  expect(frame).toContain("esc clears");
 });

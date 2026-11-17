@@ -36,6 +36,12 @@ export interface ProjectsViewProps {
   trash?: boolean;
   filter: string;
   searchFocused: boolean;
+  /**
+   * Filters that narrow this list without being typed here (a risk tier or a
+   * folder scope carried over from the full view). Said in the answer line, so
+   * a total is never read as the whole scan.
+   */
+  narrowing?: string | undefined;
   /** One line under the list: a notice when there is one, else the key hints. */
   footer: ReactNode;
   /** What the last removal gave back; the answer line says it until the next queue. */
@@ -252,13 +258,23 @@ export function ProjectsView(props: ProjectsViewProps) {
   )}${fg(tokens.textMuted)(` idle ${IDLE_WINDOW_DAYS}+ days, `)}${fg(tokens.accent)("i")}${fg(
     tokens.textMuted,
   )(" queues it")}`;
+  const narrowingHint = props.narrowing
+    ? t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.warning)(
+        clipCells(
+          sanitizeTerminalText(props.narrowing),
+          Math.max(8, inner - styledWidth(answer) - 14),
+          true,
+        ),
+      )}${fg(tokens.textMuted)(" · ")}${fg(tokens.text)("esc")}${fg(tokens.textMuted)(" clears")}`
+    : null;
+  const answerBase = narrowingHint ? concatStyled(answer, narrowingHint) : answer;
   const answerLine =
     props.selectedCount === 0 &&
     !scanning &&
     props.idleBytes > 0 &&
-    styledWidth(answer) + styledWidth(idleHint) <= inner
-      ? concatStyled(answer, idleHint)
-      : answer;
+    styledWidth(answerBase) + styledWidth(idleHint) <= inner
+      ? concatStyled(answerBase, idleHint)
+      : answerBase;
 
   // ── Rows ────────────────────────────────────────────────────────────────
   const line = (index: number, row: ProjectRow): RowParts => {
