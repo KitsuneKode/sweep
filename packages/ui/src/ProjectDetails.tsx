@@ -126,7 +126,7 @@ export function ProjectDetails({
       )}
       <text content="" />
       <text
-        content={t`${fg(tokens.textSecondary)(`${formatBytes(project.bytes)} in ${project.artifacts.length} item${project.artifacts.length === 1 ? "" : "s"}`)}`}
+        content={t`${fg(tokens.textSecondary)(`${formatBytes(project.queueableBytes)} reclaimable${project.guardedBytes > 0 ? ` · ${formatBytes(project.guardedBytes)} guarded` : ""} · ${project.artifacts.length} item${project.artifacts.length === 1 ? "" : "s"}`)}`}
         wrapMode="none"
       />
       <StackBar

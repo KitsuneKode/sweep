@@ -88,6 +88,8 @@ export interface LedgerReceipt {
   failed: number;
   unattempted: number;
   freedBytes: number;
+  /** Measured change in free space on the volume; absent when it could not be read. */
+  diskGained?: number | undefined;
   trash: boolean;
   stopped: boolean;
 }

@@ -1646,3 +1646,31 @@ test("projects view: an empty scan says what is opt-in", async () => {
   });
   expect(setup.captureCharFrame()).toContain("coverage are opt-in");
 });
+
+test("projects view: guarded bytes are named but never added to the total", async () => {
+  const plan = createPlan();
+  plan.candidates.push({
+    ...plan.candidates[0]!,
+    id: "cand_guarded",
+    path: "/tmp/sweep-ui/.env.d",
+    name: ".env.d",
+    estimatedBytes: 9000,
+    riskTier: "dangerous",
+    selectedByDefault: false,
+  });
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={plan} onDone={() => {}} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  const frame = setup.captureCharFrame();
+  // 1 KiB safe + 4 KiB caution; the 8.8 KiB guarded item is beside it.
+  expect(frame).toContain("5.0 KiB you can reclaim");
+  expect(frame).toContain("+8.8 KiB guarded");
+});

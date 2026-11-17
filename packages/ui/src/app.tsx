@@ -1427,6 +1427,9 @@ export function SweepApp({
     projectCursorRef.current = index;
     setProjectCursorState(index);
   };
+  // The volume as it was before the last apply: `disk` only re-reads after a
+  // scan or an apply, so during one it still holds the earlier reading.
+  const diskRef = useRef<DiskSpace | null>(null);
   const disk = useMemo((): DiskSpace | null => {
     try {
       const stats = statfsSync(state.targetDir);
@@ -1436,6 +1439,7 @@ export function SweepApp({
     }
     // Re-read after a scan or an apply, not on every keystroke.
   }, [state.targetDir, state.scanning, receipt]);
+  diskRef.current = disk;
 
   /**
    * Keys the projects view owns. Everything else (search, help, actions,
@@ -1774,7 +1778,18 @@ export function SweepApp({
           const merged = mergeApplyReport(stateRef.current, result.report);
           dispatch({ type: "replace", state: merged.state });
           const stopped = result.interrupted || merged.interrupted || merged.unattempted > 0;
+          // What the disk actually gained, next to the estimate: hardlinked
+          // installs (pnpm, bun) and other volumes free less than they weigh.
+          let diskGained: number | undefined;
+          try {
+            const before = diskRef.current;
+            const after = statfsSync(stateRef.current.targetDir);
+            if (before && !result.trashDir) diskGained = after.bavail * after.bsize - before.free;
+          } catch {
+            diskGained = undefined;
+          }
           setReceipt({
+            ...(diskGained !== undefined ? { diskGained } : {}),
             removed: merged.removedIds.length,
             failed: merged.failed,
             unattempted: merged.unattempted,
@@ -2821,6 +2836,9 @@ export function SweepApp({
             scanning={state.scanning}
             sizedLabel={`scanning  ${state.scanSizedCount.toLocaleString()} of ${state.candidates.length.toLocaleString()} sized`}
             reclaimableBytes={projects.reduce((sum, project) => sum + project.queueableBytes, 0)}
+            guardedBytes={projects.reduce((sum, project) => sum + project.guardedBytes, 0)}
+            partial={projects.some((project) => project.partial)}
+            incomplete={state.scanIncomplete}
             projectCount={projects.length}
             idleBytes={idleSafeBytes}
             selectedBytes={summary.selectedBytes}

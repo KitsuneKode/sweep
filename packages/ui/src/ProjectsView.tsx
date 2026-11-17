@@ -8,7 +8,7 @@ import { Meter, ScanMeter, useCountUp } from "./Meter.js";
 import { useMotionEnabled } from "./motion.js";
 import { ProjectDetails } from "./ProjectDetails.js";
 import { concatStyled, QUEUE_GLYPH, queueState } from "./presentation.js";
-import { SECTION_TITLE, type Project, type ProjectRow } from "./projects.js";
+import { SECTION_TITLE, diskGainedText, type Project, type ProjectRow } from "./projects.js";
 import { cellWidth, clipCells, clipStart } from "./text-cells.js";
 import { mixHex, type ThemeTokens } from "./theme.js";
 
@@ -24,6 +24,12 @@ export interface ProjectsViewProps {
   /** 0..1, already monotonic. */
   sizedLabel: string;
   reclaimableBytes: number;
+  /** Dangerous and blocked bytes: found, never part of the total above. */
+  guardedBytes?: number | undefined;
+  /** Some sizes are still being measured (a "~" on the total). */
+  partial?: boolean | undefined;
+  /** The scan stopped short: whatever is shown is not the whole tree. */
+  incomplete?: boolean | undefined;
   /** Safe bytes in projects idle 30+ days: the easy win, one key away. */
   idleBytes: number;
   projectCount: number;
@@ -57,6 +63,8 @@ export interface ProjectsViewProps {
 
 export interface ProjectsReceipt {
   freedBytes: number;
+  /** Measured change in free space on the volume; absent when it could not be read. */
+  diskGained?: number | undefined;
   removed: number;
   failed: number;
   trash: boolean;
@@ -86,11 +94,12 @@ function ReceiptLine({
     plural(receipt.removed, "item"),
     receipt.failed > 0 ? `${receipt.failed} failed` : "",
     receipt.stopped ? "stopped early" : "",
+    receipt.diskGained !== undefined && !receipt.trash ? diskGainedText(receipt) : "",
     diskFree !== null && !receipt.trash ? `${formatBytes(diskFree)} free now` : "",
   ].filter(Boolean);
   return (
     <text
-      content={t`${mark}${bold(fg(clean ? tokens.positive : tokens.text)(formatBytes(Math.round(counted))))}${fg(tokens.text)(verb)}${fg(tokens.textMuted)(`  ·  ${rest.join("  ·  ")}`)}`}
+      content={t`${mark}${bold(fg(clean ? tokens.positive : tokens.text)(`~${formatBytes(Math.round(counted))}`))}${fg(tokens.text)(verb)}${fg(tokens.textMuted)(`  ·  ${rest.join("  ·  ")}`)}`}
       wrapMode="none"
     />
   );
@@ -201,7 +210,7 @@ export function ProjectsView(props: ProjectsViewProps) {
   );
   const detailW = Math.max(0, inner - LEAD - nameW - 2 - SIZE_W - 2 - barGap - IDLE_W - 3);
   // One scale for every project row, so lengths compare down the list.
-  const largest = Math.max(1, ...projectRows.map((project) => project.bytes));
+  const largest = Math.max(1, ...projectRows.map((project) => project.queueableBytes));
   // Risk is its own column when any row carries it, so what follows lines up.
   const riskColW = Math.max(
     0,
@@ -241,6 +250,9 @@ export function ProjectsView(props: ProjectsViewProps) {
     ),
   )}`;
 
+  // A total is exact only once every size is measured and the scan finished
+  // whole: until then it says "~" (or "so far"), and an incomplete scan says so.
+  const approx = scanning || props.partial || props.incomplete ? "~" : "";
   const answer =
     props.selectedCount > 0
       ? t`${bold(fg(tokens.accent)(formatBytes(props.selectedBytes)))}${fg(tokens.text)(
@@ -249,8 +261,10 @@ export function ProjectsView(props: ProjectsViewProps) {
           tokens.text,
         )("c")}${fg(tokens.textMuted)(" to review")}`
       : props.reclaimableBytes > 0 || !scanning
-        ? t`${bold(fg(tokens.text)(formatBytes(props.reclaimableBytes)))}${fg(tokens.text)(
-            " you can reclaim",
+        ? t`${bold(fg(tokens.text)(`${approx}${formatBytes(props.reclaimableBytes)}`))}${fg(
+            tokens.text,
+          )(
+            scanning ? " so far" : " you can reclaim",
           )}${fg(tokens.textMuted)(`  ·  ${plural(props.projectCount, "project")}`)}`
         : t`${fg(tokens.textMuted)("Looking for build output…")}`;
   // The easy win, named and one key away - only when it fits whole.
@@ -268,7 +282,21 @@ export function ProjectsView(props: ProjectsViewProps) {
         ),
       )}${fg(tokens.textMuted)(" · ")}${fg(tokens.text)("esc")}${fg(tokens.textMuted)(" clears")}`
     : null;
-  const answerBase = narrowingHint ? concatStyled(answer, narrowingHint) : answer;
+  const guardedHint =
+    props.selectedCount === 0 && !scanning && (props.guardedBytes ?? 0) > 0
+      ? t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.textDim)(
+          `+${formatBytes(props.guardedBytes ?? 0)} guarded`,
+        )}`
+      : null;
+  const incompleteHint =
+    props.incomplete && !scanning
+      ? t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.warning)("scan incomplete")}${fg(tokens.textMuted)(" · ")}${fg(tokens.text)("r")}${fg(tokens.textMuted)(" retries")}`
+      : null;
+  let answerBase = answer;
+  for (const extra of [incompleteHint, guardedHint, narrowingHint]) {
+    if (extra && styledWidth(answerBase) + styledWidth(extra) <= inner)
+      answerBase = concatStyled(answerBase, extra);
+  }
   const answerLine =
     props.selectedCount === 0 &&
     !scanning &&
@@ -286,8 +314,19 @@ export function ProjectsView(props: ProjectsViewProps) {
       const label = SECTION_TITLE[row.section];
       // Whole parts drop, never characters: the count goes first, the size
       // is what the section is for.
-      const full = `${plural(row.count, "project")}  ·  ${formatBytes(row.bytes)}`;
-      const meta = cellWidth(label) + 2 + cellWidth(full) <= inner ? full : formatBytes(row.bytes);
+      // Reclaimable only (safe + caution): the same number the top line uses.
+      // What is guarded is named after it, never added to it.
+      const size = formatBytes(row.bytes);
+      const guard = row.guardedBytes > 0 ? `  ·  +${formatBytes(row.guardedBytes)} guarded` : "";
+      const fits = (text: string) => cellWidth(label) + 2 + cellWidth(text) <= inner;
+      const full = `${plural(row.count, "project")}  ·  ${size}`;
+      const meta = fits(`${full}${guard}`)
+        ? `${full}${guard}`
+        : fits(full)
+          ? full
+          : fits(`${size}${guard}`) && guard
+            ? `${size}${guard}`
+            : size;
       const gap = Math.max(2, inner - cellWidth(label) - cellWidth(meta));
       return {
         lead: t`${bold(fg(tokens.textSecondary)(label))}${" ".repeat(gap)}${fg(tokens.textMuted)(meta)}`,
@@ -323,7 +362,7 @@ export function ProjectsView(props: ProjectsViewProps) {
         : fg(tokens.textDim)("·");
       const nameText = padCells(clipCells(sanitizeTerminalText(p.name), nameW, true), nameW);
       const name = isCursor ? bold(fg(tokens.text)(nameText)) : fg(tokens.text)(nameText);
-      const size = `${p.partial ? "~" : ""}${formatBytes(p.bytes)}`.padStart(SIZE_W);
+      const size = `${p.partial ? "~" : ""}${formatBytes(p.queueableBytes)}`.padStart(SIZE_W);
       const idle = formatAge(p.activeMs, now).padStart(IDLE_W);
       const recent = p.activeMs !== undefined && now - p.activeMs < RECENT_WINDOW_MS;
       // Risk leads the detail when there is any: it changes what Space does
@@ -346,7 +385,7 @@ export function ProjectsView(props: ProjectsViewProps) {
         ...(barW > 0
           ? {
               bar: {
-                fraction: p.bytes / largest,
+                fraction: p.queueableBytes / largest,
                 color: state === "all" ? tokens.accent : isCursor ? barStrong : barSoft,
               },
             }

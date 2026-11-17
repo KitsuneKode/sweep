@@ -1,6 +1,7 @@
 import { basename, dirname } from "node:path";
 import { IDLE_WINDOW_DAYS, IDLE_WINDOW_MS, type ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { lastActiveMs } from "./age.js";
+import { formatBytes } from "@kitsunekode/sweep-display";
 
 /**
  * The projects view: one row per project, sorted into what nobody is using
@@ -27,8 +28,13 @@ export interface Project {
   section: ProjectSection;
   activeMs: number | undefined;
   bytes: number;
-  /** Bytes that a project-level queue would take: safe and caution only. */
+  /**
+   * Bytes that a project-level queue would take: safe and caution only. This
+   * is the one number the view calls reclaimable, everywhere it is shown.
+   */
   queueableBytes: number;
+  /** Dangerous and blocked bytes: found, never counted as space to free. */
+  guardedBytes: number;
   partial: boolean;
   artifacts: ScanCandidate[];
   /** Ids a project-level space queues: never dangerous or blocked. */
@@ -41,7 +47,14 @@ export interface Project {
 }
 
 export type ProjectRow =
-  | { kind: "section"; section: ProjectSection; bytes: number; count: number }
+  | {
+      kind: "section";
+      section: ProjectSection;
+      /** Reclaimable (safe + caution) bytes of the members. */
+      bytes: number;
+      guardedBytes: number;
+      count: number;
+    }
   | { kind: "project"; project: Project }
   | { kind: "artifact"; project: Project; candidate: ScanCandidate }
   | { kind: "more"; section: ProjectSection; count: number; bytes: number }
@@ -110,6 +123,9 @@ export function buildProjects(
       queueableBytes: artifacts
         .filter((c) => c.riskTier === "safe" || c.riskTier === "caution")
         .reduce((sum, c) => sum + c.estimatedBytes, 0),
+      guardedBytes: artifacts
+        .filter((c) => c.riskTier === "dangerous" || c.riskTier === "blocked")
+        .reduce((sum, c) => sum + c.estimatedBytes, 0),
       partial: artifacts.some((c) => c.bytesKnown === false),
       artifacts,
       queueable,
@@ -119,7 +135,8 @@ export function buildProjects(
       dangerous: artifacts.filter((c) => c.riskTier === "dangerous").length,
     });
   }
-  return projects.sort((a, b) => b.bytes - a.bytes);
+  // Largest reclaimable first: the order matches the size on the row.
+  return projects.sort((a, b) => b.queueableBytes - a.queueableBytes || b.bytes - a.bytes);
 }
 
 const SECTION_ORDER: ProjectSection[] = ["idle", "recent", "unknown"];
@@ -139,7 +156,8 @@ export function buildProjectRows(
     rows.push({
       kind: "section",
       section,
-      bytes: members.reduce((sum, project) => sum + project.bytes, 0),
+      bytes: members.reduce((sum, project) => sum + project.queueableBytes, 0),
+      guardedBytes: members.reduce((sum, project) => sum + project.guardedBytes, 0),
       count: members.length,
     });
     // The biggest few first; the long tail of small projects waits behind one row.
@@ -169,7 +187,7 @@ export function buildProjectRows(
         kind: "more",
         section,
         count: folded.length,
-        bytes: folded.reduce((sum, project) => sum + project.bytes, 0),
+        bytes: folded.reduce((sum, project) => sum + project.queueableBytes, 0),
       });
     }
   }
@@ -200,4 +218,20 @@ export function moveCursor(rows: readonly ProjectRow[], cursor: number, delta: n
 export function settleCursor(rows: readonly ProjectRow[], cursor: number): number {
   if (isFocusable(rows[cursor])) return cursor;
   return moveCursor(rows, Math.min(cursor, rows.length - 1), 0);
+}
+
+/**
+ * The disk's own answer beside the estimate. Far less than estimated is said
+ * out loud: hardlinked installs and other volumes free less than they weigh.
+ */
+export function diskGainedText(receipt: {
+  freedBytes: number;
+  diskGained?: number | undefined;
+}): string {
+  const gained = receipt.diskGained ?? 0;
+  if (gained < 0) return "";
+  const text = `disk +${formatBytes(gained)}`;
+  return receipt.freedBytes > 0 && gained < receipt.freedBytes * 0.5
+    ? `${text} (hardlinks or another volume)`
+    : text;
 }
