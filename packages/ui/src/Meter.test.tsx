@@ -3,7 +3,14 @@ import { CliRenderer } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
 import { Meter } from "./Meter.js";
-import { meterLine, meterPixels, releaseMeterImages, stackPixels } from "./meter-draw.js";
+import {
+  meterLine,
+  meterPixels,
+  releaseMeterImages,
+  STACK_DIM,
+  stackLine,
+  stackPixels,
+} from "./meter-draw.js";
 
 const capabilities = Object.getOwnPropertyDescriptor(CliRenderer.prototype, "capabilities")!;
 const resolution = Object.getOwnPropertyDescriptor(CliRenderer.prototype, "resolution")!;
@@ -92,6 +99,44 @@ describe("stackPixels", () => {
     expect(at(pixels, width, 150, mid)).toEqual([0, 0, 0, 255]);
     // Every pixel is opaque on a painted ground: kitty shows no box around it.
     for (let i = 3; i < pixels.length; i += 4) expect(pixels[i]).toBe(255);
+  });
+
+  test("a dim run recedes toward the ground and the rest keep their colour", () => {
+    const width = 200;
+    const height = 20;
+    const pixels = stackPixels(
+      width,
+      height,
+      [
+        { fraction: 3, color: "#ff0000" },
+        { fraction: 1, color: "#0000ff", dim: true },
+      ],
+      0.5,
+      "#000000",
+    );
+    const mid = height / 2;
+    expect(at(pixels, width, 75, mid)).toEqual([255, 0, 0, 255]);
+    expect(at(pixels, width, 175, mid)).toEqual([0, 0, Math.round(255 * STACK_DIM), 255]);
+  });
+
+  test("a dim run on transparency loses opacity, not colour", () => {
+    const width = 200;
+    const height = 20;
+    const pixels = stackPixels(width, height, [
+      { fraction: 1, color: "#ff0000" },
+      { fraction: 1, color: "#0000ff", dim: true },
+    ]);
+    const mid = height / 2;
+    expect(at(pixels, width, 50, mid)[3]).toBe(255);
+    expect(at(pixels, width, 150, mid)).toEqual([0, 0, 255, Math.round(255 * STACK_DIM)]);
+  });
+
+  test("text: a dim share is the lighter line", () => {
+    const line = stackLine(10, [
+      { fraction: 1, color: "#ff0000" },
+      { fraction: 1, color: "#0000ff", dim: true },
+    ]);
+    expect(line.chunks.map((chunk) => chunk.text).join("")).toBe("━━━━━─────");
   });
 
   test("nothing to split draws nothing", () => {

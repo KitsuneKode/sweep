@@ -82,6 +82,7 @@ sweep init                   # look around, then write a .sweeprc from your answ
 | `sweep` / `sweep clean`       | Scan, show what would go, confirm, remove                  |
 | `sweep ui`                    | Interactive review; `--view full` opens the folder view    |
 | `sweep scan`                  | Scan only; `--json` for a plan, `--json-stream` for events |
+| `sweep status`                | What you could free now: sizes, idle projects; `--json`    |
 | `sweep plan`                  | Write a saved plan to stdout for a later `apply`           |
 | `sweep apply --plan <file>`   | Apply a saved plan after re-checking every path            |
 | `sweep inspect --plan <file>` | Show a plan's contents and totals without applying it      |

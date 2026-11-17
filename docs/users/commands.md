@@ -10,6 +10,7 @@ the options supported by your installed version.
 | Command                          | What it does                                    |
 | -------------------------------- | ----------------------------------------------- |
 | `sweep scan .`                   | Lists candidates without deleting               |
+| `sweep status .`                 | What could be freed now, summarised; `--json`   |
 | `sweep plan .`                   | Writes a saved-plan JSON document to stdout     |
 | `sweep ui .`                     | Opens the interactive review UI                 |
 | `sweep clean .` or `sweep .`     | Scans, selects, confirms, and applies           |
@@ -19,6 +20,17 @@ the options supported by your installed version.
 | `sweep doctor .`                 | Reports configuration, environment and dry scan |
 | `sweep stats`                    | Shows retained cleanup history                  |
 | `sweep completions zsh`          | Prints completions; also supports bash and fish |
+
+## Status for scripts and widgets
+
+`sweep status . --json` is a scan boiled down to a few hundred bytes: what could
+be freed, which kinds hold it (`node_modules`, `target`, `.next`), the idle
+projects holding the most, and how many items are protected. Only safe and
+caution items count as space; dangerous and blocked ones are reported as
+`protectedCount` and never added to a size. A project whose last activity could
+not be read is not called idle. `idle.kinds` says what the idle bytes are made of,
+so a bar drawn from it adds up to the idle total. `--idle <age>` sets the idle window here (30
+days by default). It is read-only.
 
 ## Save and review
 

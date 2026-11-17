@@ -93,6 +93,10 @@ export function ProjectDetails({
     (entry) => `${entry.cost === "unknown" ? "custom" : entry.cost} ${formatBytes(entry.bytes)}`,
   );
   const hidden = facts.groups.length - groups.length;
+  // Rest on a kind and its share of the bar is the one that stays lit.
+  const focusCost = facts.groups.find((group) => group.name === focusName)?.rebuild.cost;
+  const focused =
+    focusCost === undefined ? -1 : byCost.findIndex((entry) => entry.cost === focusCost);
 
   return (
     <Margin tokens={tokens} width={width} height={height}>
@@ -127,14 +131,20 @@ export function ProjectDetails({
       />
       <StackBar
         width={inner}
-        segments={byCost.map((entry) => ({ fraction: entry.bytes, color: costColor[entry.cost] }))}
+        segments={byCost.map((entry, index) => ({
+          fraction: entry.bytes,
+          color: costColor[entry.cost],
+          ...(focused >= 0 && index !== focused ? { dim: true } : {}),
+        }))}
         background={tokens.bg}
       />
       <text
         content={concatStyled(
           ...byCost.flatMap((entry, index) => [
             t`${fg(tokens.textDim)(index > 0 ? "  " : "")}`,
-            t`${fg(costColor[entry.cost])(costKey[index] ?? "")}`,
+            index === focused
+              ? t`${bold(fg(costColor[entry.cost])(costKey[index] ?? ""))}`
+              : t`${fg(costColor[entry.cost])(costKey[index] ?? "")}`,
           ]),
         )}
         wrapMode="none"
