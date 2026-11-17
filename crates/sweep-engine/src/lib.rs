@@ -7,7 +7,6 @@ pub mod git_index;
 mod guardrails;
 
 use camino::Utf8Path;
-use chrono::SecondsFormat;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
@@ -375,7 +374,41 @@ fn build_plan(
 }
 
 fn iso_timestamp_now() -> String {
-    chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+    let since_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    iso_timestamp(since_epoch.as_millis())
+}
+
+/// RFC 3339 UTC with millisecond precision (`2026-11-17T09:30:00.123Z`), the
+/// same shape JavaScript's `Date#toISOString` writes. Kept in std so the
+/// engine carries no date-time crate for one string.
+fn iso_timestamp(epoch_millis: u128) -> String {
+    let millis = (epoch_millis % 1000) as u32;
+    let secs = (epoch_millis / 1000) as u64;
+    let (days, secs_of_day) = (secs / 86_400, secs % 86_400);
+    let (year, month, day) = civil_from_days(days as i64);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",
+        secs_of_day / 3600,
+        secs_of_day % 3600 / 60,
+        secs_of_day % 60,
+    )
+}
+
+/// Days since 1970-01-01 to a proleptic Gregorian (year, month, day).
+/// Howard Hinnant's `civil_from_days`.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (year, month, day)
 }
 
 /// Match JavaScript string.length units even for non-ASCII fields. Paths use
@@ -929,5 +962,22 @@ mod tests {
             Err(EngineError::Guardrail(GuardrailError::UnsupportedProtocolVersion { .. })) => {}
             other => panic!("expected unsupported protocol version, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn iso_timestamp_matches_known_instants() {
+        assert_eq!(iso_timestamp(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso_timestamp(951_782_400_000), "2000-02-29T00:00:00.000Z");
+        assert_eq!(iso_timestamp(1_709_164_800_123), "2024-02-29T00:00:00.123Z");
+        assert_eq!(iso_timestamp(4_102_444_799_999), "2099-12-31T23:59:59.999Z");
+        assert_eq!(iso_timestamp(4_107_542_400_000), "2100-03-01T00:00:00.000Z");
+        assert_eq!(iso_timestamp(1_795_001_234_567), "2026-11-18T11:27:14.567Z");
+    }
+
+    #[test]
+    fn iso_timestamp_now_has_the_javascript_shape() {
+        let now = iso_timestamp_now();
+        assert_eq!(now.len(), 24, "{now}");
+        assert!(now.ends_with('Z') && now.as_bytes()[10] == b'T' && now.as_bytes()[19] == b'.');
     }
 }

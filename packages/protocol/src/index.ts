@@ -343,6 +343,38 @@ export type ScanEvent =
   | WarningEvent
   | ScanCompletedEvent;
 
+/**
+ * What a scan comes to, without the candidates: the answer a status line, a
+ * widget or a script wants. `sweep status --json` emits it.
+ */
+export interface StatusSummary {
+  protocolVersion: typeof PROTOCOL_VERSION;
+  targetDir: string;
+  createdAt: string;
+  scannedDirs: number;
+  /** Safe and caution bytes: what removal could give back. Never counts dangerous or blocked. */
+  reclaimableBytes: number;
+  safeBytes: number;
+  cautionBytes: number;
+  /** Dangerous and blocked items: found, never offered as space to free. */
+  protectedCount: number;
+  /**
+   * Projects untouched for at least `days`, by their removable bytes. A project
+   * whose last activity could not be read is not idle: unknown is not idle.
+   */
+  idle: {
+    days: number;
+    projects: number;
+    bytes: number;
+    /** What the idle bytes are made of, largest first; sums to `bytes` unless the list was cut. */
+    kinds: { kind: string; bytes: number; count: number }[];
+  };
+  /** Removable bytes by kind, largest first (node_modules, target, .next...). */
+  kinds: { kind: string; bytes: number; count: number }[];
+  /** The idle projects holding the most, largest first. */
+  projects: { name: string; path: string; bytes: number; idleDays: number }[];
+}
+
 export interface ScanPlan {
   protocolVersion: typeof PROTOCOL_VERSION;
   targetDir: string;

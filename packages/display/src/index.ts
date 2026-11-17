@@ -1,5 +1,5 @@
 import pc from "picocolors";
-import type { ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { ScanCandidate, ScanPlan, StatusSummary } from "@kitsunekode/sweep-protocol";
 import { sanitizeMultilineTerminalText, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes, formatScanElapsed } from "./bytes.js";
 import { groupCandidatesByKind } from "./grouping.js";
@@ -417,6 +417,49 @@ export interface StatsTotals {
   totalDeleted: number;
   totalBytesFreed: number;
   totalFailed: number;
+}
+
+/** `sweep status` - what could be freed now, answer first. */
+export function printStatusSummary(status: StatusSummary): void {
+  if (status.reclaimableBytes === 0) {
+    console.log(pc.dim("  Nothing to free here."));
+    return;
+  }
+  const idle =
+    status.idle.projects > 0
+      ? pc.dim(
+          ` · ${formatBytes(status.idle.bytes)} in ${status.idle.projects} project${
+            status.idle.projects === 1 ? "" : "s"
+          } idle ${status.idle.days}+ days`,
+        )
+      : "";
+  console.log(`  ${pc.bold(pc.green(formatBytes(status.reclaimableBytes)))} you could free${idle}`);
+  if (status.protectedCount > 0) {
+    console.log(
+      pc.dim(`  ${status.protectedCount} protected item(s) found, never counted as space to free`),
+    );
+  }
+  console.log();
+  const width = Math.max(0, ...status.kinds.map((entry) => entry.kind.length));
+  for (const entry of status.kinds) {
+    console.log(
+      `  ${sanitizeTerminalText(entry.kind).padEnd(width)}  ${formatBytes(entry.bytes).padStart(9)}  ${pc.dim(
+        `${entry.count} item${entry.count === 1 ? "" : "s"}`,
+      )}`,
+    );
+  }
+  if (status.projects.length > 0) {
+    console.log();
+    console.log(pc.dim(`  Idle ${status.idle.days}+ days`));
+    const nameWidth = Math.max(0, ...status.projects.map((project) => project.name.length));
+    for (const project of status.projects) {
+      console.log(
+        `  ${sanitizeTerminalText(project.name).padEnd(nameWidth)}  ${formatBytes(project.bytes).padStart(9)}  ${pc.dim(
+          `${project.idleDays} days`,
+        )}`,
+      );
+    }
+  }
 }
 
 /** `sweep stats` - retained estimated cleanup bytes plus recent sessions. */

@@ -19,6 +19,7 @@ import { handleInit } from "./handlers/init.js";
 import { handleInspect } from "./handlers/inspect.js";
 import { handlePlan } from "./handlers/plan.js";
 import { handleScan } from "./handlers/scan.js";
+import { handleStatus } from "./handlers/status.js";
 import { handleStats } from "./handlers/stats.js";
 import { handleRecover } from "./handlers/recover.js";
 import { handleUi } from "./handlers/ui.js";
@@ -213,6 +214,14 @@ export function makeProgram(): Command {
         pathArg,
         this.optsWithGlobals<CliOptions & { json?: boolean; jsonStream?: boolean }>(),
       );
+    });
+
+  program
+    .command("status")
+    .description("What could be freed now: sizes, idle projects, what is protected")
+    .argument("[path]", "Directory to scan", ".")
+    .action(function (this: Command, pathArg: string) {
+      void handleStatus(pathArg, this.optsWithGlobals<CliOptions & { json?: boolean }>());
     });
 
   program
