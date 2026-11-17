@@ -28,7 +28,8 @@ be freed, which kinds hold it (`node_modules`, `target`, `.next`), the idle
 projects holding the most, and how many items are protected. Only safe and
 caution items count as space; dangerous and blocked ones are reported as
 `protectedCount` and never added to a size. A project whose last activity could
-not be read is not called idle. `--idle <age>` sets the idle window here (30
+not be read is not called idle. `idle.kinds` says what the idle bytes are made of,
+so a bar drawn from it adds up to the idle total. `--idle <age>` sets the idle window here (30
 days by default). It is read-only.
 
 ## Save and review

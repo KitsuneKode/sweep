@@ -362,7 +362,13 @@ export interface StatusSummary {
    * Projects untouched for at least `days`, by their removable bytes. A project
    * whose last activity could not be read is not idle: unknown is not idle.
    */
-  idle: { days: number; projects: number; bytes: number };
+  idle: {
+    days: number;
+    projects: number;
+    bytes: number;
+    /** What the idle bytes are made of, largest first; sums to `bytes` unless the list was cut. */
+    kinds: { kind: string; bytes: number; count: number }[];
+  };
   /** Removable bytes by kind, largest first (node_modules, target, .next...). */
   kinds: { kind: string; bytes: number; count: number }[];
   /** The idle projects holding the most, largest first. */

@@ -101,7 +101,18 @@ describe("summarizeStatus", () => {
       ]),
       NOW,
     );
-    expect(s.idle).toEqual({ days: 30, projects: 1, bytes: 6 * GB });
+    expect(s.idle).toEqual({
+      days: 30,
+      projects: 1,
+      bytes: 6 * GB,
+      // Only the old project's kinds: the fresh and unknown ones are not idle,
+      // so a bar drawn from these adds up to the headline number.
+      kinds: [
+        { kind: "node_modules", bytes: 4 * GB, count: 1 },
+        { kind: "target", bytes: 2 * GB, count: 1 },
+      ],
+    });
+    expect(s.idle.kinds.reduce((sum, k) => sum + k.bytes, 0)).toBe(s.idle.bytes);
     expect(s.projects).toEqual([{ name: "old", path: "/p/old", bytes: 6 * GB, idleDays: 212 }]);
   });
 
