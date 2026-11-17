@@ -143,7 +143,8 @@ function kindSummary(project: Project, width: number): string {
     const text = `${project.kinds.slice(0, count).join(" · ")}${rest > 0 ? ` +${rest}` : ""}`;
     if (cellWidth(text) <= width) return text;
   }
-  return clipCells(project.kinds[0] ?? "", width);
+  // A one- or two-letter stub ("n…") says nothing; leave the column empty.
+  return width >= 6 ? clipCells(project.kinds[0] ?? "", width) : "";
 }
 
 /**
@@ -283,7 +284,10 @@ export function ProjectsView(props: ProjectsViewProps) {
     if (row.kind === "spacer") return { lead: t`` };
     if (row.kind === "section") {
       const label = SECTION_TITLE[row.section];
-      const meta = `${plural(row.count, "project")}  ·  ${formatBytes(row.bytes)}`;
+      // Whole parts drop, never characters: the count goes first, the size
+      // is what the section is for.
+      const full = `${plural(row.count, "project")}  ·  ${formatBytes(row.bytes)}`;
+      const meta = cellWidth(label) + 2 + cellWidth(full) <= inner ? full : formatBytes(row.bytes);
       const gap = Math.max(2, inner - cellWidth(label) - cellWidth(meta));
       return {
         lead: t`${bold(fg(tokens.textSecondary)(label))}${" ".repeat(gap)}${fg(tokens.textMuted)(meta)}`,
@@ -483,7 +487,9 @@ export function ProjectsView(props: ProjectsViewProps) {
                   ? "Nothing yet. Projects appear here as they are found."
                   : filter
                     ? "No project matches. Esc clears the search."
-                    : "Nothing to clean here.",
+                    : props.narrowing
+                      ? `Nothing here for ${props.narrowing}. Esc clears it.`
+                      : "Nothing to clean here. dist, out and coverage are opt-in: b, then p adds them.",
               )}`}
             />
           ) : (
