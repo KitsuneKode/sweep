@@ -734,7 +734,7 @@ export class DiscoveryIndexSession {
         }
         if (++visited % 256 === 0) {
           await setImmediate();
-          this.summary;
+          void this.summary;
         }
       }
       const ordered = [...groups.entries()].sort(
@@ -891,7 +891,7 @@ export class DiscoveryIndexSession {
         }
         if (++visited % 256 === 0) {
           await setImmediate();
-          this.summary; // Cancel/close invalidates preparation before transport.
+          void this.summary; // Cancel/close invalidates preparation before transport.
         }
       }
       expected.selectedBytesPartial = partialCount > 0;
@@ -1054,7 +1054,7 @@ export class DiscoveryIndexSession {
 
   /** Construct an explicit single-row plan without changing the global queue. */
   planForCandidate(candidate: ScanCandidate): ScanPlan {
-    this.summary; // Closed generations cannot authorize a fresh review plan.
+    void this.summary; // Closed generations cannot authorize a fresh review plan.
     const witness = this.witnesses.get(candidate.id);
     if (!witness || witness.risk === "blocked" || digest(candidate) !== witness.digest)
       throw new DiscoveryIndexError(
@@ -1066,7 +1066,7 @@ export class DiscoveryIndexSession {
 
   /** Bind a host-validated explicit apply plan to this active review generation. */
   assertReviewedPlan(plan: ScanPlan): void {
-    this.summary;
+    void this.summary;
     validatePlan(plan);
     const candidateIds = new Set(plan.candidates.map((candidate) => candidate.id));
     const selectedIds = new Set(plan.selectedCandidateIds);
@@ -1099,7 +1099,7 @@ export class DiscoveryIndexSession {
     const candidates: ScanCandidate[] = [];
     const seen = new Set<string>();
     let offset = 0;
-    do {
+    for (;;) {
       const page = await this.query({
         filter: mode === "selected" ? "is:queued" : "",
         offset,
@@ -1125,7 +1125,7 @@ export class DiscoveryIndexSession {
       }
       if (page.nextOffset === null) break;
       offset = page.nextOffset;
-    } while (true);
+    }
     if (
       candidates.length !== (mode === "selected" ? before.selectedCount : before.candidateCount)
     ) {

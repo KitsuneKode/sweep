@@ -3,8 +3,7 @@ import type { ScanCandidate, ScanPlan, StatusSummary } from "@kitsunekode/sweep-
 import { sanitizeMultilineTerminalText, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes, formatScanElapsed } from "./bytes.js";
 import { groupCandidatesByKind } from "./grouping.js";
-import { formatRiskBadge, riskBadgeLabel } from "./risk.js";
-import { createSpinner } from "./spinner.js";
+import { formatRiskBadge } from "./risk.js";
 import { printScanReport } from "./report.js";
 
 export interface PrintGroupedScanPlanOptions {
