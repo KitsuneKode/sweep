@@ -23,6 +23,11 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # 0.x: a minor release is a breaking one. 0.8 breaks a UI review test and
+      # logs native clipboard errors. Upgrade on purpose, not in a weekly group.
+      - dependency-name: "@opentui/*"
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: cargo
     directory: /
