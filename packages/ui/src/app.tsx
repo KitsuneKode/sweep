@@ -269,10 +269,28 @@ const HELP_VIEW: ReadonlyArray<HelpRow> = [
   ["ctrl-k / F2", "search actions and settings"],
   ["ctrl-o", "switch folder - fuzzy or a path"],
   ["b", "projects view ↔ full view"],
-  ["i", "queue safe items in idle projects"],
   ["backspace", "up one folder in the tree"],
   ["y", "copy row path"],
   ["S", "save queue as a plan"],
+];
+
+// The calm default screen has fewer keys, and `i` means something else here
+// than in the full view, so it gets its own card rather than a filtered copy.
+const HELP_PROJECTS: ReadonlyArray<HelpRow> = [
+  [null, "projects"],
+  ["↑↓ / j k", "move · wheel moves the cursor"],
+  ["enter · l", "open a project · enter on an item: details"],
+  ["h · esc", "close it"],
+  ["space", "queue / unqueue the project or item"],
+  ["a", "queue all removable"],
+  ["i", "queue safe items in projects idle 30+ days"],
+  ["u", "clear the queue"],
+  ["x · d", "remove this project or item (confirms)"],
+  ["c", "review the queue (confirms)"],
+  ["y · t · esc", "in a review: remove · trash · cancel"],
+  ["/", "search projects"],
+  ["b", "full view: folders, ranges, patterns, copy"],
+  ["t · q", "theme · quit"],
 ];
 
 const HELP_PATTERNS: ReadonlyArray<HelpRow> = [
@@ -366,6 +384,23 @@ function helpColumn(rows: ReadonlyArray<HelpRow>, keyWidth: number, tokens: Them
         ),
       )}
     </box>
+  );
+}
+
+function ProjectsHelp({ tokens, width }: { tokens: ThemeTokens; width: number }) {
+  const keyWidth = Math.max(...HELP_PROJECTS.map(([k]) => (k === null ? 0 : cellWidth(k)))) + 1;
+  const bodyWidth = keyWidth + 2 + Math.max(...HELP_PROJECTS.map(([, d]) => cellWidth(d)));
+  const modalWidth = Math.min(bodyWidth + 10, Math.max(28, width - 4));
+  const bodyLines = HELP_PROJECTS.length;
+  return (
+    <Modal tokens={tokens} title=" keys " width={modalWidth} height={bodyLines + 2 + 4}>
+      {helpColumn(HELP_PROJECTS, keyWidth, tokens)}
+      <text content="" />
+      <text
+        content={t`${fg(tokens.textDim)("esc unwinds one layer · ctrl-c quits")}`}
+        wrapMode="none"
+      />
+    </Modal>
   );
 }
 
@@ -2808,7 +2843,11 @@ export function SweepApp({
                     notice:
                       dimensions.width >= 110
                         ? t`${fg(tokens.textSecondary)("New here? ")}${fg(tokens.text)("space")}${fg(tokens.textMuted)(" picks a project, ")}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" shows what would go. Nothing is deleted until you press ")}${fg(tokens.text)("y")}${fg(tokens.textMuted)(".")}`
-                        : t`${fg(tokens.text)("space")}${fg(tokens.textMuted)(" picks · ")}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" reviews · nothing goes until ")}${fg(tokens.text)("y")}`,
+                        : dimensions.width >= 56
+                          ? t`${fg(tokens.text)("space")}${fg(tokens.textMuted)(" picks · ")}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" reviews · nothing goes until ")}${fg(tokens.text)("y")}`
+                          : // Narrower than this the sentence would be cut where its
+                            // meaning flips, so say the one thing that matters.
+                            t`${fg(tokens.text)("c")}${fg(tokens.textMuted)(" reviews · nothing goes until ")}${fg(tokens.text)("y")}`,
                   }
                 : notice
                   ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` }
@@ -3006,7 +3045,11 @@ export function SweepApp({
           />
         ) : null}
         {!foregroundOverlay && showHelp ? (
-          <HelpOverlay tokens={tokens} width={dimensions.width} />
+          view === "projects" && projectsVisible ? (
+            <ProjectsHelp tokens={tokens} width={dimensions.width} />
+          ) : (
+            <HelpOverlay tokens={tokens} width={dimensions.width} />
+          )
         ) : null}
         {!foregroundOverlay && showFilter ? (
           <FilterPicker

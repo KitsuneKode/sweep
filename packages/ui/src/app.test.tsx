@@ -1593,3 +1593,56 @@ test("projects view: a tier carried over from the full view is named where the t
   expect(frame).toContain("dangerous only");
   expect(frame).toContain("esc clears");
 });
+
+test("projects view: a narrow terminal drops whole parts and never cuts a size", async () => {
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={createPlan()} onDone={() => {}} />,
+    { width: 44, height: 16 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  const frame = setup.captureCharFrame();
+  // The section's size is whole ("5.0 KiB"), the count went first.
+  expect(frame).toMatch(/No activity found\s+5\.0 KiB/);
+  // The first-run line fits whole, with the part that matters.
+  expect(frame).toContain("nothing goes until y");
+});
+
+test("projects view: ? shows its own keys, with i meaning the idle queue", async () => {
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={createPlan()} onDone={() => {}} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await press(setup, "?");
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("queue safe items in projects idle 30+ days");
+  expect(frame).toContain("full view: folders");
+  expect(frame).not.toContain("visual range");
+});
+
+test("projects view: an empty scan says what is opt-in", async () => {
+  const plan = createPlan();
+  plan.candidates = [];
+  plan.summary = { ...plan.summary, candidateCount: 0, estimatedTotalBytes: 0, selectedCount: 0 };
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={plan} onDone={() => {}} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  expect(setup.captureCharFrame()).toContain("coverage are opt-in");
+});
