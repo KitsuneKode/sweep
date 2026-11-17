@@ -90,6 +90,7 @@ async function mountWithApply(
   onDone: (outcome: SweepUiOutcome) => void,
   applyPolicy?: UiScanControl["applyPolicy"],
   fixturePlan: ScanPlan = createPlan(),
+  initialView?: "projects" | "folders",
 ) {
   const applyCalls: ApplyCall[] = [];
   const applyResolvers: ((result: UiApplyResult) => void)[] = [];
@@ -131,6 +132,7 @@ async function mountWithApply(
       <CrashProbe />
       <SweepApp
         init={{ startUnselected: false }}
+        {...(initialView ? { initialView } : {})}
         plan={fixturePlan}
         scan={control}
         operations={operations}
@@ -1243,5 +1245,53 @@ describe("apply receipts survive rendering failures", () => {
       interrupted: false,
       viewError: "Injected view failure",
     });
+  });
+});
+
+describe("a failed removal follows through", () => {
+  test("the reason stays on the item's row after the notice is gone", async () => {
+    const { setup, settle, applyCalls, applyResolvers } = await mountWithApply(
+      () => {},
+      undefined,
+      createPlan(),
+      "projects",
+    );
+    const press = async (key: string) => {
+      await act(async () => {
+        if (key === "enter") setup.mockInput.pressEnter();
+        else setup.mockInput.pressKey(key);
+        await setup.flush();
+      });
+      await settle();
+    };
+    await press("a");
+    await press("c");
+    await press("y");
+    expect(applyCalls).toHaveLength(1);
+    const ids = applyCalls[0]!.plan.selectedCandidateIds;
+    const failedCandidate = applyCalls[0]!.plan.candidates.find((c) => c.id === ids[0])!;
+    await act(async () => {
+      applyResolvers[0]!({
+        report: {
+          protocolVersion: "1",
+          targetDir: "/tmp/sweep-ui",
+          selectedCandidateIds: ids,
+          deletedCount: ids.length - 1,
+          failedCount: 1,
+          totalBytesFreed: 0,
+          failedPaths: [{ path: failedCandidate.path, error: "EACCES: permission denied" }],
+          outcomes: ids.map((candidateId, index) => ({
+            candidateId,
+            status: index === 0 ? "failed" : "deleted",
+          })),
+        },
+        interrupted: false,
+      } as UiApplyResult);
+      await setup.flush();
+    });
+    await settle();
+    expect(setup.captureCharFrame()).toContain("1 failed: EACCES");
+    await press("enter");
+    expect(setup.captureCharFrame()).toContain("✗ EACCES: permission denied");
   });
 });
