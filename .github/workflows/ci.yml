@@ -70,6 +70,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
+      # The UI tests require the native engine (SWEEP_REQUIRE_RUST_TESTS) but
+      # turbo does not order them after the cargo build. A warm rust-cache hid
+      # that; a cold one fails the job. Build it first, like cross-platform.
+      - name: Build native engine for the UI tests
+        run: cargo build -p sweep-engine-cli --locked
+
       - name: Check, build, and preflight
         run: bunx turbo run check build preflight --filter "@kitsunekode/*" --continue
 
