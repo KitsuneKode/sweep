@@ -3,6 +3,7 @@ import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 import type { SweepUiSummary } from "./state.js";
 import {
+  applyNotice,
   artifactRowWidths,
   buildFooterHints,
   buildArtifactRow,
@@ -491,4 +492,20 @@ describe("queue checkbox states", () => {
     expect(new Set(Object.values(QUEUE_GLYPH)).size).toBe(3);
     expect(QUEUE_GLYPH.some).not.toBe(QUEUE_GLYPH.all);
   });
+});
+
+test("a trash apply does not say space was freed", () => {
+  const base = {
+    removed: 3,
+    freedBytes: 5 * 1024 ** 3,
+    stillQueued: 0,
+    failed: 0,
+    unattempted: 0,
+    stopped: false,
+  };
+  const trashed = applyNotice({ ...base, trash: true });
+  expect(trashed).toContain("moved to trash");
+  expect(trashed).toContain("still on disk");
+  expect(trashed).not.toContain("freed");
+  expect(applyNotice({ ...base, trash: false })).toContain("freed");
 });

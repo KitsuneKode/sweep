@@ -950,7 +950,10 @@ export function applyNotice(result: {
   const verb = result.trash ? "moved to trash" : "removed";
   const parts = [
     result.removed > 0
-      ? `${result.stopped ? "stopped · " : "✓ "}${verb} ${items} · ~${formatBytes(result.freedBytes)} freed`
+      ? `${result.stopped ? "stopped · " : "✓ "}${verb} ${items} · ~${formatBytes(result.freedBytes)} ${
+          // Trash keeps the bytes on the same volume until it is emptied.
+          result.trash ? "still on disk" : "freed"
+        }`
       : `${result.stopped ? "stopped · " : ""}nothing ${verb}`,
   ];
   if (result.failed > 0)

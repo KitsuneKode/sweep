@@ -1451,6 +1451,38 @@ export function SweepApp({
       setExpandedProjects(next);
     };
     switch (key.name) {
+      case "escape": {
+        // The innermost layer first: an opened project, then an opened
+        // section. Only then does esc reach the filters and the quit hint.
+        if (expandedRef.current.size > 0 || openSections.size > 0 || allArtifacts.size > 0) {
+          const cursorKey = row && "project" in row ? row.project.key : null;
+          const closeOne = cursorKey !== null && expandedRef.current.has(cursorKey);
+          const nextExpanded = closeOne
+            ? new Set([...expandedRef.current].filter((k) => k !== cursorKey))
+            : new Set<string>();
+          const closeAll = !closeOne && expandedRef.current.size > 0;
+          const clearSections = !closeOne && !closeAll;
+          const nextSections = clearSections ? new Set<ProjectSection>() : openSections;
+          const nextArtifacts =
+            closeOne || closeAll
+              ? new Set([...allArtifacts].filter((k) => nextExpanded.has(k)))
+              : allArtifacts;
+          const nextRows = buildProjectRows(projects, nextExpanded, nextSections, nextArtifacts);
+          expandedRef.current = nextExpanded;
+          projectRowsRef.current = nextRows;
+          setExpandedProjects(nextExpanded);
+          setOpenSections(nextSections);
+          setAllArtifacts(nextArtifacts);
+          // Land on the project that was just closed, not on whatever moved up.
+          const parent =
+            cursorKey === null
+              ? -1
+              : nextRows.findIndex((r) => r.kind === "project" && r.project.key === cursorKey);
+          if (parent >= 0) setProjectCursor(parent);
+          return true;
+        }
+        return false;
+      }
       case "up":
       case "k":
         return move(-1);
@@ -2473,7 +2505,23 @@ export function SweepApp({
       (state.focus === "list" || state.focus === "sidebar")
     ) {
       key.preventDefault();
+      // The projects view has no sidebar: arriving with focus on the hidden
+      // one would leave every key acting on a cursor nobody can see.
+      if (viewRef.current === "folders" && state.focus === "sidebar") focusPanel("list");
       setView((current) => (current === "projects" ? "folders" : "projects"));
+      return;
+    }
+    // Tab moves between panes in the full view. Here there is one pane, and
+    // sending focus to the hidden sidebar made Space queue rows out of sight.
+    if (
+      projectsVisible &&
+      key.name === "tab" &&
+      openModalsRef.current.size === 0 &&
+      (state.focus === "list" || state.focus === "sidebar")
+    ) {
+      key.preventDefault();
+      if (state.focus === "sidebar") focusPanel("list");
+      setNotice("one pane here · b opens the full view with folders", "warning");
       return;
     }
     if (projectsVisible && openModalsRef.current.size === 0 && state.focus === "list") {
@@ -2646,6 +2694,11 @@ export function SweepApp({
       : state.scopeFilter === ""
         ? "project root"
         : state.scopeFilter;
+  // The projects view is built from the same filtered list as the full view,
+  // so a carried-over tier or scope narrows it too. Say so where the total is.
+  const projectsNarrowing = [riskFilterLabel, scopeFilterLabel ? `in ${scopeFilterLabel}` : ""]
+    .filter(Boolean)
+    .join(" · ");
 
   // Overlays cover the panes but not the statusline, so the footer has to
   // describe whatever is actually on top or the user is left with no visible
@@ -2744,6 +2797,7 @@ export function SweepApp({
             {...(trashMode ? { trash: true } : {})}
             filter={state.filter}
             searchFocused={state.focus === "search"}
+            {...(projectsNarrowing ? { narrowing: projectsNarrowing } : {})}
             {...(notice && (everQueued || notice.tone === "warning")
               ? { notice: t`${fg(noticeColor(notice.tone, tokens))(notice.text)}` }
               : !everQueued && !state.scanning && projects.length > 0
