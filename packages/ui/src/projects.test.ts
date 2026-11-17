@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { magnitudeBar } from "./meter-draw.js";
-import { ARTIFACT_PREVIEW, buildProjectRows, buildProjects } from "./projects.js";
+import { ARTIFACT_PREVIEW, buildProjectRows, buildProjects, diskGainedText } from "./projects.js";
 
 function candidate(index: number, bytes: number): ScanCandidate {
   return {
@@ -62,5 +62,52 @@ describe("magnitude bars", () => {
     expect(magnitudeBar(0.5, 3)).toBe("█▌ ");
     expect(magnitudeBar(0.0001, 4)).toBe("▏   ");
     expect(magnitudeBar(0, 2)).toBe("  ");
+  });
+});
+
+describe("one reclaimable number", () => {
+  const tiers = (["safe", "caution", "dangerous", "blocked"] as const).map((riskTier, i) => ({
+    ...candidate(i, 100 * (i + 1)),
+    id: riskTier,
+    path: `/work/app/${riskTier}`,
+    riskTier,
+    projectActiveMs: 1,
+  })) as ScanCandidate[];
+  const projects = buildProjects(tiers, new Set(), "/work", 100 * 86_400_000);
+
+  test("a project counts safe and caution as space, and keeps the rest apart", () => {
+    expect(projects[0]).toMatchObject({ queueableBytes: 300, guardedBytes: 700, bytes: 1000 });
+  });
+
+  test("section headers use the same number and name what is guarded", () => {
+    const section = buildProjectRows(projects, new Set()).find((row) => row.kind === "section");
+    expect(section).toMatchObject({ bytes: 300, guardedBytes: 700 });
+  });
+
+  test("projects sort by what can be reclaimed, the number on the row", () => {
+    const heavyButGuarded = [
+      { ...candidate(0, 5000), id: "g", riskTier: "dangerous", projectRoot: "/work/g" },
+      { ...candidate(1, 10), id: "s", riskTier: "safe", projectRoot: "/work/s" },
+    ] as ScanCandidate[];
+    const sorted = buildProjects(heavyButGuarded, new Set(), "/work");
+    expect(sorted.map((p) => p.name)).toEqual(["s", "g"]);
+  });
+});
+
+describe("the receipt's disk reading", () => {
+  const receipt = { removed: 3, failed: 0, trash: false, stopped: false };
+  const GiB = 1024 ** 3;
+  test("says what the disk gained", () => {
+    expect(diskGainedText({ ...receipt, freedBytes: 5 * GiB, diskGained: 5 * GiB })).toBe(
+      "disk +5.0 GiB",
+    );
+  });
+  test("names the usual reason when far less came back than estimated", () => {
+    expect(diskGainedText({ ...receipt, freedBytes: 5 * GiB, diskGained: GiB })).toContain(
+      "hardlinks or another volume",
+    );
+  });
+  test("says nothing when other writes made the reading negative", () => {
+    expect(diskGainedText({ ...receipt, freedBytes: 5 * GiB, diskGained: -GiB })).toBe("");
   });
 });
