@@ -187,7 +187,9 @@ export function Meter(props: MeterProps & { previewColor: string }) {
 
 /**
  * One bar split by share: where a total goes, part by part. Pixels in kitty,
- * a coloured line elsewhere. Static: it describes a size, not a change.
+ * a coloured line elsewhere. Static: it describes a size, not a change. A
+ * segment marked `dim` recedes so the one under the cursor reads; focus
+ * follows the keyboard, so it changes at once and never eases.
  */
 export function StackBar({
   width,
@@ -207,7 +209,9 @@ export function StackBar({
     kitty && resolution ? Math.round((width * resolution.width) / renderer.width) : 0;
   const pixelHeight = kitty && resolution ? Math.round(resolution.height / renderer.height) : 0;
   const ground = background ?? null;
-  const key = segments.map((segment) => `${segment.fraction.toFixed(4)}${segment.color}`).join(",");
+  const key = segments
+    .map((segment) => `${segment.fraction.toFixed(4)}${segment.color}${segment.dim ? "~" : ""}`)
+    .join(",");
   const image = useMemo(() => {
     if (!kitty || pixelWidth < 8 || pixelHeight < 4) return null;
     return cachedImage(
