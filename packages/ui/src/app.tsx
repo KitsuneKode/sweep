@@ -129,6 +129,7 @@ import {
   type Project,
   type ProjectSection,
 } from "./projects.js";
+import { reclaimByCost, rebuildSummary } from "./project-details.js";
 import { rankJumpTargets, type JumpTarget } from "./folder-jump.js";
 
 export { runSweepUiStreaming } from "./streaming.js";
@@ -517,6 +518,7 @@ function ConfirmOverlay({
   selectedBytes,
   dangerousCount,
   previewPaths,
+  costLine,
   dryRun,
   trash,
   applyPolicy,
@@ -543,6 +545,8 @@ function ConfirmOverlay({
   dangerousCount: number;
   /** Largest queued candidates by bytes - the last gate should name names. */
   previewPaths: string[];
+  /** What the queue costs to bring back, one line. */
+  costLine?: string | undefined;
   applyPolicy?: { maxSizeGB: number | null; forceLarge: boolean } | undefined;
   lowerBound?: boolean;
   dryRun?: boolean;
@@ -583,7 +587,9 @@ function ConfirmOverlay({
           ? 24
           : selectedCount === 1 && !dangerous
             ? 18
-            : 22) + (showDisk ? 3 : 0)
+            : 22) +
+        (showDisk ? 3 : 0) +
+        (costLine ? 2 : 0)
       }
       footer={
         <>
@@ -637,6 +643,12 @@ function ConfirmOverlay({
       <text
         content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "partial estimate; actual bytes may differ" : "estimated size")}`}
       />
+      {costLine ? (
+        <text
+          content={t`${fg(tokens.textMuted)("comes back by ")}${fg(tokens.textSecondary)(costLine)}`}
+          wrapMode="word"
+        />
+      ) : null}
       {showDisk ? (
         <DiskAfter
           tokens={tokens}
@@ -1409,6 +1421,10 @@ export function SweepApp({
   const projects = useMemo(
     () => buildProjects(visibleItems, state.selectedIds, state.targetDir),
     [visibleItems, state.selectedIds, state.targetDir],
+  );
+  const byCost = useMemo(
+    () => reclaimByCost(projects, state.selectedIds),
+    [projects, state.selectedIds],
   );
   const projectRows = useMemo(
     () => buildProjectRows(projects, expandedProjects, openSections, allArtifacts),
@@ -2837,6 +2853,7 @@ export function SweepApp({
             sizedLabel={`scanning  ${state.scanSizedCount.toLocaleString()} of ${state.candidates.length.toLocaleString()} sized`}
             reclaimableBytes={projects.reduce((sum, project) => sum + project.queueableBytes, 0)}
             guardedBytes={projects.reduce((sum, project) => sum + project.guardedBytes, 0)}
+            byCost={byCost}
             partial={projects.some((project) => project.partial)}
             incomplete={state.scanIncomplete}
             projectCount={projects.length}
@@ -3389,6 +3406,7 @@ export function SweepApp({
               selectedBytes={reviewedApply?.summary.estimatedTotalBytes ?? 0}
               dangerousCount={reviewedApply?.summary.riskCounts.dangerous ?? 0}
               previewPaths={confirmPreview}
+              costLine={rebuildSummary(reviewedApply?.candidates ?? [], formatBytes)}
               {...(dryRun ? { dryRun: true } : {})}
               {...(trashModeRef.current ? { trash: true } : {})}
               onConfirm={confirmReviewedApply}

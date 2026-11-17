@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { darkTheme, lightTheme, noticeColor, resolveTheme, type ThemeTokens } from "./theme.js";
+import {
+  darkTheme,
+  lightTheme,
+  mixHex,
+  noticeColor,
+  resolveTheme,
+  ROW_BAR_SOFT,
+  ROW_BAR_STRONG,
+  type ThemeTokens,
+} from "./theme.js";
 
 describe("resolveTheme", () => {
   const original = process.env.COLORFGBG;
@@ -116,6 +125,14 @@ describe.each([
       for (const color of informational) {
         expect(contrast(color, surface)).toBeGreaterThanOrEqual(4.5);
       }
+    }
+  });
+
+  test("project size bars hold 3:1 on the page and on the cursor row", () => {
+    for (const mix of [ROW_BAR_SOFT, ROW_BAR_STRONG]) {
+      const bar = mixHex(theme.meterTrack, theme.textMuted, mix);
+      expect(contrast(bar, theme.bg)).toBeGreaterThanOrEqual(3);
+      expect(contrast(bar, theme.selectionSoftBg)).toBeGreaterThanOrEqual(3);
     }
   });
 

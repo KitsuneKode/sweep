@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { CandidateKind, ScanCandidate } from "@kitsunekode/sweep-protocol";
 import type { Project } from "./projects.js";
 
@@ -143,4 +143,68 @@ export function projectFacts(project: Project, selectedIds: ReadonlySet<string>)
       0,
     ),
   };
+}
+
+export interface CostShare {
+  cost: RebuildCost;
+  /** Reclaimable (safe + caution) bytes that cost this much to bring back. */
+  bytes: number;
+  /** The part of them that is queued. */
+  queuedBytes: number;
+}
+
+const COST_ORDER: RebuildCost[] = ["cache", "install", "build", "unknown"];
+
+/**
+ * Everything reclaimable, split by what it costs to get back, cheapest first:
+ * the left of the hero bar is the easy win. Guarded items are never counted.
+ */
+export function reclaimByCost(
+  projects: readonly Project[],
+  selectedIds: ReadonlySet<string>,
+): CostShare[] {
+  const totals = new Map<RebuildCost, CostShare>();
+  for (const project of projects) {
+    for (const candidate of project.artifacts) {
+      if (candidate.riskTier !== "safe" && candidate.riskTier !== "caution") continue;
+      const cost = rebuildFor(candidate.kind, project.key).cost;
+      const share = totals.get(cost) ?? { cost, bytes: 0, queuedBytes: 0 };
+      share.bytes += candidate.estimatedBytes;
+      if (selectedIds.has(candidate.id)) share.queuedBytes += candidate.estimatedBytes;
+      totals.set(cost, share);
+    }
+  }
+  return COST_ORDER.flatMap((cost) => {
+    const share = totals.get(cost);
+    return share && share.bytes > 0 ? [share] : [];
+  });
+}
+
+/**
+ * One line for the confirm: what the queue costs to bring back, by kind of
+ * cost, with the command for the biggest of each ("install 5.0 GiB (bun
+ * install) · build 3.0 GiB (cargo build)"). Guarded items are not hidden here:
+ * the confirm is about everything that will actually be removed.
+ */
+export function rebuildSummary(
+  candidates: readonly ScanCandidate[],
+  format: (bytes: number) => string,
+): string {
+  const groups = new Map<RebuildCost, { bytes: number; how: string; top: number }>();
+  for (const candidate of candidates) {
+    const rebuild = rebuildFor(candidate.kind, candidate.projectRoot ?? dirname(candidate.path));
+    const group = groups.get(rebuild.cost) ?? { bytes: 0, how: rebuild.how, top: -1 };
+    group.bytes += candidate.estimatedBytes;
+    if (candidate.estimatedBytes > group.top) {
+      group.top = candidate.estimatedBytes;
+      group.how = rebuild.how;
+    }
+    groups.set(rebuild.cost, group);
+  }
+  return COST_ORDER.flatMap((cost) => {
+    const group = groups.get(cost);
+    if (!group || group.bytes <= 0) return [];
+    const label = cost === "unknown" ? "custom" : cost;
+    return [`${label} ${format(group.bytes)}${cost === "unknown" ? "" : ` (${group.how})`}`];
+  }).join(" · ");
 }
