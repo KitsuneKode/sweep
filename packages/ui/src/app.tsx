@@ -1014,6 +1014,13 @@ export function SweepApp({
   const [applying, setApplyingState] = useState<string | null>(null);
   // What the last apply gave back; the ledger shows it until the next queue.
   const [receipt, setReceipt] = useState<LedgerReceipt | null>(null);
+  // Why each item of the last removal failed, by path. Failed items stay
+  // queued, so the reason has to live where the item is, not in a notice.
+  const [applyFailures, setApplyFailures] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    // A new scan makes the old reasons stale.
+    if (state.scanning) setApplyFailures((current) => (current.size === 0 ? current : new Map()));
+  }, [state.scanning]);
   const applyAbortRef = useRef<AbortController | null>(null);
   const closeAfterApplyRef = useRef(false);
   const [applyProgress, setApplyProgress] = useState<ApplyProgress | null>(null);
@@ -1804,6 +1811,9 @@ export function SweepApp({
           } catch {
             diskGained = undefined;
           }
+          setApplyFailures(
+            new Map(result.report.failedPaths.map((failure) => [failure.path, failure.error])),
+          );
           setReceipt({
             ...(diskGained !== undefined ? { diskGained } : {}),
             removed: merged.removedIds.length,
@@ -2865,6 +2875,7 @@ export function SweepApp({
             receipt={receipt}
             {...(dryRun ? { dryRun: true } : {})}
             {...(trashMode ? { trash: true } : {})}
+            failures={applyFailures}
             filter={state.filter}
             searchFocused={state.focus === "search"}
             {...(projectsNarrowing ? { narrowing: projectsNarrowing } : {})}

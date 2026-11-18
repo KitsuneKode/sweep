@@ -28,6 +28,8 @@ export interface ProjectsViewProps {
   reclaimableBytes: number;
   /** Dangerous and blocked bytes: found, never part of the total above. */
   guardedBytes?: number | undefined;
+  /** Why each item of the last removal failed, by path; shown on its row. */
+  failures?: ReadonlyMap<string, string> | undefined;
   /** What the reclaimable bytes cost to bring back; the hero bar is drawn from it. */
   byCost?: readonly CostShare[] | undefined;
   /** Some sizes are still being measured (a "~" on the total). */
@@ -71,6 +73,8 @@ export interface ProjectsReceipt {
   diskGained?: number | undefined;
   removed: number;
   failed: number;
+  /** Items the apply never reached (stopped early); they stay queued. */
+  unattempted?: number | undefined;
   trash: boolean;
   stopped: boolean;
 }
@@ -138,7 +142,8 @@ function ReceiptLine({
   const verb = receipt.trash ? " moved to trash" : " freed";
   const rest = [
     plural(receipt.removed, "item"),
-    receipt.failed > 0 ? `${receipt.failed} failed` : "",
+    receipt.failed > 0 ? `${receipt.failed} failed, still queued` : "",
+    receipt.unattempted ? `${receipt.unattempted} not attempted` : "",
     receipt.stopped ? "stopped early" : "",
     receipt.diskGained !== undefined && !receipt.trash ? diskGainedText(receipt) : "",
     diskFree !== null && !receipt.trash ? `${formatBytes(diskFree)} free now` : "",
@@ -480,6 +485,13 @@ export function ProjectsView(props: ProjectsViewProps) {
         ? 9
         : 0;
     const where = clipStart(folder, Math.max(0, detailW - riskW));
+    // A removal that failed says why on its own row, until the next apply.
+    const failure = props.failures?.get(c.path);
+    const failedTail = failure
+      ? t`${barW > 0 ? "  " : ""}${fg(tokens.danger)(
+          `✗ ${clipCells(sanitizeTerminalText(failure), Math.max(8, detailW + IDLE_W - 2), true)}`,
+        )}`
+      : null;
     return {
       lead: t`${pointer}   ${mark}  ${
         isCursor ? bold(fg(tokens.text)(kindText)) : fg(tokens.textSecondary)(kindText)
@@ -492,9 +504,11 @@ export function ProjectsView(props: ProjectsViewProps) {
             },
           }
         : {}),
-      tail: t`${barW > 0 ? "  " : ""}${" ".repeat(IDLE_W)}   ${fg(riskTone)(
-        padCells(riskText, riskW),
-      )}${fg(tokens.textDim)(where)}`,
+      tail:
+        failedTail ??
+        t`${barW > 0 ? "  " : ""}${" ".repeat(IDLE_W)}   ${fg(riskTone)(
+          padCells(riskText, riskW),
+        )}${fg(tokens.textDim)(where)}`,
     };
   };
 
