@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { magnitudeBar } from "./meter-draw.js";
+import { reclaimByCost } from "./project-details.js";
 import { ARTIFACT_PREVIEW, buildProjectRows, buildProjects, diskGainedText } from "./projects.js";
 
 function candidate(index: number, bytes: number): ScanCandidate {
@@ -109,5 +110,21 @@ describe("the receipt's disk reading", () => {
   });
   test("says nothing when other writes made the reading negative", () => {
     expect(diskGainedText({ ...receipt, freedBytes: 5 * GiB, diskGained: -GiB })).toBe("");
+  });
+});
+
+describe("the hero bar's parts", () => {
+  const items = [
+    { ...candidate(0, 400), id: "a", kind: ".turbo", name: ".turbo", riskTier: "safe" },
+    { ...candidate(1, 600), id: "b", kind: "node_modules", riskTier: "caution" },
+    { ...candidate(2, 9000), id: "c", kind: "node_modules", riskTier: "dangerous" },
+  ] as ScanCandidate[];
+  const projects = buildProjects(items, new Set(["a"]), "/work");
+
+  test("split reclaimable bytes by rebuild cost, cheapest first, guarded never counted", () => {
+    expect(reclaimByCost(projects, new Set(["a"]))).toEqual([
+      { cost: "cache", bytes: 400, queuedBytes: 400 },
+      { cost: "install", bytes: 600, queuedBytes: 0 },
+    ]);
   });
 });

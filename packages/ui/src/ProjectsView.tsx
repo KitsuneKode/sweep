@@ -4,13 +4,15 @@ import { bold, fg, t, type MouseEvent, type StyledText } from "@opentui/core";
 import { dirname } from "node:path";
 import { type ReactNode, useRef } from "react";
 import { formatAge, RECENT_WINDOW_MS } from "./age.js";
-import { Meter, ScanMeter, useCountUp } from "./Meter.js";
+import { Meter, ScanMeter, StackBar, useCountUp } from "./Meter.js";
+import type { StackSegment } from "./meter-draw.js";
+import type { CostShare, RebuildCost } from "./project-details.js";
 import { useMotionEnabled } from "./motion.js";
 import { ProjectDetails } from "./ProjectDetails.js";
 import { concatStyled, QUEUE_GLYPH, queueState } from "./presentation.js";
 import { SECTION_TITLE, diskGainedText, type Project, type ProjectRow } from "./projects.js";
 import { cellWidth, clipCells, clipStart } from "./text-cells.js";
-import { mixHex, type ThemeTokens } from "./theme.js";
+import { mixHex, ROW_BAR_SOFT, ROW_BAR_STRONG, type ThemeTokens } from "./theme.js";
 
 export interface ProjectsViewProps {
   tokens: ThemeTokens;
@@ -26,6 +28,8 @@ export interface ProjectsViewProps {
   reclaimableBytes: number;
   /** Dangerous and blocked bytes: found, never part of the total above. */
   guardedBytes?: number | undefined;
+  /** What the reclaimable bytes cost to bring back; the hero bar is drawn from it. */
+  byCost?: readonly CostShare[] | undefined;
   /** Some sizes are still being measured (a "~" on the total). */
   partial?: boolean | undefined;
   /** The scan stopped short: whatever is shown is not the whole tree. */
@@ -69,6 +73,48 @@ export interface ProjectsReceipt {
   failed: number;
   trash: boolean;
   stopped: boolean;
+}
+
+/**
+ * The hero bar's parts: each cost in order, queued bytes solid and the rest
+ * receding once anything is queued; solid throughout while nothing is.
+ */
+function heroSegments(
+  byCost: readonly CostShare[],
+  color: Record<RebuildCost, string>,
+): StackSegment[] {
+  const anyQueued = byCost.some((share) => share.queuedBytes > 0);
+  return byCost.flatMap((share): StackSegment[] => {
+    if (!anyQueued) return [{ fraction: share.bytes, color: color[share.cost] }];
+    const rest = share.bytes - share.queuedBytes;
+    return [
+      ...(share.queuedBytes > 0 ? [{ fraction: share.queuedBytes, color: color[share.cost] }] : []),
+      ...(rest > 0 ? [{ fraction: rest, color: color[share.cost], dim: true }] : []),
+    ];
+  });
+}
+
+/** "● cache 0.4 GiB  ● install 6.0 GiB": whole entries only, as many as fit. */
+function costLegend(
+  byCost: readonly CostShare[],
+  color: Record<RebuildCost, string>,
+  tokens: ThemeTokens,
+  width: number,
+): StyledText {
+  let out = t``;
+  let used = 0;
+  for (const share of byCost) {
+    const label = share.cost === "unknown" ? "custom" : share.cost;
+    const text = `${label} ${formatBytes(share.bytes)}`;
+    const cost = (used > 0 ? 2 : 0) + 2 + cellWidth(text);
+    if (used + cost > width) break;
+    out = concatStyled(
+      out,
+      t`${used > 0 ? "  " : ""}${fg(color[share.cost])("● ")}${fg(tokens.textMuted)(text)}`,
+    );
+    used += cost;
+  }
+  return out;
 }
 
 /**
@@ -180,7 +226,10 @@ export function ProjectsView(props: ProjectsViewProps) {
   const focusProject = focusRow && "project" in focusRow ? focusRow.project : null;
   const showSearch = searchFocused || filter.length > 0;
   // Header (brand, blank, answer, meter), search, the list, blank, footer.
-  const chrome = 4 + (showSearch ? 2 : 0) + 2;
+  // The cost legend under the bar is the first thing to go when height is short.
+  const byCost = props.byCost ?? [];
+  const showLegend = !scanning && byCost.length > 0 && height >= 20;
+  const chrome = 4 + (showSearch ? 2 : 0) + 2 + (showLegend ? 1 : 0);
   const room = Math.max(3, height - chrome);
 
   // Keep the cursor in view without jumping the page on every move.
@@ -225,8 +274,14 @@ export function ProjectsView(props: ProjectsViewProps) {
   const restW = Math.max(0, detailW - riskColW);
   const whereW = restW >= 30 ? Math.min(longestWhere, Math.floor(restW * 0.55)) : 0;
   // Bars are quiet: a step above the meter track, louder only under the cursor.
-  const barSoft = mixHex(tokens.meterTrack, tokens.textMuted, 0.45);
-  const barStrong = mixHex(tokens.meterTrack, tokens.textMuted, 0.85);
+  const costColor: Record<RebuildCost, string> = {
+    cache: tokens.positive,
+    install: tokens.info,
+    build: tokens.textSecondary,
+    unknown: tokens.textMuted,
+  };
+  const barSoft = mixHex(tokens.meterTrack, tokens.textMuted, ROW_BAR_SOFT);
+  const barStrong = mixHex(tokens.meterTrack, tokens.textMuted, ROW_BAR_STRONG);
 
   // ── Header ──────────────────────────────────────────────────────────────
   const modes = [props.dryRun ? "DRY RUN" : "", props.trash ? "TRASH" : ""].filter(Boolean);
@@ -470,21 +525,18 @@ export function ProjectsView(props: ProjectsViewProps) {
           track={tokens.meterTrack}
           background={tokens.bg}
         />
-      ) : props.reclaimableBytes > 0 ? (
-        // Done scanning: how much of what can come back is queued, with what
-        // `i` would add drawn softer behind it.
-        <Meter
-          width={inner}
-          value={props.selectedBytes / props.reclaimableBytes}
-          preview={props.selectedCount > 0 ? 0 : props.idleBytes / props.reclaimableBytes}
-          fill={tokens.accent}
-          previewColor={mixHex(tokens.meterTrack, tokens.accent, 0.45)}
-          track={tokens.meterTrack}
-          background={tokens.bg}
-        />
+      ) : byCost.length > 0 ? (
+        // Done scanning: where the space is, by what it costs to get back.
+        // Once something is queued, the queued share of each part is solid and
+        // the rest recedes, so one bar says what is there and what is chosen.
+        // It follows the keyboard, so it changes at once and never eases.
+        <StackBar width={inner} segments={heroSegments(byCost, costColor)} background={tokens.bg} />
       ) : (
         <text content="" />
       )}
+      {showLegend ? (
+        <text content={costLegend(byCost, costColor, tokens, inner)} wrapMode="none" />
+      ) : null}
       {showSearch ? (
         <>
           <box height={1} flexDirection="row">

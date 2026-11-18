@@ -1674,3 +1674,37 @@ test("projects view: guarded bytes are named but never added to the total", asyn
   expect(frame).toContain("5.0 KiB you can reclaim");
   expect(frame).toContain("+8.8 KiB guarded");
 });
+
+test("projects view: the hero bar is keyed by what it costs to get the space back", async () => {
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={createPlan()} onDone={() => {}} />,
+    { width: 120, height: 32 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("install 1.0 KiB");
+  expect(frame).toContain("build 4.0 KiB");
+});
+
+test("the review says what the queue costs to bring back", async () => {
+  const setup = await testRender(
+    <SweepApp initialView="projects" plan={createPlan()} onDone={() => {}} />,
+    { width: 120, height: 40 },
+  );
+  teardown = () => setup.renderer.destroy();
+  await act(async () => {
+    await setup.renderOnce();
+  });
+  await press(setup, "a");
+  await press(setup, "c");
+  const frame = setup.captureCharFrame();
+  expect(frame).toContain("comes back by");
+  expect(frame).toContain("install");
+  expect(frame).toContain("build");
+});

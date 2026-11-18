@@ -251,3 +251,12 @@ export function noticeColor(tone: NoticeTone, theme: ThemeTokens): string {
   if (tone === "neutral") return theme.textSecondary;
   return theme.warning;
 }
+
+/**
+ * How far the quiet size bars on project rows sit from the track toward the
+ * muted text colour. Chosen so a bar holds 3:1 against the page and against
+ * the cursor row in both themes (WCAG non-text contrast); the cursor's own
+ * bar is the louder step.
+ */
+export const ROW_BAR_SOFT = 0.7;
+export const ROW_BAR_STRONG = 0.9;
