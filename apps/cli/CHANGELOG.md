@@ -1,5 +1,26 @@
 # @kitsunekode/sweep
 
+## 0.5.3
+
+### Patch Changes
+
+- a5a1c41: Projects view: when a removal fails (a root-owned `node_modules` from Docker or `sudo npm`, say), the reason now stays on that item's row ("✗ EACCES: permission denied") after the notice is gone, instead of only the first reason flashing in a notice. The item stays queued, and the receipt line says how many were not attempted when a run stops early.
+- 40f2bb2: Projects view: the bar under the total now shows where the reclaimable space is, split by what it costs to get back (cache, install, build), at every terminal width and with a key under it. Once something is queued, its share of each part stays solid and the rest recedes, so one bar shows what is there and what is chosen; it follows the keyboard with no easing. The review dialog says how the queue comes back ("install 5.0 GiB (bun install) · build 3.0 GiB (cargo build)"), and the size bars hold 3:1 contrast in both themes.
+- d73ff3f: Projects view: one definition of "reclaimable" everywhere. Rows, section headers and the top line all count safe and caution items; dangerous and blocked bytes are named beside the total ("+8.8 KiB guarded") and never added to it. While a scan runs the total says "~X so far", an incomplete scan says so and offers `r`, and projects sort by what you can reclaim. After a removal the receipt shows the estimate with a "~" next to what the disk actually gained, and says when far less came back (hardlinked installs, another volume).
+- 862f3ce: The project panel describes opt-in kinds (`.venv`, `__pycache__`, `.gradle`...) with the catalog's own note ("virtualenv - slow to recreate") instead of "your pattern", which is now said only for a pattern you wrote yourself.
+- f228a2b: Projects view: keys now act only on what is on screen. Tab no longer sends focus to the hidden folder sidebar (it used to make Space queue a row you could not see), Esc closes an opened project before anything else, and a risk tier or folder scope carried over from the full view is named beside the total ("dangerous only · esc clears"). After a trash apply the notice says the bytes are still on disk instead of "freed".
+- dcbcd55: Projects view: `?` shows its own short key list (the full-view list listed `i` twice with two meanings), narrow terminals drop whole parts instead of cutting a size or a word, and an empty scan says which patterns are opt-in.
+- e114243: In the projects view, resting on an item lights its share of the size bar and
+  lets the other shares recede, and the matching entry under the bar turns bold.
+  It follows the cursor at once (no easing: it moves with every key). Terminals
+  without pixel graphics show the receded shares as a lighter line.
+- 7d1f51e: `sweep status [path]` says what you could free right now: the total, which
+  kinds hold it, the idle projects holding the most, and how many items are
+  protected. `--json` emits that as a small summary (a few hundred bytes, not a
+  whole plan), for status lines and widgets. Only safe and caution items count
+  as space; dangerous and blocked ones are reported separately and never added
+  to a size. It is read-only.
+
 ## 0.5.2
 
 ### Patch Changes
