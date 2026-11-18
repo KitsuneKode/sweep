@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { magnitudeBar } from "./meter-draw.js";
-import { reclaimByCost } from "./project-details.js";
+import { reclaimByCost, rebuildFor } from "./project-details.js";
 import { ARTIFACT_PREVIEW, buildProjectRows, buildProjects, diskGainedText } from "./projects.js";
 
 function candidate(index: number, bytes: number): ScanCandidate {
@@ -126,5 +126,14 @@ describe("the hero bar's parts", () => {
       { cost: "cache", bytes: 400, queuedBytes: 400 },
       { cost: "install", bytes: 600, queuedBytes: 0 },
     ]);
+  });
+});
+
+describe("what an opt-in kind says about itself", () => {
+  test("a catalog name carries its own note; only a user pattern is 'your pattern'", () => {
+    expect(rebuildFor("custom" as never, "/work/app", ".venv").how).toBe(
+      "virtualenv - slow to recreate",
+    );
+    expect(rebuildFor("custom" as never, "/work/app", "my-own-dir").how).toBe("your pattern");
   });
 });

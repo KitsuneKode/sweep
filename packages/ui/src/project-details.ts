@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { catalogEntryFor } from "@kitsunekode/sweep-core/catalog";
 import type { CandidateKind, ScanCandidate } from "@kitsunekode/sweep-protocol";
 import type { Project } from "./projects.js";
 
@@ -27,16 +28,16 @@ export function packageManager(root: string): string {
 
 const rebuildCache = new Map<string, Rebuild>();
 
-export function rebuildFor(kind: CandidateKind, root: string): Rebuild {
-  const key = `${kind}\0${root}`;
+export function rebuildFor(kind: CandidateKind, root: string, name?: string): Rebuild {
+  const key = `${kind}\0${root}\0${name ?? ""}`;
   const cached = rebuildCache.get(key);
   if (cached) return cached;
-  const rebuild = readRebuild(kind, root);
+  const rebuild = readRebuild(kind, root, name);
   rebuildCache.set(key, rebuild);
   return rebuild;
 }
 
-function readRebuild(kind: CandidateKind, root: string): Rebuild {
+function readRebuild(kind: CandidateKind, root: string, name?: string): Rebuild {
   switch (kind) {
     case "node_modules":
       return { cost: "install", how: `${packageManager(root)} install` };
@@ -65,8 +66,12 @@ function readRebuild(kind: CandidateKind, root: string): Rebuild {
     case "coverage":
     case ".nyc_output":
       return { cost: "cache", how: "the next coverage run" };
-    default:
-      return { cost: "unknown", how: "your pattern" };
+    default: {
+      // Opt-in names the catalog knows (.venv, __pycache__...) carry their own
+      // note; only a pattern the user wrote is "your pattern".
+      const note = name ? catalogEntryFor(name)?.note : undefined;
+      return { cost: "unknown", how: note ?? "your pattern" };
+    }
   }
 }
 
@@ -105,7 +110,7 @@ export function kindGroups(project: Project, selectedIds: ReadonlySet<string>): 
       bytes: 0,
       count: 0,
       queued: 0,
-      rebuild: rebuildFor(candidate.kind, project.key),
+      rebuild: rebuildFor(candidate.kind, project.key, candidate.name),
     };
     group.bytes += candidate.estimatedBytes;
     group.count += 1;
@@ -167,7 +172,7 @@ export function reclaimByCost(
   for (const project of projects) {
     for (const candidate of project.artifacts) {
       if (candidate.riskTier !== "safe" && candidate.riskTier !== "caution") continue;
-      const cost = rebuildFor(candidate.kind, project.key).cost;
+      const cost = rebuildFor(candidate.kind, project.key, candidate.name).cost;
       const share = totals.get(cost) ?? { cost, bytes: 0, queuedBytes: 0 };
       share.bytes += candidate.estimatedBytes;
       if (selectedIds.has(candidate.id)) share.queuedBytes += candidate.estimatedBytes;
@@ -192,7 +197,11 @@ export function rebuildSummary(
 ): string {
   const groups = new Map<RebuildCost, { bytes: number; how: string; top: number }>();
   for (const candidate of candidates) {
-    const rebuild = rebuildFor(candidate.kind, candidate.projectRoot ?? dirname(candidate.path));
+    const rebuild = rebuildFor(
+      candidate.kind,
+      candidate.projectRoot ?? dirname(candidate.path),
+      candidate.name,
+    );
     const group = groups.get(rebuild.cost) ?? { bytes: 0, how: rebuild.how, top: -1 };
     group.bytes += candidate.estimatedBytes;
     if (candidate.estimatedBytes > group.top) {
