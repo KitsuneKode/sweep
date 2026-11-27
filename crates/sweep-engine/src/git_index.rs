@@ -9,9 +9,10 @@
 //!
 //! Index layouts this reader does not handle in full (a split index, a sparse
 //! index, an unknown version, an oversized file) fall back to the hardened
-//! `git ls-files` invocation the JavaScript implementation uses. Every
-//! failure only ever withholds protection from nothing: a repository that
-//! cannot be read either way is reported as untracked, exactly as before.
+//! `git ls-files` invocation the JavaScript implementation uses. When neither
+//! the index reader nor `git` can answer for a repository, those candidates are
+//! reported as `unknown` so callers fail closed rather than treating them as
+//! untracked.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -30,10 +31,31 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 const PATHSPEC_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_WORKERS: usize = 8;
 
-/// The subset of `paths` that are, or contain, git-tracked files.
+/// Classification of repository candidates checked for git-tracked files.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct TrackedPaths {
+    /// Paths confirmed to be, or contain, git-tracked files.
+    pub tracked: HashSet<PathBuf>,
+    /// Paths inside a git repository whose tracked status could not be checked.
+    pub unknown: HashSet<PathBuf>,
+}
+
+/// Classify `paths` into git-tracked and unknown-status subsets.
 ///
-/// `paths` are absolute. The result preserves no order; callers intersect.
-pub fn tracked_paths(paths: &[PathBuf]) -> HashSet<PathBuf> {
+/// `paths` are absolute. Paths outside any git repository appear in neither set.
+pub fn tracked_paths(paths: &[PathBuf]) -> TrackedPaths {
+    tracked_paths_with_path(
+        paths,
+        std::env::var_os("PATH").as_deref(),
+        std::env::var_os("PATHEXT").as_deref(),
+    )
+}
+
+fn tracked_paths_with_path(
+    paths: &[PathBuf],
+    path_env: Option<&OsStr>,
+    pathext_env: Option<&OsStr>,
+) -> TrackedPaths {
     let mut by_root: HashMap<PathBuf, Vec<&PathBuf>> = HashMap::new();
     let mut root_cache: HashMap<PathBuf, Option<PathBuf>> = HashMap::new();
     for path in paths {
@@ -46,7 +68,7 @@ pub fn tracked_paths(paths: &[PathBuf]) -> HashSet<PathBuf> {
     }
 
     let repos: Vec<(PathBuf, Vec<&PathBuf>)> = by_root.into_iter().collect();
-    let tracked = Mutex::new(HashSet::new());
+    let result = Mutex::new(TrackedPaths::default());
     let next = AtomicUsize::new(0);
     let workers = std::thread::available_parallelism()
         .map(usize::from)
@@ -60,19 +82,23 @@ pub fn tracked_paths(paths: &[PathBuf]) -> HashSet<PathBuf> {
                 let Some((root, members)) = repos.get(index) else {
                     break;
                 };
-                let found = tracked_in_repo(root, members);
-                if !found.is_empty() {
-                    tracked
+                let (found_tracked, found_unknown) =
+                    tracked_in_repo(root, members, path_env, pathext_env);
+                if !found_tracked.is_empty() || !found_unknown.is_empty() {
+                    let mut guard = result
                         .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .extend(found);
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    guard.tracked.extend(found_tracked);
+                    guard.unknown.extend(found_unknown);
                 }
             });
         }
     });
-    tracked
+    let mut out = result
         .into_inner()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    out.unknown.retain(|path| !out.tracked.contains(path));
+    out
 }
 
 /// Nearest ancestor holding `.git` (a directory, or a file for worktrees
@@ -99,26 +125,38 @@ fn find_repo_root(start: &Path, cache: &mut HashMap<PathBuf, Option<PathBuf>>) -
     found
 }
 
-fn tracked_in_repo(root: &Path, members: &[&PathBuf]) -> Vec<PathBuf> {
+fn tracked_in_repo(
+    root: &Path,
+    members: &[&PathBuf],
+    path_env: Option<&OsStr>,
+    pathext_env: Option<&OsStr>,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
     // Index paths are `/`-separated bytes relative to the work tree.
-    let rels: Vec<(Vec<u8>, &PathBuf)> = members
-        .iter()
-        .filter_map(|path| {
-            let rel = path.strip_prefix(root).ok()?;
-            let text = rel.to_str()?;
-            Some((text.replace('\\', "/").into_bytes(), *path))
-        })
-        .collect();
+    let mut rels: Vec<(Vec<u8>, &PathBuf)> = Vec::new();
+    let mut unknown: Vec<PathBuf> = Vec::new();
+    for &path in members {
+        match path.strip_prefix(root).ok().and_then(|rel| rel.to_str()) {
+            Some(text) => rels.push((text.replace('\\', "/").into_bytes(), path)),
+            None => unknown.push(path.clone()),
+        }
+    }
     if rels.is_empty() {
-        return Vec::new();
+        return (Vec::new(), unknown);
     }
     match read_index_paths(root) {
-        Ok(entries) => rels
-            .into_iter()
-            .filter(|(rel, _)| contains_tracked(&entries, rel))
-            .map(|(_, path)| path.clone())
-            .collect(),
-        Err(IndexError::Unsupported) => tracked_via_git(root, &rels),
+        Ok(entries) => {
+            let tracked = rels
+                .into_iter()
+                .filter(|(rel, _)| contains_tracked(&entries, rel))
+                .map(|(_, path)| path.clone())
+                .collect();
+            (tracked, unknown)
+        }
+        Err(IndexError::Unsupported) => {
+            let (tracked, mut git_unknown) = tracked_via_git(root, &rels, path_env, pathext_env);
+            unknown.append(&mut git_unknown);
+            (tracked, unknown)
+        }
     }
 }
 
@@ -171,6 +209,9 @@ fn index_file(root: &Path) -> Result<Option<PathBuf>, IndexError> {
     } else {
         root.join(gitdir)
     };
+    if !gitdir.is_dir() {
+        return Err(IndexError::Unsupported);
+    }
     Ok(Some(gitdir.join("index")))
 }
 
@@ -338,50 +379,74 @@ impl<'a> Reader<'a> {
 
 /// The JavaScript implementation's invocation, unchanged: no fsmonitor, no
 /// untracked cache, no optional locks, literal pathspecs after `--`.
-fn tracked_via_git(root: &Path, rels: &[(Vec<u8>, &PathBuf)]) -> Vec<PathBuf> {
+fn tracked_via_git(
+    root: &Path,
+    rels: &[(Vec<u8>, &PathBuf)],
+    path_env: Option<&OsStr>,
+    pathext_env: Option<&OsStr>,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let Some(git_binary) = resolve_absolute_on_path_in("git", path_env, pathext_env) else {
+        return (
+            Vec::new(),
+            rels.iter().map(|(_, path)| (*path).clone()).collect(),
+        );
+    };
     let by_rel: HashMap<&[u8], &PathBuf> = rels
         .iter()
         .map(|(rel, path)| (rel.as_slice(), *path))
         .collect();
     let mut tracked = Vec::new();
+    let mut unknown = Vec::new();
     let mut chunk: Vec<&str> = Vec::new();
     let mut chunk_bytes = 0;
-    let mut flush = |chunk: &mut Vec<&str>| {
+    let flush = |chunk: &mut Vec<&str>, tracked: &mut Vec<PathBuf>, unknown: &mut Vec<PathBuf>| {
         if chunk.is_empty() {
             return;
         }
-        if let Some(stdout) = run_git_ls_files(root, chunk) {
-            for file in stdout.split(|&byte| byte == 0).filter(|f| !f.is_empty()) {
-                let mut rel = file;
-                loop {
-                    if let Some(path) = by_rel.get(rel) {
-                        tracked.push((*path).clone());
-                        break;
+        match run_git_ls_files(&git_binary, root, chunk) {
+            Some(stdout) => {
+                for file in stdout.split(|&byte| byte == 0).filter(|f| !f.is_empty()) {
+                    let mut rel = file;
+                    loop {
+                        if let Some(path) = by_rel.get(rel) {
+                            tracked.push((*path).clone());
+                            break;
+                        }
+                        match rel.iter().rposition(|&byte| byte == b'/') {
+                            Some(cut) => rel = &rel[..cut],
+                            None => break,
+                        }
                     }
-                    match rel.iter().rposition(|&byte| byte == b'/') {
-                        Some(cut) => rel = &rel[..cut],
-                        None => break,
+                }
+            }
+            None => {
+                for &rel in chunk.iter() {
+                    if let Some(path) = by_rel.get(rel.as_bytes()) {
+                        unknown.push((*path).clone());
                     }
                 }
             }
         }
         chunk.clear();
     };
-    for (rel, _) in rels {
+    for (rel, path) in rels {
         let Ok(text) = std::str::from_utf8(rel) else {
+            unknown.push((*path).clone());
             continue;
         };
         if !chunk.is_empty() && chunk_bytes + text.len() + 1 > PATHSPEC_CHUNK_BYTES {
-            flush(&mut chunk);
+            flush(&mut chunk, &mut tracked, &mut unknown);
             chunk_bytes = 0;
         }
         chunk.push(text);
         chunk_bytes += text.len() + 1;
     }
-    flush(&mut chunk);
+    flush(&mut chunk, &mut tracked, &mut unknown);
     tracked.sort();
     tracked.dedup();
-    tracked
+    unknown.sort();
+    unknown.dedup();
+    (tracked, unknown)
 }
 
 #[cfg(unix)]
@@ -419,14 +484,6 @@ fn windows_shell_free_extensions(pathext: Option<&OsStr>) -> Vec<String> {
 
 /// Resolve a bare command name using only absolute `PATH` directories.
 /// Skips empty, whitespace-only, `.`, and relative entries on every platform.
-fn resolve_absolute_on_path(binary: &str) -> Option<PathBuf> {
-    resolve_absolute_on_path_in(
-        binary,
-        std::env::var_os("PATH").as_deref(),
-        std::env::var_os("PATHEXT").as_deref(),
-    )
-}
-
 fn resolve_absolute_on_path_in(
     binary: &str,
     path_env: Option<&OsStr>,
@@ -475,8 +532,7 @@ fn resolve_absolute_on_path_in(
     None
 }
 
-fn run_git_ls_files(root: &Path, pathspecs: &[&str]) -> Option<Vec<u8>> {
-    let git_binary = resolve_absolute_on_path("git")?;
+fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Option<Vec<u8>> {
     let mut child = Command::new(git_binary)
         .args([
             "-c",
@@ -662,6 +718,31 @@ mod tests {
             resolve_absolute_on_path_in("git", Some(OsStr::new(&with_abs)), None),
             Some(planted)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_index_without_git_marks_repo_paths_unknown() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let outside = dir.path().join("outside");
+        let repo_dist = repo.join("dist");
+        let outside_dist = outside.join("dist");
+        std::fs::create_dir_all(repo.join(".git"))?;
+        std::fs::create_dir_all(&repo_dist)?;
+        std::fs::create_dir_all(&outside_dist)?;
+        // Split index extension forces fallback to git.
+        let split = index(2, PATHS, &[(b"link", b"0123456789")]);
+        std::fs::write(repo.join(".git").join("index"), split)?;
+
+        let result = tracked_paths_with_path(
+            &[repo_dist.clone(), outside_dist.clone()],
+            Some(OsStr::new("")),
+            None,
+        );
+        assert!(result.tracked.is_empty());
+        assert!(result.unknown.contains(&repo_dist));
+        assert!(!result.unknown.contains(&outside_dist));
         Ok(())
     }
 }

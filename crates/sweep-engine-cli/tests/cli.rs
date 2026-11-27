@@ -160,3 +160,46 @@ fn native_apply_signals_flush_a_complete_interrupted_partition() {
         assert_eq!(remaining + report.deleted_count as usize, 2000);
     }
 }
+
+#[test]
+fn tracked_status_reports_unknown_when_index_fallback_has_no_git_on_path() {
+    let root = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let repo = root.path().join("repo");
+    let outside = root.path().join("outside");
+    let repo_candidate = repo.join("node_modules");
+    let outside_candidate = outside.join("node_modules");
+    std::fs::create_dir_all(repo.join(".git")).unwrap_or_else(|err| panic!("mkdir: {err}"));
+    // Unparseable index forces the native reader onto the git fallback path.
+    std::fs::write(repo.join(".git").join("index"), b"NOT_A_VALID_INDEX")
+        .unwrap_or_else(|err| panic!("write: {err}"));
+    std::fs::create_dir_all(&repo_candidate).unwrap_or_else(|err| panic!("mkdir: {err}"));
+    std::fs::create_dir_all(&outside_candidate).unwrap_or_else(|err| panic!("mkdir: {err}"));
+
+    let stdin = format!(
+        "{}\0{}\0",
+        repo_candidate.display(),
+        outside_candidate.display()
+    );
+    let output = Command::cargo_bin("sweep-engine")
+        .unwrap_or_else(|err| panic!("failed to locate sweep-engine binary: {err}"))
+        .args(["tracked", "--status"])
+        .env("PATH", "")
+        .write_stdin(stdin.as_bytes())
+        .output()
+        .unwrap_or_else(|err| panic!("failed to run sweep-engine tracked: {err}"));
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records: Vec<&str> = std::str::from_utf8(&output.stdout)
+        .unwrap_or_else(|err| panic!("utf8: {err}"))
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V2"));
+    assert!(records.contains(&format!("U\t{}", repo_candidate.display()).as_str()));
+    assert!(!records.contains(&format!("T\t{}", repo_candidate.display()).as_str()));
+    assert!(!records.contains(&format!("U\t{}", outside_candidate.display()).as_str()));
+}

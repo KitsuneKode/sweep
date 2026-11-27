@@ -632,11 +632,20 @@ export async function executePlanDeletion(
     const queued = plan.candidates.filter(
       (candidate) => selectedIds.has(candidate.id) && !candidate.isSymlink,
     );
-    const tracked = gitTrackedPaths(queued.map((candidate) => candidate.path));
+    const { tracked, unknown } = gitTrackedPaths(queued.map((candidate) => candidate.path));
     if (tracked.size > 0) {
       const first = sanitizeTerminalText([...tracked][0]!);
       throw new GuardrailError(
         `${tracked.size} queued item(s) contain git-tracked files (e.g. ${first}). Nothing was removed.`,
+      );
+    }
+    const unapprovedUnknown = queued.filter(
+      (candidate) => unknown.has(candidate.path) && candidate.riskTier !== "dangerous",
+    );
+    if (unapprovedUnknown.length > 0) {
+      const first = sanitizeTerminalText(unapprovedUnknown[0]!.path);
+      throw new GuardrailError(
+        `${unapprovedUnknown.length} queued item(s) could not be checked for git-tracked files (e.g. ${first}). Re-scan or approve as dangerous before removing.`,
       );
     }
   }

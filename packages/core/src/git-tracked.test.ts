@@ -1,8 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { lookupExecutable } from "./executable-lookup.js";
 import { gitTrackedPaths, gitTrackedPathsViaEngine, gitTrackedPathsViaGit } from "./git-tracked.js";
 import { isRustEngineAvailable } from "./rust-engine.js";
 
@@ -35,13 +45,17 @@ const IMPLEMENTATIONS = [
   { name: "git", run: gitTrackedPathsViaGit, available: hasGit },
   {
     name: "engine index reader",
-    run: (paths: string[]) => gitTrackedPathsViaEngine(paths) ?? new Set<string>(["<no answer>"]),
+    run: (paths: string[]) =>
+      gitTrackedPathsViaEngine(paths) ?? {
+        tracked: new Set<string>(["<no answer>"]),
+        unknown: new Set<string>(),
+      },
     available: hasGit && isRustEngineAvailable(),
   },
 ];
 
 for (const impl of IMPLEMENTATIONS) {
-  const gitTrackedPaths = impl.run;
+  const gitTrackedPaths = (paths: string[]) => impl.run(paths).tracked;
   describe.skipIf(!impl.available)(`git-tracked candidates (${impl.name})`, () => {
     test("a folder holding a committed file is tracked; build output is not", () => {
       write("dist/vendor.js");
@@ -182,6 +196,86 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
     expect(plan.selectedCandidateIds).not.toContain(byName.get(".next")?.id);
     expect(byName.get("node_modules")?.riskTier).toBe("safe");
   });
+
+  test("JS engine marks repo candidates dangerous with tracked-status-unknown when PATH has no git", async () => {
+    const { scanToPlan } = await import("./engine.js");
+    const { DEFAULT_CONFIG } = await import("./config.js");
+    write("package.json", "{}\n");
+    write("node_modules/pkg/index.js");
+    const outside = mkdtempSync(join(tmpdir(), "sweep-no-repo-"));
+    const nodeOnlyBin = mkdtempSync(join(tmpdir(), "sweep-node-only-bin-"));
+    mkdirSync(join(outside, "node_modules"), { recursive: true });
+    writeFileSync(join(outside, "package.json"), "{}\n");
+    writeFileSync(join(outside, "node_modules", "a.js"), "x\n");
+    const nodePath = lookupExecutable("node").resolvedPath;
+    if (nodePath) {
+      const target = join(nodeOnlyBin, basename(nodePath));
+      if (process.platform === "win32") copyFileSync(nodePath, target);
+      else symlinkSync(nodePath, target);
+    }
+
+    const previousPath = process.env.PATH;
+    const previousEngine = process.env.SWEEP_ENGINE_PATH;
+    try {
+      process.env.PATH = nodeOnlyBin;
+      process.env.SWEEP_ENGINE_PATH = join(root, "missing-sweep-engine");
+
+      const { plan } = await scanToPlan(root, DEFAULT_CONFIG);
+      const nm = plan.candidates.find((candidate) => candidate.name === "node_modules");
+      expect(nm?.riskTier).toBe("dangerous");
+      expect(nm?.reasons).toContain("tracked-status-unknown");
+      expect(nm?.selectedByDefault).toBe(false);
+      expect(plan.selectedCandidateIds).not.toContain(nm?.id);
+
+      const { plan: outsidePlan } = await scanToPlan(outside, DEFAULT_CONFIG);
+      const outsideNm = outsidePlan.candidates.find(
+        (candidate) => candidate.name === "node_modules",
+      );
+      expect(outsideNm?.riskTier).toBe("safe");
+      expect(outsideNm?.reasons).not.toContain("tracked-status-unknown");
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previousEngine;
+      rmSync(outside, { recursive: true, force: true });
+      rmSync(nodeOnlyBin, { recursive: true, force: true });
+    }
+  });
+
+  test.skipIf(!isRustEngineAvailable())(
+    "Rust engine marks repo candidates dangerous with tracked-status-unknown when index fallback has no git on PATH",
+    async () => {
+      const { scanToPlanViaRust } = await import("./rust-engine.js");
+      const { DEFAULT_CONFIG } = await import("./config.js");
+      write("package.json", "{}\n");
+      write("node_modules/pkg/index.js");
+      git("add", "package.json");
+      git("commit", "-qm", "init");
+      git("update-index", "--split-index");
+
+      const previousPath = process.env.PATH;
+      try {
+        process.env.PATH =
+          process.platform === "win32"
+            ? "C:\\nonexistent-sweep-no-git"
+            : "/nonexistent-sweep-no-git";
+
+        const plan = await scanToPlanViaRust(root, {
+          config: DEFAULT_CONFIG,
+          selectionPolicy: { mode: "default", includeDangerous: false },
+        });
+        const nm = plan.candidates.find((candidate) => candidate.name === "node_modules");
+        expect(nm?.riskTier).toBe("dangerous");
+        expect(nm?.reasons).toContain("tracked-status-unknown");
+        expect(nm?.selectedByDefault).toBe(false);
+        expect(plan.selectedCandidateIds).not.toContain(nm?.id);
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+      }
+    },
+  );
 });
 
 test.skipIf(process.platform === "win32")(
@@ -205,7 +299,10 @@ test.skipIf(process.platform === "win32")(
       process.chdir(work);
       for (const pathEnv of ["", ":/nonexistent", "/nonexistent:", "/a::/b", ".", "./relbin"]) {
         process.env.PATH = pathEnv;
-        expect(gitTrackedPathsViaGit([join(work, "dist")])).toEqual(new Set());
+        expect(gitTrackedPathsViaGit([join(work, "dist")])).toEqual({
+          tracked: new Set(),
+          unknown: new Set([join(work, "dist")]),
+        });
         expect(existsSync(marker)).toBe(false);
       }
     } finally {

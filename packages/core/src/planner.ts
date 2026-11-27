@@ -5,6 +5,7 @@ import { gitTrackedPaths } from "./git-tracked.js";
 import { ProjectActivityIndex } from "./project-activity.js";
 
 export const GIT_TRACKED_REASON = "git-tracked";
+export const TRACKED_STATUS_UNKNOWN_REASON = "tracked-status-unknown";
 import type {
   PathFailure,
   RiskTier,
@@ -126,24 +127,39 @@ export function restrictSelectionToIdle(
 
 /**
  * Anything git tracks is authored, not built: block it whatever its name.
- * Blocked and symlink rows are skipped - the first is final, and a link's
- * tracked state says nothing about what it points at.
+ * When tracked status cannot be checked for a repository candidate, escalate it
+ * to at least `dangerous` with `tracked-status-unknown` so it is never
+ * pre-selected. Blocked and symlink rows are skipped - the first is final, and
+ * a link's tracked state says nothing about what it points at.
  */
 function blockGitTracked(candidates: ScanCandidate[]): ScanCandidate[] {
   const checkable = candidates.filter(
     (candidate) => candidate.riskTier !== "blocked" && !candidate.isSymlink,
   );
-  const tracked = gitTrackedPaths(checkable.map((candidate) => candidate.path));
-  if (tracked.size === 0) return candidates;
-  return candidates.map((candidate) =>
-    tracked.has(candidate.path)
-      ? {
-          ...candidate,
-          riskTier: "blocked" as const,
-          reasons: [...candidate.reasons, GIT_TRACKED_REASON],
-        }
-      : candidate,
-  );
+  const { tracked, unknown } = gitTrackedPaths(checkable.map((candidate) => candidate.path));
+  if (tracked.size === 0 && unknown.size === 0) return candidates;
+  return candidates.map((candidate) => {
+    if (candidate.riskTier === "blocked" || candidate.isSymlink) return candidate;
+    if (tracked.has(candidate.path)) {
+      return {
+        ...candidate,
+        riskTier: "blocked" as const,
+        reasons: candidate.reasons.includes(GIT_TRACKED_REASON)
+          ? candidate.reasons
+          : [...candidate.reasons, GIT_TRACKED_REASON],
+      };
+    }
+    if (unknown.has(candidate.path)) {
+      return {
+        ...candidate,
+        riskTier: "dangerous" as const,
+        reasons: candidate.reasons.includes(TRACKED_STATUS_UNKNOWN_REASON)
+          ? candidate.reasons
+          : [...candidate.reasons, TRACKED_STATUS_UNKNOWN_REASON],
+      };
+    }
+    return candidate;
+  });
 }
 
 function normalizeSelectionDefaults(candidates: ScanCandidate[]): ScanCandidate[] {

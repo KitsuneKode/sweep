@@ -52,8 +52,10 @@ appear in a scan as **blocked** and cannot be selected:
   each repository's index directly, so no program runs and none of a cloned
   project's git config is consulted. Index layouts it does not read in full
   (split or sparse indexes) and installs without the engine ask git instead,
-  with the repository's `core.fsmonitor` disabled. Sweep checks again just
-  before removal.
+  with the repository's `core.fsmonitor` disabled. If Sweep cannot check
+  tracked files inside a git repository, those candidates are marked
+  `dangerous` with `tracked-status-unknown` and are never pre-selected. Sweep
+  checks again just before removal.
 - **Project files**: `src`, `.sweeprc`, `.env` and `.env.*`, and manifests and
   lockfiles such as `package.json`, `Cargo.toml`, `go.mod` and `pyproject.toml`.
   A repository's own `.sweeprc` can add patterns, but it cannot make these

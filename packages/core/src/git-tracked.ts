@@ -54,25 +54,39 @@ function findRepoRoot(start: string, cache: Map<string, string | null>): string 
   }
 }
 
+export interface GitTrackedResult {
+  /** Paths confirmed to be, or contain, git-tracked files. */
+  tracked: Set<string>;
+  /** Paths inside a git repository whose tracked status could not be checked. */
+  unknown: Set<string>;
+}
+
+const TRACKED_STATUS_HEADER = "SWEEP_TRACKED_V2";
+
+function emptyTrackedResult(): GitTrackedResult {
+  return { tracked: new Set(), unknown: new Set() };
+}
+
 /**
- * The subset of `paths` that are, or contain, git-tracked files. Paths outside
- * any repository, and repositories git cannot read, are reported as untracked:
- * this check only ever adds protection, it never removes any.
+ * Classify `paths` into git-tracked and unknown-status subsets. Paths outside
+ * any repository appear in neither set. When a repository's tracked files
+ * cannot be verified, its paths are reported in `unknown` so callers fail
+ * closed instead of treating them as untracked.
  *
  * The native engine answers this by reading each repository's index itself,
  * in parallel and without running git (about ten times faster on a tree of
  * many repositories). Without it, or if it fails, git answers.
  */
-export function gitTrackedPaths(paths: readonly string[]): Set<string> {
-  if (paths.length === 0) return new Set();
+export function gitTrackedPaths(paths: readonly string[]): GitTrackedResult {
+  if (paths.length === 0) return emptyTrackedResult();
   return gitTrackedPathsViaEngine(paths) ?? gitTrackedPathsViaGit(paths);
 }
 
 /** Null when the engine is unavailable or did not answer cleanly. */
-export function gitTrackedPathsViaEngine(paths: readonly string[]): Set<string> | null {
+export function gitTrackedPathsViaEngine(paths: readonly string[]): GitTrackedResult | null {
   const probe = probeRustEngine();
   if (!probe.available || !probe.resolvedPath) return null;
-  const result = spawnSync(probe.resolvedPath, ["tracked"], {
+  const result = spawnSync(probe.resolvedPath, ["tracked", "--status"], {
     input: `${paths.join("\0")}\0`,
     encoding: "utf8",
     timeout: 60_000,
@@ -81,18 +95,34 @@ export function gitTrackedPathsViaEngine(paths: readonly string[]): Set<string> 
     stdio: ["pipe", "pipe", "ignore"],
   });
   if (result.status !== 0 || typeof result.stdout !== "string") return null;
+  const records = result.stdout.split("\0");
+  if (records[0] !== TRACKED_STATUS_HEADER) return null;
   // Only ever answer about paths that were asked about.
   const asked = new Set(paths);
-  return new Set(result.stdout.split("\0").filter((path) => asked.has(path)));
+  const tracked = new Set<string>();
+  const unknown = new Set<string>();
+  for (let i = 1; i < records.length; i++) {
+    const entry = records[i];
+    if (!entry) continue;
+    if (entry.startsWith("T\t")) {
+      const path = entry.slice(2);
+      if (asked.has(path)) tracked.add(path);
+    } else if (entry.startsWith("U\t")) {
+      const path = entry.slice(2);
+      if (asked.has(path)) unknown.add(path);
+    } else {
+      return null;
+    }
+  }
+  for (const path of tracked) unknown.delete(path);
+  return { tracked, unknown };
 }
 
 /** One hardened `git ls-files` per repository. */
-export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
+export function gitTrackedPathsViaGit(paths: readonly string[]): GitTrackedResult {
   const tracked = new Set<string>();
-  if (paths.length === 0) return tracked;
-  const gitBinary = lookupExecutable("git").resolvedPath;
-  if (!gitBinary) return tracked;
-  const gitEnv = { ...process.env, ...GIT_ENV_OVERRIDES };
+  const unknown = new Set<string>();
+  if (paths.length === 0) return { tracked, unknown };
   const rootCache = new Map<string, string | null>();
   const byRoot = new Map<string, string[]>();
   for (const path of paths) {
@@ -102,6 +132,15 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
     if (list) list.push(path);
     else byRoot.set(root, [path]);
   }
+  if (byRoot.size === 0) return { tracked, unknown };
+  const gitBinary = lookupExecutable("git").resolvedPath;
+  if (!gitBinary) {
+    for (const members of byRoot.values()) {
+      for (const path of members) unknown.add(path);
+    }
+    return { tracked, unknown };
+  }
+  const gitEnv = { ...process.env, ...GIT_ENV_OVERRIDES };
 
   for (const [root, members] of byRoot) {
     const relToPath = new Map<string, string>();
@@ -119,11 +158,18 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
           stdio: ["ignore", "pipe", "ignore"],
         },
       );
-      if (result.status !== 0 || typeof result.stdout !== "string") continue;
+      if (result.status !== 0 || typeof result.stdout !== "string") {
+        for (const rel of chunk) {
+          const path = relToPath.get(rel);
+          if (path !== undefined) unknown.add(path);
+        }
+        continue;
+      }
       collect(result.stdout, relToPath, tracked);
     }
   }
-  return tracked;
+  for (const path of tracked) unknown.delete(path);
+  return { tracked, unknown };
 }
 
 /** Map each tracked file back to the candidate that contains it. */
