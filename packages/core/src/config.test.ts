@@ -23,17 +23,25 @@ import {
   writeProjectSweeprc,
   projectSweeprcRevision,
   isIgnoredEntry,
+  setProjectConfigStopDirForTest,
 } from "./config.js";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
 let tmpDir: string;
+let previousConfigDir: string | undefined;
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "sweep-config-test-"));
+  previousConfigDir = process.env.SWEEP_CONFIG_DIR;
+  process.env.SWEEP_CONFIG_DIR = join(tmpDir, ".global-config");
+  setProjectConfigStopDirForTest(tmpDir);
 });
 
 afterEach(() => {
+  setProjectConfigStopDirForTest(undefined);
+  if (previousConfigDir === undefined) delete process.env.SWEEP_CONFIG_DIR;
+  else process.env.SWEEP_CONFIG_DIR = previousConfigDir;
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -556,5 +564,27 @@ describe("config hardening", () => {
       ignore: Array.from({ length: 513 }, (_, i) => `dir-${i}`),
     });
     expect(() => loadConfig(dir("many-patterns"))).toThrow(/max 512/);
+  });
+
+  test("test boundary isolates default assertions from ancestor .sweeprc while real inheritance still works", () => {
+    const outer = dir("outer-repo");
+    const innerTmp = join(outer, "tmp-sandbox");
+    const nested = join(innerTmp, "project");
+    mkdirSync(nested, { recursive: true });
+    writeConfig(outer, { maxSizeGB: 9, ignore: ["from-ancestor"] });
+
+    // Without narrowing the stop boundary, real walk-up inherits outer/.sweeprc.
+    expect(loadConfig(nested).maxSizeGB).toBe(9);
+    expect(loadConfig(nested).ignore).toContain("from-ancestor");
+
+    // With the stop boundary pinned to innerTmp (as in beforeEach), ancestor
+    // configs above TMPDIR do not leak into default or writeProjectSweeprc tests.
+    setProjectConfigStopDirForTest(innerTmp);
+    expect(loadConfig(nested).maxSizeGB).toBeNull();
+    expect(loadConfig(nested).ignore).toEqual(DEFAULT_CONFIG.ignore);
+    expect(
+      writeProjectSweeprc(join(nested, ".sweeprc"), { patterns: [], disabledPatterns: [] }),
+    ).toBe("created");
+    expect(JSON.parse(readFileSync(join(nested, ".sweeprc"), "utf8"))).toEqual({});
   });
 });

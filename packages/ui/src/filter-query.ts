@@ -169,16 +169,16 @@ export function filterAdvice(input: string): string | null {
     const value = term.slice(colon + 1);
     if (value.length === 0) continue;
     if (key === "is" && !IS_VALUE_SET.has(value)) {
-      return `is:${value} isn't a filter — ${IS_VALUES.join(", ")}`;
+      return `is:${value} isn't a filter: ${IS_VALUES.join(", ")}`;
     }
     if ((key === "older" || key === "newer") && !DURATION_TERM.test(value)) {
       return `${key}:${value} needs a duration like 30d, 12h, or 2w`;
     }
     if (key === "risk" && value.split(",").some((tier) => tier && !RISK_TIERS.has(tier))) {
-      return `risk:${value} isn't a tier — safe, caution, dangerous, blocked`;
+      return `risk:${value} isn't a tier: safe, caution, dangerous, blocked`;
     }
     if (!FILTER_KEY_SET.has(key)) {
-      return `${key}: isn't a filter — matching that text instead`;
+      return `${key}: isn't a filter, matching that text instead`;
     }
   }
   return null;

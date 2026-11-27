@@ -7,32 +7,53 @@ import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
 import { findProjectConfigPath, validateProjectConfigFile } from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
-import {
-  isRustEngineAvailable,
-  resolveRustEngineBinary,
-} from "@kitsunekode/sweep-core/rust-engine";
+import { probeRustEngine } from "@kitsunekode/sweep-core/rust-engine";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { formatBytes, sanitizeTerminalText } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
-  isOpenTuiAvailable,
+  drainStdout,
   resolveScanConfig,
   resolveEngineBackend,
   runScanToPlan,
+  verifyOpenTuiAvailable,
   warnIgnoredOptions,
   writeJson,
 } from "./shared.js";
+import { hasRegisteredUiModule } from "./ui.js";
 
 export type DoctorHandlerOptions = CliOptions & {
   path?: string;
   json?: boolean;
 };
 
+export type DoctorCheckReasonKind =
+  | "lock_held"
+  | "identity_unavailable"
+  | "target_invalid"
+  | "config_invalid"
+  | "no_patterns"
+  | "missing"
+  | "version_mismatch"
+  | "missing_exports"
+  | "load_error"
+  | "not_installed"
+  | "spawn_error"
+  | "probe_failed"
+  | "timeout"
+  | "engine_unavailable"
+  | "capabilities_unsupported"
+  | "scan_failed";
+
 export type DoctorCheck = {
   name: string;
   ok: boolean;
   detail: string;
+  /** Stable machine-readable reason code when a check warns. */
+  reasonKind?: DoctorCheckReasonKind;
+  /** Concise human-readable reason sentence when a check warns. */
+  reason?: string;
 };
 
 function targetIsDirectory(targetDir: string): boolean {
@@ -49,13 +70,14 @@ export async function collectDoctorChecks(
 ): Promise<DoctorCheck[]> {
   // Report the config file loadConfig would actually find - ancestors count.
   const configPath = findProjectConfigPath(targetDir);
-  const rustBinary = resolveRustEngineBinary();
-  const rustOk = isRustEngineAvailable();
+  const rustProbe = probeRustEngine();
+  const rustOk = rustProbe.available;
+  const rustExecutable = rustProbe.resolvedPath ?? rustProbe.binary;
   let rustSafetyOk = false;
-  if (rustOk) {
+  if (rustOk && rustProbe.resolvedPath) {
     try {
       const capabilities = JSON.parse(
-        execFileSync(rustBinary, ["--capabilities"], {
+        execFileSync(rustProbe.resolvedPath, ["--capabilities"], {
           encoding: "utf8",
           timeout: 1000,
           killSignal: "SIGKILL",
@@ -67,8 +89,9 @@ export async function collectDoctorChecks(
       /* Report an incompatible or broken engine rather than certifying it. */
     }
   }
-  const engine = resolveEngineBackend(opts);
-  const openTuiOk = isOpenTuiAvailable();
+  const engine = resolveEngineBackend(opts, { warnOnFallback: false });
+  const embeddedUi = hasRegisteredUiModule();
+  const openTui = embeddedUi ? null : await verifyOpenTuiAvailable();
   const hasConfigFile = configPath !== null;
   const configValidity = hasConfigFile
     ? validateProjectConfigFile(configPath, targetDir)
@@ -108,6 +131,9 @@ export async function collectDoctorChecks(
 
   const lock = readApplyLockStatus();
   const rootIdentity = readFilesystemIdentity(targetDir);
+  const targetOk = targetIsDirectory(targetDir);
+  const configOk = configLoadError === undefined && configValidity.ok;
+  const patternsOk = config !== null && config.patterns.length > 0;
   return [
     {
       name: "apply_lock",
@@ -115,6 +141,12 @@ export async function collectDoctorChecks(
       detail: !lock.held
         ? "available"
         : `${lock.lockPath} · ${lock.owner ? `host PID ${lock.owner.pid}: ${lock.processStatus}; journal ${lock.owner.journalPath}` : (lock.detail ?? "owner unknown")}. Inspect recovery before manual cleanup; a child may outlive the host.`,
+      ...(lock.held
+        ? {
+            reasonKind: "lock_held" as const,
+            reason: "Another apply session currently holds the apply lock.",
+          }
+        : {}),
     },
     { name: "protocol", ok: true, detail: PROTOCOL_VERSION },
     {
@@ -123,17 +155,27 @@ export async function collectDoctorChecks(
       detail: rootIdentity
         ? "stable root identifier available; descendants are checked individually at apply"
         : "root identifier unavailable; apply is disabled, and rescanning cannot provide identity safety",
+      ...(rootIdentity === undefined
+        ? {
+            reasonKind: "identity_unavailable" as const,
+            reason: "Filesystem root identity could not be read; apply is disabled.",
+          }
+        : {}),
     },
     {
       name: "target",
-      ok: targetIsDirectory(targetDir),
-      detail: targetIsDirectory(targetDir)
-        ? targetDir
-        : `${targetDir} (missing or not a directory)`,
+      ok: targetOk,
+      detail: targetOk ? targetDir : `${targetDir} (missing or not a directory)`,
+      ...(!targetOk
+        ? {
+            reasonKind: "target_invalid" as const,
+            reason: `Target path does not exist or is not a directory: ${targetDir}.`,
+          }
+        : {}),
     },
     {
       name: "config",
-      ok: configLoadError === undefined && configValidity.ok,
+      ok: configOk,
       detail:
         configLoadError ??
         (hasConfigFile
@@ -141,11 +183,30 @@ export async function collectDoctorChecks(
             ? configPath!
             : configValidity.detail
           : "defaults (no .sweeprc)"),
+      ...(!configOk
+        ? {
+            reasonKind: "config_invalid" as const,
+            reason:
+              configLoadError ??
+              (!configValidity.ok ? configValidity.detail : "Project configuration is invalid."),
+          }
+        : {}),
     },
     {
       name: "patterns",
-      ok: config !== null && config.patterns.length > 0,
+      ok: patternsOk,
       detail: config === null ? "config error" : String(config.patterns.length),
+      ...(!patternsOk
+        ? {
+            reasonKind: (config === null
+              ? "config_invalid"
+              : "no_patterns") as DoctorCheckReasonKind,
+            reason:
+              config === null
+                ? "Patterns could not be loaded because configuration failed."
+                : "No cleanup patterns are enabled.",
+          }
+        : {}),
     },
     {
       name: "disabled_patterns",
@@ -155,20 +216,59 @@ export async function collectDoctorChecks(
 
     {
       name: "opentui",
-      ok: openTuiOk,
-      detail: openTuiOk
-        ? "available"
-        : "reinstall @kitsunekode/sweep; sweep ui includes @opentui/core",
+      ok: embeddedUi ? true : (openTui?.ok ?? false),
+      detail: embeddedUi
+        ? "embedded (standalone)"
+        : (openTui?.detail ?? "missing; reinstall @kitsunekode/sweep"),
+      ...(!embeddedUi && openTui && !openTui.ok
+        ? { reasonKind: openTui.reason, reason: openTui.detail }
+        : {}),
     },
-    { name: "rust_engine", ok: rustOk, detail: rustOk ? rustBinary : "not found" },
+    {
+      name: "rust_engine",
+      ok: rustOk,
+      detail: rustOk
+        ? rustExecutable
+        : rustProbe.reasonKind === "not_installed"
+          ? "not found"
+          : `${rustExecutable} (${rustProbe.reason ?? rustProbe.reasonKind})`,
+      ...(!rustOk
+        ? {
+            reasonKind: rustProbe.reasonKind ?? ("not_installed" as const),
+            reason: rustProbe.reason ?? "Native Rust engine binary was not found.",
+          }
+        : {}),
+    },
     {
       name: "rust_apply_safety",
       ok: rustSafetyOk,
       detail: rustSafetyOk
         ? "controlled cancellation and plan identity supported"
         : "missing or incompatible native capabilities",
+      ...(!rustSafetyOk
+        ? {
+            reasonKind: (rustOk
+              ? "capabilities_unsupported"
+              : "engine_unavailable") as DoctorCheckReasonKind,
+            reason: rustOk
+              ? "Native Rust engine lacks controlled cancellation or plan identity support."
+              : "Native Rust engine is unavailable, so native apply capabilities could not be verified.",
+          }
+        : {}),
     },
-    { name: "dry_scan", ok: scanOk, detail: scanDetail },
+    {
+      name: "dry_scan",
+      ok: scanOk,
+      detail: scanDetail,
+      ...(!scanOk
+        ? {
+            reasonKind: (config === null
+              ? "config_invalid"
+              : "scan_failed") as DoctorCheckReasonKind,
+            reason: scanDetail,
+          }
+        : {}),
+    },
   ];
 }
 
@@ -196,9 +296,12 @@ export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
           name: check.name,
           status: check.ok ? "ok" : "warn",
           detail: check.detail,
+          ...(check.reasonKind ? { reasonKind: check.reasonKind } : {}),
+          ...(check.reason ? { reason: check.reason } : {}),
         })),
         hasWarnings,
       });
+      await drainStdout();
       exitWith(hasWarnings ? EXIT.WARN : EXIT.OK);
     }
 

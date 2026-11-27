@@ -93,20 +93,77 @@ export function resolveDependencies(
   return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
 
-/** Guard: nothing Bun-specific may reach the registry. */
-export function assertPublishable(manifest: Record<string, unknown>): void {
-  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"] as const) {
-    const block = manifest[field] as DependencyBlock | undefined;
-    if (!block) continue;
-    for (const [name, range] of Object.entries(block)) {
-      if (range.startsWith("workspace:") || range.startsWith("catalog:")) {
-        throw new Error(
-          `prepack: ${field}.${name} is "${range}"; npm cannot install that. ` +
-            `Resolve it before publishing.`,
-        );
-      }
+const ALL_DEPENDENCY_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+  "overrides",
+  "resolutions",
+] as const;
+
+function assertPublishableRanges(fieldPath: string, value: unknown): void {
+  if (typeof value === "string") {
+    if (value.startsWith("workspace:") || value.startsWith("catalog:")) {
+      throw new Error(
+        `prepack: ${fieldPath} is "${value}"; npm cannot install that. ` +
+          `Resolve it before publishing.`,
+      );
+    }
+    return;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [name, nested] of Object.entries(value as Record<string, unknown>)) {
+      assertPublishableRanges(`${fieldPath}.${name}`, nested);
     }
   }
+}
+
+/** Guard: nothing Bun-specific may reach the registry in any dependency field. */
+export function assertPublishable(manifest: Record<string, unknown>): void {
+  for (const field of ALL_DEPENDENCY_FIELDS) {
+    const block = manifest[field];
+    if (block === undefined) continue;
+    assertPublishableRanges(field, block);
+  }
+}
+
+/**
+ * Transform the workspace CLI manifest into the exact manifest that ships to npm.
+ * Pure helper shared by `prepack.ts` and `preflight.ts`.
+ */
+export function preparePublishManifest(
+  originalManifest: Record<string, unknown>,
+  catalogs: Catalogs,
+): Record<string, unknown> {
+  const manifest = structuredClone(originalManifest);
+
+  // The workspace `exports` points at ./src/*.ts, which is not in the tarball.
+  // Published consumers get the bundled equivalents instead.
+  manifest.exports = {
+    ".": "./dist/sweep-lib.js",
+    "./bin": "./dist/sweep.js",
+  };
+
+  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"] as const) {
+    // Commander is compiled into both CLI/library bundles. Keeping it in
+    // dependencies needlessly requires a registry install for headless use.
+    const resolved = resolveDependencies(
+      manifest[field] as DependencyBlock | undefined,
+      catalogs,
+      field === "dependencies" ? new Set(["commander"]) : new Set(),
+    );
+    if (resolved) manifest[field] = resolved;
+    else delete manifest[field];
+  }
+
+  // Strip workspace dev tooling and monorepo-only scripts so published tarballs
+  // never ship unresolved workspace:/catalog: devDependencies or broken hooks.
+  delete manifest.devDependencies;
+  delete manifest.scripts;
+
+  assertPublishable(manifest);
+  return manifest;
 }
 
 function main(): void {
@@ -128,29 +185,11 @@ function main(): void {
     closeSync(backupFd);
   }
 
-  const manifest = JSON.parse(original) as Record<string, unknown>;
   const catalogs = readCatalogs(REPO_ROOT);
-
-  // The workspace `exports` points at ./src/*.ts, which is not in the tarball.
-  // Published consumers get the bundled equivalents instead.
-  manifest.exports = {
-    ".": "./dist/sweep-lib.js",
-    "./bin": "./dist/sweep.js",
-  };
-
-  for (const field of ["dependencies", "optionalDependencies", "peerDependencies"] as const) {
-    // Commander is compiled into both CLI/library bundles. Keeping it in
-    // dependencies needlessly requires a registry install for headless use.
-    const resolved = resolveDependencies(
-      manifest[field] as DependencyBlock | undefined,
-      catalogs,
-      field === "dependencies" ? new Set(["commander"]) : new Set(),
-    );
-    if (resolved) manifest[field] = resolved;
-    else delete manifest[field];
-  }
-
-  assertPublishable(manifest);
+  const manifest = preparePublishManifest(
+    JSON.parse(original) as Record<string, unknown>,
+    catalogs,
+  );
   atomicWrite(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
 
   console.log("prepack: copied README.md and LICENSE, resolved dependencies for publish");

@@ -133,9 +133,21 @@ fn run() -> Result<(), CliFailure> {
 }
 
 /// Which of the NUL-separated absolute paths on stdin are, or contain,
-/// git-tracked files. Answers NUL-separated on stdout, in input order.
+/// git-tracked files or nested git repositories. With `--status`, emits
+/// `SWEEP_TRACKED_V4\0` followed by `T\t<path>\0` for tracked paths,
+/// `U\t<path>\0` for repository paths whose tracked status could not be
+/// checked, and `R\t<path>\0` for directory candidates containing `.git`.
 fn run_tracked() -> Result<(), CliFailure> {
     use std::io::{Read, Write};
+    let status_mode = match arg(2)?.as_deref() {
+        None => false,
+        Some("--status") => true,
+        Some(other) => {
+            return Err(CliFailure::invalid_input(format!(
+                "unknown tracked option: {other}"
+            )));
+        }
+    };
     const MAX_INPUT: u64 = 256 * 1024 * 1024;
     let mut input = Vec::new();
     std::io::stdin()
@@ -156,11 +168,40 @@ fn run_tracked() -> Result<(), CliFailure> {
         }
         paths.push(path);
     }
-    let tracked = sweep_engine::git_index::tracked_paths(&paths);
+    let result = sweep_engine::git_index::tracked_paths(&paths);
     let mut out = Vec::new();
-    for path in &paths {
-        if tracked.contains(path) {
-            if let Some(text) = path.to_str() {
+    if status_mode {
+        out.extend_from_slice(b"SWEEP_TRACKED_V4\0");
+        for path in &paths {
+            let text = path
+                .to_str()
+                .ok_or_else(|| CliFailure::failure("tracked path is not valid UTF-8"))?;
+            if result.tracked.contains(path) {
+                out.extend_from_slice(b"T\t");
+                out.extend_from_slice(text.as_bytes());
+                out.push(0);
+            } else if result.unknown.contains(path) {
+                out.extend_from_slice(b"U\t");
+                out.extend_from_slice(text.as_bytes());
+                out.push(0);
+            }
+            if result.contains_git_repo.contains(path) {
+                out.extend_from_slice(b"R\t");
+                out.extend_from_slice(text.as_bytes());
+                out.push(0);
+            }
+        }
+    } else {
+        if !result.unknown.is_empty() {
+            return Err(CliFailure::failure(
+                "tracked status could not be verified for one or more repository paths",
+            ));
+        }
+        for path in &paths {
+            if result.tracked.contains(path) {
+                let text = path
+                    .to_str()
+                    .ok_or_else(|| CliFailure::failure("tracked path is not valid UTF-8"))?;
                 out.extend_from_slice(text.as_bytes());
                 out.push(0);
             }

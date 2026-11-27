@@ -16,6 +16,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { lookupExecutable } from "./executable-lookup.js";
 
 const COLD_ENV = "SWEEP_COLD";
 const DROP_CACHES_PATH = "/proc/sys/vm/drop_caches";
@@ -49,7 +50,11 @@ export function tryDropPageCache(): ColdDropReport {
   }
   // Sync first: dirty pages are never dropped, so without it the drop leaves
   // a partially-warm cache that would still skew cold numbers.
-  const sync = spawnSync("sync", { timeout: 10_000, stdio: "ignore" });
+  const syncBinary = lookupExecutable("sync").resolvedPath;
+  if (!syncBinary) {
+    return { dropped: false, detail: "sync failed - dirty pages would stay cached" };
+  }
+  const sync = spawnSync(syncBinary, { timeout: 10_000, stdio: "ignore" });
   if (sync.error !== undefined || sync.status !== 0) {
     return { dropped: false, detail: "sync failed - dirty pages would stay cached" };
   }

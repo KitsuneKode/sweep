@@ -95,7 +95,7 @@ Root `optionalDependencies` on the CLI package are synced via `bun run sync-engi
 3. `target/debug` or `target/release` under a Cargo.toml-gated repo root
    walk (dev builds must shadow the installed optional package)
 4. Installed optional `@kitsunekode/sweep-engine-{platform}-{arch}`
-5. `sweep-engine` on `PATH`
+5. `sweep-engine` on `PATH` (absolute directories only; empty, whitespace-only, `.`, and relative segments are skipped)
 
 **Release CI:** `.github/workflows/release.yml` builds all five platforms, packs
 artifacts, then `scripts/publish-release.ts` publishes native packages before
@@ -190,8 +190,8 @@ surface either way.
 - **No Rust toolchain → every turbo command fails.** Package discovery runs
   `cargo metadata` before any task or filter is evaluated, so even
   `bun run fmt` dies with `failed to run \`cargo metadata\``. The Rust
-toolchain is a hard dev prerequisite (see `getting-started.md`); the
-`--filter "@kitsunekode/*"` convention only scopes *which tasks run\*, not
+  toolchain is a hard dev prerequisite (see `getting-started.md`); the
+  `--filter "@kitsunekode/*"` convention only scopes *which tasks run\*, not
   whether cargo must exist.
 - **`devEngines` vs npm-in-repo.** npm 11+ enforces `devEngines` by walking up
   to the workspace root, so `runtime: bun` would make _every_ `npm` invocation

@@ -71,12 +71,67 @@ export const DEMO_ROWS: DemoRow[] = [
 ];
 
 export function formatBytes(bytes: number): string {
+  return formatBinaryBytes(bytes);
+}
+
+export function formatBinaryBytes(bytes: number): string {
   if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB", "TB"];
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
   const exp = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** exp;
   return `${value >= 100 || exp === 0 ? Math.round(value) : value.toFixed(1)} ${units[exp]}`;
 }
+
+export interface IdleReportRow {
+  path: string;
+  bytes: number;
+  idle: string;
+  picked: boolean;
+  workedOnToday?: boolean;
+}
+
+const GiB = 1024 * 1024 * 1024;
+const IDLE_REPORT_ROWS: IdleReportRow[] = [
+  { path: "thesis-site/node_modules", bytes: 612 * MB, idle: "8mo", picked: true },
+  { path: "old-api/target", bytes: Math.round(2.4 * GiB), idle: "5mo", picked: true },
+  { path: "game-jam/.next", bytes: 318 * MB, idle: "3mo", picked: true },
+  {
+    path: "shop/node_modules",
+    bytes: Math.round(1.1 * GiB),
+    idle: "2h",
+    picked: false,
+    workedOnToday: true,
+  },
+];
+
+/** Derived totals for the illustrative `sweep --dry-run` report so every line adds up. */
+export const IDLE_REPORT = (() => {
+  const foundBytes = IDLE_REPORT_ROWS.reduce((sum, row) => sum + row.bytes, 0);
+  const selectedRows = IDLE_REPORT_ROWS.filter((row) => row.picked);
+  const selectedBytes = selectedRows.reduce((sum, row) => sum + row.bytes, 0);
+  const idleBytes = IDLE_REPORT_ROWS.filter((row) => !row.workedOnToday).reduce(
+    (sum, row) => sum + row.bytes,
+    0,
+  );
+  const todayBytes = IDLE_REPORT_ROWS.filter((row) => row.workedOnToday).reduce(
+    (sum, row) => sum + row.bytes,
+    0,
+  );
+  const diskFreeBytes = Math.round(9.6 * GiB);
+  const diskTotalBytes = 256 * GiB;
+  const projectedFreeBytes = diskFreeBytes + selectedBytes;
+  return {
+    rows: IDLE_REPORT_ROWS,
+    foundBytes,
+    selectedBytes,
+    selectedCount: selectedRows.length,
+    idleBytes,
+    todayBytes,
+    diskFreeBytes,
+    diskTotalBytes,
+    projectedFreeBytes,
+  };
+})();
 
 export interface CatalogItem {
   name: string;

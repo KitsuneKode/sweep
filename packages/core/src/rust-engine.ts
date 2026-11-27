@@ -2,7 +2,7 @@ import { SCAN_RESOURCE_PROFILES } from "@kitsunekode/sweep-protocol";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   ApplyReport,
@@ -12,6 +12,13 @@ import type {
 } from "@kitsunekode/sweep-protocol";
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { isColdRequested } from "./cold.js";
+import {
+  isExplicitBinaryPath,
+  lookupExecutable,
+  windowsShellFreeExtensions,
+  type PathLookupOptions,
+  type PathLookupResult,
+} from "./executable-lookup.js";
 import { ApplyOutcomeUnknownError, ApplyRefusedError, GuardrailError } from "./guardrails.js";
 import { applyPlanInsights, buildPlan } from "./planner.js";
 import {
@@ -120,7 +127,7 @@ function isSweepWorkspaceRoot(dir: string): boolean {
  *    the installed optional package - otherwise local Rust changes are never
  *    exercised by tests or dev runs while `cargo test` validates other code)
  * 3. Installed optional `@kitsunekode/sweep-engine-*` platform package
- * 4. `sweep-engine` on `PATH`
+ * 4. `sweep-engine` on `PATH` (absolute directories only)
  */
 export function resolveRustEngineBinary(): string {
   const fromEnv = process.env.SWEEP_ENGINE_PATH;
@@ -179,11 +186,43 @@ export function resolveRustEngineBinary(): string {
     return fromOptional;
   }
 
-  return "sweep-engine";
+  return resolveExecutableOnPath("sweep-engine") ?? "sweep-engine";
+}
+
+export {
+  lookupExecutable,
+  windowsShellFreeExtensions,
+  type PathLookupOptions,
+  type PathLookupResult,
+};
+
+function resolveExecutableOnPath(binary: string): string | undefined {
+  return lookupExecutable(binary).resolvedPath;
+}
+
+export interface ResolvedRustEngineExecutable {
+  binary: string;
+  executable?: string;
+  explicitConfigured: boolean;
+}
+
+export function resolveRustEngineExecutable(): ResolvedRustEngineExecutable {
+  const explicitConfigured = Boolean(process.env.SWEEP_ENGINE_PATH);
+  const binary = resolveRustEngineBinary();
+  const lookup = lookupExecutable(binary);
+  const executable = lookup.resolvedPath ?? lookup.nonExecutablePath;
+  return executable ? { binary, executable, explicitConfigured } : { binary, explicitConfigured };
+}
+
+function missingRustEngineMessage(binary: string, explicitConfigured: boolean): string {
+  return explicitConfigured || isExplicitBinaryPath(binary)
+    ? `Configured Rust engine path was not found: ${binary}.`
+    : "Native Rust engine binary was not found.";
 }
 
 interface RunEngineOptions {
   cwd?: string | undefined;
+  executable?: string | undefined;
   signal?: AbortSignal | undefined;
   cooperativeApply?: boolean;
   waitForConsumer?: (() => Promise<void> | undefined) | undefined;
@@ -223,8 +262,17 @@ async function runEngineAsync(
   onLine?: (line: string) => void,
   options: RunEngineOptions = {},
 ): Promise<string> {
-  const binary = resolveRustEngineBinary();
-  const proc = spawn(binary, args, {
+  const resolved = options.executable
+    ? { binary: options.executable, executable: options.executable, explicitConfigured: true }
+    : resolveRustEngineExecutable();
+  if (!resolved.executable) {
+    throw new Error(
+      `${missingRustEngineMessage(resolved.binary, resolved.explicitConfigured)} Install the native engine, set SWEEP_ENGINE_PATH, or use --engine js.`,
+    );
+  }
+  const binary = resolved.binary;
+  const executable = resolved.executable;
+  const proc = spawn(executable, args, {
     cwd: options.cwd ?? process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
     // Terminal Ctrl+C must reach the host, not kill apply before its report.
@@ -522,8 +570,14 @@ export async function applyPlanViaRust(
       outcomes: [...selected].map((candidateId) => ({ candidateId, status: "unattempted" })),
     };
   }
-  const binary = resolveRustEngineBinary();
-  const capabilities = spawnSync(binary, ["--capabilities"], {
+  const { binary, executable, explicitConfigured } = resolveRustEngineExecutable();
+  if (!executable) {
+    throw new ApplyRefusedError(
+      `${missingRustEngineMessage(binary, explicitConfigured)} Repair or reinstall the native engine, or use --engine js, then review again. Nothing was removed.`,
+      "engine_unavailable",
+    );
+  }
+  const capabilities = spawnSync(executable, ["--capabilities"], {
     encoding: "utf8",
     timeout: 1000,
     killSignal: "SIGKILL",
@@ -667,7 +721,7 @@ export async function applyPlanViaRust(
           report = validateApplyReport(event.report);
         } else throw new PlanValidationError("Invalid apply event");
       },
-      { signal, cooperativeApply: true },
+      { signal, cooperativeApply: true, executable },
     );
     if (refusal) throw refusal;
     if (!report?.outcomes || report.targetDir !== plan.targetDir)
@@ -718,47 +772,138 @@ export async function applyPlanViaRust(
   }
 }
 
+export type RustEngineUnavailableKind =
+  | "not_installed"
+  | "spawn_error"
+  | "probe_failed"
+  | "timeout";
+
+export interface RustEngineProbeResult {
+  available: boolean;
+  binary: string;
+  /** Exact absolute executable file inspected by the probe when present on disk. */
+  resolvedPath?: string;
+  reasonKind?: RustEngineUnavailableKind;
+  /** Concise single-line explanation of why the probe failed (status, signal, first stderr line). */
+  reason?: string;
+  exitCode?: number | null;
+  signal?: NodeJS.Signals | null;
+  stderrFirstLine?: string;
+}
+
+function firstNonEmptyLine(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length > 0) return trimmed.slice(0, 240);
+  }
+  return undefined;
+}
+
 // Cache only the last resolved binary; replacements and environment changes
 // invalidate the probe. Bound runtime/output even for user-supplied binaries.
-let availability: { key: string; available: boolean } | undefined;
-export function isRustEngineAvailable(): boolean {
+let availability: { key: string; result: RustEngineProbeResult } | undefined;
+
+export function probeRustEngine(): RustEngineProbeResult {
+  const explicitConfigured = Boolean(process.env.SWEEP_ENGINE_PATH);
   const binary = resolveRustEngineBinary();
-  let key = `${binary}:${process.cwd()}:${process.env.PATH ?? ""}:${process.env.PATHEXT ?? ""}`;
-  const extensions =
-    process.platform === "win32" ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD").split(";")] : [""];
-  const file =
-    binary.includes("/") || binary.includes("\\")
-      ? resolve(binary)
-      : (process.env.PATH ?? "")
-          .split(delimiter)
-          .flatMap((dir) => extensions.map((ext) => join(dir, binary + ext)))
-          .find((path) => existsSync(path));
+  let key = `${explicitConfigured ? "env:" : ""}${binary}:${process.cwd()}:${process.env.PATH ?? ""}:${process.env.PATHEXT ?? ""}`;
+  const lookup = lookupExecutable(binary);
+  const file = lookup.resolvedPath ?? lookup.nonExecutablePath;
   try {
     if (!file) {
-      availability = { key, available: false };
-      return false;
+      const configuredMiss = explicitConfigured || isExplicitBinaryPath(binary);
+      const result: RustEngineProbeResult = configuredMiss
+        ? {
+            available: false,
+            binary,
+            reasonKind: "spawn_error",
+            reason: `Configured Rust engine path was not found: ${binary}.`,
+          }
+        : {
+            available: false,
+            binary,
+            reasonKind: "not_installed",
+            reason: "Native Rust engine binary was not found.",
+          };
+      availability = { key, result };
+      return result;
     }
-    if (file) {
-      const stat = statSync(file, { bigint: true });
-      key += `:${file}`;
-      key += `:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
-    }
+    const stat = statSync(file, { bigint: true });
+    key += `:${file}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
     // Cold runs pay the probe spawn every time - the memo would answer
     // instantly and make dev timings read warmer than a real cold start.
-    if (!isColdRequested() && availability?.key === key) return availability.available;
-    const proc = spawnSync(binary, ["--version"], {
+    if (!isColdRequested() && availability?.key === key) return availability.result;
+
+    // Spawn the exact resolved absolute file we just stat-checked, never the bare name.
+    const proc = spawnSync(file, ["--version"], {
       encoding: "utf8",
       timeout: 1000,
       killSignal: "SIGKILL",
       maxBuffer: 4096,
     });
-    const available = proc.status === 0;
-    availability = { key, available };
-    return available;
-  } catch {
-    availability = { key, available: false };
-    return false;
+    if (!proc.error && proc.status === 0) {
+      const result: RustEngineProbeResult = {
+        available: true,
+        binary,
+        resolvedPath: file,
+      };
+      availability = { key, result };
+      return result;
+    }
+
+    const stderrFirstLine = firstNonEmptyLine(
+      typeof proc.stderr === "string" ? proc.stderr : undefined,
+    );
+    let reasonKind: RustEngineUnavailableKind = "probe_failed";
+    let reason: string;
+    if (proc.error) {
+      const errCode = (proc.error as NodeJS.ErrnoException).code;
+      if (errCode === "ETIMEDOUT") {
+        reasonKind = "timeout";
+        reason = stderrFirstLine
+          ? `probe timed out after 1000ms: ${stderrFirstLine}`
+          : "probe timed out after 1000ms";
+      } else {
+        reasonKind = "spawn_error";
+        reason = proc.error.message;
+      }
+    } else if (proc.signal) {
+      reason = stderrFirstLine
+        ? `killed by ${proc.signal}: ${stderrFirstLine}`
+        : `killed by ${proc.signal}`;
+    } else {
+      const statusLabel = `exited with status ${proc.status ?? "unknown"}`;
+      reason = stderrFirstLine ? `${statusLabel}: ${stderrFirstLine}` : statusLabel;
+    }
+
+    const result: RustEngineProbeResult = {
+      available: false,
+      binary,
+      resolvedPath: file,
+      reasonKind,
+      reason,
+      exitCode: proc.status,
+      signal: proc.signal,
+      ...(stderrFirstLine ? { stderrFirstLine } : {}),
+    };
+    availability = { key, result };
+    return result;
+  } catch (error) {
+    const result: RustEngineProbeResult = {
+      available: false,
+      binary,
+      ...(file ? { resolvedPath: file } : {}),
+      reasonKind: "spawn_error",
+      reason: error instanceof Error ? error.message : String(error),
+    };
+    availability = { key, result };
+    return result;
   }
+}
+
+export function isRustEngineAvailable(): boolean {
+  return probeRustEngine().available;
 }
 
 /**

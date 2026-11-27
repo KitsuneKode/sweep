@@ -934,6 +934,78 @@ test("known pre-delete refusal preserves the complete scan and queued selection"
   expect(applyCalls).toHaveLength(2);
 });
 
+test("unknown tracked-status refusal in TUI preserves scan, queue, and clear notice", async () => {
+  const unknownPlan: ScanPlan = {
+    protocolVersion: "1",
+    targetDir: "/tmp/sweep-ui-unknown",
+    selectionPolicy: { mode: "default", includeDangerous: false },
+    candidates: [
+      {
+        id: "cand_unknown",
+        path: "/tmp/sweep-ui-unknown/node_modules",
+        name: "node_modules",
+        kind: "node_modules",
+        estimatedBytes: 2048,
+        isSymlink: false,
+        entryType: "directory",
+        riskTier: "dangerous",
+        reasons: ["default-pattern", "tracked-status-unknown"],
+        selectedByDefault: false,
+      },
+    ],
+    summary: {
+      candidateCount: 1,
+      estimatedTotalBytes: 2048,
+      scannedDirs: 2,
+      exact: false,
+      selectedCount: 0,
+      riskCounts: { safe: 0, caution: 0, dangerous: 1, blocked: 0 },
+    },
+    selectedCandidateIds: [],
+    createdAt: new Date().toISOString(),
+  };
+  const outcomes: SweepUiOutcome[] = [];
+  const { setup, settle, applyCalls, applyRejecters } = await mountWithApply(
+    (outcome) => outcomes.push(outcome),
+    undefined,
+    unknownPlan,
+    "folders",
+  );
+  await act(async () => {
+    setup.mockInput.pressKey("x");
+    await setup.flush();
+  });
+  await settle();
+  await act(async () => {
+    setup.mockInput.pressKey("y");
+    await setup.flush();
+  });
+  await settle();
+  expect(applyCalls).toHaveLength(1);
+  expect(applyCalls[0]!.plan.selectedCandidateIds).toEqual(["cand_unknown"]);
+  await act(async () => {
+    applyRejecters[0]!(
+      Object.assign(
+        new Error(
+          "1 queued item(s) could not be checked for git-tracked files (e.g. /tmp/sweep-ui-unknown/node_modules). Sweep refuses to remove repository items whose tracked status is unknown; nothing was removed.",
+        ),
+        {
+          name: "ApplyRefusedError",
+          applyOutcome: "not_started",
+          refusalCode: "tracked_status_unknown",
+        },
+      ),
+    );
+    await setup.flush();
+  });
+  await settle();
+  const frame = setup.captureCharFrame();
+  expect(frame).not.toContain("INCOMPLETE");
+  expect(frame).toContain("Nothing removed");
+  expect(frame).toContain("could not be checked for git-tracked files");
+  expect(outcomes).toHaveLength(0);
+});
+
 test("confirmation exposes the ceiling and explicit override instructions", async () => {
   const { setup, openSingleConfirm } = await mountWithApply(() => {}, {
     maxSizeGB: 0,

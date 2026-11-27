@@ -18,6 +18,7 @@ export interface PrintGroupedScanPlanOptions {
 
 const WORKSPACE_STUB_REASON = "workspace-stub";
 const SYMLINK_ALIAS_REASON = "symlink-alias";
+const CLOUD_SYNC_REASON = "cloud-sync";
 
 export { formatBytes, formatScanElapsed } from "./bytes.js";
 export { createSpinner, type Spinner } from "./spinner.js";
@@ -154,10 +155,12 @@ function candidateRail(selected: boolean, candidate: ScanCandidate): string {
 }
 
 function insightBadge(candidate: ScanCandidate): string {
-  if (candidate.reasons.includes(WORKSPACE_STUB_REASON)) return pc.dim(" workspace stub");
-  if (candidate.reasons.includes(SYMLINK_ALIAS_REASON)) return pc.dim(" symlink alias");
-  if (candidate.isSymlink) return pc.dim(" symlink");
-  return "";
+  const parts: string[] = [];
+  if (candidate.reasons.includes(WORKSPACE_STUB_REASON)) parts.push("workspace stub");
+  else if (candidate.reasons.includes(SYMLINK_ALIAS_REASON)) parts.push("symlink alias");
+  else if (candidate.isSymlink) parts.push("symlink");
+  if (candidate.reasons.includes(CLOUD_SYNC_REASON)) parts.push("cloud-synced");
+  return parts.length > 0 ? pc.dim(` ${parts.join(" · ")}`) : "";
 }
 
 function printScanTotals(

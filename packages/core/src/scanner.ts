@@ -17,7 +17,15 @@ import {
   discoveryCandidateFieldChars,
 } from "./resource-budget.js";
 import { toCandidate } from "./planner.js";
-import { directoryEntries, disposeDirectoryReader } from "./directory-reader.js";
+import {
+  DirectoryReaderRuntimeError,
+  directoryEntries,
+  disposeDirectoryReader,
+} from "./directory-reader.js";
+
+function isFatalScanError(error: unknown): boolean {
+  return error instanceof ResourceLimitError || error instanceof DirectoryReaderRuntimeError;
+}
 import { mapPool } from "./async-pool.js";
 import { SCAN_CONCURRENCY } from "./scan-concurrency.js";
 import { compileIgnoreMatcher } from "./config.js";
@@ -139,7 +147,7 @@ function statFallback(entryPath: string): SubtreeSize {
     // would report the target, misreporting freed bytes by the target's size.
     return { bytes: checkedBytes(0, lstatSync(entryPath).size), complete: true };
   } catch (error) {
-    if (error instanceof ResourceLimitError) throw error;
+    if (isFatalScanError(error)) throw error;
     return { bytes: 0, complete: false };
   }
 }
@@ -257,7 +265,7 @@ async function metadataSize(
                 price(childStat);
               }
             } catch (error) {
-              if (error instanceof ResourceLimitError) throw error;
+              if (isFatalScanError(error)) throw error;
               complete = false;
             }
           });
@@ -273,7 +281,7 @@ async function metadataSize(
         }
         await processNames(names);
       } catch (error) {
-        if (error instanceof ResourceLimitError) throw error;
+        if (isFatalScanError(error)) throw error;
         complete = false;
       }
     }
@@ -395,7 +403,7 @@ export class ProgressiveSizer {
       const task = this.runBatch(entries);
       const tracked = task
         .catch(async (error: unknown) => {
-          if (error instanceof ResourceLimitError || this.hooks.waitForConsumer) {
+          if (isFatalScanError(error) || this.hooks.waitForConsumer) {
             this.failure ??= error;
             this.controller.abort();
             return;
@@ -413,7 +421,7 @@ export class ProgressiveSizer {
               entry.bytesKnown = size.complete;
               this.hooks.onEntrySized?.(entry);
             } catch (fallbackError) {
-              if (fallbackError instanceof ResourceLimitError) {
+              if (isFatalScanError(fallbackError)) {
                 this.failure ??= fallbackError;
               }
               // A non-budget fallback failure leaves the entry unsized -
@@ -556,7 +564,7 @@ export async function scan(
       visitedDirs.add(key);
       return true;
     } catch (error) {
-      if (error instanceof ResourceLimitError) throw error;
+      if (isFatalScanError(error)) throw error;
       return false;
     }
   };
@@ -571,7 +579,7 @@ export async function scan(
     } catch (error) {
       // An unreadable scan root must not silently produce an empty result -
       // that reads as "nothing to clean" when the truth is "couldn't look".
-      if (depth === 0 || error instanceof ResourceLimitError) throw error;
+      if (depth === 0 || isFatalScanError(error)) throw error;
       skipDir();
       return;
     }
@@ -594,7 +602,7 @@ export async function scan(
           try {
             next = await items.next();
           } catch (error) {
-            if (error instanceof ResourceLimitError) throw error;
+            if (isFatalScanError(error)) throw error;
             midReadError = true;
             return;
           }
@@ -795,7 +803,7 @@ export async function scan(
   } finally {
     signal?.removeEventListener("abort", wakeWaiters);
     await sizer?.dispose();
-    disposeDirectoryReader(budget);
+    await disposeDirectoryReader(budget);
   }
 }
 

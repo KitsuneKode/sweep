@@ -11,6 +11,7 @@ import {
   assertTargetDirectory,
   pathUsesProcessRelativeRoot,
   isPathWithinRoot,
+  stripWindowsVerbatimPrefix,
 } from "./guardrails.js";
 
 describe("assertSafeCwd", () => {
@@ -215,9 +216,83 @@ describe("assertSafeCwd: adversarial inputs", () => {
     }
   });
 
+  test.skipIf(process.platform === "win32")(
+    "prefix-blocks deep Unix OS subtrees while keeping /var, /usr, /run exact-match and /dev/shm usable",
+    () => {
+      for (const path of [
+        "/etc/systemd",
+        "/etc/ssh",
+        "/sys/class",
+        "/proc/sys",
+        "/dev/disk",
+        "/dev/shm-other",
+        "/boot/grub",
+        "/bin/sub",
+        "/sbin/sub",
+        "/lib/x86_64-linux-gnu",
+        "/lib64/sub",
+        "/run",
+      ]) {
+        expect(() => assertSafeCwd(path)).toThrow(GuardrailError);
+      }
+      // /var, /usr, and /run stay exact-match; /dev/shm and look-alike sibling names stay allowed.
+      expect(() => assertSafeCwd("/var/www/site")).not.toThrow();
+      expect(() => assertSafeCwd("/var/tmp/sweep-test/project")).not.toThrow();
+      expect(() => assertSafeCwd("/usr/local/src/project")).not.toThrow();
+      expect(() => assertSafeCwd("/run/media/u/Data/proj")).not.toThrow();
+      expect(() => assertSafeCwd("/run/user/1000/gvfs/smb/proj")).not.toThrow();
+      expect(() => assertSafeCwd("/dev/shm")).not.toThrow();
+      expect(() => assertSafeCwd("/dev/shm/build")).not.toThrow();
+      expect(() => assertSafeCwd("/etcetera/project")).not.toThrow();
+    },
+  );
+
+  test.if(process.platform === "darwin")(
+    "prefix-blocks /private/etc subtrees and case variants on macOS",
+    () => {
+      expect(() => assertSafeCwd("/private/etc/ssh")).toThrow(GuardrailError);
+      expect(() => assertSafeCwd("/ETC/ssh")).toThrow(GuardrailError);
+      expect(() => assertSafeCwd("/private/var/folders/xy/T/project")).not.toThrow();
+    },
+  );
+
+  test.if(process.platform === "win32")(
+    "prefix-blocks Windows OS subtrees and normalizes verbatim prefixes",
+    () => {
+      for (const path of [
+        "C:\\Windows\\System32",
+        "C:\\Windows\\WinSxS",
+        "c:\\windows\\temp",
+        "D:\\Windows\\System32",
+        "\\\\?\\C:\\Windows",
+        "\\\\?\\C:\\Windows\\System32",
+        "\\\\?\\c:\\windows\\winsxs",
+        "\\\\?\\C:\\",
+      ]) {
+        expect(() => assertSafeCwd(path)).toThrow(GuardrailError);
+      }
+      expect(() => assertSafeCwd("C:\\WindowsBackup\\project")).not.toThrow();
+      expect(() => assertSafeCwd("\\\\?\\C:\\Projects\\myapp")).not.toThrow();
+    },
+  );
+
   test("allows deeply nested project path", () => {
     const deep = join(homedir(), "work", "clients", "acme", "monorepo", "packages", "api");
     expect(() => assertSafeCwd(deep)).not.toThrow();
+  });
+
+  test("strips Windows verbatim prefixes consistently on Windows and is a no-op on POSIX", () => {
+    expect(stripWindowsVerbatimPrefix("\\\\?\\C:\\Windows\\System32", true)).toBe(
+      "C:\\Windows\\System32",
+    );
+    expect(stripWindowsVerbatimPrefix("//?/C:/Windows/System32", true)).toBe("C:/Windows/System32");
+    expect(stripWindowsVerbatimPrefix("\\\\?\\UNC\\server\\share\\dir", true)).toBe(
+      "\\\\server\\share\\dir",
+    );
+    expect(stripWindowsVerbatimPrefix("\\\\?\\unc\\server\\share\\dir", true)).toBe(
+      "\\\\server\\share\\dir",
+    );
+    expect(stripWindowsVerbatimPrefix("\\\\?\\C:\\Windows", false)).toBe("\\\\?\\C:\\Windows");
   });
 });
 

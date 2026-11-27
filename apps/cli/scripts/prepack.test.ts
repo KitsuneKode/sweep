@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { assertPublishable, resolveDependencies, type Catalogs } from "./prepack.js";
+import {
+  assertPublishable,
+  preparePublishManifest,
+  resolveDependencies,
+  type Catalogs,
+} from "./prepack.js";
 import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
@@ -83,9 +88,40 @@ describe("assertPublishable", () => {
     );
   });
 
-  test("checks optional and peer dependencies too", () => {
+  test("checks optional, peer, devDependencies, overrides, and resolutions too", () => {
     expect(() => assertPublishable({ optionalDependencies: { foo: "workspace:*" } })).toThrow();
     expect(() => assertPublishable({ peerDependencies: { bar: "catalog:" } })).toThrow();
+    expect(() => assertPublishable({ devDependencies: { baz: "workspace:*" } })).toThrow();
+    expect(() => assertPublishable({ devDependencies: { qux: "catalog:" } })).toThrow();
+    expect(() => assertPublishable({ overrides: { parent: { child: "catalog:" } } })).toThrow();
+    expect(() => assertPublishable({ resolutions: { pkg: "workspace:*" } })).toThrow();
+  });
+
+  test("preparePublishManifest strips devDependencies and monorepo scripts and resolves optional catalog entries", () => {
+    const packed = preparePublishManifest(
+      {
+        name: "@kitsunekode/sweep",
+        version: "0.5.3",
+        scripts: { prepack: "bun run ./scripts/prepack.ts", test: "bun test" },
+        dependencies: { "@kitsunekode/sweep-core": "workspace:*", commander: "catalog:" },
+        devDependencies: {
+          typescript: "catalog:",
+          "@kitsunekode/sweep-typescript-config": "workspace:*",
+        },
+        optionalDependencies: {
+          "@opentui/core": "catalog:",
+          "@kitsunekode/sweep-engine-linux-64": "0.5.3",
+        },
+      },
+      { default: { commander: "^15.1.0", "@opentui/core": "^0.6.8" }, named: {} },
+    );
+    expect(packed.devDependencies).toBeUndefined();
+    expect(packed.scripts).toBeUndefined();
+    expect(packed.dependencies).toBeUndefined();
+    expect(packed.optionalDependencies).toEqual({
+      "@opentui/core": "^0.6.8",
+      "@kitsunekode/sweep-engine-linux-64": "0.5.3",
+    });
   });
 
   test("accepts a fully resolved manifest", () => {

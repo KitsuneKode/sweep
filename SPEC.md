@@ -148,7 +148,7 @@ entries that were never scheduled.
 
 ## Distribution
 
-- npm: `@kitsunekode/sweep` (bundled ESM, Node ≥20.3.0 or Bun), optional native
+- npm: `@kitsunekode/sweep` (bundled ESM, Node ≥22.12.0 or Bun), optional native
   engine packages `sweep-engine-*` per platform.
 - Standalone binaries on GitHub releases (Bun-compiled, `--minify`), each with
   a `.sha256` sidecar; `install.sh` verifies the checksum before install.

@@ -7,6 +7,8 @@ import { ProjectActivityIndex } from "./project-activity.js";
 import { WorktreeIndex, type WorktreeInfo } from "./worktree-info.js";
 
 export const GIT_TRACKED_REASON = "git-tracked";
+export const TRACKED_STATUS_UNKNOWN_REASON = "tracked-status-unknown";
+export const CONTAINS_GIT_REPOSITORY_REASON = "contains-git-repository";
 import type {
   PathFailure,
   RiskTier,
@@ -27,7 +29,11 @@ import {
   WORKSPACE_STUB_REASON,
 } from "./candidate-insights.js";
 import { catalogMatchFor } from "./catalog.js";
-import { artifactContextReason } from "./classification.js";
+import {
+  artifactContextReason,
+  CLOUD_SYNC_REASON,
+  isInsideCloudSyncDir,
+} from "./classification.js";
 import { identityFromStat, sameFilesystemIdentity } from "./filesystem-identity.js";
 import {
   GuardrailError,
@@ -172,25 +178,41 @@ export function restrictSelectionToIdle(
 }
 
 /**
- * Anything git tracks is authored, not built: block it whatever its name.
- * Blocked and symlink rows are skipped - the first is final, and a link's
- * tracked state says nothing about what it points at.
+ * Anything git tracks is authored, not built: block it whatever its name,
+ * including committed symlinks matching an artifact name.
+ * When tracked status cannot be checked for a repository candidate, escalate it
+ * to at least `dangerous` with `tracked-status-unknown` so it is never
+ * pre-selected. Any directory candidate containing a `.git` entry becomes at
+ * least `dangerous` with `contains-git-repository` and is never pre-selected.
+ * Already-blocked rows are skipped because blocked is final.
  */
 function blockGitTracked(candidates: ScanCandidate[]): ScanCandidate[] {
-  const checkable = candidates.filter(
-    (candidate) => candidate.riskTier !== "blocked" && !candidate.isSymlink,
+  const checkable = candidates.filter((candidate) => candidate.riskTier !== "blocked");
+  const { tracked, unknown, containsGitRepo } = gitTrackedPaths(
+    checkable.map((candidate) => candidate.path),
   );
-  const tracked = gitTrackedPaths(checkable.map((candidate) => candidate.path));
-  if (tracked.size === 0) return candidates;
-  return candidates.map((candidate) =>
-    tracked.has(candidate.path)
-      ? {
-          ...candidate,
-          riskTier: "blocked" as const,
-          reasons: [...candidate.reasons, GIT_TRACKED_REASON],
-        }
-      : candidate,
-  );
+  if (tracked.size === 0 && unknown.size === 0 && containsGitRepo.size === 0) return candidates;
+  const addReason = (reasons: string[], reason: string): string[] =>
+    reasons.includes(reason) ? reasons : [...reasons, reason];
+  return candidates.map((candidate) => {
+    if (candidate.riskTier === "blocked") return candidate;
+    const isTracked = tracked.has(candidate.path);
+    const isUnknown = unknown.has(candidate.path);
+    const hasNestedRepo = containsGitRepo.has(candidate.path);
+    if (!isTracked && !isUnknown && !hasNestedRepo) return candidate;
+
+    let reasons = candidate.reasons;
+    if (isTracked) reasons = addReason(reasons, GIT_TRACKED_REASON);
+    else if (isUnknown) reasons = addReason(reasons, TRACKED_STATUS_UNKNOWN_REASON);
+    if (hasNestedRepo) reasons = addReason(reasons, CONTAINS_GIT_REPOSITORY_REASON);
+
+    const riskTier = isTracked ? ("blocked" as const) : ("dangerous" as const);
+    return {
+      ...candidate,
+      riskTier,
+      reasons,
+    };
+  });
 }
 
 function normalizeSelectionDefaults(candidates: ScanCandidate[]): ScanCandidate[] {
@@ -450,7 +472,10 @@ export { candidateKindFromName } from "@kitsunekode/sweep-protocol";
  * marker file) runs once per candidate. Rust parity: `classify` in
  * `sweep-engine`.
  */
-export function classifyEntry(entry: ScanEntry): { riskTier: RiskTier; reasons: string[] } {
+export function classifyEntry(
+  entry: ScanEntry,
+  home?: string,
+): { riskTier: RiskTier; reasons: string[] } {
   const reasons: string[] = [];
   const protectedVcs = pathHasProtectedVcsSegment(entry.path);
   if (protectedVcs) reasons.push("protected-vcs-path");
@@ -466,22 +491,33 @@ export function classifyEntry(entry: ScanEntry): { riskTier: RiskTier; reasons: 
         : "custom-pattern",
   );
 
-  if (protectedVcs || protectedProject) return { riskTier: "blocked", reasons };
-  if (entry.isSymlink) return { riskTier: "caution", reasons };
-  // Only names a shipping-default pattern covers can earn the safe tier. Opt-in
-  // catalog names (dist, build, out, coverage, ...) are dangerous for the same
-  // reason they are opt-in - the name can hold authored files. Enabling a
-  // pattern consents to scanning, never to pre-selection.
-  if (match !== "default") return { riskTier: "dangerous", reasons };
-  // A default name is still only presumed safe in context: right entry type,
-  // outside tool/system install trees, and with a project marker where the
-  // name is an ordinary word.
-  const contextReason = artifactContextReason(entry);
-  if (contextReason) {
-    reasons.push(contextReason);
-    return { riskTier: "dangerous", reasons };
+  let riskTier: RiskTier;
+  if (protectedVcs || protectedProject) {
+    riskTier = "blocked";
+  } else if (entry.isSymlink) {
+    riskTier = "caution";
+  } else if (match !== "default") {
+    // Only names a shipping-default pattern covers can earn the safe tier. Opt-in
+    // catalog names (dist, build, out, coverage, ...) are dangerous for the same
+    // reason they are opt-in - the name can hold authored files. Enabling a
+    // pattern consents to scanning, never to pre-selection.
+    riskTier = "dangerous";
+  } else {
+    // A default name is still only presumed safe in context: right entry type,
+    // outside tool/system install trees, and with a project marker where the
+    // name is an ordinary word.
+    const contextReason = artifactContextReason(entry, home);
+    if (contextReason) {
+      reasons.push(contextReason);
+      riskTier = "dangerous";
+    } else {
+      riskTier = "safe";
+    }
   }
-  return { riskTier: "safe", reasons };
+  if (isInsideCloudSyncDir(entry.path, home)) {
+    reasons.push(CLOUD_SYNC_REASON);
+  }
+  return { riskTier, reasons };
 }
 
 export function inferRiskTier(entry: ScanEntry): RiskTier {
