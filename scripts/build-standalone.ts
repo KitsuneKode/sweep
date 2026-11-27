@@ -27,6 +27,7 @@ const args = [
   process.execPath, // the running bun binary
   "build",
   "--compile",
+  "--production",
   "--minify",
   "--format=esm",
   "--no-compile-autoload-dotenv",
@@ -39,6 +40,8 @@ const args = [
   `__SWEEP_VERSION__:${JSON.stringify(version)}`,
   "--define",
   `process.env.NODE_ENV:"production"`,
+  "--define",
+  `process.env.DEV:"false"`,
 ];
 // Opt-out exists only to measure the same source with and without bytecode.
 if (!process.argv.includes("--no-bytecode")) args.push("--bytecode");

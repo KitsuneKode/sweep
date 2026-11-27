@@ -89,6 +89,7 @@ async function runBundle(
       ...options,
       define: {
         "process.env.NODE_ENV": '"production"',
+        "process.env.DEV": '"false"',
         ...options.define,
       },
     });
