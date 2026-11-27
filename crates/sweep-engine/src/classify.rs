@@ -8,39 +8,91 @@ use sweep_types::RiskTier;
 
 use crate::guardrails;
 
-/// Home-relative toolchain, package-manager, editor and app-data trees.
+/// Home-relative toolchain, package-manager, editor, desktop app, and
+/// cloud-synced storage trees.
 const HOME_TOOL_DIRS: &[&[&str]] = &[
     &[".bun"],
     &[".cargo"],
     &[".rustup"],
     &[".npm"],
+    &[".npm-global"],
     &[".nvm"],
+    &[".nodenv"],
     &[".yarn"],
     &[".volta"],
     &[".fnm"],
     &[".deno"],
     &[".pnpm-store"],
+    &[".mise"],
+    &[".asdf"],
+    &[".pyenv"],
+    &[".poetry"],
+    &[".conda"],
+    &["miniconda3"],
+    &["anaconda3"],
+    &["miniforge3"],
+    &["mambaforge"],
+    &[".uv"],
+    &[".pipx"],
+    &[".rbenv"],
+    &[".rvm"],
+    &[".gem"],
+    &["go"],
+    &[".sdkman"],
+    &[".gradle"],
+    &[".m2"],
+    &[".composer"],
+    &[".pub-cache"],
+    &[".android"],
+    &[".flutter"],
     &[".local"],
     &[".config"],
     &[".cache"],
+    &[".var", "app"],
+    &["snap"],
+    &["scoop"],
     &[".vscode"],
+    &[".vscode-insiders"],
+    &[".vscode-oss"],
     &[".vscode-server"],
     &[".cursor"],
     &[".cursor-server"],
+    &[".windsurf"],
+    &[".windsurf-server"],
+    &[".zed"],
+    &[".claude"],
+    &[".codex"],
+    &[".gemini"],
+    &[".t3"],
+    &["Applications"],
     &["Library"],
     &["AppData"],
+    &["Dropbox"],
+    &["OneDrive"],
 ];
 
 /// OS temp space inside a tool dir hosts ordinary scratch projects.
 const HOME_TOOL_EXCEPTIONS: &[&[&str]] = &[&["AppData", "Local", "Temp"]];
 
-/// System install locations; `/var` is listed by subdirectory because
-/// `/var/www` holds projects and macOS `/var/folders` is the temp root.
+/// System install locations and OS trees; `/var` is listed by subdirectory
+/// because `/var/www` holds projects and macOS `/var/folders` is the temp root.
 const SYSTEM_TOOL_DIRS: &[&[&str]] = &[
     &["usr"],
     &["opt"],
+    &["etc"],
+    &["private", "etc"],
+    &["sys"],
+    &["proc"],
+    &["dev"],
+    &["boot"],
+    &["bin"],
+    &["sbin"],
+    &["lib"],
+    &["lib64"],
+    &["run"],
     &["snap"],
     &["nix"],
+    &["home", "linuxbrew", ".linuxbrew"],
     &["var", "lib"],
     &["var", "cache"],
     &["var", "opt"],
@@ -49,6 +101,7 @@ const SYSTEM_TOOL_DIRS: &[&[&str]] = &[
     &["Applications"],
     &["System"],
     &["Library"],
+    &["Windows"],
     &["Program Files"],
     &["Program Files (x86)"],
     &["ProgramData"],
@@ -67,7 +120,9 @@ fn fold(segment: &str) -> String {
 /// Path segments with the Windows drive kept as a leading `c:` segment, the
 /// same shape as JS `normalize(path).split(sep)`.
 fn segments_of(path: &Path) -> Vec<String> {
-    path.components()
+    let cleaned = guardrails::strip_verbatim_str(&path.to_string_lossy());
+    Path::new(&cleaned)
+        .components()
         .filter_map(|component| match component {
             Component::Prefix(prefix) => Some(fold(&prefix.as_os_str().to_string_lossy())),
             Component::Normal(part) => Some(fold(&part.to_string_lossy())),
@@ -97,14 +152,32 @@ fn without_drive(segments: &[String]) -> &[String] {
     }
 }
 
+/// True when an ancestor directory of `path` is a macOS application bundle
+/// (`*.app` with a `Contents/Info.plist` file). Ordinary project folders named
+/// like `example.app` lack `Contents/Info.plist` and are not treated as bundles.
+fn has_macos_app_bundle_ancestor(path: &Path) -> bool {
+    for ancestor in path.ancestors().skip(1) {
+        let Some(name) = ancestor.file_name() else {
+            continue;
+        };
+        if name
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .ends_with(".app")
+            && std::fs::metadata(ancestor.join("Contents").join("Info.plist"))
+                .is_ok_and(|meta| meta.is_file())
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// True when `path` lies inside a toolchain, package-manager, editor or system
-/// install tree, or inside a macOS `.app` bundle. A home with no segments
-/// disables the home rules.
+/// install tree, or (on macOS) inside a real `.app` bundle containing
+/// `Contents/Info.plist`. A home with no segments disables the home rules.
 pub(crate) fn is_inside_tool_home(path: &Path, home: Option<&Path>) -> bool {
     let segments = segments_of(path);
-    if segments.iter().any(|segment| segment.ends_with(".app")) {
-        return true;
-    }
     let rooted = without_drive(&segments);
     if SYSTEM_TOOL_DIRS
         .iter()
@@ -113,19 +186,19 @@ pub(crate) fn is_inside_tool_home(path: &Path, home: Option<&Path>) -> bool {
         return true;
     }
     let home_segments = home.map(segments_of).unwrap_or_default();
-    if home_segments.is_empty() || !segments.starts_with(&home_segments) {
-        return false;
+    if !home_segments.is_empty() && segments.starts_with(&home_segments) {
+        let below = &segments[home_segments.len()..];
+        if !HOME_TOOL_EXCEPTIONS
+            .iter()
+            .any(|prefix| starts_with_segments(below, prefix))
+            && HOME_TOOL_DIRS
+                .iter()
+                .any(|prefix| starts_with_segments(below, prefix))
+        {
+            return true;
+        }
     }
-    let below = &segments[home_segments.len()..];
-    if HOME_TOOL_EXCEPTIONS
-        .iter()
-        .any(|prefix| starts_with_segments(below, prefix))
-    {
-        return false;
-    }
-    HOME_TOOL_DIRS
-        .iter()
-        .any(|prefix| starts_with_segments(below, prefix))
+    cfg!(target_os = "macos") && has_macos_app_bundle_ancestor(path)
 }
 
 /// Inputs to classification, separated from `WalkEntry` so tests can supply
@@ -281,10 +354,60 @@ mod tests {
         let home = Some(Path::new("/home/dev"));
         for path in [
             "/home/dev/.bun/install/global/node_modules",
+            "/home/dev/.npm-global/lib/node_modules",
+            "/home/dev/.asdf/installs/nodejs/22/lib/node_modules",
+            "/home/dev/.mise/installs/node/22/lib/node_modules",
+            "/home/dev/.nodenv/versions/22/lib/node_modules",
+            "/home/dev/.pyenv/versions/3.12/lib/node_modules",
+            "/home/dev/.poetry/venv/node_modules",
+            "/home/dev/.conda/envs/ml/node_modules",
+            "/home/dev/miniconda3/envs/ml/node_modules",
+            "/home/dev/anaconda3/envs/ml/node_modules",
+            "/home/dev/miniforge3/envs/ml/node_modules",
+            "/home/dev/mambaforge/envs/ml/node_modules",
+            "/home/dev/.uv/tools/ruff/node_modules",
+            "/home/dev/.pipx/venvs/tool/node_modules",
+            "/home/dev/.rbenv/versions/3.3/node_modules",
+            "/home/dev/.rvm/gems/node_modules",
+            "/home/dev/.gem/ruby/node_modules",
+            "/home/dev/go/pkg/mod/node_modules",
+            "/home/dev/.sdkman/candidates/java/node_modules",
+            "/home/dev/.gradle/caches/node_modules",
+            "/home/dev/.m2/repository/node_modules",
+            "/home/dev/.composer/vendor/node_modules",
+            "/home/dev/.pub-cache/hosted/node_modules",
+            "/home/dev/.android/avd/node_modules",
+            "/home/dev/.flutter/packages/node_modules",
+            "/home/dev/.var/app/com.example.App/data/node_modules",
+            "/home/dev/snap/code/current/node_modules",
+            "/home/dev/scoop/apps/node/current/node_modules",
+            "/home/dev/.vscode-insiders/extensions/ext/node_modules",
+            "/home/dev/.vscode-oss/extensions/ext/node_modules",
+            "/home/dev/.windsurf/extensions/ext/node_modules",
+            "/home/dev/.windsurf-server/bin/node_modules",
+            "/home/dev/.zed/extensions/node_modules",
+            "/home/dev/.claude/plugins/node_modules",
+            "/home/dev/.codex/skills/node_modules",
+            "/home/dev/.gemini/extensions/node_modules",
+            "/home/dev/.t3/userdata/node_modules",
+            "/home/dev/Dropbox/work/node_modules",
+            "/home/dev/OneDrive/work/node_modules",
             "/home/dev/.local/share/nvim/lazy/blink.cmp/target",
             "/home/dev/Applications/Editor.app/Contents/Resources/app/node_modules",
             "/usr/share/cursor/resources/app/node_modules",
             "/opt/homebrew/lib/node_modules",
+            "/home/linuxbrew/.linuxbrew/lib/node_modules",
+            "/etc/nginx/node_modules",
+            "/private/etc/nginx/node_modules",
+            "/sys/class/target",
+            "/proc/sys/target",
+            "/dev/disk/target",
+            "/boot/grub/target",
+            "/bin/sub/node_modules",
+            "/sbin/sub/node_modules",
+            "/lib/sub/node_modules",
+            "/lib64/sub/node_modules",
+            "/run/user/1000/node_modules",
             "/var/lib/docker/overlay2/abc/diff/app/node_modules",
             "/nix/store/abc-pkg/lib/node_modules",
         ] {
@@ -292,7 +415,9 @@ mod tests {
         }
         for path in [
             "/home/dev/Projects/app/node_modules",
+            "/home/dev/Projects/example.app/node_modules",
             "/home/devops/.bun/node_modules",
+            "/home/linuxbrew/Projects/app/node_modules",
             "/var/www/site/node_modules",
             "/var/folders/xy/T/sweep-test/node_modules",
             "/tmp/sweep-test/node_modules",
@@ -310,6 +435,33 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn app_bundle_detection_requires_macos_and_info_plist() -> std::io::Result<()> {
+        let base = std::env::temp_dir().join(format!("sweep-app-bundle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let project_nm = base.join("example.app/node_modules");
+        std::fs::create_dir_all(&project_nm)?;
+        let bundle_nm = base.join("Editor.app/Contents/Resources/app/node_modules");
+        std::fs::create_dir_all(&bundle_nm)?;
+        std::fs::write(base.join("Editor.app/Contents/Info.plist"), "<plist/>\n")?;
+
+        let home = Some(Path::new("/home/dev"));
+        assert!(!has_macos_app_bundle_ancestor(&project_nm));
+        assert!(has_macos_app_bundle_ancestor(&bundle_nm));
+        let fake_plist_dir = base.join("Fake.app/Contents/Info.plist");
+        std::fs::create_dir_all(&fake_plist_dir)?;
+        assert!(!has_macos_app_bundle_ancestor(
+            &fake_plist_dir.join("node_modules")
+        ));
+
+        assert!(!is_inside_tool_home(&project_nm, home));
+        let expected_bundle = cfg!(target_os = "macos");
+        assert_eq!(is_inside_tool_home(&bundle_nm, home), expected_bundle);
+
+        let _ = std::fs::remove_dir_all(&base);
+        Ok(())
+    }
+
     #[cfg(windows)]
     #[test]
     fn windows_app_data_is_protected_but_temp_is_not() {
@@ -324,6 +476,22 @@ mod tests {
         ));
         assert!(is_inside_tool_home(
             Path::new(r"D:\Program Files\App\resources\node_modules"),
+            home
+        ));
+        assert!(is_inside_tool_home(
+            Path::new(r"C:\Windows\System32\target"),
+            home
+        ));
+        assert!(is_inside_tool_home(
+            Path::new(r"\\?\C:\Windows\System32\target"),
+            home
+        ));
+        assert!(is_inside_tool_home(
+            Path::new(r"\\?\C:\Users\dev\.bun\node_modules"),
+            home
+        ));
+        assert!(is_inside_tool_home(
+            Path::new(r"C:\Users\dev\scoop\apps\node\node_modules"),
             home
         ));
     }

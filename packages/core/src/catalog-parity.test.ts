@@ -19,6 +19,13 @@ function constGroups(source: string, name: string): string[][] {
   return groups;
 }
 
+function constStrings(source: string, name: string): string[] {
+  const start = source.indexOf(`const ${name}`);
+  if (start < 0) throw new Error(`missing ${name}`);
+  const end = source.indexOf("];", start);
+  return [...source.slice(start, end).matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
+}
+
 function rustFnStrings(source: string, name: string): string[] {
   const start = source.indexOf(`pub fn ${name}(`);
   if (start < 0) throw new Error(`missing ${name}`);
@@ -29,8 +36,10 @@ function rustFnStrings(source: string, name: string): string[] {
 describe("JS and Rust catalogs", () => {
   const fsSource = readFileSync(join(ROOT, "crates/sweep-fs/src/lib.rs"), "utf8");
   const classify = readFileSync(join(ROOT, "crates/sweep-engine/src/classify.rs"), "utf8");
+  const rustGuardrails = readFileSync(join(ROOT, "crates/sweep-engine/src/guardrails.rs"), "utf8");
   const engine = readFileSync(join(ROOT, "crates/sweep-engine/src/lib.rs"), "utf8");
   const classification = readFileSync(join(ROOT, "packages/core/src/classification.ts"), "utf8");
+  const tsGuardrails = readFileSync(join(ROOT, "packages/core/src/guardrails.ts"), "utf8");
 
   test("default and opt-in pattern sets match", () => {
     const defaults = PATTERN_CATALOG.filter((entry) => entry.byDefault).map(
@@ -44,6 +53,12 @@ describe("JS and Rust catalogs", () => {
   test("tool-home prefixes match", () => {
     for (const name of ["HOME_TOOL_DIRS", "HOME_TOOL_EXCEPTIONS", "SYSTEM_TOOL_DIRS"]) {
       expect(constGroups(classify, name)).toEqual(constGroups(classification, name));
+    }
+  });
+
+  test("guardrail root lists match", () => {
+    for (const name of ["DARWIN_SYSTEM_ROOTS", "UNIX_PREFIX_BLOCKED_ROOTS"]) {
+      expect(constStrings(rustGuardrails, name)).toEqual(constStrings(tsGuardrails, name));
     }
   });
 

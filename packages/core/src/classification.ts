@@ -6,56 +6,109 @@
  * catalog and must not be presumed safe. Rust parity: `sweep-engine`
  * `artifact_context_reason` applies the same rules in the same order.
  */
-import { lstatSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, normalize, sep } from "node:path";
+import { basename, dirname, join, normalize, sep } from "node:path";
 import type { ScanEntry } from "@kitsunekode/sweep-protocol";
 import { type CatalogEntry, defaultCatalogEntryForName } from "./catalog.js";
+import { stripWindowsVerbatimPrefix } from "./guardrails.js";
 
 export type ArtifactContextReason = "entry-type-mismatch" | "tool-home" | "no-project-marker";
 
 const CASE_FOLD = process.platform === "darwin" || process.platform === "win32";
 
 /**
- * Home-relative directories owned by toolchains, package managers, editors
- * and desktop apps. Their `node_modules`/`target` trees are runtime state
- * (global installs, editor servers, prebuilt plugin binaries), not project
- * output.
+ * Home-relative directories owned by toolchains, package managers, editors,
+ * desktop apps, and cloud-synced storage. Their `node_modules`/`target` trees
+ * are runtime state (global installs, editor servers, prebuilt plugin
+ * binaries), not project output.
  */
 const HOME_TOOL_DIRS: readonly (readonly string[])[] = [
   [".bun"],
   [".cargo"],
   [".rustup"],
   [".npm"],
+  [".npm-global"],
   [".nvm"],
+  [".nodenv"],
   [".yarn"],
   [".volta"],
   [".fnm"],
   [".deno"],
   [".pnpm-store"],
+  [".mise"],
+  [".asdf"],
+  [".pyenv"],
+  [".poetry"],
+  [".conda"],
+  ["miniconda3"],
+  ["anaconda3"],
+  ["miniforge3"],
+  ["mambaforge"],
+  [".uv"],
+  [".pipx"],
+  [".rbenv"],
+  [".rvm"],
+  [".gem"],
+  ["go"],
+  [".sdkman"],
+  [".gradle"],
+  [".m2"],
+  [".composer"],
+  [".pub-cache"],
+  [".android"],
+  [".flutter"],
   [".local"],
   [".config"],
   [".cache"],
+  [".var", "app"],
+  ["snap"],
+  ["scoop"],
   [".vscode"],
+  [".vscode-insiders"],
+  [".vscode-oss"],
   [".vscode-server"],
   [".cursor"],
   [".cursor-server"],
+  [".windsurf"],
+  [".windsurf-server"],
+  [".zed"],
+  [".claude"],
+  [".codex"],
+  [".gemini"],
+  [".t3"],
+  ["Applications"],
   ["Library"],
   ["AppData"],
+  ["Dropbox"],
+  ["OneDrive"],
 ];
 
 /** Carve-outs inside tool dirs: OS temp space hosts ordinary scratch projects. */
 const HOME_TOOL_EXCEPTIONS: readonly (readonly string[])[] = [["AppData", "Local", "Temp"]];
 
 /**
- * System install locations. `/var` is listed by subdirectory: `/var/www` holds
- * user projects and macOS `/var/folders` is the per-user temp root.
+ * System install locations and OS trees. `/var` is listed by subdirectory:
+ * `/var/www` holds user projects and macOS `/var/folders` is the per-user temp
+ * root.
  */
 const SYSTEM_TOOL_DIRS: readonly (readonly string[])[] = [
   ["usr"],
   ["opt"],
+  ["etc"],
+  ["private", "etc"],
+  ["sys"],
+  ["proc"],
+  ["dev"],
+  ["boot"],
+  ["bin"],
+  ["sbin"],
+  ["lib"],
+  ["lib64"],
+  ["run"],
   ["snap"],
   ["nix"],
+  ["home", "linuxbrew", ".linuxbrew"],
   ["var", "lib"],
   ["var", "cache"],
   ["var", "opt"],
@@ -64,13 +117,14 @@ const SYSTEM_TOOL_DIRS: readonly (readonly string[])[] = [
   ["Applications"],
   ["System"],
   ["Library"],
+  ["Windows"],
   ["Program Files"],
   ["Program Files (x86)"],
   ["ProgramData"],
 ];
 
 function segmentsOf(path: string): string[] {
-  const segments = normalize(path)
+  const segments = normalize(stripWindowsVerbatimPrefix(path))
     .split(sep === "\\" ? /[\\/]/ : sep)
     .filter((segment) => segment !== "");
   return CASE_FOLD ? segments.map((segment) => segment.toLowerCase()) : segments;
@@ -90,23 +144,58 @@ function withoutDrive(segments: string[]): string[] {
   return segments.length > 0 && /^[a-z]:$/i.test(segments[0] ?? "") ? segments.slice(1) : segments;
 }
 
+function isExistingFile(path: string): boolean {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when an ancestor directory of `path` is a macOS application bundle
+ * (`*.app` with a `Contents/Info.plist` file). Ordinary project folders named
+ * like `example.app` lack `Contents/Info.plist` and are not treated as bundles.
+ */
+export function hasMacOsAppBundleAncestor(path: string): boolean {
+  let current = dirname(normalize(path));
+  while (true) {
+    if (
+      basename(current).toLowerCase().endsWith(".app") &&
+      isExistingFile(join(current, "Contents", "Info.plist"))
+    ) {
+      return true;
+    }
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
+  }
+}
+
 /**
  * True when `path` lies inside a toolchain, package-manager, editor or system
- * install tree, or inside a macOS `.app` bundle. `home` is injectable for
- * tests; a home with no segments (unset or `/`) disables home rules.
+ * install tree, or (on macOS) inside a real `.app` bundle containing
+ * `Contents/Info.plist`. `home` is injectable for tests; a home with no
+ * segments (unset or `/`) disables home rules.
  */
 export function isInsideToolHome(path: string, home: string = homedir()): boolean {
   const segments = segmentsOf(path);
-  if (segments.some((segment) => segment.endsWith(".app"))) return true;
 
   const rooted = withoutDrive(segments);
   if (SYSTEM_TOOL_DIRS.some((prefix) => startsWithSegments(rooted, prefix))) return true;
 
   const homeSegments = segmentsOf(home);
-  if (homeSegments.length === 0 || !startsWithSegments(segments, homeSegments)) return false;
-  const below = segments.slice(homeSegments.length);
-  if (HOME_TOOL_EXCEPTIONS.some((prefix) => startsWithSegments(below, prefix))) return false;
-  return HOME_TOOL_DIRS.some((prefix) => startsWithSegments(below, prefix));
+  if (homeSegments.length > 0 && startsWithSegments(segments, homeSegments)) {
+    const below = segments.slice(homeSegments.length);
+    if (
+      !HOME_TOOL_EXCEPTIONS.some((prefix) => startsWithSegments(below, prefix)) &&
+      HOME_TOOL_DIRS.some((prefix) => startsWithSegments(below, prefix))
+    ) {
+      return true;
+    }
+  }
+
+  return process.platform === "darwin" && hasMacOsAppBundleAncestor(path);
 }
 
 function isRegularFile(path: string): boolean {

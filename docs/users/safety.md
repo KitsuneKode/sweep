@@ -58,14 +58,34 @@ appear in a scan as **blocked** and cannot be selected:
   lockfiles such as `package.json`, `Cargo.toml`, `go.mod` and `pyproject.toml`.
   A repository's own `.sweeprc` can add patterns, but it cannot make these
   removable.
-- **Version-control internals** (`.git`, `.hg`, `.jj`, ...) and system roots.
+- **Version-control internals** (`.git`, `.hg`, `.jj`, ...) and protected roots.
+  Sweep refuses to scan filesystem roots, your home folder directly, and
+  operating-system trees: anything under `/etc`, `/sys`, `/proc`, `/dev`,
+  `/boot`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/run` (plus `/private/etc` on
+  macOS) or `C:\Windows` (on any Windows drive, including `\\?\` verbatim
+  paths) is refused as a scan target. `/usr` and `/var` themselves are refused,
+  while project directories beneath them such as `/var/www` remain scannable.
 
 ## Dangerous items need consent by name
 
-Dangerous items (custom and opt-in patterns, names that can hold authored files)
-are never pre-selected. Interactively, they are listed by path before you
-confirm. An unattended run (`--yes`) refuses them unless you also pass
-`--allow-dangerous`; it still prints each path before removing it.
+Dangerous items (custom and opt-in patterns, names that can hold authored files,
+and matches inside tool or system folders) are never pre-selected.
+Interactively, they are listed by path before you confirm. An unattended run
+(`--yes`) refuses them unless you also pass `--allow-dangerous`; it still prints
+each path before removing it.
+
+Matches inside operating-system trees, system installs (such as `/usr`, `/opt`,
+`/home/linuxbrew/.linuxbrew`, `Windows`, `Program Files`), or personal tool,
+editor, agent, package-manager, and cloud-sync homes under your home folder
+(including `~/.bun`, `~/.cargo`, `~/.npm-global`, `~/.asdf`, `~/.mise`,
+`~/.conda`, `~/miniconda3`, `~/anaconda3`, `~/scoop`, `~/snap`, `~/.var/app`,
+`~/.vscode-insiders`, `~/.vscode-oss`, `~/.windsurf`, `~/.claude`, `~/.codex`,
+`~/.cache`, `~/Applications`, `~/Library`, `~/AppData`, `~/Dropbox`, and
+`~/OneDrive`) are marked **dangerous** (`tool-home`) instead of safe so global
+installs and editor runtimes are never queued by default. On macOS, a folder
+ending in `.app` is treated as an app bundle only when it contains
+`Contents/Info.plist`; outside macOS, or without `Contents/Info.plist`, a
+project folder named `example.app` is treated as an ordinary project folder.
 
 ```sh
 sweep --dry-run --select all --include-dangerous   # look first

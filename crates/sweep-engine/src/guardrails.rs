@@ -97,6 +97,7 @@ fn assert_resolved_safe(resolved: &Path) -> Result<(), EngineError> {
     };
 
     if is_blocked
+        || is_prefix_blocked(resolved)
         || path_has_protected_vcs_segment(&resolved.to_string_lossy())
         || aliases_protected_root(resolved, &roots)
     {
@@ -135,19 +136,24 @@ pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
         .into());
     }
 
+    // Strip Windows verbatim prefixes (`\\?\`, `\\?\UNC\`) before lexical
+    // normalization so verbatim spellings are judged identically to normal
+    // paths.
+    let cleaned = strip_verbatim_str(target_path);
+
     // `..` is not rejected here: normalization collapses it first, then the
     // blocked-root and depth checks judge the result - same order as the JS
     // `resolve()` path, so `scan foo/../bar` behaves identically on both.
     // Relative input is absolutized against cwd first - otherwise
     // `sweep-engine apply` with a relative targetDir would check a fragment
     // against absolute blocked roots and silently pass.
-    let resolved = if Path::new(target_path).is_absolute() {
-        normalize_path(target_path)
+    let resolved = if Path::new(&cleaned).is_absolute() {
+        normalize_path(&cleaned)
     } else {
         normalize_path(
             &std::env::current_dir()
                 .unwrap_or_else(|_| PathBuf::from("/"))
-                .join(target_path)
+                .join(&cleaned)
                 .to_string_lossy(),
         )
     };
@@ -159,7 +165,7 @@ pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
     // checks on the canonical path too (verbatim `\\?\` prefix stripped so it
     // compares like the lexical spelling).
     if let Ok(canonical_raw) = std::fs::canonicalize(&resolved) {
-        let canonical = strip_verbatim(&normalize_path(&canonical_raw.to_string_lossy()));
+        let canonical = normalize_path(&strip_verbatim_str(&canonical_raw.to_string_lossy()));
         let same = if cfg!(windows) || cfg!(target_os = "macos") {
             canonical.to_string_lossy().to_lowercase() == resolved.to_string_lossy().to_lowercase()
         } else {
@@ -173,15 +179,34 @@ pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
     Ok(())
 }
 
-/// Drop the `\\?\` verbatim prefix canonicalize() adds on Windows so a
-/// canonical path compares lexically against `resolve()`d spellings.
-fn strip_verbatim(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    if let Some(stripped) = text.strip_prefix("\\\\?\\") {
-        PathBuf::from(stripped)
-    } else {
-        path.to_path_buf()
+/// Drop Windows verbatim prefixes (`\\?\` and `\\?\UNC\`, including `/`
+/// variants) so lexical and canonical paths compare consistently against
+/// blocked roots and prefixes. JS parity: `stripWindowsVerbatimPrefix`.
+fn strip_verbatim_str_for(input: &str, is_windows: bool) -> String {
+    if !is_windows {
+        return input.to_owned();
     }
+    let bytes = input.as_bytes();
+    if bytes.len() >= 4
+        && (bytes[0] == b'\\' || bytes[0] == b'/')
+        && (bytes[1] == b'\\' || bytes[1] == b'/')
+        && bytes[2] == b'?'
+        && (bytes[3] == b'\\' || bytes[3] == b'/')
+    {
+        let rest = &input[4..];
+        if rest.len() >= 4
+            && rest.as_bytes()[..3].eq_ignore_ascii_case(b"unc")
+            && (rest.as_bytes()[3] == b'\\' || rest.as_bytes()[3] == b'/')
+        {
+            return format!("\\\\{}", &rest[4..]);
+        }
+        return rest.to_owned();
+    }
+    input.to_owned()
+}
+
+pub(crate) fn strip_verbatim_str(input: &str) -> String {
+    strip_verbatim_str_for(input, cfg!(windows))
 }
 
 /// Assert that a pattern string is safe (won't escape the target directory).
@@ -272,6 +297,49 @@ const DARWIN_SYSTEM_ROOTS: &[&str] = &[
     "/opt/homebrew",
 ];
 
+/// Unix OS trees whose entire subtrees are refused as scan targets.
+/// `/usr` and `/var` stay exact-match in `blocked_roots` so `/var/www`,
+/// `/var/tmp`, macOS `/var/folders`, and `/usr/local/...` stay usable.
+/// JS parity: `UNIX_PREFIX_BLOCKED_ROOTS` in `guardrails.ts`.
+#[cfg_attr(windows, allow(dead_code))]
+const UNIX_PREFIX_BLOCKED_ROOTS: &[&str] = &[
+    "/etc", "/sys", "/proc", "/dev", "/boot", "/bin", "/sbin", "/lib", "/lib64", "/run",
+];
+
+fn prefix_blocked_roots() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        (b'A'..=b'Z')
+            .map(|drive| PathBuf::from(format!("{}:\\Windows", drive as char)))
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        let mut roots: Vec<PathBuf> = UNIX_PREFIX_BLOCKED_ROOTS
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        #[cfg(target_os = "macos")]
+        roots.push(PathBuf::from("/private/etc"));
+        roots
+    }
+}
+
+fn is_prefix_blocked(resolved: &Path) -> bool {
+    let prefixes = prefix_blocked_roots();
+    if cfg!(windows) || cfg!(target_os = "macos") {
+        let sep = std::path::MAIN_SEPARATOR;
+        let candidate = resolved.to_string_lossy().to_lowercase();
+        prefixes.iter().any(|prefix| {
+            let p = prefix.to_string_lossy().to_lowercase();
+            candidate == p || candidate.starts_with(&format!("{p}{sep}"))
+        })
+    } else {
+        prefixes.iter().any(|prefix| resolved.starts_with(prefix))
+    }
+}
+
 fn blocked_roots() -> HashSet<PathBuf> {
     let mut roots = HashSet::from([
         PathBuf::from("/"),
@@ -289,6 +357,7 @@ fn blocked_roots() -> HashSet<PathBuf> {
         PathBuf::from("/sys"),
         PathBuf::from("/proc"),
         PathBuf::from("/dev"),
+        PathBuf::from("/run"),
         PathBuf::from("/tmp"),
     ]);
 
@@ -449,7 +518,77 @@ mod tests {
             assert!(assert_safe_cwd(root).is_err(), "{root} should be refused");
         }
         assert!(assert_safe_cwd("/system/library").is_err());
+        assert!(assert_safe_cwd("/private/etc/ssh").is_err());
+        assert!(assert_safe_cwd("/ETC/ssh").is_err());
         assert!(assert_safe_cwd("/Users/Shared/projects/app").is_ok());
+        assert!(assert_safe_cwd("/private/var/folders/xy/T/project").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_os_subtrees_are_prefix_blocked_while_var_and_usr_stay_exact() {
+        for path in [
+            "/etc/systemd",
+            "/etc/ssh",
+            "/sys/class",
+            "/proc/sys",
+            "/dev/disk",
+            "/boot/grub",
+            "/bin/sub",
+            "/sbin/sub",
+            "/lib/x86_64-linux-gnu",
+            "/lib64/sub",
+            "/run/user/1000",
+        ] {
+            assert!(assert_safe_cwd(path).is_err(), "{path} should be refused");
+        }
+        assert!(assert_safe_cwd("/var/www/site").is_ok());
+        assert!(assert_safe_cwd("/var/tmp/sweep-test/project").is_ok());
+        assert!(assert_safe_cwd("/usr/local/src/project").is_ok());
+        assert!(assert_safe_cwd("/etcetera/project").is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_os_subtrees_and_verbatim_prefixes_are_refused() {
+        for path in [
+            r"C:\Windows\System32",
+            r"C:\Windows\WinSxS",
+            r"c:\windows\temp",
+            r"D:\Windows\System32",
+            r"\\?\C:\Windows",
+            r"\\?\C:\Windows\System32",
+            r"\\?\c:\windows\winsxs",
+            r"\\?\C:\",
+        ] {
+            assert!(assert_safe_cwd(path).is_err(), "{path} should be refused");
+        }
+        assert!(assert_safe_cwd(r"C:\WindowsBackup\project").is_ok());
+        assert!(assert_safe_cwd(r"\\?\C:\Projects\myapp").is_ok());
+    }
+
+    #[test]
+    fn strip_verbatim_handles_windows_drive_and_unc_and_noop_on_posix() {
+        assert_eq!(
+            strip_verbatim_str_for(r"\\?\C:\Windows\System32", true),
+            r"C:\Windows\System32"
+        );
+        assert_eq!(
+            strip_verbatim_str_for("//?/C:/Windows/System32", true),
+            "C:/Windows/System32"
+        );
+        assert_eq!(
+            strip_verbatim_str_for(r"\\?\UNC\server\share\dir", true),
+            r"\\server\share\dir"
+        );
+        assert_eq!(
+            strip_verbatim_str_for(r"\\?\unc\server\share\dir", true),
+            r"\\server\share\dir"
+        );
+        assert_eq!(
+            strip_verbatim_str_for(r"\\?\C:\Windows", false),
+            r"\\?\C:\Windows"
+        );
     }
 
     #[test]

@@ -79,3 +79,17 @@ The user approved this interaction contract after the grilling interview:
 - Serialize publication without cancelling a running release. Require the full
   matching native matrix in CI and explicit preview dist-tags. These workflow
   changes require hosted qualification; no publication was performed locally.
+
+## Narrowing `.app` bundle detection to macOS bundles (2026-11-28)
+
+- Previously, `isInsideToolHome` demoted any path with a segment ending in
+  `.app` on every platform, causing false positives on ordinary web/project
+  folders such as `example.app/node_modules`.
+- Both JS and Rust engines now treat a `.app` ancestor as a macOS application
+  bundle (`tool-home`) only on macOS (`darwin`) and only when that folder
+  contains a `Contents/Info.plist` file. `~/Applications` and `/Applications`
+  remain unconditionally protected as tool homes on all platforms.
+- This is an explicit false-positive correction (issue #130); all other
+  classification changes in the same change move strictly toward caution
+  (expanding `HOME_TOOL_DIRS`, `SYSTEM_TOOL_DIRS`, and prefix-blocking OS
+  roots).

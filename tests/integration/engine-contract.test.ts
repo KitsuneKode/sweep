@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
+import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import {
   isRustEngineAvailable,
   resolveRustEngineBinary,
@@ -411,6 +412,58 @@ test.skipIf(!NATIVE_AVAILABLE)(
         expect(candidate.identity?.device).toBe(metadata.dev.toString());
         expect(candidate.identity?.inode).toBe(metadata.ino.toString());
       }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!NATIVE_AVAILABLE)(
+  "both engines agree on .app project folders vs macOS bundles and prefix-blocked OS roots",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-app-parity-"));
+    try {
+      mkdirSync(join(root, "example.app", "node_modules", "pkg"), { recursive: true });
+      writeFileSync(join(root, "example.app", "node_modules", "pkg", "index.js"), "export {};\n");
+      mkdirSync(join(root, "Editor.app", "Contents", "Resources", "app", "node_modules", "pkg"), {
+        recursive: true,
+      });
+      writeFileSync(join(root, "Editor.app", "Contents", "Info.plist"), "<plist/>\n");
+      writeFileSync(
+        join(root, "Editor.app", "Contents", "Resources", "app", "node_modules", "pkg", "index.js"),
+        "export {};\n",
+      );
+
+      const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG);
+      const rustPlan = await scanToPlanViaRust(root, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+      });
+      expect(normalizePlan(rustPlan, root)).toEqual(normalizePlan(jsPlan, root));
+
+      const bySuffix = (plan: ScanPlan, suffix: string) =>
+        plan.candidates.find((c) => c.path.endsWith(suffix));
+      for (const plan of [jsPlan, rustPlan]) {
+        const project = bySuffix(plan, join("example.app", "node_modules"));
+        expect(project?.riskTier).toBe("safe");
+        const bundle = bySuffix(plan, join("Resources", "app", "node_modules"));
+        if (process.platform === "darwin") {
+          expect(bundle?.riskTier).toBe("dangerous");
+          expect(bundle?.reasons).toContain("tool-home");
+        } else {
+          expect(bundle?.riskTier).toBe("safe");
+        }
+      }
+
+      const refusedTarget =
+        process.platform === "win32" ? "\\\\?\\C:\\Windows\\System32" : "/etc/systemd";
+      expect(() => assertSafeCwd(refusedTarget)).toThrow(/protected path/i);
+      await expect(
+        scanToPlanViaRust(refusedTarget, {
+          config: DEFAULT_CONFIG,
+          selectionPolicy: DEFAULT_SELECTION_POLICY,
+        }),
+      ).rejects.toThrow(/protected path/i);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
