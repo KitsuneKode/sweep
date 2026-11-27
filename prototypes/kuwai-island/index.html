@@ -9,10 +9,10 @@
       /* Kuwai Night & Theme.qml tokens */
       --desktop: #0b0b0f;
       --notch-fill: rgba(0, 0, 0, 0.94);
-      --notch-mid: rgba(6, 6, 8, 0.88);
-      --notch-bottom: rgba(9, 9, 12, 0.82);
+      --notch-mid: rgba(6, 6, 8, 0.86);
+      --notch-bottom: rgba(9, 9, 12, 0.78);
       --card: rgba(255, 255, 255, 0.05);
-      --card-edge: rgba(255, 255, 255, 0.08);
+      --card-edge: rgba(255, 255, 255, 0.05);
       --card-drop: rgba(0, 0, 0, 0.50);
       --wash-1: rgba(255, 255, 255, 0.06);
       --wash-2: rgba(255, 255, 255, 0.10);
@@ -20,7 +20,7 @@
       --wash-4: rgba(255, 255, 255, 0.20);
       --edge-1: rgba(255, 255, 255, 0.10);
       --edge-2: rgba(255, 255, 255, 0.15);
-      --edge-4: rgba(255, 255, 255, 0.28);
+      --edge-4: rgba(255, 255, 255, 0.32);
 
       --text-primary: rgba(255, 255, 255, 0.96);
       --text-secondary: rgba(255, 255, 255, 0.72);
@@ -252,6 +252,27 @@
       color: var(--orange);
     }
 
+    /* Cleanly separated closed-state capsule reference for States 11 and 12 */
+    .closed-ref {
+      margin-top: 18px;
+      padding: 8px 14px;
+      border-radius: 14px;
+      background: rgba(14, 15, 20, 0.72);
+      border: 1px dashed rgba(255, 255, 255, 0.12);
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .closed-ref-label {
+      font-size: 11.5px;
+      color: var(--text-tertiary);
+      font-weight: 500;
+    }
+    .closed-ref .capsule {
+      margin-top: 0;
+      cursor: default;
+    }
+
     /* Expanded Island Panel (Theme.panelM = 640px, 30px bottom radius, 14px ears) */
     .notch-panel {
       position: relative;
@@ -284,14 +305,14 @@
       pointer-events: none;
     }
 
-    /* Top section strip (34px, IslandBar.qml:1210-1270) */
+    /* Top section strip (IslandBar.qml:1210-1270: left title/meta + centered section tabs, no right actions) */
     .section-strip {
       position: relative;
       height: 40px;
       padding: 10px 18px 0;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-start;
     }
     .strip-title {
       display: flex;
@@ -327,11 +348,6 @@
       background: var(--wash-3);
       color: var(--text-primary);
     }
-    .strip-actions {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
 
     /* Panel inner content column */
     .panel-body {
@@ -341,39 +357,54 @@
       gap: 12px;
     }
 
-    /* Toolbar row: Segmented switch + right meta chip */
+    /* Toolbar row: single CleanupPanel Segmented control + right chip & quiet panel actions */
     .toolbar-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      gap: 10px;
+    }
+    .toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
     }
 
+    /* CleanupPanel Segmented control (shell/components/Segmented.qml: 36px track, 4px pad) */
     .segmented {
       display: inline-flex;
       align-items: center;
-      padding: 3px;
-      border-radius: 11px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      height: 36px;
+      padding: 4px;
+      border-radius: 12px;
+      background: var(--wash-1);
       gap: 2px;
     }
     .seg-opt {
-      border: none;
+      border: 1px solid transparent;
       background: transparent;
       color: var(--text-secondary);
       font-family: inherit;
-      font-size: 12.5px;
-      font-weight: 500;
-      padding: 4px 11px;
+      font-size: 13px;
+      font-weight: 450;
+      height: 28px;
+      padding: 0 11px;
       border-radius: 8px;
       cursor: pointer;
       transition: background var(--dur-hover) var(--ease-out), color var(--dur-hover) var(--ease-out);
     }
+    .seg-opt:hover:not(.active):not(:disabled) {
+      color: var(--text-primary);
+    }
     .seg-opt.active {
-      background: rgba(255, 255, 255, 0.14);
+      background: var(--wash-3);
+      border-color: var(--edge-1);
       color: var(--text-primary);
       font-weight: 590;
+    }
+    .seg-opt.peer {
+      color: var(--text-tertiary);
     }
 
     /* Ui.Card (shell/components/ui/Card.qml) */
@@ -400,8 +431,10 @@
     .hero-left {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 3px;
       min-height: 52px;
+      min-width: 0;
+      flex: 1;
     }
     .hero-line {
       display: flex;
@@ -428,10 +461,36 @@
       font-weight: 450;
       color: var(--text-tertiary);
       font-variant-numeric: tabular-nums;
+      line-height: 1.4;
     }
     .hero-sub.mono {
       font-family: var(--font-mono);
       font-size: 11.5px;
+    }
+
+    /* Quiet inline navigation link (State 9 "All projects >") */
+    .inline-link {
+      border: none;
+      background: transparent;
+      padding: 3px 6px;
+      margin: -3px -6px 0 0;
+      border-radius: 6px;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: color var(--dur-hover) var(--ease-out), background var(--dur-hover) var(--ease-out);
+    }
+    .inline-link:hover {
+      color: var(--text-primary);
+      background: var(--wash-1);
+    }
+    .inline-link:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     /* Ui.Chip (shell/components/ui/Chip.qml) */
@@ -453,7 +512,7 @@
     .chip.green { background: rgba(48, 209, 88, 0.16); color: var(--green); }
     .chip.red { background: rgba(255, 69, 58, 0.16); color: var(--red); }
 
-    /* SweepDotBar: 6-row circular dot matrix (LinkedBar.qml geometry) */
+    /* SweepDotBar: 6-row circular dot matrix (LinkedBar.qml geometry + C+ seams) */
     .dot-bar-wrap {
       position: relative;
       width: 100%;
@@ -515,6 +574,10 @@
       background: rgba(255, 255, 255, 0.12);
       color: var(--text-primary);
     }
+    .legend-item:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
     .legend-item.dim { opacity: 0.42; }
     .legend-item .l-size {
       margin-left: auto;
@@ -523,13 +586,6 @@
       font-weight: 500;
     }
     .legend-item.hot .l-size { color: var(--text-secondary); }
-    .legend-item .ro-tag {
-      font-size: 10px;
-      padding: 1px 5px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-tertiary);
-    }
 
     /* Project rows (FluidHighlight style) */
     .proj-list {
@@ -564,7 +620,7 @@
       white-space: nowrap;
     }
 
-    /* Ui.Notice (shell/components/ui/Notice.qml) */
+    /* Ui.Notice (shell/components/ui/Notice.qml: at most one action button) */
     .notice {
       display: flex;
       align-items: center;
@@ -596,13 +652,12 @@
     .notice-actions {
       display: flex;
       align-items: center;
-      gap: 6px;
       flex-shrink: 0;
     }
 
     /* Empty state (Sweep not installed) */
     .empty-state {
-      padding: 18px 16px;
+      padding: 18px 14px;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -627,21 +682,44 @@
     .empty-body {
       font-size: 13px;
       color: var(--text-secondary);
-      max-width: 420px;
+      max-width: 440px;
       line-height: 1.45;
     }
     .code-pill {
-      display: inline-flex;
+      display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 10px;
-      padding: 6px 8px 6px 12px;
+      width: 100%;
+      max-width: 560px;
+      padding: 8px 10px 8px 14px;
       border-radius: 10px;
       background: rgba(0, 0, 0, 0.45);
       border: 1px solid var(--edge-1);
       font-family: var(--font-mono);
-      font-size: 12.5px;
+      font-size: 11px;
+      line-height: 1.45;
       color: var(--text-primary);
+      text-align: left;
     }
+    .code-pill code {
+      font-family: inherit;
+      user-select: all;
+      white-space: normal;
+      overflow-wrap: break-word;
+      flex: 1;
+      min-width: 0;
+    }
+    .code-pill .btn {
+      flex-shrink: 0;
+    }
+    .copy-feedback {
+      font-size: 11.5px;
+      min-height: 16px;
+      color: var(--text-tertiary);
+    }
+    .copy-feedback.ok { color: var(--green); }
+    .copy-feedback.err { color: var(--orange); }
 
     /* Footer row */
     .footer-row {
@@ -649,6 +727,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 14px;
+      min-height: 34px;
     }
     .footer-text {
       font-size: 13px;
@@ -671,55 +750,78 @@
     }
     .trust-caption.amber { color: var(--orange); }
 
-    /* Ui.Button (shell/components/RaisedButton.qml & Button.qml) */
+    /* Ui.Button (shell/components/RaisedButton.qml: 34px height, plate scales to 0.97 while text stays put) */
     .btn {
+      position: relative;
+      isolation: isolate;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 6px;
-      height: 32px;
-      padding: 0 14px;
+      height: 34px;
+      padding: 0 15px;
       border-radius: 999px;
       font-family: inherit;
       font-size: 13px;
       font-weight: 590;
       cursor: pointer;
       white-space: nowrap;
+      border: none;
+      background: transparent;
+      transition: opacity var(--dur-press) var(--ease-out), color var(--dur-hover) var(--ease-out);
+    }
+    .btn::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      z-index: -1;
       border: 1px solid transparent;
-      transition: background var(--dur-press) var(--ease-out), transform var(--dur-press) var(--ease-out), opacity var(--dur-press) var(--ease-out);
+      transition: background var(--dur-press) var(--ease-out), transform var(--dur-press) var(--ease-out), box-shadow var(--dur-press) var(--ease-out);
     }
-    .btn:active:not(:disabled) { transform: scale(0.97); }
+    .btn:active:not(:disabled)::before,
+    .btn.pressed-demo::before {
+      transform: scale(0.97);
+    }
+    .btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
     .btn:disabled { opacity: 0.48; cursor: default; }
-    .btn.primary {
+    .btn.primary { color: var(--on-accent); }
+    .btn.primary::before {
       background: var(--accent);
-      color: var(--on-accent);
-      border-color: rgba(0, 0, 0, 0.16);
+      border-color: rgba(0, 0, 0, 0.20);
       box-shadow: 0 1px 0 rgba(0, 0, 0, 0.50);
     }
-    .btn.primary:hover:not(:disabled) { background: #7fd1ff; }
+    .btn.primary:hover:not(:disabled)::before { background: #7fd1ff; }
     .btn.secondary {
-      background: var(--wash-2);
       color: var(--text-primary);
-      border-color: var(--edge-2);
-      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.50);
       font-weight: 500;
     }
-    .btn.secondary:hover:not(:disabled) { background: var(--wash-3); }
+    .btn.secondary::before {
+      background: var(--wash-2);
+      border-color: var(--edge-4);
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.50);
+    }
+    .btn.secondary:hover:not(:disabled)::before { background: var(--wash-4); }
     .btn.quiet {
-      background: transparent;
       color: var(--text-secondary);
       padding: 0 10px;
       font-weight: 500;
     }
-    .btn.quiet:hover:not(:disabled) { background: var(--wash-2); color: var(--text-primary); }
+    .btn.quiet::before { background: transparent; }
+    .btn.quiet:hover:not(:disabled) { color: var(--text-primary); }
+    .btn.quiet:hover:not(:disabled)::before { background: var(--wash-2); }
     .btn.icon-only {
       width: 28px;
       height: 28px;
       padding: 0;
     }
-    .btn.pressed-demo {
-      transform: scale(0.97);
-      opacity: 0.88;
+    .btn.compact-btn {
+      height: 28px;
+      padding: 0 12px;
+      font-size: 12px;
     }
 
     .spin {
@@ -817,7 +919,7 @@
 </head>
 <body>
   <div class="desktop">
-    <!-- Simulated background Kitty window to show translucent glass over real desktop -->
+    <!-- Simulated background terminal window to show translucent glass over real desktop -->
     <div class="bg-window" aria-hidden="true">
       <div class="bg-bar"><span class="bg-dot"></span><span class="bg-dot"></span><span class="bg-dot"></span></div>
       <div>~/Projects/sweep (main)</div>
@@ -829,8 +931,8 @@
       <div>@kitsunekode/sweep-ui:check: 218 pass, 0 fail [520ms]</div>
       <div>Tasks: 6 successful, 6 total</div>
       <div>&nbsp;</div>
-      <div class="accent-line">$ sweep status ~/Projects --json</div>
-      <div>{"protocolVersion":"1","targetDir":"/home/kitsunekode/Projects","reclaimableBytes":61632780697,"protectedCount":22}</div>
+      <div class="accent-line">$ sweep widget ~/Projects --view projects --json</div>
+      <div>{"widgetSchemaVersion":1,"readOnly":true,"targetDir":"/home/kitsunekode/Projects","reclaimableBytes":61633196850}</div>
     </div>
 
     <main class="island-stage" id="island-stage" aria-live="polite"></main>
@@ -854,6 +956,8 @@
 
   <script>
     (function () {
+      const INSTALL_CMD = "curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh";
+
       /* Crisp 14-15px Lucide-style inline SVG icons matching C+ & Kuwai glyph set */
       const ICONS = {
         sweep: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m19 5-7 7"/><path d="M5 19c2-2 3-5 6-5 1.5 0 2.5 1 2.5 2.5 0 3-3 4-5 5.5H5v-3Z"/><path d="M12 12 8.5 8.5"/></svg>',
@@ -891,6 +995,13 @@
         { id: "custom", label: "Opt-in", size: "410 MiB", gb: 0.4, count: 6, color: "#ea85d3", detail: "6 folders · Check first (.venv, custom patterns)." }
       ];
 
+      /* 5 finished worktrees' own rebuild-cost breakdown (sums to 3.5 GiB) */
+      const WORKTREE_BUCKETS = [
+        { id: "cache", label: "Caches", size: "220 MiB", gb: 0.215, count: 4, color: "#55d7be" },
+        { id: "install", label: "Installs", size: "2.1 GiB", gb: 2.1, count: 5, color: "#ad9efd" },
+        { id: "build", label: "Builds", size: "1.2 GiB", gb: 1.185, count: 5, color: "#fb984a" }
+      ];
+
       const SPACE_CATEGORIES = [
         { id: "developer", label: "Developer", size: "57.4 GiB", gb: 57.4, color: "#ad9efd", actionable: true, actionLabel: "Review in Sweep", detail: "Project build artifacts and toolchains. Opens Sweep with an empty queue." },
         { id: "apps", label: "Apps", size: "52.6 GiB", gb: 52.6, color: "#5fc9f4", actionable: false, detail: "Installed applications and runtimes. Info only." },
@@ -906,29 +1017,30 @@
       ];
 
       const STATES = [
-        { id: "rest-hidden", label: "1. Rest (hidden)", desc: "Default closed notch. Zero Sweep capsules, zero polling, 0% CPU." },
-        { id: "rest-capsule", label: "2. Rest (capsule)", desc: "Optional right-lane capsule when idle/worktree bytes pass threshold." },
-        { id: "hover-glance", label: "3. Hover (glance)", desc: "Capsule hovered (220 ms intent) opens read-only preview without stealing focus." },
-        { id: "expanded-settled", label: "4. Expanded (settled)", desc: "Full 640 px storage card: big sans hero, dim free line, C+ dot bar, legend, single action." },
+        { id: "rest-hidden", label: "1. Rest (hidden)", desc: "Default closed notch. Zero Sweep marks, zero polling, 0% CPU." },
+        { id: "rest-capsule", label: "2. Rest (capsule)", desc: "Optional right-lane SysMarks capsule when idle/worktree bytes pass Settings.sweepMinGB." },
+        { id: "hover-glance", label: "3. Hover (glance)", desc: "Island.preview('sweep') morphs NotchShape directly from top edge; strictly cache-only." },
+        { id: "expanded-settled", label: "4. Expanded (settled)", desc: "640 px Cleanup card: single Segmented bar, toolbar actions, C+ dot bar, single CTA." },
         { id: "scanning", label: "5. Scanning", desc: "User-triggered scan only: ~total counting up, live path, progressive dots, Stop button." },
-        { id: "settled-clean", label: "6. Settled (0 B)", desc: "Nothing reclaimable: empty dot track, calm confirmation, quiet Rescan." },
+        { id: "settled-clean", label: "6. Settled (0 B)", desc: "Nothing reclaimable: empty dot track, calm confirmation, secondary Rescan." },
         { id: "stale-cache", label: "7. Stale cache (L4)", desc: "Instant first paint from cache with age chip; never auto-scans on battery." },
-        { id: "point-hover", label: "8. Point / hover", desc: "Hovering Builds dims other dots to 0.24 and swaps headline in place with zero layout shift." },
-        { id: "suggestion", label: "9. Suggestion", desc: "Actionable finished-worktree callout with top 3 rows and single review handoff." },
-        { id: "review-handoff", label: "10. Review handoff", desc: "Button confirms handoff to Kitty with empty queue; island never deletes directly." },
-        { id: "clearing", label: "11. Clearing", desc: "Passive observation of active Sweep apply; dots dissolve on real item completions." },
-        { id: "receipt", label: "12. Receipt", desc: "Clean removal receipt in green + updated free space + next suggestion." },
-        { id: "partial-failed", label: "13. Partial / failed", desc: "Amber notice when some items failed or stopped; Inspect opens Sweep with reasons." },
-        { id: "error", label: "14. Error", desc: "Red notice on scan timeout/failure without leaking helper names or exit codes." },
-        { id: "not-installed", label: "15. Not installed", desc: "Centered empty state with copyable install command and instant check feedback." },
-        { id: "engine-missing", label: "16. Engine missing", desc: "Amber notice offering fallback JS scanner or running sweep doctor in Kitty." },
-        { id: "permission-denied", label: "17. Permission denied", desc: "Red notice when target root is unreadable, pointing directly to Settings." },
-        { id: "space-report", label: "18. Space report", desc: "Read-only 11-category whole-disk view; personal files info-only forever." }
+        { id: "point-hover", label: "8. Point / hover", desc: "Hovering or focusing Builds dims other dots to 0.24 and swaps Projects hero in place." },
+        { id: "suggestion", label: "9. Suggestion", desc: "Worktree focus card: worktrees' own 3.5 GiB breakdown, inline All projects link, one CTA." },
+        { id: "review-handoff", label: "10. Review handoff", desc: "Terminal-agnostic handoff with empty queue; island never deletes directly." },
+        { id: "clearing", label: "11. Clearing", desc: "Top-attached NotchShape observing active-apply.json (25%, 55.6 GiB remaining) + closed capsule." },
+        { id: "receipt", label: "12. Receipt", desc: "Top-attached NotchShape clean receipt in green + closed capsule + dismissal controls." },
+        { id: "partial-failed", label: "13. Partial / failed", desc: "Single-action amber Ui.Notice with updated 54.3 GiB remaining dot bar." },
+        { id: "error", label: "14. Error", desc: "Single-action red Ui.Notice (Try again); quiet Open terminal below; dimmed cache preserved." },
+        { id: "not-installed", label: "15. Not installed", desc: "Centered empty state with install.sh command and resolved-only clipboard confirmation." },
+        { id: "engine-missing", label: "16. Engine missing", desc: "Single-action amber Ui.Notice (Scan with fallback); quiet Run doctor in footer." },
+        { id: "permission-denied", label: "17. Permission denied", desc: "Single-action red Ui.Notice when target root is unreadable, pointing to Settings." },
+        { id: "space-report", label: "18. Space report", desc: "Read-only 11-category Space tab (v1b): fixed volume hero, focused category on dim line." }
       ];
 
       let activeState = "expanded-settled";
       let interactiveHot = null;
-      let copied = false;
+      let copyState = "idle"; /* "idle" | "copied" | "failed" */
+      let copyTimer = null;
 
       function earsSvg(size) {
         return `
@@ -961,7 +1073,8 @@
           </div>`;
       }
 
-      function renderSectionStrip(metaText, busyRescan) {
+      /* Faithful to IslandBar.qml:1210-1270 (left title + headerMeta, center 4 section tabs, no right slot) */
+      function renderSectionStrip(metaText) {
         return `
           <div class="section-strip">
             <div class="strip-title">
@@ -974,13 +1087,28 @@
               <div class="strip-tab">${ICONS.system}</div>
               <div class="strip-tab active">${ICONS.sweep}</div>
             </div>
-            <div class="strip-actions">
-              <button type="button" class="btn quiet icon-only" title="Rescan" aria-label="Rescan">
-                <span class="${busyRescan ? "spin" : ""}" style="display:grid;place-items:center;">${ICONS.refresh}</span>
-              </button>
-              <button type="button" class="btn quiet icon-only" title="Open Sweep in Kitty" aria-label="Open Sweep in Kitty">
-                ${ICONS.terminal}
-              </button>
+          </div>`;
+      }
+
+      /* Single CleanupPanel Segmented bar + right chip & quiet Rescan / Open terminal buttons */
+      function renderToolbar(activeTab, chipHtml, busyRescan = false, showActions = true) {
+        return `
+          <div class="toolbar-row">
+            <div class="segmented" role="tablist" aria-label="Cleanup sections">
+              <button type="button" class="seg-opt peer" disabled tabindex="-1">Skills</button>
+              <button type="button" class="seg-opt ${activeTab === "projects" ? "active" : ""}" role="tab" aria-selected="${activeTab === "projects"}" data-jump="expanded-settled">Projects</button>
+              <button type="button" class="seg-opt ${activeTab === "space" ? "active" : ""}" role="tab" aria-selected="${activeTab === "space"}" data-jump="space-report">Space</button>
+              <button type="button" class="seg-opt peer" disabled tabindex="-1">Caches</button>
+            </div>
+            <div class="toolbar-right">
+              ${chipHtml || ""}
+              ${showActions ? `
+                <button type="button" class="btn quiet icon-only" title="Rescan" aria-label="Rescan" data-jump="scanning">
+                  <span class="${busyRescan ? "spin" : ""}" style="display:grid;place-items:center;">${ICONS.refresh}</span>
+                </button>
+                <button type="button" class="btn quiet icon-only" title="Open Sweep in terminal" aria-label="Open Sweep in terminal" data-jump="review-handoff">
+                  ${ICONS.terminal}
+                </button>` : ""}
             </div>
           </div>`;
       }
@@ -1048,7 +1176,7 @@
               const isHot = hotId === it.id;
               const isDim = hotId && !isHot;
               return `
-                <button type="button" class="legend-item ${isHot ? "hot" : ""} ${isDim ? "dim" : ""}" data-bucket="${it.id}">
+                <button type="button" class="legend-item ${isHot ? "hot" : ""} ${isDim ? "dim" : ""}" data-bucket="${it.id}" aria-pressed="${isHot}">
                   <span style="color:${it.color};display:inline-flex;align-items:center;">${ICONS[it.id] || ICONS.other}</span>
                   <span>${it.label}</span>
                   <span class="l-size">${it.size}</span>
@@ -1057,7 +1185,7 @@
           </div>`;
       }
 
-      function renderState(id) {
+      function renderState(id, restoreBucketFocus = null) {
         const stage = document.getElementById("island-stage");
         let html = "";
 
@@ -1073,17 +1201,12 @@
               </button>
             </div>`;
         } else if (id === "hover-glance") {
+          /* Island.preview("sweep") folds IslandSplit and morphs NotchShape directly from the top edge */
           html = `
-            <div class="rest-cluster" style="margin-bottom:8px;">
-              ${renderRestNotch()}
-              <button type="button" class="capsule hovered" data-jump="expanded-settled">
-                <span style="color:var(--accent);display:grid;place-items:center;">${ICONS.sweep}</span>
-                <span>10.3 GiB</span>
-              </button>
-            </div>
             <div class="notch-shell">
-              <div class="notch-panel compact-preview" style="border-radius:22px;border-top:1px solid rgba(255,255,255,0.14);">
-                <div class="panel-body" style="padding:14px 16px;gap:10px;">
+              ${earsSvg(14)}
+              <div class="notch-panel compact-preview">
+                <div class="panel-body" style="padding:14px 18px 16px;gap:10px;">
                   <div class="hero-head">
                     <div class="hero-left" style="min-height:auto;">
                       <div class="hero-line">
@@ -1092,12 +1215,12 @@
                       </div>
                       <div class="hero-sub">31.0 GiB free on volume &middot; +4.2 GiB guarded</div>
                     </div>
-                    <span class="chip">Preview</span>
+                    <span class="chip">Preview &middot; cached</span>
                   </div>
-                  ${buildDotBar({ segments: PROJECT_BUCKETS, total: 57.4, cols: 60 })}
+                  ${buildDotBar({ segments: PROJECT_BUCKETS, total: 57.4, cols: 62 })}
                   <div class="footer-row">
                     <span class="footer-text" style="font-size:12.5px;">10.3 GiB is in 26 idle projects and 5 finished worktrees.</span>
-                    <button type="button" class="btn secondary" style="height:28px;font-size:12px;" data-jump="expanded-settled">Open</button>
+                    <button type="button" class="btn secondary compact-btn" data-jump="expanded-settled">Open</button>
                   </div>
                 </div>
               </div>
@@ -1113,15 +1236,16 @@
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Sweep", false)}
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
-                  <div class="toolbar-row">
-                    <div class="segmented" role="tablist">
-                      <button type="button" class="seg-opt active" data-jump="expanded-settled">Projects</button>
-                      <button type="button" class="seg-opt" data-jump="space-report">Space</button>
-                    </div>
-                    ${isStale ? `<span class="chip orange">Cached &middot; 3 h ago &middot; on battery</span>` : `<span class="chip">112 projects</span>`}
-                  </div>
+                  ${renderToolbar(
+                    "projects",
+                    isStale
+                      ? `<span class="chip orange">Cached &middot; 3 h ago &middot; on battery</span>`
+                      : `<span class="chip">112 projects</span>`,
+                    false,
+                    true
+                  )}
                   <div class="kuwai-card">
                     <div class="hero-head">
                       <div class="hero-left">
@@ -1144,7 +1268,7 @@
                     <div class="footer-actions">
                       ${isStale ? `<button type="button" class="btn secondary" data-jump="scanning">Refresh</button>` : ""}
                       <button type="button" class="btn primary ${isHandoff ? "pressed-demo" : ""}" ${isHandoff ? "disabled" : ""} data-jump="review-handoff">
-                        ${isHandoff ? `${ICONS.terminal}<span>Opening Sweep in Kitty&hellip;</span>` : "Review in Sweep"}
+                        ${isHandoff ? `${ICONS.terminal}<span>Opening Sweep&hellip;</span>` : "Review in Sweep"}
                       </button>
                     </div>
                   </div>
@@ -1165,15 +1289,9 @@
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Scanning", true)}
+                ${renderSectionStrip("Scanning")}
                 <div class="panel-body">
-                  <div class="toolbar-row">
-                    <div class="segmented">
-                      <button type="button" class="seg-opt active">Projects</button>
-                      <button type="button" class="seg-opt" data-jump="space-report">Space</button>
-                    </div>
-                    <span class="chip">Low-memory scan</span>
-                  </div>
+                  ${renderToolbar("projects", `<span class="chip">Low-memory scan</span>`, true, true)}
                   <div class="kuwai-card">
                     <div class="hero-head">
                       <div class="hero-left">
@@ -1202,15 +1320,9 @@
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Sweep", false)}
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
-                  <div class="toolbar-row">
-                    <div class="segmented">
-                      <button type="button" class="seg-opt active">Projects</button>
-                      <button type="button" class="seg-opt" data-jump="space-report">Space</button>
-                    </div>
-                    <span class="chip green">All clear</span>
-                  </div>
+                  ${renderToolbar("projects", `<span class="chip green">All clear</span>`, false, true)}
                   <div class="kuwai-card">
                     <div class="hero-head">
                       <div class="hero-left">
@@ -1237,15 +1349,9 @@
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Sweep", false)}
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
-                  <div class="toolbar-row">
-                    <div class="segmented">
-                      <button type="button" class="seg-opt active">Projects</button>
-                      <button type="button" class="seg-opt" data-jump="space-report">Space</button>
-                    </div>
-                    <span class="chip">5 finished worktrees</span>
-                  </div>
+                  ${renderToolbar("projects", `<span class="chip">5 finished worktrees</span>`, false, true)}
                   <div class="kuwai-card">
                     <div class="hero-head">
                       <div class="hero-left">
@@ -1255,8 +1361,9 @@
                         </div>
                         <div class="hero-sub">Part of 57.4 GiB reclaimable &middot; Merged branches can be reviewed first.</div>
                       </div>
+                      <button type="button" class="inline-link" data-jump="expanded-settled">All projects &rsaquo;</button>
                     </div>
-                    ${buildDotBar({ segments: PROJECT_BUCKETS, total: 57.4, cols: 80, hotId: "install" })}
+                    ${buildDotBar({ segments: WORKTREE_BUCKETS, total: 3.5, cols: 80 })}
                     <div class="proj-list">
                       <div class="proj-row sel">
                         <span class="proj-name"><span class="proj-repo">sweep &rsaquo;</span><span class="proj-branch">old-renderer</span></span>
@@ -1275,7 +1382,6 @@
                   <div class="footer-row">
                     <div class="footer-text">Opens Sweep focused on finished worktrees with nothing queued yet.</div>
                     <div class="footer-actions">
-                      <button type="button" class="btn quiet" data-jump="expanded-settled">All projects</button>
                       <button type="button" class="btn primary" data-jump="review-handoff">Review 5 worktrees</button>
                     </div>
                   </div>
@@ -1283,23 +1389,18 @@
               </div>
             </div>`;
         } else if (id === "clearing") {
+          /* 57.4 - 1.8 = 55.6 GiB remaining; 3 of 12 = 25% */
           const midBuckets = [
             { id: "cache", label: "Caches", size: "2.1 GiB", gb: 2.1, color: "#55d7be" },
-            { id: "install", label: "Installs", size: "36.8 GiB", gb: 36.8, color: "#ad9efd" },
-            { id: "build", label: "Builds", size: "15.1 GiB", gb: 15.1, color: "#fb984a" },
+            { id: "install", label: "Installs", size: "37.6 GiB", gb: 37.6, color: "#ad9efd" },
+            { id: "build", label: "Builds", size: "15.5 GiB", gb: 15.5, color: "#fb984a" },
             { id: "custom", label: "Opt-in", size: "410 MiB", gb: 0.4, color: "#ea85d3" }
           ];
           html = `
-            <div class="rest-cluster" style="margin-bottom:8px;">
-              ${renderRestNotch()}
-              <div class="capsule tone-orange">
-                <span style="display:grid;place-items:center;">${ICONS.sweep}</span>
-                <span>Clearing 3/12</span>
-              </div>
-            </div>
             <div class="notch-shell">
-              <div class="notch-panel" style="border-radius:26px;border-top:1px solid rgba(255,255,255,0.14);">
-                ${renderSectionStrip("Clearing in Sweep", false)}
+              ${earsSvg(14)}
+              <div class="notch-panel">
+                ${renderSectionStrip("Clearing in Sweep")}
                 <div class="panel-body">
                   <div class="kuwai-card">
                     <div class="hero-head">
@@ -1310,21 +1411,29 @@
                         </div>
                         <div class="hero-sub mono">Removing packages/web/.next</div>
                       </div>
-                      <span class="chip orange">Active in Kitty</span>
+                      <span class="chip orange">Active in terminal</span>
                     </div>
-                    <div class="clear-track"><div class="clear-fill" style="width:28%;"></div></div>
-                    ${buildDotBar({ segments: midBuckets, total: 57.4, cols: 80, dissolveId: "build", dissolveCols: 4 })}
+                    <div class="clear-track"><div class="clear-fill" style="width:25%;"></div></div>
+                    ${buildDotBar({ segments: midBuckets, total: 57.4, cols: 80, dissolveId: "build", dissolveCols: 3 })}
                   </div>
                   <div class="footer-row">
-                    <div class="footer-text">Running in your Sweep terminal session. Focus Kitty to stop early.</div>
+                    <div class="footer-text">Running in your Sweep terminal session. Focus the terminal to stop early.</div>
                     <div class="footer-actions">
                       <button type="button" class="btn secondary" data-jump="receipt">${ICONS.terminal}<span>Focus Sweep</span></button>
                     </div>
                   </div>
                 </div>
               </div>
+            </div>
+            <div class="closed-ref" aria-label="Closed-notch capsule preview">
+              <span class="closed-ref-label">When panel is closed &middot; right-lane capsule</span>
+              <span class="capsule tone-orange">
+                <span style="display:grid;place-items:center;">${ICONS.sweep}</span>
+                <span>Clearing 3/12</span>
+              </span>
             </div>`;
         } else if (id === "receipt") {
+          /* 57.4 - 3.5 = 53.9 GiB remaining */
           const afterBuckets = [
             { id: "cache", label: "Caches", size: "2.1 GiB", gb: 2.1, color: "#55d7be" },
             { id: "install", label: "Installs", size: "35.9 GiB", gb: 35.9, color: "#ad9efd" },
@@ -1332,16 +1441,10 @@
             { id: "custom", label: "Opt-in", size: "410 MiB", gb: 0.4, color: "#ea85d3" }
           ];
           html = `
-            <div class="rest-cluster" style="margin-bottom:8px;">
-              ${renderRestNotch()}
-              <div class="capsule tone-green">
-                <span style="display:grid;place-items:center;">${ICONS.check}</span>
-                <span>Freed 3.5 GiB</span>
-              </div>
-            </div>
             <div class="notch-shell">
-              <div class="notch-panel" style="border-radius:26px;border-top:1px solid rgba(255,255,255,0.14);">
-                ${renderSectionStrip("Sweep", false)}
+              ${earsSvg(14)}
+              <div class="notch-panel">
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
                   <div class="kuwai-card">
                     <div class="hero-head">
@@ -1365,13 +1468,27 @@
                   </div>
                 </div>
               </div>
+            </div>
+            <div class="closed-ref" aria-label="Closed-notch capsule preview">
+              <span class="closed-ref-label">When panel is closed &middot; one-time green halo</span>
+              <span class="capsule tone-green">
+                <span style="display:grid;place-items:center;">${ICONS.check}</span>
+                <span>Freed 3.5 GiB</span>
+              </span>
             </div>`;
         } else if (id === "partial-failed") {
+          /* 57.4 - 3.1 = 54.3 GiB remaining */
+          const partialBuckets = [
+            { id: "cache", label: "Caches", size: "2.1 GiB", gb: 2.1, color: "#55d7be" },
+            { id: "install", label: "Installs", size: "36.4 GiB", gb: 36.4, color: "#ad9efd" },
+            { id: "build", label: "Builds", size: "15.4 GiB", gb: 15.4, color: "#fb984a" },
+            { id: "custom", label: "Opt-in", size: "410 MiB", gb: 0.4, color: "#ea85d3" }
+          ];
           html = `
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Sweep", false)}
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
                   <div class="notice">
                     <span class="notice-icon" style="color:var(--orange);">${ICONS.warn}</span>
@@ -1380,7 +1497,7 @@
                       <div class="notice-detail">2 items stayed queued because files were busy or lacked permission. 34.1 GiB free now.</div>
                     </div>
                     <div class="notice-actions">
-                      <button type="button" class="btn secondary" data-jump="review-handoff">Inspect in Sweep</button>
+                      <button type="button" class="btn secondary compact-btn" data-jump="review-handoff">Inspect in Sweep</button>
                     </div>
                   </div>
                   <div class="kuwai-card">
@@ -1393,7 +1510,7 @@
                         <div class="hero-sub">34.1 GiB free on volume &middot; +4.2 GiB guarded</div>
                       </div>
                     </div>
-                    ${buildDotBar({ segments: PROJECT_BUCKETS, total: 57.4, cols: 80 })}
+                    ${buildDotBar({ segments: partialBuckets, total: 57.4, cols: 80 })}
                   </div>
                 </div>
               </div>
@@ -1403,7 +1520,7 @@
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Sweep", false)}
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
                   <div class="notice red">
                     <span class="notice-icon" style="color:var(--red);">${ICONS.warn}</span>
@@ -1412,8 +1529,7 @@
                       <div class="notice-detail">The scan timed out before sizing finished. Showing the last saved scan from 3 h ago.</div>
                     </div>
                     <div class="notice-actions">
-                      <button type="button" class="btn secondary" data-jump="scanning">Try again</button>
-                      <button type="button" class="btn quiet" data-jump="review-handoff">Open terminal</button>
+                      <button type="button" class="btn secondary compact-btn" data-jump="scanning">Try again</button>
                     </div>
                   </div>
                   <div class="kuwai-card dimmed">
@@ -1428,15 +1544,26 @@
                     </div>
                     ${buildDotBar({ segments: PROJECT_BUCKETS, total: 57.4, cols: 80 })}
                   </div>
+                  <div class="footer-row">
+                    <div class="footer-text">Open Sweep in your terminal to inspect full scan output.</div>
+                    <div class="footer-actions">
+                      <button type="button" class="btn quiet" data-jump="review-handoff">Open terminal</button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>`;
         } else if (id === "not-installed") {
+          const feedbackHtml = copyState === "copied"
+            ? `<div class="copy-feedback ok">Copied to clipboard.</div>`
+            : copyState === "failed"
+              ? `<div class="copy-feedback err">Copy failed. Select the command above to copy manually.</div>`
+              : `<div class="copy-feedback">Self-contained binary with terminal UI built in (checksum verified).</div>`;
           html = `
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Sweep", false)}
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
                   <div class="kuwai-card">
                     <div class="empty-state">
@@ -1444,11 +1571,12 @@
                       <div class="empty-title">Sweep is not installed</div>
                       <div class="empty-body">Install Sweep to inspect project build artifacts and reclaim disk space from the island.</div>
                       <div class="code-pill">
-                        <span>bun add -g @kitsunekode/sweep</span>
-                        <button type="button" class="btn secondary icon-only" id="copy-cmd" title="Copy command" aria-label="Copy install command">
-                          ${copied ? `<span style="color:var(--green);">${ICONS.check}</span>` : ICONS.copy}
+                        <code>${INSTALL_CMD}</code>
+                        <button type="button" class="btn secondary icon-only" id="copy-cmd" title="Copy install command" aria-label="Copy install command">
+                          ${copyState === "copied" ? `<span style="color:var(--green);display:grid;place-items:center;">${ICONS.check}</span>` : ICONS.copy}
                         </button>
                       </div>
+                      ${feedbackHtml}
                     </div>
                   </div>
                 </div>
@@ -1459,22 +1587,23 @@
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Sweep", false)}
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
                   <div class="notice">
                     <span class="notice-icon" style="color:var(--orange);">${ICONS.warn}</span>
                     <div class="notice-copy">
                       <div class="notice-title">Native scan engine unavailable</div>
-                      <div class="notice-detail">Scans can still run with the fallback scanner, or run doctor in Kitty to repair the native engine.</div>
+                      <div class="notice-detail">Scans can still run with the fallback scanner, or run sweep doctor in your terminal to repair the native engine.</div>
                     </div>
                     <div class="notice-actions">
-                      <button type="button" class="btn secondary" data-jump="scanning">Scan with fallback</button>
-                      <button type="button" class="btn quiet" data-jump="review-handoff">Run doctor</button>
+                      <button type="button" class="btn secondary compact-btn" data-jump="scanning">Scan with fallback</button>
                     </div>
                   </div>
-                  <div class="trust-caption">
-                    <span>Fallback scanner uses identical guardrails and binary sizing.</span>
-                    <span>~/Projects</span>
+                  <div class="footer-row">
+                    <div class="footer-text">Fallback scanner uses identical guardrails and binary sizing.</div>
+                    <div class="footer-actions">
+                      <button type="button" class="btn quiet" data-jump="review-handoff">Run doctor</button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1484,7 +1613,7 @@
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Sweep", false)}
+                ${renderSectionStrip("Sweep")}
                 <div class="panel-body">
                   <div class="notice red">
                     <span class="notice-icon" style="color:var(--red);">${ICONS.lock}</span>
@@ -1493,11 +1622,8 @@
                       <div class="notice-detail">Your account does not have read permission on this folder. Pick another scan root in Settings.</div>
                     </div>
                     <div class="notice-actions">
-                      <button type="button" class="btn secondary" data-jump="expanded-settled">Open Settings</button>
+                      <button type="button" class="btn secondary compact-btn" data-jump="expanded-settled">Open Settings</button>
                     </div>
-                  </div>
-                  <div class="trust-caption amber">
-                    <span>When only subfolders are unreadable, Sweep skips them and marks sizes as a lower bound.</span>
                   </div>
                 </div>
               </div>
@@ -1505,27 +1631,30 @@
         } else if (id === "space-report") {
           const hotId = interactiveHot !== null ? interactiveHot : "photos";
           const hotCat = SPACE_CATEGORIES.find(c => c.id === hotId) || null;
+          /* Space view ALWAYS keeps volume total as the single bold headline; focused category goes on the dim line */
+          const subLineHtml = hotCat
+            ? `<span style="color:${hotCat.color};font-weight:590;">${hotCat.label} &middot; ${hotCat.size}</span> &middot; ${hotCat.detail}`
+            : `134.5 GiB free on volume &middot; point at or focus any category`;
+          const footerActionHtml = hotCat
+            ? (hotCat.actionable
+                ? `<button type="button" class="btn primary" data-jump="review-handoff">${hotCat.actionLabel}</button>`
+                : "")
+            : `<button type="button" class="btn secondary" data-jump="review-handoff">Open Space in Sweep</button>`;
           html = `
             <div class="notch-shell">
               ${earsSvg(14)}
               <div class="notch-panel">
-                ${renderSectionStrip("Where your space goes", false)}
+                ${renderSectionStrip("Where your space goes")}
                 <div class="panel-body">
-                  <div class="toolbar-row">
-                    <div class="segmented" role="tablist">
-                      <button type="button" class="seg-opt" data-jump="expanded-settled">Projects</button>
-                      <button type="button" class="seg-opt active" data-jump="space-report">Space</button>
-                    </div>
-                    <span class="chip">Read-only &middot; 11 categories</span>
-                  </div>
+                  ${renderToolbar("space", `<span class="chip">Read-only &middot; 11 categories</span>`, false, true)}
                   <div class="kuwai-card">
                     <div class="hero-head">
                       <div class="hero-left">
                         <div class="hero-line">
-                          <span class="hero-num" style="${hotCat ? `color:${hotCat.color};` : ""}">${hotCat ? hotCat.size : "342.4 GiB"}</span>
-                          <span class="hero-qual">${hotCat ? hotCat.label : "of 476.9 GiB used"}</span>
+                          <span class="hero-num">342.4 GiB</span>
+                          <span class="hero-qual">of 476.9 GiB used</span>
                         </div>
-                        <div class="hero-sub">${hotCat ? hotCat.detail : "134.5 GiB free on volume &middot; point at any category"}</div>
+                        <div class="hero-sub">${subLineHtml}</div>
                       </div>
                       ${hotCat && !hotCat.actionable ? `<span class="chip">Info only</span>` : ""}
                     </div>
@@ -1538,11 +1667,7 @@
                         ? `${hotCat.label} (${hotCat.size}) can be reviewed in Sweep. Queue starts empty.`
                         : "Personal files are info-only. Only Developer, Caches, and Trash open review."}
                     </div>
-                    <div class="footer-actions">
-                      ${hotCat && hotCat.actionable
-                        ? `<button type="button" class="btn primary" data-jump="review-handoff">${hotCat.actionLabel}</button>`
-                        : `<button type="button" class="btn secondary" data-jump="review-handoff">Open Space in Sweep</button>`}
-                    </div>
+                    ${footerActionHtml ? `<div class="footer-actions">${footerActionHtml}</div>` : ""}
                   </div>
                 </div>
               </div>
@@ -1551,13 +1676,25 @@
 
         stage.innerHTML = html;
         bindStageEvents();
+        if (restoreBucketFocus) {
+          const btn = stage.querySelector(`button.legend-item[data-bucket="${restoreBucketFocus}"]`);
+          if (btn) btn.focus({ preventScroll: true });
+        }
         updateSwitcherMeta();
+      }
+
+      function setBucketFocus(bucket, preserveFocus) {
+        if (interactiveHot !== bucket) {
+          interactiveHot = bucket;
+          renderState(activeState, preserveFocus ? bucket : null);
+        }
       }
 
       function bindStageEvents() {
         document.querySelectorAll("[data-jump]").forEach(el => {
           el.addEventListener("click", () => {
             interactiveHot = null;
+            copyState = "idle";
             setState(el.getAttribute("data-jump"));
           });
         });
@@ -1565,24 +1702,39 @@
         const copyBtn = document.getElementById("copy-cmd");
         if (copyBtn) {
           copyBtn.addEventListener("click", () => {
-            copied = true;
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText("bun add -g @kitsunekode/sweep").catch(() => {});
+            clearTimeout(copyTimer);
+            if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+              copyState = "failed";
+              renderState(activeState);
+              return;
             }
-            renderState(activeState);
-            setTimeout(() => { copied = false; if (activeState === "not-installed") renderState(activeState); }, 1600);
+            navigator.clipboard.writeText(INSTALL_CMD).then(() => {
+              copyState = "copied";
+              if (activeState === "not-installed") renderState(activeState);
+              copyTimer = setTimeout(() => {
+                copyState = "idle";
+                if (activeState === "not-installed") renderState(activeState);
+              }, 1800);
+            }).catch(() => {
+              copyState = "failed";
+              if (activeState === "not-installed") renderState(activeState);
+            });
           });
         }
 
         if (["expanded-settled", "point-hover", "stale-cache", "space-report"].includes(activeState)) {
           document.querySelectorAll("[data-bucket]").forEach(el => {
-            el.addEventListener("mouseenter", () => {
-              const bucket = el.getAttribute("data-bucket");
-              if (interactiveHot !== bucket) {
-                interactiveHot = bucket;
-                renderState(activeState);
-              }
-            });
+            const bucket = el.getAttribute("data-bucket");
+            el.addEventListener("mouseenter", () => setBucketFocus(bucket, false));
+            if (el.tagName === "BUTTON") {
+              el.addEventListener("click", () => setBucketFocus(bucket, true));
+              el.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setBucketFocus(bucket, true);
+                }
+              });
+            }
           });
           const card = document.querySelector(".kuwai-card");
           if (card) {
@@ -1611,6 +1763,7 @@
         if (!STATES.some(s => s.id === id)) return;
         activeState = id;
         interactiveHot = null;
+        copyState = "idle";
         renderState(activeState);
       }
 

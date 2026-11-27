@@ -53,15 +53,20 @@ dot loader:
   `ScanMeter` allocates up to 56 separate `NativeImage` buffers per bar width.
   With `IMAGE_CACHE_MAX = 256`, resizing or scrolling through a project list
   evicts active row bars and re-uploads PNG/RGBA frames.
-- **Transparency over painted row backgrounds (`meter-draw.ts:54-56`):**
+- **Transparency over painted row backgrounds (`meter-draw.ts:54-64`):**
   Kitty blends transparent image pixels against the terminal's default
   background, not the cell background underneath. On `auto` theme (`bg:
-  "transparent"`), any pixel bar inside a highlighted or hovered row must
-  either bake the exact row background hex or avoid overlapping row highlights.
-- **Pinned on `@opentui/core ^0.6.8`:** OpenTUI `0.8.1+` and `0.9.0` ship
-  `NativeImagePool` (fixed-slot buffer reuse with zero allocation churn),
-  8 MiB/frame upload pacing, `kittyImageTransport` (`raw` / `zlib` / `file`),
-  and fixed resize/scroll re-placement.
+  "transparent"`), any pixel bar inside a painted card surface or highlighted
+  row must bake the exact surface/row hex background rather than emitting alpha
+  pixels.
+- **Unused primitives already in pinned `@opentui/core@0.6.8`:** Inspecting the
+  installed `@opentui/core@0.6.8` declarations (`bun.lock:464`) confirms that
+  `NativeImagePool` (added in OpenTUI `0.5.10`, exported from `image.d.ts:130`
+  and `index.d.ts:27`), `renderer.kittyImageTransport` /
+  `kittyImageTransportStatus` (`renderer.d.ts:465-468`), and
+  `TerminalCapabilities.multiplexer` / `remote` / `image_protocol`
+  (`types.d.ts:64-89`) are **already available today** without upgrading
+  OpenTUI. `Meter.tsx` and `meter-draw.ts` simply do not use them yet.
 
 ---
 
@@ -70,7 +75,7 @@ dot loader:
 | Rank | Use case | Value | Cost | Verdict |
 | --- | --- | --- | --- | --- |
 | 1 | Pixel dot-matrix storage bar (Direction C+) | High | Medium | **Build next** |
-| 2 | Unicode placeholders (`U=1`, `U+10EEEE`) for tmux and scroll safety | High | Medium-High | **Build next (pair with OpenTUI upgrade / fallback)** |
+| 2 | Unicode placeholders (`U=1`, `U+10EEEE`) for tmux and scroll safety | High | Medium-High | **Build next (verify upstream emitter / keep Braille fallback in tmux)** |
 | 3 | Event-driven scan progress & right-edge clearing dissolve | Medium-High | Low | **Build next** |
 | 4 | Compact size-history sparklines (ledger I3) | Medium | Low-Medium | **Build after I3 history lands** |
 | 5 | Colored category icons as 1x1 Kitty images vs Nerd Font glyphs | Low-Medium | High friction | **Legend only, opt-in; keep glyphs default** |
@@ -91,6 +96,13 @@ dot-matrix bar is the highest-leverage visual upgrade Kitty graphics can give
   points at or focuses a rebuild-cost bucket or one of the 11 Space categories.
 - **Visual continuity:** Makes `sweep ui`, the web docs (`Direction C+`), and
   the Kuwai island (`SweepDotBar.qml`) share one unmistakable storage visual.
+- **`auto`-theme background baking (required):** Under `auto` theme
+  (`bg: "transparent"`), whenever the dot-matrix bar is rendered inside a
+  painted card surface (`theme.surface`) or highlighted container, the
+  rasterizer must bake `theme.surface` (matching the existing `ground` fill in
+  `packages/ui/src/meter-draw.ts:54-64`) into every pixel instead of emitting
+  alpha transparency, so Kitty's terminal-ground compositing does not bleed the
+  raw terminal background through the card.
 - **Tiny footprint:** A 100-column x 2-row bar at 10x20 px cells is
   `1000 x 40 px` = `160 KiB` raw RGBA (`~4-8 KiB` with `zlib` transport),
   uploaded **once** when settled and never redrawn until selection or cursor
@@ -117,11 +129,11 @@ or vanish after a pane redraw.
     naturally cover placeholder cells at whole-cell granularity without leaving
     pixel bars bleeding through dialogs.
   - Resizing a split pane never strands an orphaned image outside the box.
-- **Practical caveat:** Check OpenTUI's native emitter before hand-rolling
-  escape sequences. If the pinned OpenTUI release does not yet emit `U=1`
-  virtual placements, keep `auto` falling back to Braille inside tmux rather
-  than forcing raw passthrough, and track `U=1` support as an upstream OpenTUI
-  requirement (with `SWEEP_KITTY_PLACEHOLDERS=1` opt-in once available).
+- **Practical caveat:** Verify OpenTUI's native emitter before hand-rolling
+  escape sequences. If the pinned `@opentui/core@0.6.8` release does not emit
+  `U=1` virtual placements, keep `auto` falling back to Braille inside tmux
+  rather than forcing raw passthrough, and track `U=1` support as an upstream
+  OpenTUI requirement (with `SWEEP_KITTY_PLACEHOLDERS=1` opt-in once available).
 
 ### Rank 3: Smooth scan progress and clearing dissolve, only while work runs (Medium-High value, Low cost)
 
@@ -129,9 +141,10 @@ Align Kitty animation strictly with `.docs/ux-principles.md` ("motion only
 while work runs", `SWEEP_REDUCED_MOTION=1`, `m` toggle):
 
 - **During scanning:** Replace `ScanMeter`'s 40 Hz (`56` steps / `1400 ms`)
-  cache-thrashing loop with a 3-slot `NativeImagePool` (once on OpenTUI 0.8.1+)
-  running at `<= 15 fps` (`66-80 ms` per step). Drive the dot bar's left-to-right
-  fill from real `scan_progress` totals instead of a disconnected spinner.
+  cache-thrashing loop with a 3-slot `NativeImagePool` (already available in
+  pinned `@opentui/core@0.6.8`; introduced in `0.5.10`) running at `<= 15 fps`
+  (`66-80 ms` per step). Drive the dot bar's left-to-right fill from real
+  `scan_progress` totals instead of a disconnected spinner.
 - **During apply (`ApplyOverlay`):** Drive right-edge dot extinguishment from
   real `onDeleted` completion events (180 ms ease-out per completed item), never
   a synthetic timer. Trash mode on the same volume draws zero byte gain, so it
@@ -192,8 +205,12 @@ or 2D squarified treemaps:
 
 Never trust a single environment variable (`TERM_PROGRAM` lies over SSH and
 inside stale tmux shells). Follow OpenTUI's live capability snapshot
-(`renderer.capabilities` + `CliRenderEvents.CAPABILITIES`) and add explicit
-multiplexer and remote guards:
+(`renderer.capabilities` + `CliRenderEvents.CAPABILITIES`, verified in
+`@opentui/core@0.6.8/types.d.ts:64-89` where `multiplexer: "none" | "tmux" |
+"zellij" | "screen" | "unknown"` and `remote: boolean` are populated) and keep
+explicit environment fallback checks (`TMUX`, `ZELLIJ`, `STY`,
+`SSH_CONNECTION`) whenever `capabilities` is still `null` or reports
+`multiplexer === "unknown"`:
 
 | Terminal / Environment | Kitty Graphics | Unicode Placeholders (`U=1`) | Recommended `sweep` policy |
 | --- | --- | --- | --- |
@@ -202,18 +219,20 @@ multiplexer and remote guards:
 | **WezTerm** | Yes (partial) | Partial / version-dependent | Use Kitty pixels with `raw`/`zlib` transport only (never assume `t=f` upload ack on older builds); fall back to Braille if `resolution` is absent. |
 | **Konsole** | Yes (22.04+) | Limited | Use direct Kitty placement for static hero/details bars only; fall back to Braille when scrolling or inside splits. |
 | **foot / Alacritty / iTerm2 / Windows Terminal** | No (Sixel or none) | No | Use 2-row Unicode Braille dot-matrix fallback (`⣿`/`⣶`/`⣤`/`⠒`). Do not force Sixel for tiny 1-row meters (Sixel flashes during scroll and redraws slower than Braille). |
-| **tmux** | Only with `allow-passthrough on` + outer Kitty/Ghostty | Required for safe pane clipping | Default to **Braille fallback** when `capabilities.multiplexer === "tmux"` unless both `allow-passthrough` and `U=1` placeholders are confirmed; never emit unwrapped direct Kitty escapes inside tmux. |
-| **Zellij / GNU Screen** | No / unreliable | No | Always use Braille fallback; disable graphics probes. |
-| **SSH / mosh (`capabilities.remote === true`)** | Depends on client | Same as client | Never use `t=f` temp-file transport (wrong filesystem); prefer `zlib` transport; disable smooth scan/clear pixel animation or cap at `<= 6 fps` so slow links never queue stale frames. |
+| **tmux** | Only with `allow-passthrough on` + outer Kitty/Ghostty | Required for safe pane clipping | Default to **Braille fallback** when `capabilities.multiplexer === "tmux"` or `process.env.TMUX` is set unless both `allow-passthrough` and `U=1` placeholders are confirmed; never emit unwrapped direct Kitty escapes inside tmux. |
+| **Zellij / GNU Screen** | No / unreliable | No | Always use Braille fallback when `multiplexer` is `"zellij"`/`"screen"` or `ZELLIJ`/`STY` is set; disable graphics probes. |
+| **SSH / mosh (`capabilities.remote === true` or `SSH_CONNECTION`)** | Depends on client | Same as client | Never use `t=f` temp-file transport (wrong filesystem); prefer `zlib` transport; disable smooth scan/clear pixel animation or cap at `<= 6 fps` so slow links never queue stale frames. |
 | **`NO_COLOR` / `OPENTUI_GRAPHICS=false` / `SWEEP_GRAPHICS=off`** | Disabled | Disabled | Always render Braille density + single-letter fallback (`c`/`i`/`b`/`?`) with zero escape sequences. |
 
 ### Detection rules to enforce in `Meter.tsx`
 
 1. Listen to `CliRenderEvents.CAPABILITIES` (capabilities can arrive after
    first paint; do not freeze a `false` read from frame 0).
-2. Switch `<image protocol="kitty">` to `<image protocol="auto">` (or gate on
-   `capabilities.kitty_graphics && capabilities.multiplexer === "none"` until
-   `U=1` placeholder support lands).
+2. Switch `<image protocol="kitty">` to `<image protocol="auto">` and gate
+   direct Kitty rendering on `capabilities.kitty_graphics === true &&
+   capabilities.multiplexer === "none" && !process.env.TMUX &&
+   !process.env.ZELLIJ && !process.env.STY` until `U=1` placeholder support
+   lands.
 3. Respect `SWEEP_GRAPHICS=off` alongside `OPENTUI_GRAPHICS=false` and
    `NO_COLOR` so users on quirky terminal setups always have a one-env escape
    hatch.
@@ -227,7 +246,7 @@ concrete limits in `packages/ui`:
 
 | Dimension | Hard limit | Rationale |
 | --- | --- | --- |
-| Live Kitty image IDs | `<= 32` active IDs at once (`<= 64` LRU cache cap, down from `256`) | Hero bar (1), details bar (1), sparkline (1), optional legend strip (1), plus a small headroom of cached resize/hover states. Send `a=d,d=i,i=<id>` on eviction and `a=d,d=A` on teardown. |
+| Live Kitty image IDs | `<= 32` active IDs at once (`<= 64` LRU cache cap, down from `256`) | Hero bar (1), details bar (1), sparkline (1), optional legend strip (1), plus small headroom for cached resize/hover states. Track every image ID owned by Sweep. On eviction, once placements are no longer needed, free terminal-side image data with uppercase `a=d,d=I,i=<id>` (never lowercase `d=i` alone, which deletes placements without guaranteeing RAM is freed). On teardown, delete each tracked Sweep-owned image ID individually with `a=d,d=I,i=<id>` (never `a=d,d=A`, which wipes images belonging to other tmux panes and fails to delete virtual `U=1` placements). |
 | Total RGBA pixel memory | `<= 4 MiB` across all cached images; `<= 256 KiB` per bar image | Well below OpenTUI's 100 MiB/image and 8 MiB/frame caps; keeps RSS flat during long TUI sessions (`ui-long-session` budget). |
 | Animated redraw rate | `<= 15 fps` (`66-80 ms` step) during active scan/apply; `0 fps` at rest | Cuts CPU and terminal upload bytes by 60-75% vs today's 40-60 Hz `setInterval(..., 16)` with no perceptual loss on a dot bar. |
 | Animation allocation | `0` new `NativeImage` objects per frame (use `NativeImagePool` with `capacity: 3`) | Eliminates GC churn and LRU eviction storms during scans and eases. |
