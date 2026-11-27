@@ -3,6 +3,7 @@ import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { gitTrackedPaths } from "./git-tracked.js";
 import { ProjectActivityIndex } from "./project-activity.js";
+import { WorktreeIndex } from "./worktree-info.js";
 
 export const GIT_TRACKED_REASON = "git-tracked";
 import type {
@@ -87,16 +88,30 @@ export function applyPlanInsights(plan: ScanPlan): ScanPlan {
   };
 }
 
-/** Stamp each candidate with when its project was last worked on. */
+/**
+ * Stamp each candidate with when its project was last worked on, and, for a
+ * linked worktree, the repository it belongs to and whether its branch is
+ * finished. Fields from an older plan are recomputed, never trusted.
+ */
 function withProjectActivity(candidates: ScanCandidate[]): ScanCandidate[] {
   const index = new ProjectActivityIndex(new Set(candidates.map((candidate) => candidate.path)));
+  const worktrees = new WorktreeIndex();
   return candidates.map((candidate) => {
     const { root, activeMs } = index.forArtifact(candidate.path);
-    const { projectActiveMs: _stale, projectRoot: _staleRoot, ...rest } = candidate;
+    const {
+      projectActiveMs: _stale,
+      projectRoot: _staleRoot,
+      worktreeOf: _staleOf,
+      worktreeState: _staleState,
+      ...rest
+    } = candidate;
+    const worktree = worktrees.forProject(root);
     return {
       ...rest,
       projectRoot: root,
       ...(activeMs === undefined ? {} : { projectActiveMs: Math.floor(activeMs) }),
+      ...(worktree ? { worktreeOf: worktree.of } : {}),
+      ...(worktree?.state ? { worktreeState: worktree.state } : {}),
     };
   });
 }

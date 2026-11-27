@@ -13,7 +13,7 @@ import { isRustEngineAvailable, resolveRustEngineBinary } from "./rust-engine.js
  * that repository's config. `core.fsmonitor` can name a program to execute,
  * so every call disables it, takes no optional locks and reads only the index.
  */
-const GIT_ARGS = [
+export const GIT_ARGS = [
   "-c",
   "core.fsmonitor=false",
   "-c",
@@ -21,7 +21,7 @@ const GIT_ARGS = [
   "-c",
   "core.quotePath=false",
 ];
-const GIT_ENV = {
+export const GIT_ENV = {
   ...process.env,
   GIT_OPTIONAL_LOCKS: "0",
   // Pathspecs are paths, never globs: a folder named `*` must not match all.

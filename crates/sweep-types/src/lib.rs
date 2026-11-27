@@ -208,6 +208,12 @@ pub struct ScanCandidate {
     /// The owning project's folder. Computed by the JS planner; passed through.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_root: Option<String>,
+    /// The main work tree when the project is a linked worktree. JS planner; passed through.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_of: Option<String>,
+    /// `merged` or `upstream_gone`. JS planner; a triage hint passed through untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_state: Option<String>,
 }
 
 // Serde does not support deny_unknown_fields with flatten. Keep the public
@@ -238,6 +244,20 @@ struct CandidateInput {
     project_active_ms: Option<u64>,
     #[serde(default, deserialize_with = "present_value")]
     project_root: Option<String>,
+    #[serde(default, deserialize_with = "present_value")]
+    worktree_of: Option<String>,
+    #[serde(default, deserialize_with = "worktree_state")]
+    worktree_state: Option<String>,
+}
+
+fn worktree_state<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let state = <String as serde::Deserialize>::deserialize(deserializer)?;
+    match state.as_str() {
+        "merged" | "upstream_gone" => Ok(Some(state)),
+        _ => Err(serde::de::Error::custom("unknown worktree state")),
+    }
 }
 
 fn artifact_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
@@ -270,6 +290,8 @@ impl From<CandidateInput> for ScanCandidate {
             selected_by_default: input.selected_by_default,
             project_active_ms: input.project_active_ms,
             project_root: input.project_root,
+            worktree_of: input.worktree_of,
+            worktree_state: input.worktree_state,
         }
     }
 }
@@ -478,6 +500,35 @@ mod tests {
         }
         value["candidates"][0]["kind"] = serde_json::json!("unrecognized-artifact");
         assert!(serde_json::from_value::<ScanPlan>(value).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn worktree_fields_pass_through_and_reject_unknown_states() -> Result<(), serde_json::Error> {
+        let mut value =
+            serde_json::to_value(ScanPlan::empty("/tmp/project", "2026-01-01T00:00:00.000Z"))?;
+        value["candidates"] = serde_json::json!([{
+            "id": "one", "path": "/tmp/project/.worktrees/a/dist", "name": "dist",
+            "estimatedBytes": 1, "isSymlink": false, "entryType": "directory",
+            "kind": "dist", "riskTier": "safe", "reasons": [], "selectedByDefault": true,
+            "projectRoot": "/tmp/project/.worktrees/a",
+            "worktreeOf": "/tmp/project", "worktreeState": "upstream_gone"
+        }]);
+        let plan = serde_json::from_value::<ScanPlan>(value.clone())?;
+        let candidate = &plan.candidates[0];
+        assert_eq!(candidate.worktree_of.as_deref(), Some("/tmp/project"));
+        assert_eq!(candidate.worktree_state.as_deref(), Some("upstream_gone"));
+        let round_trip = serde_json::to_value(&plan)?;
+        assert_eq!(
+            round_trip["candidates"][0]["worktreeState"],
+            "upstream_gone"
+        );
+
+        for state in [serde_json::json!("abandoned"), serde_json::json!(null)] {
+            let mut invalid = value.clone();
+            invalid["candidates"][0]["worktreeState"] = state;
+            assert!(serde_json::from_value::<ScanPlan>(invalid).is_err());
+        }
         Ok(())
     }
 }

@@ -1117,6 +1117,8 @@ mod tests {
             selected_by_default: true,
             project_active_ms: None,
             project_root: None,
+            worktree_of: None,
+            worktree_state: None,
         }
     }
 

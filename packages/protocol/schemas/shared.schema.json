@@ -95,6 +95,15 @@
           "minLength": 1,
           "maxLength": 4096
         },
+        "worktreeOf": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "worktreeState": {
+          "type": "string",
+          "enum": ["merged", "upstream_gone"]
+        },
         "isSymlink": {
           "type": "boolean"
         },

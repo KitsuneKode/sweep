@@ -12,6 +12,7 @@
     "./filesystem-identity": "./src/filesystem-identity.ts",
     "./git-tracked": "./src/git-tracked.ts",
     "./project-activity": "./src/project-activity.ts",
+    "./worktree-info": "./src/worktree-info.ts",
     "./status": "./src/status.ts",
     "./guardrails": "./src/guardrails.ts",
     "./planner": "./src/planner.ts",
