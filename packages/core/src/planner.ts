@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import { mapPool } from "./async-pool.js";
 import { gitTrackedPaths } from "./git-tracked.js";
 import { ProjectActivityIndex } from "./project-activity.js";
-import { WorktreeIndex } from "./worktree-info.js";
+import { WorktreeIndex, type WorktreeInfo } from "./worktree-info.js";
 
 export const GIT_TRACKED_REASON = "git-tracked";
 import type {
@@ -37,40 +38,52 @@ import {
   pathHasProtectedVcsSegment,
 } from "./guardrails.js";
 
-export function buildPlan(
+export interface PlanInsightsOptions {
+  signal?: AbortSignal;
+}
+
+export async function buildPlan(
   targetDir: string,
   result: ScanResult,
   selectionPolicy: SelectionPolicy = DEFAULT_SELECTION_POLICY,
-): ScanPlan {
+  options?: PlanInsightsOptions,
+): Promise<ScanPlan> {
   const candidates = result.entries.map((entry) => toCandidate(entry));
 
-  return applyPlanInsights({
-    protocolVersion: PROTOCOL_VERSION,
-    targetDir,
-    targetIdentity: result.targetIdentity,
-    selectionPolicy,
-    candidates,
-    summary: {
-      candidateCount: candidates.length,
-      estimatedTotalBytes: result.estimatedTotalBytes,
-      scannedDirs: result.scannedDirs,
-      // Sparse field: absent means "nothing skipped" (or a pre-field plan).
-      // Keeping zero implicit also keeps JS and Rust plans byte-identical -
-      // the Rust engine cannot report skips yet.
-      ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),
-      exact: result.exact,
-      selectedCount: 0,
-      riskCounts: countRiskTiers(candidates),
+  return await applyPlanInsights(
+    {
+      protocolVersion: PROTOCOL_VERSION,
+      targetDir,
+      targetIdentity: result.targetIdentity,
+      selectionPolicy,
+      candidates,
+      summary: {
+        candidateCount: candidates.length,
+        estimatedTotalBytes: result.estimatedTotalBytes,
+        scannedDirs: result.scannedDirs,
+        // Sparse field: absent means "nothing skipped" (or a pre-field plan).
+        // Keeping zero implicit also keeps JS and Rust plans byte-identical -
+        // the Rust engine cannot report skips yet.
+        ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),
+        exact: result.exact,
+        selectedCount: 0,
+        riskCounts: countRiskTiers(candidates),
+      },
+      selectedCandidateIds: [],
+      createdAt: new Date().toISOString(),
     },
-    selectedCandidateIds: [],
-    createdAt: new Date().toISOString(),
-  });
+    options,
+  );
 }
 
 /** Recompute candidate insights and selection after scan (JS and Rust engines). */
-export function applyPlanInsights(plan: ScanPlan): ScanPlan {
-  const candidates = withProjectActivity(
+export async function applyPlanInsights(
+  plan: ScanPlan,
+  options?: PlanInsightsOptions,
+): Promise<ScanPlan> {
+  const candidates = await withProjectActivity(
     normalizeSelectionDefaults(blockGitTracked(enrichCandidates(plan.candidates))),
+    options?.signal,
   );
   const selectedCandidateIds = compileSelectedCandidateIds(candidates, plan.selectionPolicy);
   const riskCounts = countRiskTiers(candidates);
@@ -93,11 +106,21 @@ export function applyPlanInsights(plan: ScanPlan): ScanPlan {
  * linked worktree, the repository it belongs to and whether its branch is
  * finished. Fields from an older plan are recomputed, never trusted.
  */
-function withProjectActivity(candidates: ScanCandidate[]): ScanCandidate[] {
+async function withProjectActivity(
+  candidates: ScanCandidate[],
+  signal?: AbortSignal,
+): Promise<ScanCandidate[]> {
   const index = new ProjectActivityIndex(new Set(candidates.map((candidate) => candidate.path)));
-  const worktrees = new WorktreeIndex();
-  return candidates.map((candidate) => {
-    const { root, activeMs } = index.forArtifact(candidate.path);
+  const worktrees = new WorktreeIndex(undefined, signal ? { signal } : {});
+  const activity = candidates.map((candidate) => index.forArtifact(candidate.path));
+  const uniqueRoots = [...new Set(activity.map((entry) => entry.root))];
+  const worktreeByRoot = new Map<string, WorktreeInfo | undefined>();
+  await mapPool(uniqueRoots, 8, async (root) => {
+    worktreeByRoot.set(root, await worktrees.forProject(root));
+  });
+
+  return candidates.map((candidate, idx) => {
+    const { root, activeMs } = activity[idx]!;
     const {
       projectActiveMs: _stale,
       projectRoot: _staleRoot,
@@ -105,7 +128,7 @@ function withProjectActivity(candidates: ScanCandidate[]): ScanCandidate[] {
       worktreeState: _staleState,
       ...rest
     } = candidate;
-    const worktree = worktrees.forProject(root);
+    const worktree = worktreeByRoot.get(root);
     return {
       ...rest,
       projectRoot: root,

@@ -1,10 +1,21 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   GIT_ENV,
+  gitEnv,
+  gitSafeArgs,
   gitTrackedPaths,
   gitTrackedPathsViaEngine,
   gitTrackedPathsViaGit,
@@ -12,8 +23,24 @@ import {
 import { isRustEngineAvailable } from "./rust-engine.js";
 
 let root: string;
+let emptyGitConfig: string;
+
+function isolatedGitEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined && !/^git_/i.test(k)) env[k] = v;
+  }
+  env.GIT_CONFIG_GLOBAL = emptyGitConfig;
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_AUTHOR_NAME = "t";
+  env.GIT_AUTHOR_EMAIL = "t@example.com";
+  env.GIT_COMMITTER_NAME = "t";
+  env.GIT_COMMITTER_EMAIL = "t@example.com";
+  return env;
+}
+
 const git = (...args: string[]) =>
-  spawnSync("git", ["-C", root, ...args], { stdio: "ignore", env: { ...process.env } });
+  spawnSync("git", ["-C", root, ...args], { stdio: "ignore", env: isolatedGitEnv() });
 
 function write(rel: string, contents = "x\n") {
   const path = join(root, rel);
@@ -25,6 +52,8 @@ const hasGit = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "sweep-git-tracked-"));
+  emptyGitConfig = join(root, ".empty-gitconfig");
+  writeFileSync(emptyGitConfig, "");
   git("init", "-q");
   git("config", "user.email", "t@example.com");
   git("config", "user.name", "t");
@@ -161,10 +190,99 @@ for (const impl of IMPLEMENTATIONS) {
   });
 }
 
-test("GIT_ENV forces C locale so parsed git output is locale-independent", () => {
+test("GIT_ENV and gitEnv force C locale and drop inherited GIT_* overrides", () => {
   expect(GIT_ENV.LC_ALL).toBe("C");
   expect(GIT_ENV.LANG).toBe("C");
+  expect(GIT_ENV.GIT_NO_LAZY_FETCH).toBe("1");
+  expect(GIT_ENV.GIT_NO_REPLACE_OBJECTS).toBe("1");
+  expect(GIT_ENV.GIT_TERMINAL_PROMPT).toBe("0");
+  expect(GIT_ENV.GIT_OPTIONAL_LOCKS).toBe("0");
+
+  const sanitized = gitEnv({
+    PATH: "/usr/bin",
+    GIT_DIR: "/other/.git",
+    GIT_WORK_TREE: "/other",
+    GIT_INDEX_FILE: "/other/.git/index",
+    GIT_OBJECT_DIRECTORY: "/other/.git/objects",
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: "/alt",
+    GIT_COMMON_DIR: "/other/.git",
+    GIT_SSH_COMMAND: "evil",
+  });
+  expect(sanitized.GIT_DIR).toBeUndefined();
+  expect(sanitized.GIT_WORK_TREE).toBeUndefined();
+  expect(sanitized.GIT_INDEX_FILE).toBeUndefined();
+  expect(sanitized.GIT_OBJECT_DIRECTORY).toBeUndefined();
+  expect(sanitized.GIT_ALTERNATE_OBJECT_DIRECTORIES).toBeUndefined();
+  expect(sanitized.GIT_COMMON_DIR).toBeUndefined();
+  expect(sanitized.GIT_SSH_COMMAND).toBeUndefined();
+  expect(sanitized.GIT_NO_LAZY_FETCH).toBe("1");
+  expect(sanitized.GIT_NO_REPLACE_OBJECTS).toBe("1");
+  expect(sanitized.LC_ALL).toBe("C");
+
+  const args = gitSafeArgs();
+  expect(args).toContain("protocol.allow=never");
+  expect(args).toContain("core.fsmonitor=false");
+  expect(args.some((arg) => arg.startsWith("core.hooksPath="))).toBe(true);
 });
+
+test.skipIf(!hasGit)(
+  "inherited GIT_DIR and GIT_WORK_TREE do not redirect tracked-path checks",
+  () => {
+    const other = mkdtempSync(join(tmpdir(), "sweep-other-repo-"));
+    try {
+      spawnSync("git", ["-C", other, "init", "-q"], { stdio: "ignore", env: isolatedGitEnv() });
+      write("dist/vendor.js");
+      git("add", "dist/vendor.js");
+      git("commit", "-qm", "init");
+
+      const prevGitDir = process.env.GIT_DIR;
+      const prevWorkTree = process.env.GIT_WORK_TREE;
+      process.env.GIT_DIR = join(other, ".git");
+      process.env.GIT_WORK_TREE = other;
+      try {
+        const dist = join(root, "dist");
+        expect(gitTrackedPathsViaGit([dist])).toEqual(new Set([dist]));
+        expect(gitTrackedPaths([dist])).toEqual(new Set([dist]));
+      } finally {
+        if (prevGitDir === undefined) delete process.env.GIT_DIR;
+        else process.env.GIT_DIR = prevGitDir;
+        if (prevWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+        else process.env.GIT_WORK_TREE = prevWorkTree;
+      }
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!hasGit)(
+  "split-index tracked checks stay read-only and preserve sharedindex mtime",
+  () => {
+    write("dist/vendor.js");
+    write("node_modules/pkg/index.js");
+    git("add", "dist/vendor.js");
+    git("commit", "-qm", "init");
+    git("update-index", "--split-index");
+
+    const sharedName = readdirSync(join(root, ".git")).find((name) =>
+      name.startsWith("sharedindex."),
+    );
+    expect(sharedName).toBeDefined();
+    const sharedPath = join(root, ".git", sharedName!);
+    const pinned = new Date("2025-01-01T00:00:00.000Z");
+    utimesSync(sharedPath, pinned, pinned);
+    const beforeMs = Math.floor(statSync(sharedPath).mtimeMs);
+
+    const targets = [join(root, "dist"), join(root, "node_modules")];
+    expect(gitTrackedPaths(targets)).toEqual(new Set([join(root, "dist")]));
+    expect(Math.floor(statSync(sharedPath).mtimeMs)).toBe(beforeMs);
+
+    if (isRustEngineAvailable()) {
+      expect(gitTrackedPathsViaEngine(targets)).toEqual(new Set([join(root, "dist")]));
+      expect(Math.floor(statSync(sharedPath).mtimeMs)).toBe(beforeMs);
+    }
+  },
+);
 
 test("the public check agrees with git on an ordinary repository", () => {
   if (!hasGit) return;

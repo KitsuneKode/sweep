@@ -1,49 +1,92 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
+import { readTrackedPathsFromIndex } from "./git-index.js";
 import { isRustEngineAvailable, resolveRustEngineBinary } from "./rust-engine.js";
 
 /**
  * Build output is never committed. A candidate that contains (or is) a file
  * git tracks holds authored work, whatever its name - so it is not sweep's to
- * remove. One `git ls-files` per repository answers that for every candidate
+ * remove. Reading `.git/index` directly (or one hardened `git ls-files` per
+ * repository on unsupported index layouts) answers that for every candidate
  * inside it.
  *
  * Running git inside a repository sweep did not create means running with
- * that repository's config. `core.fsmonitor` can name a program to execute,
- * so every call disables it, takes no optional locks and reads only the index.
+ * that repository's config. Every git call drops inherited `GIT_*` overrides,
+ * forces the C locale, disables network protocols, fsmonitor, and hooks, and
+ * takes no optional locks.
  */
+
+let emptyHooksDir: string | undefined;
+
+/** Empty directory passed to `-c core.hooksPath=...` so repo/global hooks never run. */
+export function emptyGitHooksDir(): string {
+  if (emptyHooksDir && existsSync(emptyHooksDir)) return emptyHooksDir;
+  emptyHooksDir = mkdtempSync(join(tmpdir(), "sweep-no-hooks-"));
+  process.once("exit", () => {
+    if (!emptyHooksDir) return;
+    try {
+      rmSync(emptyHooksDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error on exit.
+    }
+  });
+  return emptyHooksDir;
+}
+
+/** Static hardened git flags (combine with `gitSafeArgs()` for the empty hooks path). */
 export const GIT_ARGS = [
+  "--no-pager",
+  "-c",
+  "protocol.allow=never",
   "-c",
   "core.fsmonitor=false",
   "-c",
   "core.untrackedCache=false",
   "-c",
   "core.quotePath=false",
+  "-c",
+  "gc.auto=0",
+  "-c",
+  "maintenance.auto=false",
 ];
-export const GIT_ENV: NodeJS.ProcessEnv = {
-  ...process.env,
-  LC_ALL: "C",
-  LANG: "C",
-  LANGUAGE: "C",
-  GIT_OPTIONAL_LOCKS: "0",
-  // Pathspecs are paths, never globs: a folder named `*` must not match all.
-  GIT_LITERAL_PATHSPECS: "1",
-  GIT_TERMINAL_PROMPT: "0",
-};
 
-/** Hardened environment for git subprocesses, always forcing the C locale. */
-export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return {
-    ...base,
-    LC_ALL: "C",
-    LANG: "C",
-    LANGUAGE: "C",
-    GIT_OPTIONAL_LOCKS: "0",
-    GIT_LITERAL_PATHSPECS: "1",
-    GIT_TERMINAL_PROMPT: "0",
-  };
+/** Hardened git CLI flags including `-c core.hooksPath=<empty dir>`. */
+export function gitSafeArgs(): string[] {
+  return [...GIT_ARGS, "-c", `core.hooksPath=${emptyGitHooksDir()}`];
 }
+
+/**
+ * Hardened environment for git subprocesses:
+ * - Drops all inherited `GIT_*` overrides (`GIT_DIR`, `GIT_WORK_TREE`,
+ *   `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+ *   `GIT_COMMON_DIR`, `GIT_CONFIG_*`, etc.) so parent environment state cannot
+ *   redirect or alter git queries.
+ * - Forces C locale and disables lazy fetches, replace objects, prompts, and
+ *   optional locks.
+ */
+export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) continue;
+    if (/^git_/i.test(key)) continue;
+    clean[key] = value;
+  }
+  clean.LC_ALL = "C";
+  clean.LANG = "C";
+  clean.LANGUAGE = "C";
+  clean.GIT_OPTIONAL_LOCKS = "0";
+  // Pathspecs are paths, never globs: a folder named `*` must not match all.
+  clean.GIT_LITERAL_PATHSPECS = "1";
+  clean.GIT_TERMINAL_PROMPT = "0";
+  clean.GIT_NO_LAZY_FETCH = "1";
+  clean.GIT_NO_REPLACE_OBJECTS = "1";
+  return clean;
+}
+
+export const GIT_ENV: NodeJS.ProcessEnv = gitEnv();
+
 const TIMEOUT_MS = 10_000;
 
 /** Nearest ancestor holding `.git` (a directory, or a file for worktrees). */
@@ -77,11 +120,13 @@ function findRepoRoot(start: string, cache: Map<string, string | null>): string 
  *
  * The native engine answers this by reading each repository's index itself,
  * in parallel and without running git (about ten times faster on a tree of
- * many repositories). Without it, or if it fails, git answers.
+ * many repositories). Without it, the pure JS read-only index reader handles
+ * ordinary and split indexes without spawning git or mutating mtimes; only
+ * unsupported layouts fall back to hardened `git ls-files`.
  */
 export function gitTrackedPaths(paths: readonly string[]): Set<string> {
   if (paths.length === 0) return new Set();
-  return gitTrackedPathsViaEngine(paths) ?? gitTrackedPathsViaGit(paths);
+  return gitTrackedPathsViaEngine(paths) ?? gitTrackedPathsViaIndexOrGit(paths);
 }
 
 /** Null when the engine is unavailable or did not answer cleanly. */
@@ -101,6 +146,60 @@ export function gitTrackedPathsViaEngine(paths: readonly string[]): Set<string> 
   return new Set(result.stdout.split("\0").filter((path) => asked.has(path)));
 }
 
+function containsTrackedSorted(sortedPaths: readonly string[], rel: string): boolean {
+  let lo = 0;
+  let hi = sortedPaths.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const entry = sortedPaths[mid]!;
+    if (entry === rel) return true;
+    if (entry < rel) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  const prefix = `${rel}/`;
+  lo = 0;
+  hi = sortedPaths.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (sortedPaths[mid]! < prefix) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < sortedPaths.length && sortedPaths[lo]!.startsWith(prefix);
+}
+
+/** Read-only index parser per repo, falling back to hardened `git ls-files` only if unsupported. */
+function gitTrackedPathsViaIndexOrGit(paths: readonly string[]): Set<string> {
+  const tracked = new Set<string>();
+  if (paths.length === 0) return tracked;
+  const rootCache = new Map<string, string | null>();
+  const byRoot = new Map<string, string[]>();
+  for (const path of paths) {
+    const root = findRepoRoot(dirname(path), rootCache);
+    if (!root) continue;
+    const list = byRoot.get(root);
+    if (list) list.push(path);
+    else byRoot.set(root, [path]);
+  }
+
+  const fallbackPaths: string[] = [];
+  for (const [root, members] of byRoot) {
+    const indexed = readTrackedPathsFromIndex(root);
+    if (indexed === null) {
+      fallbackPaths.push(...members);
+      continue;
+    }
+    for (const path of members) {
+      const rel = relative(root, path).split(sep).join("/");
+      if (containsTrackedSorted(indexed, rel)) tracked.add(path);
+    }
+  }
+
+  if (fallbackPaths.length > 0) {
+    for (const path of gitTrackedPathsViaGit(fallbackPaths)) tracked.add(path);
+  }
+  return tracked;
+}
+
 /** One hardened `git ls-files` per repository. */
 export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
   const tracked = new Set<string>();
@@ -115,6 +214,9 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
     else byRoot.set(root, [path]);
   }
 
+  const safeArgs = gitSafeArgs();
+  const env = gitEnv();
+
   for (const [root, members] of byRoot) {
     const relToPath = new Map<string, string>();
     for (const path of members) relToPath.set(relative(root, path).split(sep).join("/"), path);
@@ -122,9 +224,9 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
       // `--` ends options: a folder named `-x` stays a path, never a flag.
       const result = spawnSync(
         "git",
-        [...GIT_ARGS, "-C", root, "ls-files", "-z", "--cached", "--", ...chunk],
+        [...safeArgs, "-C", root, "ls-files", "-z", "--cached", "--", ...chunk],
         {
-          env: gitEnv(),
+          env,
           encoding: "utf8",
           timeout: TIMEOUT_MS,
           maxBuffer: 256 * 1024 * 1024,

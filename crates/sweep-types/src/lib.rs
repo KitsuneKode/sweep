@@ -242,12 +242,25 @@ struct CandidateInput {
     selected_by_default: bool,
     #[serde(default, deserialize_with = "optional_safe_integer")]
     project_active_ms: Option<u64>,
-    #[serde(default, deserialize_with = "present_value")]
+    #[serde(default, deserialize_with = "bounded_path_field")]
     project_root: Option<String>,
-    #[serde(default, deserialize_with = "present_value")]
+    #[serde(default, deserialize_with = "bounded_path_field")]
     worktree_of: Option<String>,
     #[serde(default, deserialize_with = "worktree_state")]
     worktree_state: Option<String>,
+}
+
+fn bounded_path_field<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+    let utf16_len = value.encode_utf16().count();
+    if utf16_len == 0 || utf16_len > 4096 {
+        return Err(serde::de::Error::custom(
+            "path metadata must be between 1 and 4096 UTF-16 units",
+        ));
+    }
+    Ok(Some(value))
 }
 
 fn worktree_state<'de, D: serde::Deserializer<'de>>(
@@ -527,6 +540,15 @@ mod tests {
         for state in [serde_json::json!("abandoned"), serde_json::json!(null)] {
             let mut invalid = value.clone();
             invalid["candidates"][0]["worktreeState"] = state;
+            assert!(serde_json::from_value::<ScanPlan>(invalid).is_err());
+        }
+        for bad_of in [
+            serde_json::json!(""),
+            serde_json::json!("x".repeat(4097)),
+            serde_json::json!(null),
+        ] {
+            let mut invalid = value.clone();
+            invalid["candidates"][0]["worktreeOf"] = bad_of;
             assert!(serde_json::from_value::<ScanPlan>(invalid).is_err());
         }
         Ok(())

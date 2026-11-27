@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
   linkSync,
   mkdtempSync,
@@ -868,3 +869,71 @@ for (const backend of ["js", "rust"] as const) {
     },
   );
 }
+
+test.skipIf(process.platform === "win32")(
+  "native apply strips presentation-only worktree fields for older engines that reject unknown fields",
+  async () => {
+    const project = dir("strict-engine-proj");
+    const artifact = join(project, "node_modules");
+    mkdirSync(artifact, { recursive: true });
+    writeFileSync(join(artifact, "keep.txt"), "do not delete");
+    const { plan } = await scanToPlan(project, DEFAULT_CONFIG);
+    // Stamp presentation-only worktree metadata onto the plan candidate.
+    plan.candidates = plan.candidates.map((candidate) => ({
+      ...candidate,
+      worktreeOf: dir("main-repo"),
+      worktreeState: "merged" as const,
+    }));
+
+    // Build a fake older native engine that enforces strict `deny_unknown_fields`
+    // (rejecting `worktreeOf` / `worktreeState` with exit 3) and refuses apply
+    // without touching disk once the payload passes schema validation.
+    const fakeScript = dir("strict-older-engine.mjs");
+    writeFileSync(
+      fakeScript,
+      `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args.includes("--capabilities")) {
+  process.stdout.write(JSON.stringify({ applyControl: true, planIdentity: true }) + "\\n");
+  process.exit(0);
+}
+if (args.includes("--version")) {
+  process.stdout.write("sweep-engine 0.5.2\\n");
+  process.exit(0);
+}
+let buf = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buf += chunk;
+  const nl = buf.indexOf("\\n");
+  if (nl < 0) return;
+  const req = JSON.parse(buf.slice(0, nl));
+  for (const c of req.plan.candidates) {
+    if ("worktreeOf" in c || "worktreeState" in c) {
+      process.stderr.write("unknown field \`worktreeOf\`\\n");
+      process.exit(3);
+    }
+  }
+  process.stdout.write(JSON.stringify({ type: "apply_refused", code: "size_limit_exceeded", message: "refused in test" }) + "\\n");
+  process.exit(0);
+});
+`,
+    );
+    chmodSync(fakeScript, 0o755);
+
+    const prevEnginePath = process.env.SWEEP_ENGINE_PATH;
+    process.env.SWEEP_ENGINE_PATH = fakeScript;
+    try {
+      const { applyPlanViaRust } = await import("./rust-engine.js");
+      await expect(applyPlanViaRust(plan, undefined, undefined, 0)).rejects.toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "size_limit_exceeded",
+      });
+      // Confirm no file was deleted.
+      expect(readFileSync(join(artifact, "keep.txt"), "utf8")).toBe("do not delete");
+    } finally {
+      if (prevEnginePath === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = prevEnginePath;
+    }
+  },
+);

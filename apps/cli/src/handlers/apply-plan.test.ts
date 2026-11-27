@@ -12,7 +12,7 @@ test("an over-cap preview needs no destructive authorization and preserves the s
     mkdirSync(artifact);
     writeFileSync(join(artifact, "keep"), "owned");
     const bytes = 600 * 1024 ** 3;
-    const plan = buildPlan(root, {
+    const plan = await buildPlan(root, {
       entries: [
         {
           path: artifact,

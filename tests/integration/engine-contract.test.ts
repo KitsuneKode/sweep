@@ -1,4 +1,5 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -6,6 +7,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   utimesSync,
@@ -124,6 +126,8 @@ function assertByteParity(jsPlan: ScanPlan, rustPlan: ScanPlan): void {
     const jsCandidate = jsByPath.get(rustCandidate.path);
     expect(jsCandidate).toBeDefined();
     expect(rustCandidate.identity).toEqual(jsCandidate?.identity);
+    expect(rustCandidate.worktreeOf).toBe(jsCandidate?.worktreeOf);
+    expect(rustCandidate.worktreeState).toBe(jsCandidate?.worktreeState);
     const jsBytes = jsCandidate?.estimatedBytes ?? 0;
     const rustBytes = rustCandidate.estimatedBytes;
     const tolerance = Math.max(512, jsBytes * 0.15);
@@ -413,6 +417,159 @@ test.skipIf(!NATIVE_AVAILABLE)(
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignore" }).status !== 0)(
+  "both engines emit identical canonical worktreeOf and worktreeState before plan normalization",
+  async () => {
+    const rawRoot = mkdtempSync(join(tmpdir(), "sweep-worktree-parity-"));
+    const canonical = (p: string) => {
+      const real =
+        typeof realpathSync.native === "function" ? realpathSync.native(p) : realpathSync(p);
+      if (process.platform !== "win32") return real;
+      if (real.startsWith("\\\\?\\UNC\\")) return `\\\\${real.slice(8)}`;
+      if (real.startsWith("\\\\?\\")) return real.slice(4);
+      return real;
+    };
+    const root = canonical(rawRoot);
+    const emptyCfg = join(root, ".empty-gitconfig");
+    writeFileSync(emptyCfg, "");
+    const gitEnv: NodeJS.ProcessEnv = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && !/^git_/i.test(k)) gitEnv[k] = v;
+    }
+    gitEnv.GIT_CONFIG_GLOBAL = emptyCfg;
+    gitEnv.GIT_CONFIG_NOSYSTEM = "1";
+    gitEnv.GIT_AUTHOR_NAME = "t";
+    gitEnv.GIT_AUTHOR_EMAIL = "t@example.com";
+    gitEnv.GIT_COMMITTER_NAME = "t";
+    gitEnv.GIT_COMMITTER_EMAIL = "t@example.com";
+    gitEnv.LC_ALL = "C";
+
+    const git = (cwd: string, ...args: string[]) => {
+      const res = spawnSync("git", ["-C", cwd, ...args], {
+        env: gitEnv,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      if (res.status !== 0) throw new Error(`git ${args.join(" ")}: ${res.stderr}`);
+    };
+    const commit = (cwd: string, file: string, content = `${file}\n`) => {
+      writeFileSync(join(cwd, file), content);
+      git(cwd, "add", file);
+      git(cwd, "-c", "commit.gpgsign=false", "commit", "-q", "-m", file);
+    };
+    const seedModules = (dir: string) => {
+      mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });
+      writeFileSync(join(dir, "node_modules", "pkg", "index.js"), "module.exports = 1;\n");
+    };
+
+    try {
+      const remote = join(root, "remote.git");
+      const app = join(root, "app");
+      mkdirSync(app);
+      git(root, "init", "-q", "--bare", remote);
+      git(app, "init", "-q", "-b", "main");
+      commit(app, ".gitignore", "node_modules/\n");
+      git(app, "remote", "add", "origin", remote);
+      git(app, "push", "-q", "-u", "origin", "main");
+      git(app, "remote", "set-head", "origin", "main");
+
+      // 1. Clean merged worktree -> merged
+      const merged = join(root, "wt-merged");
+      git(app, "worktree", "add", "-q", "-b", "wt-merged", merged);
+      commit(merged, "merged.txt");
+      git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "m", "wt-merged");
+      git(app, "push", "-q", "origin", "main");
+
+      // 2. Open worktree -> undefined
+      const open = join(root, "wt-open");
+      git(app, "worktree", "add", "-q", "-b", "wt-open", open);
+      commit(open, "wip.txt");
+
+      // 3. Merged branch whose upstream was deleted & pruned -> upstream_gone (never merged)
+      const mergedGone = join(root, "wt-merged-gone");
+      git(app, "worktree", "add", "-q", "-b", "wt-merged-gone", mergedGone);
+      commit(mergedGone, "mg.txt");
+      git(mergedGone, "push", "-q", "-u", "origin", "wt-merged-gone");
+      git(
+        app,
+        "-c",
+        "commit.gpgsign=false",
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "mg",
+        "wt-merged-gone",
+      );
+      git(app, "push", "-q", "origin", "main");
+      git(app, "push", "-q", "origin", "--delete", "wt-merged-gone");
+      git(app, "fetch", "-q", "--prune");
+
+      // 4. Dirty merged worktree (non-ignored untracked file) -> undefined
+      const dirty = join(root, "wt-dirty");
+      git(app, "worktree", "add", "-q", "-b", "wt-dirty", dirty);
+      commit(dirty, "dirty.txt");
+      git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "md", "wt-dirty");
+      git(app, "push", "-q", "origin", "main");
+      writeFileSync(join(dirty, "untracked.txt"), "wip\n");
+
+      // 5. Zero-commit branch forked from merged side branch -> undefined
+      const zeroOnSide = join(root, "wt-zero-on-side");
+      git(app, "worktree", "add", "-q", "-b", "wt-zero-on-side", zeroOnSide, "wt-merged");
+
+      for (const dir of [app, merged, open, mergedGone, dirty, zeroOnSide]) {
+        seedModules(dir);
+      }
+
+      const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG);
+      const rustPlan = await scanToPlanViaRust(root, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+      });
+
+      const byWorktree = (plan: ScanPlan) =>
+        new Map(
+          plan.candidates.map((c) => [
+            canonical(c.path),
+            { worktreeOf: c.worktreeOf, worktreeState: c.worktreeState },
+          ]),
+        );
+
+      const jsMap = byWorktree(jsPlan);
+      const rustMap = byWorktree(rustPlan);
+      expect(rustMap.size).toBe(jsMap.size);
+      expect(rustMap).toEqual(jsMap);
+
+      expect(jsMap.get(canonical(join(app, "node_modules")))).toEqual({
+        worktreeOf: undefined,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(merged, "node_modules")))).toEqual({
+        worktreeOf: app,
+        worktreeState: "merged",
+      });
+      expect(jsMap.get(canonical(join(open, "node_modules")))).toEqual({
+        worktreeOf: app,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(mergedGone, "node_modules")))).toEqual({
+        worktreeOf: app,
+        worktreeState: "upstream_gone",
+      });
+      expect(jsMap.get(canonical(join(dirty, "node_modules")))).toEqual({
+        worktreeOf: app,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(zeroOnSide, "node_modules")))).toEqual({
+        worktreeOf: app,
+        worktreeState: undefined,
+      });
+    } finally {
+      rmSync(rawRoot, { recursive: true, force: true });
     }
   },
 );

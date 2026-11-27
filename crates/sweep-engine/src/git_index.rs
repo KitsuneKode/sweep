@@ -147,7 +147,8 @@ enum IndexError {
 
 /// The index file `git` itself would read for this work tree.
 fn index_file(root: &Path) -> Result<Option<PathBuf>, IndexError> {
-    let dot_git = root.join(".git");
+    let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let dot_git = canonical_root.join(".git");
     let meta = std::fs::symlink_metadata(&dot_git).map_err(|_| IndexError::Unsupported)?;
     if meta.is_dir() {
         return Ok(Some(dot_git.join("index")));
@@ -155,7 +156,7 @@ fn index_file(root: &Path) -> Result<Option<PathBuf>, IndexError> {
     if !meta.is_file() || meta.len() > 4096 {
         return Err(IndexError::Unsupported);
     }
-    // Worktrees and submodules: `gitdir: <path>`, relative to the work tree.
+    // Worktrees and submodules: `gitdir: <path>`, relative to the canonical work tree.
     let text = std::fs::read_to_string(&dot_git).map_err(|_| IndexError::Unsupported)?;
     let gitdir = text
         .lines()
@@ -168,19 +169,15 @@ fn index_file(root: &Path) -> Result<Option<PathBuf>, IndexError> {
     let gitdir = if gitdir.is_absolute() {
         gitdir.to_path_buf()
     } else {
-        root.join(gitdir)
+        canonical_root.join(gitdir)
     };
     Ok(Some(gitdir.join("index")))
 }
 
-fn read_index_paths(root: &Path) -> Result<Vec<Vec<u8>>, IndexError> {
-    let Some(path) = index_file(root)? else {
-        return Ok(Vec::new());
-    };
-    let file = match std::fs::File::open(&path) {
+fn read_index_bytes(path: &Path) -> Result<Option<Vec<u8>>, IndexError> {
+    let file = match std::fs::File::open(path) {
         Ok(file) => file,
-        // No index yet: nothing staged, nothing committed - `git ls-files` agrees.
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(IndexError::Unsupported),
     };
     let len = file.metadata().map_err(|_| IndexError::Unsupported)?.len();
@@ -191,13 +188,89 @@ fn read_index_paths(root: &Path) -> Result<Vec<Vec<u8>>, IndexError> {
     file.take(MAX_INDEX_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| IndexError::Unsupported)?;
+    if bytes.len() as u64 > MAX_INDEX_BYTES {
+        return Err(IndexError::Unsupported);
+    }
+    Ok(Some(bytes))
+}
+
+fn read_index_paths(root: &Path) -> Result<Vec<Vec<u8>>, IndexError> {
+    let Some(path) = index_file(root)? else {
+        return Ok(Vec::new());
+    };
+    let Some(bytes) = read_index_bytes(&path)? else {
+        // No index yet: nothing staged, nothing committed - `git ls-files` agrees.
+        return Ok(Vec::new());
+    };
     // SHA-1 repositories are the norm; SHA-256 ones store 32-byte names.
-    parse_index(&bytes, 20).or_else(|_| parse_index(&bytes, 32))
+    let parsed = parse_index_raw(&bytes, 20, true)
+        .map(|p| (p, 20usize))
+        .or_else(|_| parse_index_raw(&bytes, 32, true).map(|p| (p, 32usize)))?;
+    let (parsed, hash_len) = parsed;
+    let Some(split) = parsed.split_link else {
+        let mut paths = parsed.paths;
+        paths.sort_unstable();
+        paths.dedup();
+        return Ok(paths);
+    };
+
+    let mut all_paths: Vec<Vec<u8>> = Vec::new();
+    if split.base_oid.iter().any(|&b| b != 0) {
+        let mut hex = String::with_capacity(split.base_oid.len() * 2);
+        for byte in &split.base_oid {
+            use std::fmt::Write as _;
+            let _ = write!(&mut hex, "{byte:02x}");
+        }
+        let shared_dir = path.parent().ok_or(IndexError::Unsupported)?;
+        let shared_path = shared_dir.join(format!("sharedindex.{hex}"));
+        let shared_bytes = read_index_bytes(&shared_path)?.ok_or(IndexError::Unsupported)?;
+        let base_parsed = parse_index_raw(&shared_bytes, hash_len, false)?;
+        for (idx, base_path) in base_parsed.paths.into_iter().enumerate() {
+            if split.delete_bitmap.contains(&idx) {
+                continue;
+            }
+            all_paths.push(base_path);
+        }
+    }
+    for entry_path in parsed.paths {
+        if !entry_path.is_empty() {
+            all_paths.push(entry_path);
+        }
+    }
+    all_paths.sort_unstable();
+    all_paths.dedup();
+    Ok(all_paths)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SplitIndexLink {
+    base_oid: Vec<u8>,
+    delete_bitmap: HashSet<usize>,
+    replace_bitmap: HashSet<usize>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ParsedIndex {
+    paths: Vec<Vec<u8>>,
+    split_link: Option<SplitIndexLink>,
 }
 
 /// Parse the path of every index entry. Bounds-checked throughout: the file
 /// comes from a repository sweep did not create.
+#[cfg_attr(not(test), allow(dead_code))]
 fn parse_index(bytes: &[u8], hash_len: usize) -> Result<Vec<Vec<u8>>, IndexError> {
+    let parsed = parse_index_raw(bytes, hash_len, false)?;
+    let mut paths = parsed.paths;
+    paths.sort_unstable();
+    paths.dedup();
+    Ok(paths)
+}
+
+fn parse_index_raw(
+    bytes: &[u8],
+    hash_len: usize,
+    allow_split_index: bool,
+) -> Result<ParsedIndex, IndexError> {
     let mut reader = Reader { bytes, at: 0 };
     if reader.take(4)? != b"DIRC" {
         return Err(IndexError::Unsupported);
@@ -253,28 +326,109 @@ fn parse_index(bytes: &[u8], hash_len: usize) -> Result<Vec<Vec<u8>>, IndexError
             }
             name.to_vec()
         };
-        if path.is_empty() || path.len() > MAX_PATH_BYTES {
+        if path.len() > MAX_PATH_BYTES || (path.is_empty() && !allow_split_index) {
             return Err(IndexError::Unsupported);
         }
         previous.clone_from(&path);
         paths.push(path);
     }
     // Extensions follow the entries, then the trailing checksum. A split
-    // index keeps entries elsewhere; a sparse index collapses directories.
+    // index keeps entries in `sharedindex.<oid>`; a sparse index collapses
+    // directories.
+    let mut split_link = None;
     while reader.remaining() > hash_len {
         let signature = reader.take(4)?;
         let size = reader.u32()? as usize;
-        if signature == b"link" || signature == b"sdir" {
+        let body = reader.take(size)?;
+        if signature == b"link" {
+            if !allow_split_index {
+                return Err(IndexError::Unsupported);
+            }
+            split_link = Some(parse_split_link(body, hash_len)?);
+        } else if signature == b"sdir" {
             return Err(IndexError::Unsupported);
         }
-        reader.take(size)?;
     }
     if reader.remaining() != hash_len {
         return Err(IndexError::Unsupported);
     }
-    paths.sort_unstable();
-    paths.dedup();
-    Ok(paths)
+    if paths.iter().any(Vec::is_empty) && split_link.is_none() {
+        return Err(IndexError::Unsupported);
+    }
+    Ok(ParsedIndex { paths, split_link })
+}
+
+fn parse_split_link(body: &[u8], hash_len: usize) -> Result<SplitIndexLink, IndexError> {
+    let mut reader = Reader { bytes: body, at: 0 };
+    let base_oid = reader.take(hash_len)?.to_vec();
+    if reader.remaining() == 0 {
+        return Ok(SplitIndexLink {
+            base_oid,
+            delete_bitmap: HashSet::new(),
+            replace_bitmap: HashSet::new(),
+        });
+    }
+    let delete_bitmap = read_ewah_bitmap(&mut reader)?;
+    let replace_bitmap = read_ewah_bitmap(&mut reader)?;
+    if reader.remaining() != 0 {
+        return Err(IndexError::Unsupported);
+    }
+    Ok(SplitIndexLink {
+        base_oid,
+        delete_bitmap,
+        replace_bitmap,
+    })
+}
+
+fn read_ewah_bitmap(reader: &mut Reader<'_>) -> Result<HashSet<usize>, IndexError> {
+    let bit_size = reader.u32()? as usize;
+    let word_count = reader.u32()? as usize;
+    if bit_size > MAX_ENTRIES as usize {
+        return Err(IndexError::Unsupported);
+    }
+    let mut set_bits = HashSet::new();
+    let mut words_read = 0usize;
+    let mut bit_pos = 0usize;
+    while words_read < word_count {
+        let rlw = reader.u64()?;
+        words_read += 1;
+        let running_bit = (rlw & 1) != 0;
+        let running_words =
+            usize::try_from((rlw >> 1) & 0xffff_ffff).map_err(|_| IndexError::Unsupported)?;
+        let literal_words = usize::try_from(rlw >> 33).map_err(|_| IndexError::Unsupported)?;
+        if words_read
+            .checked_add(literal_words)
+            .is_none_or(|n| n > word_count)
+        {
+            return Err(IndexError::Unsupported);
+        }
+        let running_bits = running_words
+            .checked_mul(64)
+            .ok_or(IndexError::Unsupported)?;
+        if running_bit {
+            let end = bit_size.min(bit_pos.saturating_add(running_bits));
+            for i in bit_pos..end {
+                set_bits.insert(i);
+            }
+        }
+        bit_pos = bit_pos.saturating_add(running_bits);
+        for _ in 0..literal_words {
+            let word = reader.u64()?;
+            words_read += 1;
+            if word != 0 {
+                let limit = 64.min(bit_size.saturating_sub(bit_pos));
+                for b in 0..limit {
+                    if ((word >> b) & 1) != 0 {
+                        set_bits.insert(bit_pos + b);
+                    }
+                }
+            }
+            bit_pos = bit_pos.saturating_add(64);
+        }
+    }
+    // Trailing rlw_pos.
+    let _ = reader.u32()?;
+    Ok(set_bits)
 }
 
 struct Reader<'a> {
@@ -305,6 +459,13 @@ impl<'a> Reader<'a> {
     fn u32(&mut self) -> Result<u32, IndexError> {
         let b = self.take(4)?;
         Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    }
+
+    fn u64(&mut self) -> Result<u64, IndexError> {
+        let b = self.take(8)?;
+        Ok(u64::from_be_bytes([
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        ]))
     }
 
     fn until_nul(&mut self) -> Result<&'a [u8], IndexError> {
@@ -383,17 +544,63 @@ fn tracked_via_git(root: &Path, rels: &[(Vec<u8>, &PathBuf)]) -> Vec<PathBuf> {
     tracked
 }
 
-fn git_ls_files_command(root: &Path, pathspecs: &[&str]) -> Command {
+struct EmptyHooksGuard(PathBuf);
+
+impl EmptyHooksGuard {
+    fn create() -> Option<Self> {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let pid = std::process::id();
+        let base = std::env::temp_dir();
+        for _ in 0..16 {
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir = base.join(format!("sweep-no-hooks-{pid}-{n}"));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return Some(Self(dir)),
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => return None,
+            }
+        }
+        None
+    }
+}
+
+impl Drop for EmptyHooksGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
+fn git_ls_files_command(root: &Path, pathspecs: &[&str], hooks_dir: &Path) -> Command {
     let mut cmd = Command::new("git");
+    for (key, _) in std::env::vars_os() {
+        if key
+            .to_string_lossy()
+            .to_ascii_uppercase()
+            .starts_with("GIT_")
+        {
+            cmd.env_remove(&key);
+        }
+    }
+    let mut hooks_arg = std::ffi::OsString::from("core.hooksPath=");
+    hooks_arg.push(hooks_dir);
     cmd.args([
+        "--no-pager",
+        "-c",
+        "protocol.allow=never",
         "-c",
         "core.fsmonitor=false",
         "-c",
         "core.untrackedCache=false",
         "-c",
         "core.quotePath=false",
-        "-C",
+        "-c",
+        "gc.auto=0",
+        "-c",
+        "maintenance.auto=false",
+        "-c",
     ])
+    .arg(hooks_arg)
+    .arg("-C")
     .arg(root)
     .args(["ls-files", "-z", "--cached", "--"])
     .args(pathspecs)
@@ -403,6 +610,8 @@ fn git_ls_files_command(root: &Path, pathspecs: &[&str]) -> Command {
     .env("GIT_OPTIONAL_LOCKS", "0")
     .env("GIT_LITERAL_PATHSPECS", "1")
     .env("GIT_TERMINAL_PROMPT", "0")
+    .env("GIT_NO_LAZY_FETCH", "1")
+    .env("GIT_NO_REPLACE_OBJECTS", "1")
     .stdin(Stdio::null())
     .stdout(Stdio::piped())
     .stderr(Stdio::null());
@@ -410,7 +619,10 @@ fn git_ls_files_command(root: &Path, pathspecs: &[&str]) -> Command {
 }
 
 fn run_git_ls_files(root: &Path, pathspecs: &[&str]) -> Option<Vec<u8>> {
-    let mut child = git_ls_files_command(root, pathspecs).spawn().ok()?;
+    let hooks_guard = EmptyHooksGuard::create()?;
+    let mut child = git_ls_files_command(root, pathspecs, &hooks_guard.0)
+        .spawn()
+        .ok()?;
     let mut stdout = child.stdout.take()?;
     let reader = std::thread::spawn(move || {
         let mut out = Vec::new();
@@ -531,8 +743,9 @@ mod tests {
     }
 
     #[test]
-    fn git_command_forces_c_locale() {
-        let cmd = git_ls_files_command(Path::new("/tmp/repo"), &["dist"]);
+    fn git_command_forces_c_locale_and_sanitized_env() {
+        let hooks = Path::new("/tmp/empty-hooks");
+        let cmd = git_ls_files_command(Path::new("/tmp/repo"), &["dist"], hooks);
         let envs: HashMap<_, _> = cmd.get_envs().collect();
         assert_eq!(
             envs.get(std::ffi::OsStr::new("LC_ALL")),
@@ -542,5 +755,72 @@ mod tests {
             envs.get(std::ffi::OsStr::new("LANG")),
             Some(&Some(std::ffi::OsStr::new("C")))
         );
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("GIT_NO_LAZY_FETCH")),
+            Some(&Some(std::ffi::OsStr::new("1")))
+        );
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("GIT_NO_REPLACE_OBJECTS")),
+            Some(&Some(std::ffi::OsStr::new("1")))
+        );
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("GIT_TERMINAL_PROMPT")),
+            Some(&Some(std::ffi::OsStr::new("0")))
+        );
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("GIT_OPTIONAL_LOCKS")),
+            Some(&Some(std::ffi::OsStr::new("0")))
+        );
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.contains(&"protocol.allow=never".to_owned()));
+        assert!(args.contains(&"core.fsmonitor=false".to_owned()));
+        assert!(args.contains(&format!("core.hooksPath={}", hooks.display())));
+    }
+
+    #[test]
+    fn split_index_reads_shared_index_without_spawning_git() -> Result<(), std::io::Error> {
+        // Synthesize a minimal split index pointing to a shared index with a
+        // deleted entry and a newly added split entry.
+        let tmp =
+            std::env::temp_dir().join(format!("sweep-split-index-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let git_dir = tmp.join(".git");
+        std::fs::create_dir_all(&git_dir)?;
+
+        let base_bytes = index(2, &[b"dist/deleted.js", b"dist/kept.js"], &[]);
+        let base_oid = [0x11u8; 20];
+        let hex: String = base_oid.iter().map(|b| format!("{b:02x}")).collect();
+        let shared_path = git_dir.join(format!("sharedindex.{hex}"));
+        std::fs::write(&shared_path, &base_bytes)?;
+
+        // Build EWAH delete bitmap with bit 0 set (deletes dist/deleted.js)
+        // and empty replace bitmap.
+        let mut link_body = base_oid.to_vec();
+        // delete bitmap: bit_size=2, word_count=2, rlw=(literal_words=1 -> 1<<33), literal=1, rlw_pos=0
+        link_body.extend_from_slice(&2u32.to_be_bytes());
+        link_body.extend_from_slice(&2u32.to_be_bytes());
+        link_body.extend_from_slice(&(1u64 << 33).to_be_bytes());
+        link_body.extend_from_slice(&1u64.to_be_bytes());
+        link_body.extend_from_slice(&0u32.to_be_bytes());
+        // replace bitmap: bit_size=0, word_count=0, rlw_pos=0
+        link_body.extend_from_slice(&0u32.to_be_bytes());
+        link_body.extend_from_slice(&0u32.to_be_bytes());
+        link_body.extend_from_slice(&0u32.to_be_bytes());
+
+        let split_bytes = index(2, &[b"out/added.js"], &[(b"link", &link_body)]);
+        std::fs::write(git_dir.join("index"), &split_bytes)?;
+
+        let paths = read_index_paths(&tmp);
+        let _ = std::fs::remove_dir_all(&tmp);
+        let Ok(paths) = paths else {
+            panic!("read_index_paths should parse split index without git");
+        };
+        assert!(contains_tracked(&paths, b"dist/kept.js"));
+        assert!(contains_tracked(&paths, b"out/added.js"));
+        assert!(!contains_tracked(&paths, b"dist/deleted.js"));
+        Ok(())
     }
 }

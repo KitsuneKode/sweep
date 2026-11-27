@@ -32,9 +32,9 @@ afterEach(() => {
 
 const dir = (...parts: string[]) => join(tmpDir, ...parts);
 
-test("plan construction cannot invent missing scan approval snapshots", () => {
+test("plan construction cannot invent missing scan approval snapshots", async () => {
   mkdirSync(dir("node_modules"));
-  const plan = buildPlan(tmpDir, {
+  const plan = await buildPlan(tmpDir, {
     entries: [
       {
         path: dir("node_modules"),
@@ -84,7 +84,7 @@ describe("planner", () => {
     },
   );
 
-  test("buildPlan selects safe defaults and excludes dangerous custom patterns", () => {
+  test("buildPlan selects safe defaults and excludes dangerous custom patterns", async () => {
     const safeEntry: ScanEntry = {
       path: dir("node_modules"),
       name: "node_modules",
@@ -108,7 +108,7 @@ describe("planner", () => {
       exact: false,
     };
 
-    const plan = buildPlan(tmpDir, result);
+    const plan = await buildPlan(tmpDir, result);
 
     expect(plan.candidates).toHaveLength(2);
     expect(plan.selectedCandidateIds).toHaveLength(1);
@@ -120,7 +120,7 @@ describe("planner", () => {
     ).toBe(false);
   });
 
-  test("opt-in catalog names are dangerous and never pre-selected", () => {
+  test("opt-in catalog names are dangerous and never pre-selected", async () => {
     // A curated name like `dist` can hold authored files - that is exactly why
     // it ships disabled. Enabling the pattern consents to scanning for it,
     // not to selecting it: tier + reasons must say so on both engines.
@@ -139,7 +139,7 @@ describe("planner", () => {
       exact: false,
     };
 
-    const plan = buildPlan(tmpDir, result);
+    const plan = await buildPlan(tmpDir, result);
 
     expect(plan.selectedCandidateIds).toHaveLength(0);
     for (const candidate of plan.candidates) {
