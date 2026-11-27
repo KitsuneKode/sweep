@@ -803,7 +803,7 @@ export async function scan(
   } finally {
     signal?.removeEventListener("abort", wakeWaiters);
     await sizer?.dispose();
-    disposeDirectoryReader(budget);
+    await disposeDirectoryReader(budget);
   }
 }
 

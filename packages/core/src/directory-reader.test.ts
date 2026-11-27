@@ -10,8 +10,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { directoryEntries } from "./directory-reader.js";
+import { basename, join } from "node:path";
+import { directoryEntries, disposeDirectoryReader } from "./directory-reader.js";
+import { lookupExecutable } from "./executable-lookup.js";
 import { ResourceBudget } from "./resource-budget.js";
 
 let owned: string;
@@ -45,6 +46,33 @@ test("closing an enumeration early allows another enumeration", async () => {
   let count = 0;
   for await (const _entry of directoryEntries(owned, budget)) count++;
   expect(count).toBe(65);
+  await disposeDirectoryReader(budget);
+});
+
+test("disposeDirectoryReader waits for the Node worker to exit before returning", async () => {
+  const nodePath = lookupExecutable("node").resolvedPath;
+  if (!nodePath) return;
+  const binDir = mkdtempSync(join(tmpdir(), "sweep-dir-reader-bin-"));
+  const target = join(binDir, basename(nodePath));
+  if (process.platform === "win32") copyFileSync(nodePath, target);
+  else symlinkSync(nodePath, target);
+
+  const previousPath = process.env.PATH;
+  const budget = new ResourceBudget();
+  try {
+    process.env.PATH = binDir;
+    let count = 0;
+    for await (const _entry of directoryEntries(owned, budget)) count++;
+    expect(count).toBe(65);
+    await disposeDirectoryReader(budget);
+    rmSync(binDir, { recursive: true, force: true });
+    expect(existsSync(binDir)).toBe(false);
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+    await disposeDirectoryReader(budget);
+    rmSync(binDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
 });
 
 test("dirent types classify files, dirs, and symlinks", async () => {

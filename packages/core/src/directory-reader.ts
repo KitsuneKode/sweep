@@ -83,6 +83,7 @@ class DirectoryWorker {
   private failure: Error | undefined;
   private idle: ReturnType<typeof setTimeout> | undefined;
   private readonly abort: () => void;
+  private readonly closed: Promise<void>;
 
   constructor(private readonly signal?: AbortSignal) {
     const nodeLookup = lookupExecutable("node");
@@ -94,6 +95,14 @@ class DirectoryWorker {
     }
     this.proc = spawn(nodeLookup.resolvedPath, ["--input-type=commonjs", "-e", WORKER], {
       stdio: "pipe",
+    });
+    this.closed = new Promise<void>((resolve) => {
+      if (this.proc.exitCode !== null || this.proc.signalCode !== null) {
+        resolve();
+        return;
+      }
+      this.proc.once("close", () => resolve());
+      this.proc.once("error", () => resolve());
     });
     this.abort = () => {
       const error = new Error("Directory enumeration cancelled");
@@ -169,7 +178,14 @@ class DirectoryWorker {
     clearTimeout(this.idle);
     for (const waiting of this.pending.values()) waiting.reject(this.failure);
     this.pending.clear();
-    this.proc.kill("SIGKILL");
+    if (!this.proc.stdin.destroyed) this.proc.stdin.destroy();
+    if (this.proc.exitCode === null && this.proc.signalCode === null) {
+      try {
+        this.proc.kill("SIGKILL");
+      } catch {
+        // Child process already exited.
+      }
+    }
   }
 
   private request(op: string, handle: number, path?: string | Buffer): Promise<Reply> {
@@ -211,7 +227,7 @@ class DirectoryWorker {
         if (!this.failure) await this.request("close", handle);
       } finally {
         this.active--;
-        if (this.active === 0) this.idle = setTimeout(() => this.dispose(), 100);
+        if (this.active === 0) this.idle = setTimeout(() => void this.dispose(), 100);
       }
     }
   }
@@ -220,18 +236,20 @@ class DirectoryWorker {
     return this.failure === undefined;
   }
 
-  dispose(): void {
+  async dispose(): Promise<void> {
     clearTimeout(this.idle);
     this.signal?.removeEventListener("abort", this.abort);
     this.fail(new Error("Directory reader disposed"));
+    await this.closed;
   }
 }
 
 const workers = new WeakMap<ResourceBudget, DirectoryWorker>();
 
-export function disposeDirectoryReader(budget: ResourceBudget): void {
-  workers.get(budget)?.dispose();
+export async function disposeDirectoryReader(budget: ResourceBudget): Promise<void> {
+  const worker = workers.get(budget);
   workers.delete(budget);
+  await worker?.dispose();
 }
 
 export type DirectoryEntrySource = (

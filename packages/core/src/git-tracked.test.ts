@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { lookupExecutable } from "./executable-lookup.js";
 import { gitTrackedPaths, gitTrackedPathsViaEngine, gitTrackedPathsViaGit } from "./git-tracked.js";
 import { isRustEngineAvailable } from "./rust-engine.js";
@@ -203,22 +203,30 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
     write("package.json", "{}\n");
     write("node_modules/pkg/index.js");
     const outside = mkdtempSync(join(tmpdir(), "sweep-no-repo-"));
-    const nodeOnlyBin = mkdtempSync(join(tmpdir(), "sweep-node-only-bin-"));
+    const tempBin = mkdtempSync(join(tmpdir(), "sweep-node-only-bin-"));
     mkdirSync(join(outside, "node_modules"), { recursive: true });
     writeFileSync(join(outside, "package.json"), "{}\n");
     writeFileSync(join(outside, "node_modules", "a.js"), "x\n");
     const nodePath = lookupExecutable("node").resolvedPath;
-    if (nodePath) {
-      const target = join(nodeOnlyBin, basename(nodePath));
-      if (process.platform === "win32") copyFileSync(nodePath, target);
-      else symlinkSync(nodePath, target);
+    const nodeDir = nodePath ? dirname(nodePath) : undefined;
+    let pathWithoutGit = tempBin;
+    if (nodePath && nodeDir) {
+      if (!lookupExecutable("git", { pathEnv: nodeDir }).resolvedPath) {
+        pathWithoutGit = `${tempBin}${delimiter}${nodeDir}`;
+      } else {
+        const target = join(tempBin, basename(nodePath));
+        if (process.platform === "win32") copyFileSync(nodePath, target);
+        else symlinkSync(nodePath, target);
+      }
     }
 
     const previousPath = process.env.PATH;
     const previousEngine = process.env.SWEEP_ENGINE_PATH;
     try {
-      process.env.PATH = nodeOnlyBin;
+      process.env.PATH = pathWithoutGit;
       process.env.SWEEP_ENGINE_PATH = join(root, "missing-sweep-engine");
+      expect(lookupExecutable("git").resolvedPath).toBeUndefined();
+      if (nodePath) expect(lookupExecutable("node").resolvedPath).toBeDefined();
 
       const { plan } = await scanToPlan(root, DEFAULT_CONFIG);
       const nm = plan.candidates.find((candidate) => candidate.name === "node_modules");
@@ -238,8 +246,8 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
       else process.env.PATH = previousPath;
       if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
       else process.env.SWEEP_ENGINE_PATH = previousEngine;
-      rmSync(outside, { recursive: true, force: true });
-      rmSync(nodeOnlyBin, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      rmSync(tempBin, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
 
@@ -260,6 +268,7 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
           process.platform === "win32"
             ? "C:\\nonexistent-sweep-no-git"
             : "/nonexistent-sweep-no-git";
+        expect(lookupExecutable("git").resolvedPath).toBeUndefined();
 
         const plan = await scanToPlanViaRust(root, {
           config: DEFAULT_CONFIG,
