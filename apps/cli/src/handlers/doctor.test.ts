@@ -56,11 +56,12 @@ describe("collectDoctorChecks", () => {
     expect(openTui).toBeDefined();
     expect(openTui?.ok).toBe(true);
     expect(openTui?.detail).toContain("embedded");
+    expect(openTui?.reasonKind).toBeUndefined();
     expect(openTui?.reason).toBeUndefined();
   });
 
   test.skipIf(process.platform === "win32")(
-    "reports rust engine probe failure reason in detail and additive reason field",
+    "reports rust engine probe failure reasonKind and human reason sentence",
     async () => {
       const root = mkdtempSync(join(tmpdir(), "sweep-doctor-rust-reason-"));
       roots.push(root);
@@ -83,7 +84,21 @@ describe("collectDoctorChecks", () => {
       expect(rustCheck?.ok).toBe(false);
       expect(rustCheck?.detail).toContain("127");
       expect(rustCheck?.detail).toContain("GLIBC_2.39");
+      expect(rustCheck?.reasonKind).toBe("probe_failed");
       expect(rustCheck?.reason).toContain("GLIBC_2.39");
+
+      const safetyCheck = checks.find((check) => check.name === "rust_apply_safety");
+      expect(safetyCheck?.ok).toBe(false);
+      expect(safetyCheck?.reasonKind).toBe("engine_unavailable");
+      expect(safetyCheck?.reason).toBeTruthy();
+
+      // Every warning check carries both a stable reasonKind and human reason.
+      for (const check of checks) {
+        if (!check.ok) {
+          expect(check.reasonKind).toBeTruthy();
+          expect(check.reason).toBeTruthy();
+        }
+      }
     },
   );
 });

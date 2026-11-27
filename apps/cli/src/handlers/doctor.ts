@@ -28,11 +28,31 @@ export type DoctorHandlerOptions = CliOptions & {
   json?: boolean;
 };
 
+export type DoctorCheckReasonKind =
+  | "lock_held"
+  | "identity_unavailable"
+  | "target_invalid"
+  | "config_invalid"
+  | "no_patterns"
+  | "missing"
+  | "version_mismatch"
+  | "missing_exports"
+  | "load_error"
+  | "not_installed"
+  | "spawn_error"
+  | "probe_failed"
+  | "timeout"
+  | "engine_unavailable"
+  | "capabilities_unsupported"
+  | "scan_failed";
+
 export type DoctorCheck = {
   name: string;
   ok: boolean;
   detail: string;
-  /** Additive machine-readable failure/fallback reason when a check warns. */
+  /** Stable machine-readable reason code when a check warns. */
+  reasonKind?: DoctorCheckReasonKind;
+  /** Concise human-readable reason sentence when a check warns. */
   reason?: string;
 };
 
@@ -111,6 +131,9 @@ export async function collectDoctorChecks(
 
   const lock = readApplyLockStatus();
   const rootIdentity = readFilesystemIdentity(targetDir);
+  const targetOk = targetIsDirectory(targetDir);
+  const configOk = configLoadError === undefined && configValidity.ok;
+  const patternsOk = config !== null && config.patterns.length > 0;
   return [
     {
       name: "apply_lock",
@@ -118,6 +141,12 @@ export async function collectDoctorChecks(
       detail: !lock.held
         ? "available"
         : `${lock.lockPath} · ${lock.owner ? `host PID ${lock.owner.pid}: ${lock.processStatus}; journal ${lock.owner.journalPath}` : (lock.detail ?? "owner unknown")}. Inspect recovery before manual cleanup; a child may outlive the host.`,
+      ...(lock.held
+        ? {
+            reasonKind: "lock_held" as const,
+            reason: "Another apply session currently holds the apply lock.",
+          }
+        : {}),
     },
     { name: "protocol", ok: true, detail: PROTOCOL_VERSION },
     {
@@ -126,17 +155,27 @@ export async function collectDoctorChecks(
       detail: rootIdentity
         ? "stable root identifier available; descendants are checked individually at apply"
         : "root identifier unavailable; apply is disabled, and rescanning cannot provide identity safety",
+      ...(rootIdentity === undefined
+        ? {
+            reasonKind: "identity_unavailable" as const,
+            reason: "Filesystem root identity could not be read; apply is disabled.",
+          }
+        : {}),
     },
     {
       name: "target",
-      ok: targetIsDirectory(targetDir),
-      detail: targetIsDirectory(targetDir)
-        ? targetDir
-        : `${targetDir} (missing or not a directory)`,
+      ok: targetOk,
+      detail: targetOk ? targetDir : `${targetDir} (missing or not a directory)`,
+      ...(!targetOk
+        ? {
+            reasonKind: "target_invalid" as const,
+            reason: `Target path does not exist or is not a directory: ${targetDir}.`,
+          }
+        : {}),
     },
     {
       name: "config",
-      ok: configLoadError === undefined && configValidity.ok,
+      ok: configOk,
       detail:
         configLoadError ??
         (hasConfigFile
@@ -144,11 +183,30 @@ export async function collectDoctorChecks(
             ? configPath!
             : configValidity.detail
           : "defaults (no .sweeprc)"),
+      ...(!configOk
+        ? {
+            reasonKind: "config_invalid" as const,
+            reason:
+              configLoadError ??
+              (!configValidity.ok ? configValidity.detail : "Project configuration is invalid."),
+          }
+        : {}),
     },
     {
       name: "patterns",
-      ok: config !== null && config.patterns.length > 0,
+      ok: patternsOk,
       detail: config === null ? "config error" : String(config.patterns.length),
+      ...(!patternsOk
+        ? {
+            reasonKind: (config === null
+              ? "config_invalid"
+              : "no_patterns") as DoctorCheckReasonKind,
+            reason:
+              config === null
+                ? "Patterns could not be loaded because configuration failed."
+                : "No cleanup patterns are enabled.",
+          }
+        : {}),
     },
     {
       name: "disabled_patterns",
@@ -162,7 +220,9 @@ export async function collectDoctorChecks(
       detail: embeddedUi
         ? "embedded (standalone)"
         : (openTui?.detail ?? "missing; reinstall @kitsunekode/sweep"),
-      ...(!embeddedUi && openTui && !openTui.ok ? { reason: openTui.reason } : {}),
+      ...(!embeddedUi && openTui && !openTui.ok
+        ? { reasonKind: openTui.reason, reason: openTui.detail }
+        : {}),
     },
     {
       name: "rust_engine",
@@ -172,7 +232,12 @@ export async function collectDoctorChecks(
         : rustProbe.reasonKind === "not_installed"
           ? "not found"
           : `${rustExecutable} (${rustProbe.reason ?? rustProbe.reasonKind})`,
-      ...(!rustOk && rustProbe.reason ? { reason: rustProbe.reason } : {}),
+      ...(!rustOk
+        ? {
+            reasonKind: rustProbe.reasonKind ?? ("not_installed" as const),
+            reason: rustProbe.reason ?? "Native Rust engine binary was not found.",
+          }
+        : {}),
     },
     {
       name: "rust_apply_safety",
@@ -180,8 +245,30 @@ export async function collectDoctorChecks(
       detail: rustSafetyOk
         ? "controlled cancellation and plan identity supported"
         : "missing or incompatible native capabilities",
+      ...(!rustSafetyOk
+        ? {
+            reasonKind: (rustOk
+              ? "capabilities_unsupported"
+              : "engine_unavailable") as DoctorCheckReasonKind,
+            reason: rustOk
+              ? "Native Rust engine lacks controlled cancellation or plan identity support."
+              : "Native Rust engine is unavailable, so native apply capabilities could not be verified.",
+          }
+        : {}),
     },
-    { name: "dry_scan", ok: scanOk, detail: scanDetail },
+    {
+      name: "dry_scan",
+      ok: scanOk,
+      detail: scanDetail,
+      ...(!scanOk
+        ? {
+            reasonKind: (config === null
+              ? "config_invalid"
+              : "scan_failed") as DoctorCheckReasonKind,
+            reason: scanDetail,
+          }
+        : {}),
+    },
   ];
 }
 
@@ -209,6 +296,7 @@ export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
           name: check.name,
           status: check.ok ? "ok" : "warn",
           detail: check.detail,
+          ...(check.reasonKind ? { reasonKind: check.reasonKind } : {}),
           ...(check.reason ? { reason: check.reason } : {}),
         })),
         hasWarnings,

@@ -74,43 +74,60 @@ function compareSemver(a: ParsedSemver, b: ParsedSemver): number {
   return 0;
 }
 
-function satisfiesComparator(version: ParsedSemver, raw: string): boolean {
+interface PrimitiveComparator {
+  op: ">=" | "<=" | ">" | "<" | "=";
+  version: ParsedSemver;
+  /** True only when the user/range explicitly wrote a prerelease comparator (not a synthetic `-0` upper bound). */
+  explicitPrerelease: boolean;
+}
+
+function expandComparator(raw: string): PrimitiveComparator[] | null {
   const token = raw.trim();
-  if (!token || token === "*" || token === "x" || token === "X") return true;
+  if (!token || token === "*" || token === "x" || token === "X") {
+    return [];
+  }
 
   if (token.startsWith("^")) {
     const base = parseSemver(token.slice(1));
-    if (!base) return false;
-    if (compareSemver(version, base) < 0) return false;
+    if (!base) return null;
     const upper: ParsedSemver =
       base.major > 0
-        ? { major: base.major + 1, minor: 0, patch: 0, prerelease: [] }
+        ? { major: base.major + 1, minor: 0, patch: 0, prerelease: ["0"] }
         : base.minor > 0
-          ? { major: 0, minor: base.minor + 1, patch: 0, prerelease: [] }
-          : { major: 0, minor: 0, patch: base.patch + 1, prerelease: [] };
-    return compareSemver(version, upper) < 0;
+          ? { major: 0, minor: base.minor + 1, patch: 0, prerelease: ["0"] }
+          : { major: 0, minor: 0, patch: base.patch + 1, prerelease: ["0"] };
+    return [
+      { op: ">=", version: base, explicitPrerelease: base.prerelease.length > 0 },
+      { op: "<", version: upper, explicitPrerelease: false },
+    ];
   }
 
   if (token.startsWith("~")) {
     const base = parseSemver(token.slice(1));
-    if (!base) return false;
-    if (compareSemver(version, base) < 0) return false;
+    if (!base) return null;
     const upper: ParsedSemver = {
       major: base.major,
       minor: base.minor + 1,
       patch: 0,
-      prerelease: [],
+      prerelease: ["0"],
     };
-    return compareSemver(version, upper) < 0;
+    return [
+      { op: ">=", version: base, explicitPrerelease: base.prerelease.length > 0 },
+      { op: "<", version: upper, explicitPrerelease: false },
+    ];
   }
 
   const opMatch = /^(>=|<=|>|<|=)?\s*(.+)$/.exec(token);
-  if (!opMatch) return false;
-  const op = opMatch[1] ?? "=";
+  if (!opMatch) return null;
+  const op = (opMatch[1] ?? "=") as PrimitiveComparator["op"];
   const base = parseSemver(opMatch[2]!);
-  if (!base) return false;
-  const cmp = compareSemver(version, base);
-  switch (op) {
+  if (!base) return null;
+  return [{ op, version: base, explicitPrerelease: base.prerelease.length > 0 }];
+}
+
+function matchesPrimitive(version: ParsedSemver, comp: PrimitiveComparator): boolean {
+  const cmp = compareSemver(version, comp.version);
+  switch (comp.op) {
     case ">=":
       return cmp >= 0;
     case "<=":
@@ -124,17 +141,38 @@ function satisfiesComparator(version: ParsedSemver, raw: string): boolean {
   }
 }
 
-/** Pure-JS semver range check so `sweep doctor` behaves identically on Node and Bun. */
+function sameReleaseTuple(a: ParsedSemver, b: ParsedSemver): boolean {
+  return a.major === b.major && a.minor === b.minor && a.patch === b.patch;
+}
+
+/**
+ * Pure-JS semver range check matching npm `semver@7` (default `includePrerelease: false`),
+ * so `sweep doctor` and `sweep ui` agree with Bun/npm on both Node and Bun:
+ * a prerelease version satisfies a comparator set only if every comparator passes
+ * AND at least one explicit comparator in that set has a prerelease on the same
+ * `[major, minor, patch]` tuple.
+ */
 export function satisfiesSemverRange(version: string, range: string): boolean {
   const parsed = parseSemver(version);
   if (!parsed) return false;
-  return range.split("||").some((branch) =>
-    branch
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .every((comparator) => satisfiesComparator(parsed, comparator)),
-  );
+  return range.split("||").some((branch) => {
+    const tokens = branch.trim().split(/\s+/).filter(Boolean);
+    const comparators: PrimitiveComparator[] = [];
+    for (const token of tokens) {
+      const expanded = expandComparator(token);
+      if (expanded === null) return false;
+      comparators.push(...expanded);
+    }
+    if (!comparators.every((comp) => matchesPrimitive(parsed, comp))) {
+      return false;
+    }
+    if (parsed.prerelease.length > 0) {
+      return comparators.some(
+        (comp) => comp.explicitPrerelease && sameReleaseTuple(parsed, comp.version),
+      );
+    }
+    return true;
+  });
 }
 
 /** Walk up from a resolved entry file to locate the owning `@opentui/core/package.json`. */
@@ -264,7 +302,9 @@ export function openTuiMissingMessage(): string {
     "sweep ui needs @opentui/core, and this install does not have it.",
     `Reinstall sweep under Bun so the optional UI library installs:  ${openTuiInstallHint()}`,
     "Or run it without a global install:  bunx @kitsunekode/sweep ui <folder>",
-    "Or use the standalone binary (UI embedded, no Node or Bun needed):  brew install kitsunekode/tap/sweep",
+    "Or use a standalone binary (UI embedded, no Node or Bun needed):",
+    "  • macOS / Linux:  brew install kitsunekode/tap/sweep  (or install.sh)",
+    "  • Windows / all platforms:  https://github.com/KitsuneKode/sweep/releases  (sweep-win-x64.exe on Windows)",
     "Then run:  sweep ui <folder>",
   ].join("\n");
 }
@@ -291,11 +331,11 @@ function openTuiMismatchMessage(details: {
     lines.push(`Load error: ${details.loadError}`);
   }
   lines.push(
-    "This usually happens when a shared global node_modules has an older @opentui/core from another tool.",
+    "This usually happens when a shared global node_modules has a different @opentui/core from another tool.",
     "Fixes:",
     `  • Reinstall sweep:  ${openTuiInstallHint()}`,
     "  • Run with bunx:  bunx @kitsunekode/sweep ui <folder>",
-    "  • Use the standalone binary (UI embedded):  brew install kitsunekode/tap/sweep",
+    "  • Use a standalone binary (UI embedded):  brew install kitsunekode/tap/sweep (macOS/Linux) or https://github.com/KitsuneKode/sweep/releases (Windows sweep-win-x64.exe, macOS, Linux)",
   );
   return lines.join("\n");
 }

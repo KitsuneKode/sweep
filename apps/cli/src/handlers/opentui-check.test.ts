@@ -45,6 +45,29 @@ describe("satisfiesSemverRange", () => {
     expect(satisfiesSemverRange("0.7.0", ">=0.6.8 <0.7.0")).toBe(false);
     expect(satisfiesSemverRange("0.7.0", "^0.6.8 || ^0.7.0")).toBe(true);
   });
+
+  test("enforces npm prerelease rules at both range boundaries and matches Bun.semver", () => {
+    const cases: Array<[string, string, boolean]> = [
+      ["0.6.8-rc.1", "^0.6.8", false],
+      ["0.6.9-rc.1", "^0.6.8", false],
+      ["0.7.0-rc.1", "^0.6.8", false],
+      ["0.7.0-beta.0", "^0.6.8", false],
+      ["0.6.8-rc.2", "^0.6.8-rc.1", true],
+      ["0.6.8", "^0.6.8-rc.1", true],
+      ["0.6.9", "^0.6.8-rc.1", true],
+      ["0.6.9-rc.1", "^0.6.8-rc.1", false],
+      ["0.7.0-rc.1", "^0.6.8-rc.1", false],
+      ["0.6.9-rc.1", "~0.6.8", false],
+      ["0.7.0-rc.1", "~0.6.8", false],
+      ["0.7.0-rc.1", ">=0.6.8 <0.7.0", false],
+      ["0.7.0-rc.1", ">=0.6.8 <0.7.0-rc.2", true],
+      ["1.0.0-alpha.1", "*", false],
+    ];
+    for (const [version, range, expected] of cases) {
+      expect(satisfiesSemverRange(version, range)).toBe(expected);
+      expect(Bun.semver.satisfies(version, range)).toBe(expected);
+    }
+  });
 });
 
 describe("inspectOpenTui & verifyOpenTuiAvailable", () => {
@@ -88,6 +111,29 @@ describe("inspectOpenTui & verifyOpenTuiAvailable", () => {
       expect(result.message).toContain("ImageRenderable");
       expect(result.message).toContain("bunx @kitsunekode/sweep ui");
       expect(result.message).toContain("standalone");
+      expect(result.message).toContain("https://github.com/KitsuneKode/sweep/releases");
+      expect(result.message).toContain("a different @opentui/core");
+      expect(result.message).not.toContain("an older @opentui/core");
+    }
+  });
+
+  test("does not call a newer incompatible copy 'older' and lists cross-platform standalone options", () => {
+    const entry = createFakeOpenTui({
+      version: "0.9.9",
+      exportsCode: `export class ImageRenderable {}\nexport function createCliRenderer() {}\nexport class StyledText {}\n`,
+    });
+    const result = inspectOpenTui({
+      resolvers: [() => entry],
+      requiredRange: "^0.6.8",
+      requiredExports,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("version_mismatch");
+      expect(result.message).toContain("0.9.9");
+      expect(result.message).not.toMatch(/\bolder\b/i);
+      expect(result.message).toContain("a different @opentui/core");
+      expect(result.message).toContain("sweep-win-x64.exe");
     }
   });
 

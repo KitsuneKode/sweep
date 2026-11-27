@@ -262,14 +262,21 @@ try {
     );
   }
   const doctorJson = JSON.parse(doctorRes.stdout) as {
-    checks: Array<{ name: string; status: string; detail: string; reason?: string }>;
+    checks: Array<{
+      name: string;
+      status: string;
+      detail: string;
+      reasonKind?: string;
+      reason?: string;
+    }>;
   };
   const openTuiCheck = doctorJson.checks.find((c) => c.name === "opentui");
   if (
     !openTuiCheck ||
     openTuiCheck.status !== "warn" ||
     !openTuiCheck.detail.includes("0.1.97") ||
-    openTuiCheck.reason !== "version_mismatch"
+    openTuiCheck.reasonKind !== "version_mismatch" ||
+    !openTuiCheck.reason?.includes("0.1.97")
   ) {
     throw new Error(`Unexpected doctor opentui check: ${JSON.stringify(openTuiCheck)}`);
   }
@@ -280,6 +287,7 @@ try {
         installedUiExitCode: uiExitCode,
         mismatchExitCode: mismatchExit,
         doctorOpenTuiStatus: openTuiCheck.status,
+        doctorOpenTuiReasonKind: openTuiCheck.reasonKind,
         doctorOpenTuiReason: openTuiCheck.reason,
         ok: true,
       },
