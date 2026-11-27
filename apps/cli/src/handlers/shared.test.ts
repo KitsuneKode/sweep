@@ -306,7 +306,7 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
-test("--engine auto stays silent when the Rust engine is simply not installed", () => {
+test("--engine auto warns when explicitly configured SWEEP_ENGINE_PATH is missing", () => {
   const root = mkdtempSync(join(tmpdir(), "sweep-auto-missing-"));
   roots.push(root);
   const previousEngine = process.env.SWEEP_ENGINE_PATH;
@@ -319,13 +319,18 @@ test("--engine auto stays silent when the Rust engine is simply not installed", 
   });
   try {
     expect(resolveEngineBackend({ engine: "auto" })).toBe("js");
+    // Repeated resolution for the same missing path prints only once.
+    expect(resolveEngineBackend({ engine: "auto" })).toBe("js");
   } finally {
     spy.mockRestore();
     if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
     else process.env.SWEEP_ENGINE_PATH = previousEngine;
   }
 
-  expect(errors).toEqual([]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toContain("Rust engine unavailable");
+  expect(errors[0]).toContain("does-not-exist");
+  expect(errors[0]).toContain("falling back to JS engine");
 });
 
 test("unattended consent follows the live tier, and --json still names the path", () => {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { directoryEntries } from "./directory-reader.js";
+import { directoryEntries, enumerateDirectoryHexForTest } from "./directory-reader.js";
 import { ResourceBudget } from "./resource-budget.js";
 
 let owned: string;
@@ -74,6 +74,33 @@ test.skipIf(process.platform !== "linux")(
       expect(entry.type).toBe("f");
     }
     expect(names.some((n) => n.equals(raw))).toBe(true);
+  },
+);
+
+test.skipIf(process.platform !== "linux")(
+  "hex+fd compatibility reader preserves invalid-UTF8 files and directories",
+  async () => {
+    const rawFile = Buffer.from([0x62, 0x61, 0x64, 0xff, 0xfe]);
+    const rawDir = Buffer.from([0x64, 0x69, 0x72, 0xff, 0xfe]);
+    const rawDirPath = Buffer.concat([Buffer.from(owned + "/", "utf8"), rawDir]);
+    mkdirSync(rawDirPath);
+    writeFileSync(Buffer.concat([Buffer.from(owned + "/", "utf8"), rawFile]), "");
+    writeFileSync(Buffer.concat([rawDirPath, Buffer.from("/"), rawFile]), "");
+
+    const rootEntries: Array<{ name: Buffer; type: string }> = [];
+    for await (const entry of enumerateDirectoryHexForTest(owned)) {
+      rootEntries.push(entry);
+    }
+    expect(rootEntries.some((e) => e.name.equals(rawFile) && e.type === "f")).toBe(true);
+    expect(rootEntries.some((e) => e.name.equals(rawDir) && e.type === "d")).toBe(true);
+
+    const nestedEntries: Array<{ name: Buffer; type: string }> = [];
+    for await (const entry of enumerateDirectoryHexForTest(rawDirPath)) {
+      nestedEntries.push(entry);
+    }
+    expect(nestedEntries).toHaveLength(1);
+    expect(nestedEntries[0]?.name.equals(rawFile)).toBe(true);
+    expect(nestedEntries[0]?.type).toBe("f");
   },
 );
 

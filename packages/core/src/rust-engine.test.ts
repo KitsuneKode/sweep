@@ -1,13 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_CONFIG } from "./config.js";
-import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import {
   isRustEngineAvailable,
+  lookupExecutable,
   probeRustEngine,
   rustScanBlockedReason,
   scanToPlanViaRust,
+  windowsShellFreeExtensions,
 } from "./rust-engine.js";
 
 test("failed embedded extraction still tries the installed resolution chain", async () => {
@@ -153,7 +155,8 @@ test.skipIf(process.platform === "win32")(
       process.env.SWEEP_ENGINE_PATH = join(root, "missing-engine");
       const missing = probeRustEngine();
       expect(missing.available).toBe(false);
-      expect(missing.reasonKind).toBe("not_installed");
+      expect(missing.reasonKind).toBe("spawn_error");
+      expect(missing.reason).toContain("missing-engine");
 
       process.env.SWEEP_ENGINE_PATH = binary;
       writeFileSync(binary, "#!/bin/sh\nexit 0\n");
@@ -194,3 +197,136 @@ test.skipIf(process.platform === "win32")(
     }
   },
 );
+
+describe("lookupExecutable & cross-platform probe semantics", () => {
+  test("windowsShellFreeExtensions honors PATHEXT ordering while excluding shell scripts", () => {
+    expect(windowsShellFreeExtensions(".COM;.EXE;.BAT;.CMD")).toEqual([".com", ".exe"]);
+    expect(windowsShellFreeExtensions(" .CMD ; .EXE ; .BAT ")).toEqual([".exe"]);
+    expect(windowsShellFreeExtensions(".BAT;.CMD")).toEqual([".exe", ".com"]);
+  });
+
+  test("Windows lookup skips .CMD shim ahead of .exe and applies PATHEXT to extensionless paths", () => {
+    const files = new Set([
+      "C:\\shims\\sweep-engine.cmd",
+      "C:\\real\\sweep-engine.exe",
+      "C:\\tools\\my-engine.exe",
+    ]);
+    const has = (p: string) =>
+      files.has(p.toLowerCase()) || [...files].some((f) => f.toLowerCase() === p.toLowerCase());
+
+    const fromPath = lookupExecutable("sweep-engine", {
+      platform: "win32",
+      pathEnv: "C:\\shims;C:\\real",
+      pathextEnv: ".CMD;.BAT;.EXE",
+      cwd: "C:\\work",
+      isFile: has,
+    });
+    expect(fromPath.resolvedPath?.toLowerCase()).toBe("c:\\real\\sweep-engine.exe");
+
+    const fromAbs = lookupExecutable("C:\\tools\\my-engine", {
+      platform: "win32",
+      pathEnv: "",
+      pathextEnv: ".CMD;.EXE",
+      cwd: "C:\\work",
+      isFile: has,
+    });
+    expect(fromAbs.resolvedPath?.toLowerCase()).toBe("c:\\tools\\my-engine.exe");
+  });
+
+  test("configured SWEEP_ENGINE_PATH miss never reports not_installed silently (all platforms)", () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-probe-miss-"));
+    const previous = process.env.SWEEP_ENGINE_PATH;
+    try {
+      const missingPath = join(root, "does-not-exist-engine");
+      process.env.SWEEP_ENGINE_PATH = missingPath;
+      const probe = probeRustEngine();
+      expect(probe.available).toBe(false);
+      expect(probe.reasonKind).toBe("spawn_error");
+      expect(probe.reason).toContain("not found");
+    } finally {
+      if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previous;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("real executable probe resolves extensionless SWEEP_ENGINE_PATH and skips .CMD shims on Windows", () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-probe-native-"));
+    const previousEngine = process.env.SWEEP_ENGINE_PATH;
+    const previousPath = process.env.PATH;
+    const previousPathext = process.env.PATHEXT;
+    try {
+      const dir1 = join(root, "first");
+      const dir2 = join(root, "second");
+      mkdirSync(dir1, { recursive: true });
+      mkdirSync(dir2, { recursive: true });
+
+      const ext = process.platform === "win32" ? ".exe" : "";
+      const realEngine = join(dir2, `sweep-engine${ext}`);
+      // Bun itself exits 0 on `--version` on every platform including Windows.
+      copyFileSync(process.execPath, realEngine);
+      if (process.platform !== "win32") chmodSync(realEngine, 0o755);
+
+      if (process.platform === "win32") {
+        // Put a .CMD shim ahead of the real .exe on PATH and verify it is skipped.
+        writeFileSync(join(dir1, "sweep-engine.CMD"), "@echo off\r\nexit /b 1\r\n");
+        process.env.PATHEXT = ".CMD;.BAT;.EXE";
+        process.env.PATH = `${dir1}${delimiter}${dir2}`;
+        process.env.SWEEP_ENGINE_PATH = "sweep-engine";
+        const viaPath = probeRustEngine();
+        expect(viaPath.available).toBe(true);
+        expect(viaPath.resolvedPath?.toLowerCase()).toBe(realEngine.toLowerCase());
+
+        // Extensionless absolute SWEEP_ENGINE_PATH must find sibling .exe via PATHEXT.
+        process.env.SWEEP_ENGINE_PATH = join(dir2, "sweep-engine");
+        const viaAbs = probeRustEngine();
+        expect(viaAbs.available).toBe(true);
+        expect(viaAbs.resolvedPath?.toLowerCase()).toBe(realEngine.toLowerCase());
+      } else {
+        // Put a non-executable regular file ahead of the working binary on POSIX PATH.
+        const nonExec = join(dir1, "sweep-engine");
+        writeFileSync(nonExec, "#!/bin/sh\nexit 0\n");
+        chmodSync(nonExec, 0o644);
+        process.env.PATH = `${dir1}${delimiter}${dir2}`;
+        process.env.SWEEP_ENGINE_PATH = "sweep-engine";
+        const viaPath = probeRustEngine();
+        expect(viaPath.available).toBe(true);
+        expect(viaPath.resolvedPath).toBe(realEngine);
+
+        // Preserve literal leading/trailing spaces in PATH directory names.
+        const spaceDir = join(root, " padded dir ");
+        mkdirSync(spaceDir);
+        const spaceEngine = join(spaceDir, "sweep-engine");
+        copyFileSync(process.execPath, spaceEngine);
+        chmodSync(spaceEngine, 0o755);
+        process.env.PATH = spaceDir;
+        const viaSpace = probeRustEngine();
+        expect(viaSpace.available).toBe(true);
+        expect(viaSpace.resolvedPath).toBe(spaceEngine);
+
+        // Empty PATH segment resolves cwd like POSIX execvp.
+        const emptySeg = lookupExecutable("sweep-engine", {
+          platform: "linux",
+          pathEnv: `:/nonexistent`,
+          cwd: dir2,
+        });
+        expect(emptySeg.resolvedPath).toBe(realEngine);
+
+        const trailingEmpty = lookupExecutable("sweep-engine", {
+          platform: "linux",
+          pathEnv: `/nonexistent:`,
+          cwd: dir2,
+        });
+        expect(trailingEmpty.resolvedPath).toBe(realEngine);
+      }
+    } finally {
+      if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previousEngine;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousPathext === undefined) delete process.env.PATHEXT;
+      else process.env.PATHEXT = previousPathext;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
