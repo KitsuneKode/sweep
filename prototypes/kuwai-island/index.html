@@ -357,17 +357,35 @@
       gap: 12px;
     }
 
-    /* Toolbar row: single CleanupPanel Segmented control + right chip & quiet panel actions */
-    .toolbar-row {
+    /* CleanupPanel viewSwitch sits on its own row; SweepPanel mounts its slim status/action row below it */
+    .header-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .view-switch-row {
+      display: flex;
+      align-items: center;
+    }
+    .sweep-subbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
+      flex-wrap: wrap;
+      gap: 6px 10px;
+      min-height: 28px;
     }
-    .toolbar-right {
+    .sweep-subbar-left {
       display: flex;
       align-items: center;
       gap: 6px;
+      min-width: 0;
+    }
+    .sweep-subbar-right {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
       flex-shrink: 0;
     }
 
@@ -657,7 +675,7 @@
 
     /* Empty state (Sweep not installed) */
     .empty-state {
-      padding: 18px 14px;
+      padding: 18px 8px;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -691,14 +709,14 @@
       justify-content: space-between;
       gap: 10px;
       width: 100%;
-      max-width: 560px;
-      padding: 8px 10px 8px 14px;
+      max-width: 552px;
+      padding: 8px 10px 8px 12px;
       border-radius: 10px;
       background: rgba(0, 0, 0, 0.45);
       border: 1px solid var(--edge-1);
       font-family: var(--font-mono);
-      font-size: 11px;
-      line-height: 1.45;
+      font-size: 10.5px;
+      line-height: 1.5;
       color: var(--text-primary);
       text-align: left;
     }
@@ -706,9 +724,12 @@
       font-family: inherit;
       user-select: all;
       white-space: normal;
-      overflow-wrap: break-word;
+      overflow-x: auto;
       flex: 1;
       min-width: 0;
+    }
+    .code-pill .cmd-tail {
+      white-space: nowrap;
     }
     .code-pill .btn {
       flex-shrink: 0;
@@ -956,7 +977,9 @@
 
   <script>
     (function () {
-      const INSTALL_CMD = "curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh";
+      const INSTALL_CMD_PREFIX = "curl -fsSL";
+      const INSTALL_CMD_TAIL = "https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh";
+      const INSTALL_CMD = `${INSTALL_CMD_PREFIX} ${INSTALL_CMD_TAIL}`;
 
       /* Crisp 14-15px Lucide-style inline SVG icons matching C+ & Kuwai glyph set */
       const ICONS = {
@@ -967,6 +990,7 @@
         usage: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 3 5-6"/></svg>',
         system: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>',
         cache: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>',
+        caches: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>',
         install: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
         build: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2M9 2v2M15 20v2M9 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>',
         custom: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
@@ -1020,7 +1044,7 @@
         { id: "rest-hidden", label: "1. Rest (hidden)", desc: "Default closed notch. Zero Sweep marks, zero polling, 0% CPU." },
         { id: "rest-capsule", label: "2. Rest (capsule)", desc: "Optional right-lane SysMarks capsule when idle/worktree bytes pass Settings.sweepMinGB." },
         { id: "hover-glance", label: "3. Hover (glance)", desc: "Island.preview('sweep') morphs NotchShape directly from top edge; strictly cache-only." },
-        { id: "expanded-settled", label: "4. Expanded (settled)", desc: "640 px Cleanup card: single Segmented bar, toolbar actions, C+ dot bar, single CTA." },
+        { id: "expanded-settled", label: "4. Expanded (settled)", desc: "640 px Cleanup card: viewSwitch row, Sweep slim sub-row, C+ dot bar, single CTA." },
         { id: "scanning", label: "5. Scanning", desc: "User-triggered scan only: ~total counting up, live path, progressive dots, Stop button." },
         { id: "settled-clean", label: "6. Settled (0 B)", desc: "Nothing reclaimable: empty dot track, calm confirmation, secondary Rescan." },
         { id: "stale-cache", label: "7. Stale cache (L4)", desc: "Instant first paint from cache with age chip; never auto-scans on battery." },
@@ -1038,7 +1062,7 @@
       ];
 
       let activeState = "expanded-settled";
-      let interactiveHot = null;
+      let interactiveHot = undefined; /* undefined = initial state default, null = explicitly unfocused, string = focused bucket */
       let copyState = "idle"; /* "idle" | "copied" | "failed" */
       let copyTimer = null;
 
@@ -1090,25 +1114,31 @@
           </div>`;
       }
 
-      /* Single CleanupPanel Segmented bar + right chip & quiet Rescan / Open terminal buttons */
+      /* CleanupPanel Segmented viewSwitch on its own row + Sweep's slim status/action row directly below */
       function renderToolbar(activeTab, chipHtml, busyRescan = false, showActions = true) {
         return `
-          <div class="toolbar-row">
-            <div class="segmented" role="tablist" aria-label="Cleanup sections">
-              <button type="button" class="seg-opt peer" disabled tabindex="-1">Skills</button>
-              <button type="button" class="seg-opt ${activeTab === "projects" ? "active" : ""}" role="tab" aria-selected="${activeTab === "projects"}" data-jump="expanded-settled">Projects</button>
-              <button type="button" class="seg-opt ${activeTab === "space" ? "active" : ""}" role="tab" aria-selected="${activeTab === "space"}" data-jump="space-report">Space</button>
-              <button type="button" class="seg-opt peer" disabled tabindex="-1">Caches</button>
+          <div class="header-stack">
+            <div class="view-switch-row">
+              <div class="segmented" role="tablist" aria-label="Cleanup sections">
+                <button type="button" class="seg-opt peer" disabled tabindex="-1">Skills</button>
+                <button type="button" class="seg-opt ${activeTab === "projects" ? "active" : ""}" role="tab" aria-selected="${activeTab === "projects"}" data-jump="expanded-settled">Projects</button>
+                <button type="button" class="seg-opt ${activeTab === "space" ? "active" : ""}" role="tab" aria-selected="${activeTab === "space"}" data-jump="space-report">Space</button>
+                <button type="button" class="seg-opt peer" disabled tabindex="-1">Caches</button>
+              </div>
             </div>
-            <div class="toolbar-right">
-              ${chipHtml || ""}
+            <div class="sweep-subbar">
+              <div class="sweep-subbar-left">
+                ${chipHtml || ""}
+              </div>
               ${showActions ? `
-                <button type="button" class="btn quiet icon-only" title="Rescan" aria-label="Rescan" data-jump="scanning">
-                  <span class="${busyRescan ? "spin" : ""}" style="display:grid;place-items:center;">${ICONS.refresh}</span>
-                </button>
-                <button type="button" class="btn quiet icon-only" title="Open Sweep in terminal" aria-label="Open Sweep in terminal" data-jump="review-handoff">
-                  ${ICONS.terminal}
-                </button>` : ""}
+                <div class="sweep-subbar-right">
+                  <button type="button" class="btn quiet icon-only" title="Rescan" aria-label="Rescan" data-jump="scanning">
+                    <span class="${busyRescan ? "spin" : ""}" style="display:grid;place-items:center;">${ICONS.refresh}</span>
+                  </button>
+                  <button type="button" class="btn quiet icon-only" title="Open Sweep in terminal" aria-label="Open Sweep in terminal" data-jump="review-handoff">
+                    ${ICONS.terminal}
+                  </button>
+                </div>` : ""}
             </div>
           </div>`;
       }
@@ -1227,7 +1257,7 @@
             </div>`;
         } else if (id === "expanded-settled" || id === "point-hover" || id === "stale-cache" || id === "review-handoff") {
           const defaultHot = id === "point-hover" ? "build" : null;
-          const hotId = interactiveHot !== null ? interactiveHot : defaultHot;
+          const hotId = interactiveHot !== undefined ? interactiveHot : defaultHot;
           const hotBucket = PROJECT_BUCKETS.find(b => b.id === hotId) || null;
           const isStale = id === "stale-cache";
           const isHandoff = id === "review-handoff";
@@ -1571,7 +1601,7 @@
                       <div class="empty-title">Sweep is not installed</div>
                       <div class="empty-body">Install Sweep to inspect project build artifacts and reclaim disk space from the island.</div>
                       <div class="code-pill">
-                        <code>${INSTALL_CMD}</code>
+                        <code>${INSTALL_CMD_PREFIX} <span class="cmd-tail">${INSTALL_CMD_TAIL}</span></code>
                         <button type="button" class="btn secondary icon-only" id="copy-cmd" title="Copy install command" aria-label="Copy install command">
                           ${copyState === "copied" ? `<span style="color:var(--green);display:grid;place-items:center;">${ICONS.check}</span>` : ICONS.copy}
                         </button>
@@ -1629,7 +1659,7 @@
               </div>
             </div>`;
         } else if (id === "space-report") {
-          const hotId = interactiveHot !== null ? interactiveHot : "photos";
+          const hotId = interactiveHot !== undefined ? interactiveHot : "photos";
           const hotCat = SPACE_CATEGORIES.find(c => c.id === hotId) || null;
           /* Space view ALWAYS keeps volume total as the single bold headline; focused category goes on the dim line */
           const subLineHtml = hotCat
@@ -1693,7 +1723,7 @@
       function bindStageEvents() {
         document.querySelectorAll("[data-jump]").forEach(el => {
           el.addEventListener("click", () => {
-            interactiveHot = null;
+            interactiveHot = undefined;
             copyState = "idle";
             setState(el.getAttribute("data-jump"));
           });
@@ -1732,6 +1762,10 @@
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   setBucketFocus(bucket, true);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  interactiveHot = null;
+                  renderState(activeState, bucket);
                 }
               });
             }
@@ -1739,7 +1773,12 @@
           const card = document.querySelector(".kuwai-card");
           if (card) {
             card.addEventListener("mouseleave", () => {
-              if (interactiveHot !== null) {
+              const currentHot = activeState === "space-report"
+                ? (interactiveHot !== undefined ? interactiveHot : "photos")
+                : activeState === "point-hover"
+                  ? (interactiveHot !== undefined ? interactiveHot : "build")
+                  : (interactiveHot ?? null);
+              if (currentHot !== null) {
                 interactiveHot = null;
                 renderState(activeState);
               }
@@ -1762,7 +1801,7 @@
       function setState(id) {
         if (!STATES.some(s => s.id === id)) return;
         activeState = id;
-        interactiveHot = null;
+        interactiveHot = undefined;
         copyState = "idle";
         renderState(activeState);
       }
