@@ -2,13 +2,32 @@ name: CLI Binaries
 
 # Builds standalone `sweep` executables (Bun compile with embedded OpenTUI
 # native assets and embedded Rust engine) and attaches them to the GitHub
-# release for the tag. Intentionally decoupled from release.yml's npm flow.
+# release for a qualified `v*` tag. Downstream Homebrew/Scoop updates run in
+# the protected `release-downstream` environment from canonical `main`.
 
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Scope: all (build, attach, downstream) or downstream (retry Homebrew/Scoop from existing GitHub Release)"
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - downstream
+      downstream:
+        description: "Downstream channels to update for stable releases"
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - homebrew
+          - scoop
 
 concurrency:
   group: cli-binaries-${{ github.ref }}
@@ -20,6 +39,7 @@ permissions:
 jobs:
   binaries:
     name: ${{ matrix.id }}
+    if: inputs.target != 'downstream'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -37,6 +57,7 @@ jobs:
             zigbuild: false
             engine_abi_mode: ""
             standalone_abi_mode: ""
+            embedded_so_mode: ""
             container: ""
           - id: darwin-x64
             os: macos-15-intel
@@ -45,6 +66,7 @@ jobs:
             zigbuild: false
             engine_abi_mode: ""
             standalone_abi_mode: ""
+            embedded_so_mode: ""
             container: ""
           - id: linux-x64
             os: ubuntu-latest
@@ -53,6 +75,7 @@ jobs:
             zigbuild: true
             engine_abi_mode: glibc
             standalone_abi_mode: glibc
+            embedded_so_mode: glibc-so
             container: debian:11-slim
           - id: linux-x64-musl
             os: ubuntu-latest
@@ -61,6 +84,7 @@ jobs:
             zigbuild: false
             engine_abi_mode: musl-static
             standalone_abi_mode: musl-dynamic
+            embedded_so_mode: musl-so
             container: alpine:3.21
           - id: linux-arm64
             os: ubuntu-24.04-arm
@@ -69,6 +93,7 @@ jobs:
             zigbuild: true
             engine_abi_mode: glibc
             standalone_abi_mode: glibc
+            embedded_so_mode: glibc-so
             container: debian:11-slim
           - id: linux-arm64-musl
             os: ubuntu-24.04-arm
@@ -77,6 +102,7 @@ jobs:
             zigbuild: false
             engine_abi_mode: musl-static
             standalone_abi_mode: musl-dynamic
+            embedded_so_mode: musl-so
             container: alpine:3.21
           - id: win-x64
             os: windows-latest
@@ -85,6 +111,7 @@ jobs:
             zigbuild: false
             engine_abi_mode: ""
             standalone_abi_mode: ""
+            embedded_so_mode: ""
             container: ""
 
     steps:
@@ -110,12 +137,14 @@ jobs:
       - name: Setup Zig for glibc 2.17 floor
         if: matrix.zigbuild
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.1
 
       - name: Install cargo-zigbuild
         if: matrix.zigbuild
         uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         with:
-          tool: cargo-zigbuild
+          tool: cargo-zigbuild@0.24.1
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
@@ -145,12 +174,18 @@ jobs:
               engine_src="target/${{ matrix.cargo_target }}/release/sweep-engine"
               ;;
           esac
+          metafile="build-${{ matrix.id }}.meta.json"
           cp "$engine_src" "$engine_out"
-          bun run scripts/build-standalone.ts "${{ matrix.bun_target }}" "$out" --engine "$engine_src"
-          echo "OUT=$out" >> "$GITHUB_ENV"
-          echo "ENGINE_OUT=$engine_out" >> "$GITHUB_ENV"
+          bun run scripts/build-standalone.ts "${{ matrix.bun_target }}" "$out" \
+            --engine "$engine_src" \
+            --metafile "$metafile"
+          {
+            echo "OUT=$out"
+            echo "ENGINE_OUT=$engine_out"
+            echo "BUILD_METAFILE=$metafile"
+          } >> "$GITHUB_ENV"
 
-      - name: Verify Linux ELF ABI floor
+      - name: Verify Linux ELF ABI floor (standalone, embedded engine, and OpenTUI .so)
         if: matrix.engine_abi_mode != ''
         shell: bash
         run: |
@@ -161,7 +196,10 @@ jobs:
           bun run packages/engine-native/scripts/check-elf-abi.ts \
             --binary "./$OUT" \
             --mode "${{ matrix.standalone_abi_mode }}" \
-            --max-glibc 2.17
+            --max-glibc 2.17 \
+            --metafile "./$BUILD_METAFILE" \
+            --embedded-so-mode "${{ matrix.embedded_so_mode }}" \
+            --verify-embedded "./$ENGINE_OUT:${{ matrix.engine_abi_mode }}"
 
       - name: Smoke - host standalone and engine
         if: matrix.standalone_abi_mode != 'musl-dynamic'
@@ -245,6 +283,74 @@ jobs:
             ${{ env.ENGINE_OUT }}.gz
             ${{ env.ENGINE_OUT }}.gz.sha256
 
+  qualify-homebrew:
+    name: qualify Homebrew formula
+    needs: binaries
+    if: inputs.target != 'downstream'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          merge-multiple: true
+          path: dist-bin
+
+      - name: Smoke-install rendered formula from local tap with real .gz archive
+        shell: bash
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: |
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          version="$(node -p "require('./apps/cli/package.json').version")"
+          tmp="$(mktemp -d)"
+          server_pid=""
+          cleanup() {
+            if [ -n "$server_pid" ]; then
+              kill "$server_pid" 2>/dev/null || true
+            fi
+            brew uninstall --force local/sweep-smoke/sweep >/dev/null 2>&1 || true
+            brew untap local/sweep-smoke >/dev/null 2>&1 || true
+            rm -rf "$tmp"
+          }
+          trap cleanup EXIT
+
+          # Render using the exact repository template and built checksums.
+          bun run apps/cli/scripts/render-packaging.ts homebrew \
+            --version "$version" \
+            --dist-dir dist-bin \
+            --template packaging/homebrew/sweep.rb.tmpl \
+            --out "$tmp/sweep.rb"
+
+          # Serve the built .gz archive locally and point the formula URL at it.
+          python3 -m http.server 18765 --bind 127.0.0.1 --directory dist-bin >/dev/null 2>&1 &
+          server_pid=$!
+          sleep 1
+
+          brew tap-new --no-git local/sweep-smoke >/dev/null
+          tap_repo="$(brew --repository local/sweep-smoke)"
+          mkdir -p "$tap_repo/Formula"
+          sed "s|https://github.com/KitsuneKode/sweep/releases/download/v#{version}|http://127.0.0.1:18765|g" \
+            "$tmp/sweep.rb" > "$tap_repo/Formula/sweep.rb"
+
+          brew style local/sweep-smoke/sweep
+          brew install --formula local/sweep-smoke/sweep
+          installed_ver="$("$(brew --prefix)/bin/sweep" --version)"
+          echo "brew installed sweep version: $installed_ver"
+          printf '%s\n' "$installed_ver" | grep -q "$version"
+          test -s "$(brew --prefix)/etc/bash_completion.d/sweep"
+          test -s "$(brew --prefix)/share/zsh/site-functions/_sweep"
+          test -s "$(brew --prefix)/share/fish/vendor_completions.d/sweep.fish"
+          brew test local/sweep-smoke/sweep
+
   attach:
     name: attach binaries to release
     needs: binaries
@@ -252,17 +358,55 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-    if: startsWith(github.ref, 'refs/tags/v')
+      actions: read
+    if: |
+      always() &&
+      github.repository == 'KitsuneKode/sweep' &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      (inputs.target == 'downstream' || needs.binaries.result == 'success')
+    outputs:
+      version: ${{ steps.version.outputs.number }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      tag_sha: ${{ steps.version.outputs.tag_sha }}
+      qualified: ${{ steps.qualify.outputs.qualified }}
     steps:
       - name: Download all binaries
+        if: inputs.target != 'downstream'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           merge-multiple: true
           path: dist-bin
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          path: src
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Fetch canonical main ref
+        working-directory: src
+        run: git fetch origin main:refs/remotes/origin/main
+
+      - name: Qualify release tag against canonical main, CI, and Release workflow
+        id: qualify
+        working-directory: src
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bun run apps/cli/scripts/verify-release-tag.ts \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.ref }}" \
+            --main-ref origin/main
+          echo "qualified=true" >> "$GITHUB_OUTPUT"
+
       - name: Resolve release version
         id: version
         shell: bash
+        working-directory: src
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -272,28 +416,17 @@ jobs:
           esac
           prerelease="false"
           [[ "$version" != *-* ]] || prerelease="true"
-          echo "number=$version" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          tag_sha="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
+          {
+            echo "number=$version"
+            echo "prerelease=$prerelease"
+            echo "tag_sha=$tag_sha"
+          } >> "$GITHUB_OUTPUT"
 
       # The release says what changed: its notes are this version's changelog
-      # section, never an empty page beside the binaries. Checkout packaging
-      # templates and the renderer from this exact release ref as well so tap
-      # and Scoop updates never run unpinned scripts from external repos.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: |
-            apps/cli/CHANGELOG.md
-            apps/cli/scripts/render-packaging.ts
-            packaging/homebrew/sweep.rb.tmpl
-            packaging/scoop/sweep.json
-          sparse-checkout-cone-mode: false
-          path: src
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-
+      # section, never an empty page beside the binaries.
       - name: Release notes from the changelog
+        if: inputs.target != 'downstream'
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.number }}
@@ -305,6 +438,7 @@ jobs:
           fi
 
       - name: Attach to GitHub release
+        if: inputs.target != 'downstream'
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: dist-bin/*
@@ -313,9 +447,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # The tap lives in a separate repo, so GITHUB_TOKEN cannot reach it -
-      # a fine-grained PAT with contents:write on homebrew-tap is required.
-      # Skip cleanly until the secret exists rather than failing the release.
+  update-homebrew:
+    name: update Homebrew tap
+    needs: attach
+    environment: release-downstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    if: |
+      github.repository == 'KitsuneKode/sweep' &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.attach.result == 'success' &&
+      needs.attach.outputs.qualified == 'true' &&
+      needs.attach.outputs.prerelease != 'true' &&
+      (inputs.downstream == '' || inputs.downstream == 'all' || inputs.downstream == 'homebrew')
+    steps:
       - name: Check for tap token
         id: tap
         env:
@@ -328,19 +475,53 @@ jobs:
             echo "::notice::TAP_GITHUB_TOKEN not set; skipping Homebrew formula bump"
           fi
 
+      # Always render templates and scripts from canonical `main`, never from tag content.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.tap.outputs.present == 'true'
+        with:
+          ref: main
+          sparse-checkout: |
+            apps/cli/scripts/render-packaging.ts
+            packaging/homebrew/sweep.rb.tmpl
+          sparse-checkout-cone-mode: false
+          path: main-src
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: steps.tap.outputs.present == 'true'
+        with:
+          bun-version: 1.4.2
+
+      - name: Download release checksums
+        if: steps.tap.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.attach.outputs.version }}
+        run: |
+          mkdir -p dist-bin
+          gh release download "v$VERSION" \
+            --repo KitsuneKode/sweep \
+            -p 'sweep-darwin-arm64.gz.sha256' \
+            -p 'sweep-darwin-x64.gz.sha256' \
+            -p 'sweep-linux-arm64.gz.sha256' \
+            -p 'sweep-linux-x64.gz.sha256' \
+            -D dist-bin
+
       - name: Render and push Homebrew tap formula
-        if: steps.tap.outputs.present == 'true' && steps.version.outputs.prerelease != 'true' && startsWith(github.ref, 'refs/tags/v')
+        if: steps.tap.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.number }}
+          VERSION: ${{ needs.attach.outputs.version }}
         run: |
           version="$VERSION"
+          # Bind git push authentication to the repo-scoped GH_TOKEN without echoing it.
+          gh auth setup-git --hostname github.com
           gh repo clone KitsuneKode/homebrew-tap tap -- --depth 1
-          bun run src/apps/cli/scripts/render-packaging.ts homebrew \
+          bun run main-src/apps/cli/scripts/render-packaging.ts homebrew \
             --version "$version" \
             --dist-dir dist-bin \
-            --template src/packaging/homebrew/sweep.rb.tmpl \
-            --out tap/Formula/sweep.rb
+            --template main-src/packaging/homebrew/sweep.rb.tmpl \
+            --out tap/Formula/sweep.rb \
+            --reject-downgrade
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -349,10 +530,25 @@ jobs:
             echo "formula already at $version"
           else
             git commit -m "sweep $version"
-            git push
+            git push origin HEAD
           fi
 
-      # Scoop bucket lives in a separate repo; skip cleanly if no secret exists.
+  update-scoop:
+    name: update Scoop bucket
+    needs: attach
+    environment: release-downstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    if: |
+      github.repository == 'KitsuneKode/sweep' &&
+      startsWith(github.ref, 'refs/tags/v') &&
+      needs.attach.result == 'success' &&
+      needs.attach.outputs.qualified == 'true' &&
+      needs.attach.outputs.prerelease != 'true' &&
+      (inputs.downstream == '' || inputs.downstream == 'all' || inputs.downstream == 'scoop')
+    steps:
       - name: Check for Scoop bucket token
         id: scoop
         env:
@@ -365,20 +561,51 @@ jobs:
             echo "::notice::SCOOP_BUCKET_TOKEN not set; skipping Scoop bucket update"
           fi
 
+      # Always render templates and scripts from canonical `main`, never from tag content.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.scoop.outputs.present == 'true'
+        with:
+          ref: main
+          sparse-checkout: |
+            apps/cli/scripts/render-packaging.ts
+            packaging/scoop/sweep.json
+          sparse-checkout-cone-mode: false
+          path: main-src
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: steps.scoop.outputs.present == 'true'
+        with:
+          bun-version: 1.4.2
+
+      - name: Download Windows checksum
+        if: steps.scoop.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.attach.outputs.version }}
+        run: |
+          mkdir -p dist-bin
+          gh release download "v$VERSION" \
+            --repo KitsuneKode/sweep \
+            -p 'sweep-win-x64.exe.sha256' \
+            -D dist-bin
+
       - name: Render and push Scoop bucket manifest
-        if: steps.scoop.outputs.present == 'true' && steps.version.outputs.prerelease != 'true' && startsWith(github.ref, 'refs/tags/v')
+        if: steps.scoop.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-          VERSION: ${{ steps.version.outputs.number }}
+          VERSION: ${{ needs.attach.outputs.version }}
         run: |
           version="$VERSION"
+          # Bind git push authentication to the repo-scoped GH_TOKEN without echoing it.
+          gh auth setup-git --hostname github.com
           gh repo clone KitsuneKode/scoop-bucket scoop -- --depth 1
           mkdir -p scoop/bucket
-          bun run src/apps/cli/scripts/render-packaging.ts scoop \
+          bun run main-src/apps/cli/scripts/render-packaging.ts scoop \
             --version "$version" \
             --dist-dir dist-bin \
-            --template src/packaging/scoop/sweep.json \
-            --out scoop/bucket/sweep.json
+            --template main-src/packaging/scoop/sweep.json \
+            --out scoop/bucket/sweep.json \
+            --reject-downgrade
           cd scoop
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -387,5 +614,5 @@ jobs:
             echo "Scoop manifest already at $version"
           else
             git commit -m "sweep $version"
-            git push
+            git push origin HEAD
           fi

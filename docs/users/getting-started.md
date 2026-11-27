@@ -7,7 +7,10 @@ description: Install Sweep and complete your first read-only review.
 
 ### Standalone binary (no Node or Bun required)
 
-macOS and Linux (glibc 2.17+ and musl/Alpine; minimal Alpine containers need `apk add libstdc++ libgcc` for the standalone binary):
+macOS and Linux (glibc 2.17+; Linux musl/Alpine downloads ship starting with the
+next release `v0.5.4+`, where minimal Alpine images need
+`apk add libstdc++ libgcc` before `install.sh` because the musl standalone is
+dynamically linked):
 
 ```sh
 brew install kitsunekode/tap/sweep
@@ -21,9 +24,18 @@ Windows (x64, PowerShell):
 irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 | iex
 ```
 
-Or with [Scoop](https://scoop.sh):
+Or download and inspect `install.ps1` first (respects execution policy):
 
 ```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+[Scoop](https://scoop.sh) support (`https://github.com/KitsuneKode/scoop-bucket`)
+will be available starting with the next release (`v0.5.4+`):
+
+```powershell
+# Available from v0.5.4+:
 scoop bucket add kitsunekode https://github.com/KitsuneKode/scoop-bucket
 scoop install sweep
 ```
@@ -34,7 +46,7 @@ build provenance attestations on any downloaded release binary or `.gz` archive
 with the GitHub CLI:
 
 ```sh
-gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/v0.5.4
 ```
 
 ### npm or Bun

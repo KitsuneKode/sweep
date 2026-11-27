@@ -30,6 +30,7 @@ class Sweep < Formula
     arch = Hardware::CPU.arm? ? "arm64" : "x64"
     os = OS.mac? ? "darwin" : "linux"
     bin.install "sweep-#{os}-#{arch}" => "sweep"
+    chmod 0755, bin/"sweep"
     generate_completions_from_executable(bin/"sweep", "completions")
   end
 

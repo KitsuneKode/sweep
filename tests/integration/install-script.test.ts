@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -35,11 +36,11 @@ function hostAssetName(libc: "glibc" | "musl" = "glibc"): string | null {
 function writeFakeReleaseAsset(
   dir: string,
   assetName: string,
-  scriptBody: string,
+  scriptBody: string | Buffer,
   options: { badChecksum?: boolean; omitGzip?: boolean } = {},
 ): void {
   mkdirSync(dir, { recursive: true });
-  const raw = Buffer.from(scriptBody, "utf8");
+  const raw = Buffer.isBuffer(scriptBody) ? scriptBody : Buffer.from(scriptBody, "utf8");
   const rawSum = options.badChecksum ? "0".repeat(64) : sha256(raw);
   writeFileSync(join(dir, assetName), raw);
   writeFileSync(join(dir, `${assetName}.sha256`), `${rawSum}  ${assetName}\n`);
@@ -93,6 +94,17 @@ describe.if(isPosixHost)("install.sh", () => {
       asset,
       "#!/usr/bin/env sh\necho 'incompatible glibc' >&2\nexit 127\n",
     );
+    writeFakeReleaseAsset(
+      join(releaseRoot, "download/v0.5.4-alpine-missing-cpp"),
+      asset,
+      "#!/usr/bin/env sh\necho 'Error relocating /tmp/sweep: libstdc++.so.6: symbol not found' >&2\nexit 127\n",
+    );
+    // Highly compressible 128 KiB payload to test bounded decompression cap.
+    writeFakeReleaseAsset(
+      join(releaseRoot, "download/v0.5.5-bomb"),
+      asset,
+      Buffer.alloc(128 * 1024, "A"),
+    );
 
     server = Bun.serve({
       hostname: "127.0.0.1",
@@ -100,6 +112,9 @@ describe.if(isPosixHost)("install.sh", () => {
       fetch(req) {
         const url = new URL(req.url);
         requestedPaths.push(url.pathname);
+        if (url.pathname.includes("v0.5.9-http403")) {
+          return new Response("forbidden", { status: 403 });
+        }
         const filePath = join(releaseRoot, url.pathname.replace(/^\/+/, ""));
         if (!existsSync(filePath)) {
           return new Response("not found", { status: 404 });
@@ -168,6 +183,9 @@ describe.if(isPosixHost)("install.sh", () => {
       "chmod",
       "mv",
       "rm",
+      "wc",
+      "head",
+      "cat",
       "ldd",
     ]) {
       const resolved = Bun.which(tool);
@@ -235,6 +253,123 @@ describe.if(isPosixHost)("install.sh", () => {
     expect(proc.stderr).toContain("failed --version");
     expect(readFileSync(existing, "utf8")).toContain("0.5.1-working");
     expect(readdirSync(installDir)).toEqual(["sweep"]);
+  });
+
+  test("prints Alpine apk add hint when staged binary fails due to missing libstdc++/libgcc", async () => {
+    const installDir = join(root, "install-alpine-hint");
+    const proc = await runInstall({
+      SWEEP_INSTALL_DIR: installDir,
+      SWEEP_VERSION: "0.5.4-alpine-missing-cpp",
+    });
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("apk add libstdc++ libgcc");
+  });
+
+  test("refuses cleanly when destination $INSTALL_DIR/sweep is a directory", async () => {
+    const installDir = join(root, "install-dest-is-dir");
+    const destDir = join(installDir, "sweep");
+    mkdirSync(destDir, { recursive: true });
+
+    const proc = await runInstall({
+      SWEEP_INSTALL_DIR: installDir,
+      SWEEP_VERSION: "0.5.2",
+    });
+    expect(proc.exitCode).not.toBe(0);
+    expect(proc.stderr).toContain("is a directory");
+    expect(statSync(destDir).isDirectory()).toBe(true);
+    expect(existsSync(join(destDir, "sweep"))).toBe(false);
+  });
+
+  test("fails cleanly on non-writable install directory while preserving existing binary", async () => {
+    if (process.getuid?.() === 0) return;
+    const installDir = join(root, "install-readonly");
+    mkdirSync(installDir, { recursive: true });
+    const existing = join(installDir, "sweep");
+    writeFileSync(existing, "#!/usr/bin/env sh\necho '0.5.1-readonly'\n");
+    chmodSync(existing, 0o755);
+    chmodSync(installDir, 0o555);
+    try {
+      const proc = await runInstall({
+        SWEEP_INSTALL_DIR: installDir,
+        SWEEP_VERSION: "0.5.2",
+      });
+      expect(proc.exitCode).not.toBe(0);
+      expect(readFileSync(existing, "utf8")).toContain("0.5.1-readonly");
+    } finally {
+      chmodSync(installDir, 0o755);
+    }
+  });
+
+  test("caps download size and decompression size before executing or installing", async () => {
+    const dlDir = join(root, "install-cap-dl");
+    const dlProc = await runInstall({
+      SWEEP_INSTALL_DIR: dlDir,
+      SWEEP_VERSION: "0.5.2",
+      SWEEP_TEST_MAX_DOWNLOAD_BYTES: "8",
+    });
+    expect(dlProc.exitCode).not.toBe(0);
+    expect(dlProc.stderr).toContain("exceeds maximum allowed size");
+    expect(existsSync(join(dlDir, "sweep"))).toBe(false);
+
+    const bombDir = join(root, "install-cap-decomp");
+    const bombProc = await runInstall({
+      SWEEP_INSTALL_DIR: bombDir,
+      SWEEP_VERSION: "0.5.5-bomb",
+      SWEEP_TEST_MAX_DECOMPRESSED_BYTES: "4096",
+    });
+    expect(bombProc.exitCode).not.toBe(0);
+    expect(bombProc.stderr).toContain("decompressed binary exceeds maximum allowed size");
+    expect(existsSync(join(bombDir, "sweep"))).toBe(false);
+  });
+
+  test("distinguishes HTTP 404 (missing asset), HTTP 403, curl write error (exit 23), and network error", async () => {
+    const missingDir = join(root, "install-404");
+    const missingProc = await runInstall({
+      SWEEP_INSTALL_DIR: missingDir,
+      SWEEP_VERSION: "9.9.9-does-not-exist",
+    });
+    expect(missingProc.exitCode).not.toBe(0);
+    expect(missingProc.stderr).toContain("HTTP 404");
+    expect(missingProc.stderr).toContain("release asset missing");
+
+    const http403Dir = join(root, "install-403");
+    const http403Proc = await runInstall({
+      SWEEP_INSTALL_DIR: http403Dir,
+      SWEEP_VERSION: "0.5.9-http403",
+    });
+    expect(http403Proc.exitCode).not.toBe(0);
+    expect(http403Proc.stderr).toContain("HTTP 403");
+    expect(http403Proc.stderr).not.toContain("release asset missing");
+
+    // Simulate curl exit 23 (write error) via a fake curl binary.
+    const writeErrBin = join(root, "fake-curl-23");
+    mkdirSync(writeErrBin, { recursive: true });
+    writeFileSync(join(writeErrBin, "curl"), "#!/usr/bin/env sh\nexit 23\n");
+    chmodSync(join(writeErrBin, "curl"), 0o755);
+    const writeErrProc = await runInstall({
+      SWEEP_INSTALL_DIR: join(root, "install-curl23"),
+      SWEEP_VERSION: "0.5.2",
+      PATH: `${writeErrBin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+    });
+    expect(writeErrProc.exitCode).not.toBe(0);
+    expect(writeErrProc.stderr).toContain("write error");
+    expect(writeErrProc.stderr).toContain("curl exit 23");
+    expect(writeErrProc.stderr).not.toContain("release asset missing");
+
+    // Simulate curl exit 7 (network error) via a fake curl binary.
+    const netErrBin = join(root, "fake-curl-7");
+    mkdirSync(netErrBin, { recursive: true });
+    writeFileSync(join(netErrBin, "curl"), "#!/usr/bin/env sh\nexit 7\n");
+    chmodSync(join(netErrBin, "curl"), 0o755);
+    const netErrProc = await runInstall({
+      SWEEP_INSTALL_DIR: join(root, "install-curl7"),
+      SWEEP_VERSION: "0.5.2",
+      PATH: `${netErrBin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+    });
+    expect(netErrProc.exitCode).not.toBe(0);
+    expect(netErrProc.stderr).toContain("network error");
+    expect(netErrProc.stderr).toContain("curl exit 7");
+    expect(netErrProc.stderr).not.toContain("release asset missing");
   });
 
   test("selects musl asset when musl is detected on Linux", async () => {

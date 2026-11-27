@@ -7,6 +7,7 @@ import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
 import { findProjectConfigPath, validateProjectConfigFile } from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
+import { detectLinuxLibc, type DetectedLinuxLibc } from "@kitsunekode/sweep-core/native-platforms";
 import {
   isRustEngineAvailable,
   resolveRustEngineBinary,
@@ -34,6 +35,17 @@ export type DoctorCheck = {
   ok: boolean;
   detail: string;
 };
+
+export function describeMissingRustEngine(
+  platform: string = process.platform,
+  linuxLibc: DetectedLinuxLibc = platform === "linux" ? detectLinuxLibc() : "unknown",
+  envEnginePath: string | undefined = process.env.SWEEP_ENGINE_PATH,
+): string {
+  if (!envEnginePath && platform === "linux" && linuxLibc === "unknown") {
+    return "not found (Linux libc detection was inconclusive; no native engine package selected, falling back to JS — set SWEEP_ENGINE_PATH to override)";
+  }
+  return "not found";
+}
 
 function targetIsDirectory(targetDir: string): boolean {
   try {
@@ -160,7 +172,11 @@ export async function collectDoctorChecks(
         ? "available"
         : "reinstall @kitsunekode/sweep; sweep ui includes @opentui/core",
     },
-    { name: "rust_engine", ok: rustOk, detail: rustOk ? rustBinary : "not found" },
+    {
+      name: "rust_engine",
+      ok: rustOk,
+      detail: rustOk ? rustBinary : describeMissingRustEngine(),
+    },
     {
       name: "rust_apply_safety",
       ok: rustSafetyOk,

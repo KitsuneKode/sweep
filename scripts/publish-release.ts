@@ -48,19 +48,101 @@ function run(command: string, args: string[], options: { cwd?: string } = {}): v
   }
 }
 
+function npmViewStatus(spec: string): {
+  status: "found" | "not_found" | "error";
+  output: string;
+  error?: string;
+} {
+  const result = spawnSync("npm", ["view", spec, "version"], {
+    encoding: "utf8",
+    timeout: 30_000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdout = result.stdout?.trim() ?? "";
+  const stderr = result.stderr?.trim() ?? "";
+  if (result.status === 0 && stdout.length > 0) {
+    return { status: "found", output: stdout };
+  }
+  const combined = `${stdout}\n${stderr}`;
+  if (/\bE404\b|404 Not Found|is not in this registry/i.test(combined)) {
+    return { status: "not_found", output: stdout };
+  }
+  return {
+    status: "error",
+    output: stdout,
+    error: combined.trim() || `npm view ${spec} exited with status ${String(result.status)}`,
+  };
+}
+
 /**
  * True when this exact version is already on the registry.
  *
- * Publishing six packages behind an interactive 2FA prompt is easy to
+ * Publishing seven packages behind an interactive 2FA prompt is easy to
  * interrupt, and npm refuses to republish a version. Without this a retry dies
  * on the first package that already made it, stranding the release half done.
  */
 function alreadyPublished(name: string, version: string): boolean {
-  const result = spawnSync("npm", ["view", `${name}@${version}`, "version"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-  return result.status === 0 && result.stdout.trim().length > 0;
+  const probe = npmViewStatus(`${name}@${version}`);
+  if (probe.status === "error") {
+    throw new Error(`Failed to query npm registry for ${name}@${version}: ${probe.error}`);
+  }
+  return probe.status === "found";
+}
+
+/**
+ * Verify every target native package already exists on npm (at any version)
+ * before publishing the first one, so an unregistered package name cannot
+ * strand earlier engine packages on the registry.
+ */
+function assertNativePackagesRegistered(names: readonly string[]): void {
+  const unregistered: string[] = [];
+  for (const name of names) {
+    const probe = npmViewStatus(name);
+    if (probe.status === "error") {
+      throw new Error(`Failed to verify npm registration for ${name}: ${probe.error}`);
+    }
+    if (probe.status === "not_found") {
+      unregistered.push(name);
+    }
+  }
+  if (unregistered.length > 0) {
+    throw new Error(
+      `Unregistered native engine package(s) on npm: ${unregistered.join(", ")}. ` +
+        `Run \`bun run bootstrap:npm-trust -- --publish --trust\` before merging the release PR.`,
+    );
+  }
+}
+
+/**
+ * Confirm all required native engine packages are queryable at the exact
+ * release version on npm before promoting `@kitsunekode/sweep`.
+ */
+async function waitForNativePackagesPublished(
+  names: readonly string[],
+  version: string,
+  timeoutMs = 60_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let missing = [...names];
+  while (true) {
+    const stillMissing: string[] = [];
+    for (const name of missing) {
+      if (!alreadyPublished(name, version)) {
+        stillMissing.push(name);
+      }
+    }
+    if (stillMissing.length === 0) {
+      return;
+    }
+    missing = stillMissing;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Refusing to publish @kitsunekode/sweep@${version}: native engine package(s) not available at ${version}: ${missing.join(", ")}`,
+      );
+    }
+    console.log(`waiting for npm registry propagation at ${version}: ${missing.join(", ")}...`);
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 5_000));
+  }
 }
 
 function cliVersion(): string {
@@ -139,12 +221,14 @@ if (!skipNative) {
       }
     }
 
-    for (const platform of NATIVE_PLATFORMS) {
+    const packedPlatforms = NATIVE_PLATFORMS.filter((p) => packed.includes(p.id));
+    // Verify every target package is already registered on npm before writing
+    // any engine version, so an unregistered package (e.g. a new musl target)
+    // cannot strand earlier packages half-published.
+    assertNativePackagesRegistered(packedPlatforms.map((p) => p.npmName));
+
+    for (const platform of packedPlatforms) {
       const dir = join(REPO_ROOT, "native-packages", platform.id);
-      const binPath = join(dir, "bin", platform.binaryName);
-      if (!existsSync(binPath)) {
-        continue;
-      }
       if (alreadyPublished(platform.npmName, version)) {
         console.log(`\nskipping ${platform.npmName}@${version} (already published)`);
         continue;
@@ -162,6 +246,13 @@ if (!skipNative) {
         policy.distTag,
       ]);
     }
+
+    // Confirm every expected engine package is queryable at the exact release
+    // version on npm before promoting the CLI package.
+    const requiredNames = requiresNative
+      ? NATIVE_PLATFORMS.map((p) => p.npmName)
+      : packedPlatforms.map((p) => p.npmName);
+    await waitForNativePackagesPublished(requiredNames, version);
   }
 } else {
   console.log("skipping native engine publish (--skip-native)");

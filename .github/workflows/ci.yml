@@ -269,6 +269,13 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 scripts/qualify-linux-deletion.py --output "$RUNNER_TEMP/sweep-deep-deletion.json"
 
+      - name: Qualify Windows PowerShell installer (Windows PowerShell 5.1 and PowerShell 7)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/integration/install-ps1.test.ps1 -TestBinaryPath target/release/sweep-engine.exe
+          pwsh -NoProfile -File tests/integration/install-ps1.test.ps1 -TestBinaryPath target/release/sweep-engine.exe
+
       - name: Smoke - scan a temp tree (no deletion, no TTY)
         shell: bash
         run: |

@@ -14,6 +14,22 @@ INSTALL_DIR="${SWEEP_INSTALL_DIR:-$HOME/.local/bin}"
 RELEASE_BASE="${SWEEP_RELEASE_BASE_URL:-https://github.com/$REPO/releases}"
 RELEASE_BASE="${RELEASE_BASE%/}"
 
+MAX_DOWNLOAD_BYTES=209715200
+MAX_DECOMPRESSED_BYTES=314572800
+MAX_CHECKSUM_BYTES=4096
+
+# Allow bounding caps lower only when running against a test release server.
+if [ -n "${SWEEP_RELEASE_BASE_URL:-}" ]; then
+  case "${SWEEP_TEST_MAX_DOWNLOAD_BYTES:-}" in
+    ''|*[!0-9]*) ;;
+    *) MAX_DOWNLOAD_BYTES="$SWEEP_TEST_MAX_DOWNLOAD_BYTES" ;;
+  esac
+  case "${SWEEP_TEST_MAX_DECOMPRESSED_BYTES:-}" in
+    ''|*[!0-9]*) ;;
+    *) MAX_DECOMPRESSED_BYTES="$SWEEP_TEST_MAX_DECOMPRESSED_BYTES" ;;
+  esac
+fi
+
 info() { printf '  %s\n' "$*"; }
 fail() { printf 'sweep-install: %s\n' "$*" >&2; exit 1; }
 
@@ -22,8 +38,46 @@ need uname
 need curl
 need mktemp
 
-fetch() {
-  curl --retry 3 --connect-timeout 15 -fsSL "$1" -o "$2"
+fetch_checked() {
+  fetch_url="$1"
+  fetch_out="$2"
+  fetch_max="$3"
+  fetch_kind="$4"
+
+  curl_rc=0
+  http_code="$(curl --retry 3 --connect-timeout 15 --max-time 180 --max-filesize "$fetch_max" -sS -L -w '%{http_code}' "$fetch_url" -o "$fetch_out")" || curl_rc=$?
+
+  if [ "$curl_rc" -ne 0 ]; then
+    case "$curl_rc" in
+      23)
+        fail "${fetch_kind} failed (write error; curl exit 23): $fetch_url"
+        ;;
+      63)
+        fail "${fetch_kind} failed (exceeds maximum allowed size of ${fetch_max} bytes; curl exit 63): $fetch_url"
+        ;;
+      6|7|28|35|52|56)
+        fail "${fetch_kind} failed (network error; curl exit $curl_rc): $fetch_url"
+        ;;
+      *)
+        fail "${fetch_kind} failed (curl exit $curl_rc): $fetch_url"
+        ;;
+    esac
+  fi
+
+  case "$http_code" in
+    2??) ;;
+    404)
+      fail "${fetch_kind} failed (HTTP 404: release asset missing for $label): $fetch_url"
+      ;;
+    *)
+      fail "${fetch_kind} failed (HTTP $http_code): $fetch_url"
+      ;;
+  esac
+
+  actual_bytes="$(wc -c < "$fetch_out" | tr -d '[:space:]')"
+  if [ "$actual_bytes" -gt "$fetch_max" ]; then
+    fail "${fetch_kind} failed (exceeds maximum allowed size of ${fetch_max} bytes): $fetch_url"
+  fi
 }
 
 sha256_file() {
@@ -53,7 +107,7 @@ detect_linux_libc() {
   fi
 
   has_musl=0
-  for loader in /lib/ld-musl-*.so.1; do
+  for loader in /lib/ld-musl-*.so.1 /usr/lib/ld-musl-*.so.1; do
     if [ -e "$loader" ]; then
       has_musl=1
       break
@@ -61,7 +115,9 @@ detect_linux_libc() {
   done
 
   has_glibc=0
-  for loader in /lib/ld-linux*.so.* /lib64/ld-linux*.so.* /lib/*/ld-linux*.so.*; do
+  for loader in \
+    /lib/ld-linux*.so.* /lib64/ld-linux*.so.* /lib/*/ld-linux*.so.* \
+    /usr/lib/ld-linux*.so.* /usr/lib64/ld-linux*.so.* /usr/lib/*/ld-linux*.so.*; do
     if [ -e "$loader" ]; then
       has_glibc=1
       break
@@ -126,7 +182,18 @@ else
   download_asset="$asset"
 fi
 
+if [ -e "$INSTALL_DIR" ] && [ ! -d "$INSTALL_DIR" ]; then
+  fail "install directory path is not a directory: $INSTALL_DIR"
+fi
 mkdir -p "$INSTALL_DIR" || fail "cannot create install directory: $INSTALL_DIR"
+
+dest_bin="$INSTALL_DIR/sweep"
+if [ -d "$dest_bin" ]; then
+  fail "destination path is a directory, refusing to install: $dest_bin"
+fi
+if [ -e "$dest_bin" ] && [ ! -f "$dest_bin" ] && [ ! -L "$dest_bin" ]; then
+  fail "destination path is not a regular file, refusing to install: $dest_bin"
+fi
 
 # Stage exclusively inside INSTALL_DIR so verification runs on the target
 # filesystem and the final rename is atomic without disturbing any existing
@@ -140,11 +207,11 @@ staged_bin="$stage_dir/sweep"
 url="$base/$download_asset"
 
 info "downloading $download_asset ($label)"
-fetch "$url" "$download_path" || fail "download failed: $url (release asset missing?)"
+fetch_checked "$url" "$download_path" "$MAX_DOWNLOAD_BYTES" "download"
 
 # Verify the downloaded artifact against its published checksum before
 # decompressing or executing anything.
-fetch "$url.sha256" "$checksum_path" || fail "checksum download failed: $url.sha256"
+fetch_checked "$url.sha256" "$checksum_path" "$MAX_CHECKSUM_BYTES" "checksum download"
 
 actual="$(sha256_file "$download_path")"
 expected="$(awk '{print tolower($1); exit}' "$checksum_path")"
@@ -156,7 +223,23 @@ esac
 info "checksum verified"
 
 if [ "$use_gzip" -eq 1 ]; then
-  gzip -dc "$download_path" > "$staged_bin" || fail "failed to decompress $download_asset"
+  limit_plus_one=$((MAX_DECOMPRESSED_BYTES + 1))
+  gzip_status_file="$stage_dir/gzip.status"
+  (
+    rc=0
+    gzip -dc "$download_path" || rc=$?
+    printf '%s' "$rc" > "$gzip_status_file"
+  ) | head -c "$limit_plus_one" > "$staged_bin"
+
+  decompressed_bytes="$(wc -c < "$staged_bin" | tr -d '[:space:]')"
+  if [ "$decompressed_bytes" -gt "$MAX_DECOMPRESSED_BYTES" ]; then
+    fail "decompressed binary exceeds maximum allowed size (${MAX_DECOMPRESSED_BYTES} bytes)"
+  fi
+
+  gzip_rc="$(cat "$gzip_status_file" 2>/dev/null || printf '1')"
+  if [ "$gzip_rc" -ne 0 ]; then
+    fail "failed to decompress $download_asset (gzip exit $gzip_rc)"
+  fi
 else
   mv -f "$download_path" "$staged_bin"
 fi
@@ -165,12 +248,22 @@ chmod 755 "$staged_bin" || fail "failed to mark staged binary executable"
 
 # Prove the replacement executes on this host before touching any existing install.
 if ! version_out="$("$staged_bin" --version 2>&1)"; then
-  fail "staged binary ($asset) failed --version; existing installation was left unchanged: $version_out"
+  case "$version_out" in
+    *libstdc++*|*libgcc*)
+      fail "staged binary ($asset) failed --version (missing C++ runtime; on Alpine run: apk add libstdc++ libgcc); existing installation was left unchanged: $version_out"
+      ;;
+    *)
+      fail "staged binary ($asset) failed --version; existing installation was left unchanged: $version_out"
+      ;;
+  esac
 fi
 
-mv -f "$staged_bin" "$INSTALL_DIR/sweep" || fail "failed to install sweep into $INSTALL_DIR/sweep"
+if [ -d "$dest_bin" ]; then
+  fail "destination path is a directory, refusing to install: $dest_bin"
+fi
+mv -f "$staged_bin" "$dest_bin" || fail "failed to install sweep into $dest_bin"
 
-info "installed sweep -> $INSTALL_DIR/sweep ($version_out)"
+info "installed sweep -> $dest_bin ($version_out)"
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *) info "note: $INSTALL_DIR is not on your PATH" ;;

@@ -5,15 +5,15 @@ description: Choose an engine and understand runtime, memory and filesystem limi
 
 ## Distribution targets
 
-| Target              | Minimum ABI / libc          | Standalone asset (`sweep-*`) | Native npm engine package (`@kitsunekode/*`) |
-| ------------------- | --------------------------- | ---------------------------- | -------------------------------------------- |
-| Linux glibc x64     | glibc 2.17+                 | `sweep-linux-x64`            | `sweep-engine-linux-64`                      |
-| Linux glibc ARM64   | glibc 2.17+                 | `sweep-linux-arm64`          | `sweep-engine-linux-arm64`                   |
-| Linux musl x64      | musl (Alpine, Void, static) | `sweep-linux-x64-musl`       | `sweep-engine-linux-64-musl`                 |
-| Linux musl ARM64    | musl (Alpine, Void, static) | `sweep-linux-arm64-musl`     | `sweep-engine-linux-arm64-musl`              |
-| macOS Intel         | macOS x64                   | `sweep-darwin-x64`           | `sweep-engine-darwin-64`                     |
-| macOS Apple Silicon | macOS arm64                 | `sweep-darwin-arm64`         | `sweep-engine-darwin-arm64`                  |
-| Windows x64         | Windows 10/11 x64           | `sweep-win-x64.exe`          | `sweep-engine-windows-64`                    |
+| Target              | Minimum ABI / libc                                  | Standalone asset (`sweep-*`)         | Native npm engine package (`@kitsunekode/*`) |
+| ------------------- | --------------------------------------------------- | ------------------------------------ | -------------------------------------------- |
+| Linux glibc x64     | glibc 2.17+                                         | `sweep-linux-x64`                    | `sweep-engine-linux-64`                      |
+| Linux glibc ARM64   | glibc 2.17+                                         | `sweep-linux-arm64`                  | `sweep-engine-linux-arm64`                   |
+| Linux musl x64      | musl (static engine; dynamic standalone, `v0.5.4+`) | `sweep-linux-x64-musl` (`v0.5.4+`)   | `sweep-engine-linux-64-musl` (`v0.5.4+`)     |
+| Linux musl ARM64    | musl (static engine; dynamic standalone, `v0.5.4+`) | `sweep-linux-arm64-musl` (`v0.5.4+`) | `sweep-engine-linux-arm64-musl` (`v0.5.4+`)  |
+| macOS Intel         | macOS x64                                           | `sweep-darwin-x64`                   | `sweep-engine-darwin-64`                     |
+| macOS Apple Silicon | macOS arm64                                         | `sweep-darwin-arm64`                 | `sweep-engine-darwin-arm64`                  |
+| Windows x64         | Windows 10/11 x64 (unsigned binary)                 | `sweep-win-x64.exe`                  | `sweep-engine-windows-64`                    |
 
 ### Linux ABI floor and musl support
 
@@ -22,26 +22,38 @@ Linux glibc engine binaries are built against **glibc 2.17** via `cargo-zigbuild
 Bun standalone executable and OpenTUI's Linux glibc library also target glibc
 2.17, so the glibc standalone and npm engine packages run on Ubuntu 20.04+,
 Debian 11+, RHEL 8/9, Rocky/AlmaLinux, and Amazon Linux 2/2023. Release CI
-enforces this floor by inspecting ELF `DT_VERNEED` symbol versions (failing if
-any required symbol exceeds `GLIBC_2.17`) and smoke-running the artifacts inside
-`debian:11-slim`.
+enforces this floor by inspecting ELF `DT_VERNEED` symbol versions across the
+standalone binary, embedded engine, and embedded OpenTUI shared object (failing
+on `GLIBC_ABI_DT_RELR`, `GLIBC_PRIVATE`, or any version above `GLIBC_2.17`) and
+smoke-running the artifacts inside `debian:11-slim`.
 
-Linux musl engine binaries are statically linked (`x86_64-unknown-linux-musl`
-and `aarch64-unknown-linux-musl`) with zero glibc or shared-library
-dependencies, so they run on bare Alpine containers. Musl standalone binaries
-target Bun's musl runtime with OpenTUI's musl native library and dynamically
-link `libstdc++` and `libgcc` (on minimal Alpine images, run
-`apk add libstdc++ libgcc`). Release CI checks ELF metadata for zero glibc
-dependencies and smoke-runs the artifacts inside `alpine:3.21`.
+Linux musl assets ship starting with the next release (`v0.5.4+`). Musl native
+engine binaries (`x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`)
+are statically linked with zero `DT_NEEDED` or glibc dependencies, so they run
+on bare Alpine containers. Musl standalone binaries (`sweep-linux-*-musl`) are
+**dynamically** linked against musl (`ld-musl`), `libstdc++`, and `libgcc` via
+Bun's musl runtime and OpenTUI's musl library; on minimal Alpine images, run
+`apk add libstdc++ libgcc` before running `install.sh` or the binary. Release
+CI checks ELF metadata for zero glibc dependencies and smoke-runs the artifacts
+inside `alpine:3.21`.
 
-Windows ARM64 is not currently a shipped target. Refer to the specific release
-assets rather than assuming an unsupported binary will work. Interactive
-physical-terminal qualification on macOS and Windows remains separate from
-headless CI checks.
+At runtime on Linux, `@kitsunekode/sweep` determines whether to load the glibc
+or musl optional engine package by inspecting the running executable's own ELF
+`PT_INTERP` and `/proc/self/maps` (without invoking `ldd` from `PATH`). If libc
+detection is inconclusive, no native package is selected and `--engine auto`
+falls back to JavaScript (`sweep doctor` explains the reason and `SWEEP_ENGINE_PATH`
+can override it).
+
+Windows x64 standalone binaries are unsigned, so browser or Scoop downloads may
+show a Windows SmartScreen prompt. Scoop (`kitsunekode/scoop-bucket`) becomes
+available starting with `v0.5.4+`. Windows ARM64 is not currently a shipped
+target. Refer to the specific release assets rather than assuming an unsupported
+binary will work. Interactive physical-terminal qualification on macOS and
+Windows remains separate from headless CI checks.
 
 Choose the npm CLI plus its optional precompiled engine when you already have
-Node/Bun. Choose `sweep-TARGET` (or Homebrew / Scoop / `install.sh` /
-`install.ps1`) for the self-contained application. The smaller
+Node/Bun. Choose `sweep-TARGET` (or Homebrew / `install.sh` / `install.ps1` /
+Scoop from `v0.5.4+`) for the self-contained application. The smaller
 `sweep-engine-TARGET` download is only the machine-protocol backend; it does not
 include interactive commands or the TUI. Both binary families ship raw
 executables, verified `.gz` archives, and `.sha256` sidecars.
@@ -50,13 +62,18 @@ executables, verified `.gz` archives, and `.sha256` sidecars.
 
 Every released standalone binary, `.gz` archive, and native engine binary is
 attested with GitHub Artifact Attestations (`actions/attest-build-provenance`).
-To verify that a downloaded file was built by this repository's release workflow
-before running it:
+To verify a standalone release asset or `.gz` archive against the exact
+`cli-binaries.yml` signer workflow and release tag:
 
 ```sh
-gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep
-gh attestation verify sweep-win-x64.exe -R KitsuneKode/sweep
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/v0.5.4
+gh attestation verify sweep-win-x64.exe -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/v0.5.4
 ```
+
+Native engine binaries packaged for npm are built by `native-engine-release.yml`
+on `main` (called from `release.yml`), so verifying a packaged engine binary
+uses `--signer-workflow KitsuneKode/sweep/.github/workflows/native-engine-release.yml`
+and `--source-ref refs/heads/main`.
 
 Published npm packages carry npm provenance automatically via OIDC trusted
 publishing (`npm audit signatures`).

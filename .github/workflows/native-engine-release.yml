@@ -100,12 +100,14 @@ jobs:
       - name: Setup Zig for glibc 2.17 floor
         if: matrix.zigbuild
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.1
 
       - name: Install cargo-zigbuild
         if: matrix.zigbuild
         uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
         with:
-          tool: cargo-zigbuild
+          tool: cargo-zigbuild@0.24.1
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -163,6 +165,42 @@ jobs:
               /usr/local/bin/sweep-engine --version
               /usr/local/bin/sweep-engine --capabilities
               out="$(/usr/local/bin/sweep-engine scan /work/proj < /dev/null)"
+              printf "%s\n" "$out" | grep -q "node_modules"
+            '
+
+      - name: Smoke - installed package under Alpine with glibc compatibility layer
+        if: matrix.abi_mode == 'musl-static'
+        shell: bash
+        run: |
+          bunx turbo run build --filter=@kitsunekode/sweep
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          glibc_id="${{ matrix.id }}"
+          glibc_id="${glibc_id%-musl}"
+          mkdir -p "$tmp/app/node_modules/@kitsunekode/sweep/dist" \
+                   "$tmp/app/node_modules/@kitsunekode/sweep-engine-$glibc_id/bin" \
+                   "$tmp/app/node_modules/@kitsunekode/sweep-engine-${{ matrix.id }}/bin" \
+                   "$tmp/proj/node_modules"
+          cp apps/cli/package.json "$tmp/app/node_modules/@kitsunekode/sweep/package.json"
+          cp apps/cli/dist/sweep.js "$tmp/app/node_modules/@kitsunekode/sweep/dist/sweep.js"
+          cp "native-packages/$glibc_id/package.json" \
+             "$tmp/app/node_modules/@kitsunekode/sweep-engine-$glibc_id/package.json"
+          printf '#!/bin/sh\necho wrong-glibc-package >&2\nexit 99\n' \
+            > "$tmp/app/node_modules/@kitsunekode/sweep-engine-$glibc_id/bin/${{ matrix.binary }}"
+          chmod 755 "$tmp/app/node_modules/@kitsunekode/sweep-engine-$glibc_id/bin/${{ matrix.binary }}"
+          cp "native-packages/${{ matrix.id }}/package.json" \
+             "$tmp/app/node_modules/@kitsunekode/sweep-engine-${{ matrix.id }}/package.json"
+          cp "native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}" \
+             "$tmp/app/node_modules/@kitsunekode/sweep-engine-${{ matrix.id }}/bin/${{ matrix.binary }}"
+          chmod 755 "$tmp/app/node_modules/@kitsunekode/sweep-engine-${{ matrix.id }}/bin/${{ matrix.binary }}"
+          printf 'alpine-compat-smoke' > "$tmp/proj/node_modules/file"
+          docker run --rm \
+            -v "$tmp/app:/app:ro" \
+            -v "$tmp/proj:/work/proj:ro" \
+            node:20-alpine \
+            sh -eu -c '
+              apk add --no-cache gcompat libc6-compat >/dev/null
+              out="$(node /app/node_modules/@kitsunekode/sweep/dist/sweep.js scan /work/proj --engine rust --json)"
               printf "%s\n" "$out" | grep -q "node_modules"
             '
 

@@ -2,7 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSha256File, renderHomebrewFormula, renderScoopManifest } from "./render-packaging.js";
+import {
+  assertNotDowngrade,
+  compareSemver,
+  extractHomebrewFormulaVersion,
+  extractScoopManifestVersion,
+  parseSha256File,
+  renderHomebrewFormula,
+  renderScoopManifest,
+} from "./render-packaging.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -15,7 +23,7 @@ describe("render-packaging", () => {
     expect(() => parseSha256File("", "empty")).toThrow(/Invalid SHA-256/);
   });
 
-  test("renders Homebrew formula template with .gz URLs, completions, and validated checksums", () => {
+  test("renders Homebrew formula template with chmod 0755 before completions and validated checksums", () => {
     const template = readFileSync(join(REPO_ROOT, "packaging/homebrew/sweep.rb.tmpl"), "utf8");
     const rendered = renderHomebrewFormula(template, "0.6.0", {
       darwinArm64Gz: `${"1".repeat(64)}  sweep-darwin-arm64.gz\n`,
@@ -32,8 +40,14 @@ describe("render-packaging", () => {
     expect(rendered).toContain(
       'sha256 "1111111111111111111111111111111111111111111111111111111111111111"',
     );
-    expect(rendered).toContain('generate_completions_from_executable(bin/"sweep", "completions")');
+    const chmodIdx = rendered.indexOf('chmod 0755, bin/"sweep"');
+    const compIdx = rendered.indexOf(
+      'generate_completions_from_executable(bin/"sweep", "completions")',
+    );
+    expect(chmodIdx).toBeGreaterThan(-1);
+    expect(compIdx).toBeGreaterThan(chmodIdx);
     expect(rendered).not.toContain("{{");
+    expect(extractHomebrewFormulaVersion(rendered)).toBe("0.6.0");
   });
 
   test("renders Scoop manifest from checked-in template with checkver and autoupdate intact", () => {
@@ -51,6 +65,18 @@ describe("render-packaging", () => {
         hash: sum,
       },
     );
+    expect(extractScoopManifestVersion(rendered)).toBe("0.6.0");
+  });
+
+  test("compares semver accurately and refuses downstream downgrades", () => {
+    expect(compareSemver("0.5.3", "0.5.4")).toBeLessThan(0);
+    expect(compareSemver("0.5.4", "0.5.4")).toBe(0);
+    expect(compareSemver("0.5.10", "0.5.4")).toBeGreaterThan(0);
+    expect(compareSemver("0.5.4-next.1", "0.5.4")).toBeLessThan(0);
+    expect(() => assertNotDowngrade("0.5.3", "0.5.4", "homebrew")).toThrow(/downgrade/);
+    expect(() => assertNotDowngrade("0.5.4", "0.5.4", "homebrew")).not.toThrow();
+    expect(() => assertNotDowngrade("0.5.5", "0.5.4", "scoop")).not.toThrow();
+    expect(() => assertNotDowngrade("0.5.4", null, "scoop")).not.toThrow();
   });
 
   test("rejects invalid semver versions", () => {

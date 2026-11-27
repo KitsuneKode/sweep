@@ -22,6 +22,7 @@ permissions:
 jobs:
   release-intent:
     name: detect release intent
+    if: github.repository == 'KitsuneKode/sweep' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -59,7 +60,7 @@ jobs:
   build-engine:
     name: build native engines
     needs: release-intent
-    if: needs.release-intent.outputs.needs_native_build == 'true'
+    if: github.repository == 'KitsuneKode/sweep' && github.ref == 'refs/heads/main' && needs.release-intent.outputs.needs_native_build == 'true'
     permissions:
       contents: read
       id-token: write
@@ -71,6 +72,8 @@ jobs:
     needs: [release-intent, build-engine]
     if: |
       always() &&
+      github.repository == 'KitsuneKode/sweep' &&
+      github.ref == 'refs/heads/main' &&
       needs.release-intent.result == 'success' &&
       (needs.release-intent.outputs.needs_native_build != 'true' || needs.build-engine.result == 'success')
     runs-on: ubuntu-latest
@@ -186,4 +189,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           bun run apps/cli/scripts/reconcile-release.ts \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.ref }}" \
             --changesets-published "${{ steps.release.outputs.published == 'true' }}"

@@ -10,10 +10,12 @@ function parseArgs(argv: string[]): {
   target: string;
   outfile: string;
   enginePath?: string;
+  metafile?: string;
   noBytecode: boolean;
 } {
   const positional: string[] = [];
   let enginePath: string | undefined;
+  let metafile: string | undefined;
   let noBytecode = false;
 
   for (let i = 0; i < argv.length; i++) {
@@ -21,6 +23,11 @@ function parseArgs(argv: string[]): {
     if (arg === "--engine" || arg === "-e") {
       enginePath = argv[++i];
       if (!enginePath) throw new Error("--engine requires a binary path");
+    } else if (arg === "--metafile") {
+      metafile = argv[++i];
+      if (!metafile) throw new Error("--metafile requires a path");
+    } else if (arg.startsWith("--metafile=")) {
+      metafile = arg.slice("--metafile=".length);
     } else if (arg === "--no-bytecode") {
       noBytecode = true;
     } else if (arg.startsWith("--engine=")) {
@@ -34,12 +41,13 @@ function parseArgs(argv: string[]): {
     target: positional[0] ?? "",
     outfile: positional[1] ?? "sweep",
     ...(enginePath !== undefined ? { enginePath } : {}),
+    ...(metafile !== undefined ? { metafile } : {}),
     noBytecode,
   };
 }
 
 const version = readCliVersion();
-const { target, outfile, enginePath, noBytecode } = parseArgs(process.argv.slice(2));
+const { target, outfile, enginePath, metafile, noBytecode } = parseArgs(process.argv.slice(2));
 const entry = join(REPO_ROOT, "apps/cli/src/bin-standalone.ts");
 
 const hostOs = process.platform === "win32" ? "windows" : process.platform;
@@ -79,8 +87,14 @@ const args = [
   "--define",
   `__SWEEP_VERSION__:${JSON.stringify(version)}`,
 ];
-if (isLinuxMusl) {
-  args.push("--define", `process.env.OPENTUI_LIBC:${JSON.stringify("musl")}`);
+if (process.platform === "linux") {
+  args.push(
+    "--define",
+    `process.env.OPENTUI_LIBC:${JSON.stringify(isLinuxMusl ? "musl" : "glibc")}`,
+  );
+}
+if (metafile) {
+  args.push(`--metafile=${resolve(REPO_ROOT, metafile)}`);
 }
 // Opt-out exists only to measure the same source with and without bytecode.
 if (!noBytecode) args.push("--bytecode");

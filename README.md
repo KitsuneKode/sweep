@@ -65,21 +65,31 @@ On Windows (PowerShell):
 irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 | iex
 ```
 
-Or via [Scoop](https://scoop.sh):
+Or download and inspect `install.ps1` first (respects execution policy):
 
 ```powershell
-scoop bucket add kitsunekode https://github.com/KitsuneKode/scoop-bucket
-scoop install sweep
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Homebrew, Scoop, and the install scripts fetch one self-contained binary with
-the terminal UI built in (no Node or Bun needed, SHA-256 checksums verified).
-Release binaries also carry GitHub build provenance attestations (`gh
-attestation verify <file> -R KitsuneKode/sweep`). From npm, scan and cleanup
-run on Node; `sweep ui` runs on Bun (`@opentui/core` is installed with the
-package).
-Linux glibc (x64, arm64, glibc 2.17+), Linux musl/Alpine (x64, arm64), macOS
-(x64, arm64), and Windows (x64) are supported.
+Scoop (`kitsunekode/scoop-bucket`) and Linux musl standalone downloads will be
+available starting with the next release (`v0.5.4+`). Minimal Alpine installs
+need `apk add libstdc++ libgcc` before running `install.sh` (only the native
+musl engine is static; the musl standalone executable links those two C++
+runtime libraries dynamically).
+
+Homebrew and the install scripts fetch one self-contained binary with the
+terminal UI built in (no Node or Bun needed, SHA-256 checksums verified).
+Release binaries also carry GitHub build provenance attestations:
+
+```bash
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/v0.5.4
+```
+
+From npm, scan and cleanup run on Node; `sweep ui` runs on Bun
+(`@opentui/core` is installed with the package). Linux glibc (x64, arm64, glibc
+2.17+), Linux musl/Alpine (x64, arm64, from `v0.5.4+`), macOS (x64, arm64), and
+Windows (x64) are supported.
 
 For coding agents: `npx skills add KitsuneKode/sweep`.
 

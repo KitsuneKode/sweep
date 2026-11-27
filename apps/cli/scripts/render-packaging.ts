@@ -4,11 +4,11 @@
  * and verified release checksum sidecars in dist-bin/.
  *
  * Usage:
- *   bun run apps/cli/scripts/render-packaging.ts homebrew --version 0.5.3 --dist-dir dist-bin --template packaging/homebrew/sweep.rb.tmpl --out Formula/sweep.rb
- *   bun run apps/cli/scripts/render-packaging.ts scoop --version 0.5.3 --dist-dir dist-bin --template packaging/scoop/sweep.json --out bucket/sweep.json
+ *   bun run apps/cli/scripts/render-packaging.ts homebrew --version 0.5.3 --dist-dir dist-bin --template packaging/homebrew/sweep.rb.tmpl --out Formula/sweep.rb [--reject-downgrade]
+ *   bun run apps/cli/scripts/render-packaging.ts scoop --version 0.5.3 --dist-dir dist-bin --template packaging/scoop/sweep.json --out bucket/sweep.json [--reject-downgrade]
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 export interface HomebrewChecksums {
@@ -18,7 +18,7 @@ export interface HomebrewChecksums {
   linuxX64Gz: string;
 }
 
-const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/;
+const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 
 export function assertStableOrReleaseVersion(version: string): string {
@@ -27,6 +27,75 @@ export function assertStableOrReleaseVersion(version: string): string {
     throw new Error(`Invalid release version: ${version}`);
   }
   return clean;
+}
+
+/** Compare two semver strings (`-1` if a < b, `0` if equal, `1` if a > b). */
+export function compareSemver(a: string, b: string): number {
+  const ma = SEMVER_RE.exec(a.trim());
+  const mb = SEMVER_RE.exec(b.trim());
+  if (!ma) throw new Error(`Invalid semver: ${a}`);
+  if (!mb) throw new Error(`Invalid semver: ${b}`);
+
+  for (let i = 1; i <= 3; i++) {
+    const na = Number.parseInt(ma[i]!, 10);
+    const nb = Number.parseInt(mb[i]!, 10);
+    if (na !== nb) return na < nb ? -1 : 1;
+  }
+
+  const preA = ma[4];
+  const preB = mb[4];
+  if (preA === preB) return 0;
+  if (preA === undefined) return 1;
+  if (preB === undefined) return -1;
+
+  const idsA = preA.split(".");
+  const idsB = preB.split(".");
+  const len = Math.max(idsA.length, idsB.length);
+  for (let i = 0; i < len; i++) {
+    const ia = idsA[i];
+    const ib = idsB[i];
+    if (ia === ib) continue;
+    if (ia === undefined) return -1;
+    if (ib === undefined) return 1;
+    const numA = /^\d+$/.test(ia);
+    const numB = /^\d+$/.test(ib);
+    if (numA && numB) {
+      const diff = Number.parseInt(ia, 10) - Number.parseInt(ib, 10);
+      if (diff !== 0) return diff < 0 ? -1 : 1;
+    } else if (numA !== numB) {
+      return numA ? -1 : 1;
+    } else {
+      return ia < ib ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+export function extractHomebrewFormulaVersion(formulaSource: string): string | null {
+  const match = /^\s*version\s+"([^"]+)"\s*$/m.exec(formulaSource);
+  return match?.[1]?.trim() ?? null;
+}
+
+export function extractScoopManifestVersion(manifestJson: string): string | null {
+  try {
+    const parsed = JSON.parse(manifestJson) as { version?: unknown };
+    return typeof parsed.version === "string" && parsed.version.trim().length > 0
+      ? parsed.version.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function assertNotDowngrade(
+  targetVersion: string,
+  existingVersion: string | null,
+  label: string,
+): void {
+  if (!existingVersion) return;
+  if (compareSemver(targetVersion, existingVersion) < 0) {
+    throw new Error(`Refusing to downgrade ${label} from ${existingVersion} to ${targetVersion}`);
+  }
 }
 
 export function parseSha256File(content: string, label: string): string {
@@ -98,6 +167,7 @@ function parseCliArgs(argv: string[]): {
   distDir: string;
   template: string;
   out: string;
+  rejectDowngrade: boolean;
 } {
   const mode = argv[0];
   if (mode !== "homebrew" && mode !== "scoop") {
@@ -108,6 +178,7 @@ function parseCliArgs(argv: string[]): {
   let distDir = "";
   let template = "";
   let out = "";
+  let rejectDowngrade = false;
 
   for (let i = 1; i < argv.length; i++) {
     const arg = argv[i];
@@ -115,6 +186,7 @@ function parseCliArgs(argv: string[]): {
     else if (arg === "--dist-dir") distDir = argv[++i] ?? "";
     else if (arg === "--template") template = argv[++i] ?? "";
     else if (arg === "--out") out = argv[++i] ?? "";
+    else if (arg === "--reject-downgrade") rejectDowngrade = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -122,12 +194,25 @@ function parseCliArgs(argv: string[]): {
     throw new Error("--version, --dist-dir, --template, and --out are all required");
   }
 
-  return { mode, version, distDir, template, out };
+  return { mode, version, distDir, template, out, rejectDowngrade };
 }
 
 if (import.meta.main) {
-  const { mode, version, distDir, template, out } = parseCliArgs(process.argv.slice(2));
+  const { mode, version, distDir, template, out, rejectDowngrade } = parseCliArgs(
+    process.argv.slice(2),
+  );
   const distPath = resolve(distDir);
+  const outPath = resolve(out);
+
+  if (rejectDowngrade && existsSync(outPath)) {
+    const existingRaw = readFileSync(outPath, "utf8");
+    const existingVersion =
+      mode === "homebrew"
+        ? extractHomebrewFormulaVersion(existingRaw)
+        : extractScoopManifestVersion(existingRaw);
+    assertNotDowngrade(assertStableOrReleaseVersion(version), existingVersion, mode);
+  }
+
   const templateContent = readFileSync(resolve(template), "utf8");
 
   let output: string;
@@ -144,7 +229,6 @@ if (import.meta.main) {
     output = renderScoopManifest(templateContent, version, winSum);
   }
 
-  const outPath = resolve(out);
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, output);
   console.log(`rendered ${mode} manifest for ${version} -> ${outPath}`);

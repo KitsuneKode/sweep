@@ -15,10 +15,17 @@ Driven by changesets in `.github/workflows/release.yml`:
        `dist/sweep.js` + `dist/sweep-ui.js` are built by `apps/cli/scripts/build.ts`
        (shared config in `scripts/bundle.ts`).
 
-Release jobs are serialized without cancelling an in-flight publication. Native
-build intent comes from the version, applied changesets and scoped tag state,
-not a commit-message substring. CI requires every native artifact and checks
-all package versions before the first publish.
+Release jobs are serialized without cancelling an in-flight publication, and
+`.github/workflows/release.yml` requires the canonical repository
+(`KitsuneKode/sweep`) and `refs/heads/main` for both push and manual dispatch.
+Native build intent comes from the version, applied changesets and scoped tag
+state, not a commit-message substring. CI requires every native artifact and
+checks all package versions before the first publish. Before publishing the
+first engine package, `scripts/publish-release.ts` verifies that all seven
+`@kitsunekode/sweep-engine-*` packages are already registered on npm (failing
+fast instead of stranding partial publishes on an unregistered name), and
+confirms all seven are queryable at the exact release version before promoting
+`@kitsunekode/sweep`.
 
 `scripts/publish-release.ts` also waits for successful push CI on the exact
 `GITHUB_SHA` before any registry write. Failed, cancelled, skipped or missing
@@ -30,14 +37,16 @@ Stable publishes explicitly use
 The policy rejects prerelease/latest and conflicting pre-mode tags. Changesets
 pre mode controls its own tag and rejects an extra `--tag` argument.
 
-After publication, `apps/cli/scripts/reconcile-release.ts` verifies that
-Changesets' scoped package tag points at the released commit, creates a
-matching immutable `vVERSION` alias (refusing to move a mismatched existing
-tag), and explicitly dispatches `cli-binaries.yml`. A GITHUB_TOKEN tag push
-does not automatically trigger another workflow. Because reconciliation checks
-npm, git tags, and GitHub Release assets idempotently, rerunning `release.yml`
-after an interrupted handoff creates the missing tag on the exact released
-commit and dispatches `cli-binaries.yml` without republishing npm.
+After publication, `apps/cli/scripts/reconcile-release.ts` requires canonical
+`KitsuneKode/sweep` + `refs/heads/main` and durable publication commit evidence
+(`npm gitHead` when present, otherwise `@kitsunekode/sweep@X.Y.Z`, refusing to
+guess from version-bump history), verifies the commit is on `main` and carries
+the exact `apps/cli/package.json` version, creates a matching immutable
+`vVERSION` alias (refusing to move a mismatched existing tag), deduplicates any
+in-flight or queued `cli-binaries.yml` run for the same tag and commit, tracks
+Homebrew tap and Scoop bucket updates separately (never downgrading), and
+explicitly dispatches `cli-binaries.yml`. A GITHUB_TOKEN tag push does not
+automatically trigger another workflow.
 
 Internal workspace packages are `private` and unpublished. They still need a
 `version` field so `@kitsunekode/sweep` can depend on them during `changeset
@@ -115,34 +124,63 @@ is disabled so scanning a project does not import its Bun runtime settings.
 No external Node, Bun or Rust engine is needed for the default standalone scan.
 
 Before upload, Linux jobs enforce ELF ABI metadata via
-`packages/engine-native/scripts/check-elf-abi.ts` (glibc <= 2.17 for gnu
-targets; zero glibc symbols and static/musl linkage for musl targets) and
-smoke-run the artifacts inside `debian:11-slim` or `alpine:3.21`. Every runner
-checks `--ui-probe`, `--version`, and an owned scan with PATH emptied. Each
-binary also gets a streaming, round-trip-verified `.gz` archive with its own
-SHA-256 sidecar and a GitHub build provenance attestation
-(`actions/attest-build-provenance`). All seven target families attach to one
-release; preview releases are marked prerelease and cannot update the stable
-Homebrew formula or Scoop bucket. Homebrew (`packaging/homebrew/sweep.rb.tmpl`)
-and Scoop (`packaging/scoop/sweep.json`) manifests are rendered from this
-repository's checked-in templates by `apps/cli/scripts/render-packaging.ts` and
-pushed only when `TAP_GITHUB_TOKEN` / `SCOOP_BUCKET_TOKEN` are configured. Linux
-local success does not substitute for passing those hosted platform jobs.
+`packages/engine-native/scripts/check-elf-abi.ts` across the standalone
+executable, embedded Rust engine, and embedded OpenTUI shared object (glibc <=
+2.17 with zero `GLIBC_ABI_DT_RELR` / `GLIBC_PRIVATE` for gnu targets; zero
+`DT_NEEDED` and zero glibc symbols for static musl engines; `ld-musl` and zero
+glibc symbols for dynamic musl standalones), smoke-run the artifacts inside
+`debian:11-slim` or `alpine:3.21`, and qualify the rendered Homebrew formula
+with `brew install --formula` from a local tap. Every runner checks
+`--ui-probe`, `--version`, and an owned scan with PATH emptied. Each binary
+also gets a streaming, round-trip-verified `.gz` archive with its own SHA-256
+sidecar and a GitHub build provenance attestation
+(`actions/attest-build-provenance`).
 
-The workflow also builds `sweep-engine-TARGET` assets (with `.exe` on Windows),
-their checksums and verified gzip archives. These small files expose the machine
-scan/apply protocol and contain neither the terminal UI nor the Bun runtime.
-They complement the full `sweep-TARGET` application and the optional native npm
-packages. Keep their download labels distinct. A manual dispatch on `main`
-builds and tests artifacts without attaching a public release.
+Before `attach` uploads assets to a GitHub Release,
+`apps/cli/scripts/verify-release-tag.ts` verifies canonical `KitsuneKode/sweep`,
+exact semver `v*` tag matching `apps/cli/package.json`, `origin/main` ancestry,
+exact-commit push CI pass, and a passing `release.yml` run on `main`. All seven
+target families attach to one release; preview releases are marked prerelease
+and cannot update the stable Homebrew formula or Scoop bucket.
 
-The npm package keeps the dynamic `sweep-ui.js` sibling loading - only standalone
-binaries use the static entrypoint.
+Downstream Homebrew (`update-homebrew`) and Scoop (`update-scoop`) updates run
+as separate jobs in the protected GitHub Environment `release-downstream`. Both
+jobs check out templates and `apps/cli/scripts/render-packaging.ts` from
+canonical `main` (never from tag content), enforce `--reject-downgrade`, bind
+git push auth via `gh auth setup-git --hostname github.com` with their
+repo-scoped token, and skip cleanly when `TAP_GITHUB_TOKEN` or
+`SCOOP_BUCKET_TOKEN` is unset. Linux local success does not substitute for
+passing those hosted platform jobs.
 
-### Retry or qualify a binary release
+### One-time owner repository setup
+
+1. **Create GitHub Environment `release-downstream`** in repository Settings ->
+   Environments, restrict deployment branches/tags to `main` and `v*` tags (and
+   optionally add required reviewers), and store `TAP_GITHUB_TOKEN`
+   (`contents:write` on `KitsuneKode/homebrew-tap`) and `SCOOP_BUCKET_TOKEN`
+   (`contents:write` on `KitsuneKode/scoop-bucket`) as environment secrets.
+2. **Add tag protection ruleset** in repository Settings -> Rules -> Rulesets
+   covering `refs/tags/v*` and `refs/tags/@kitsunekode/sweep@*` so only
+   repository admins and GitHub Actions can create tags, and force-updates /
+   deletions are blocked.
+3. **Bootstrap the two musl engine npm packages** (`@kitsunekode/sweep-engine-linux-64-musl`
+   and `@kitsunekode/sweep-engine-linux-arm64-musl`) via
+   `bun run bootstrap:npm-trust -- --publish --trust` before merging the release
+   version PR that ships them.
+4. **Seed `KitsuneKode/scoop-bucket`** (`bucket/sweep.json` from
+   `packaging/scoop/sweep.json`) or let the first `v0.5.4+` release with
+   `SCOOP_BUCKET_TOKEN` create it.
+
+### Retry a binary or downstream release
 
 ```bash
+# Rebuild and re-attach all standalone binaries + update downstream:
 gh workflow run cli-binaries.yml --ref vX.Y.Z
+
+# Retry downstream Homebrew and/or Scoop updates from an existing GitHub Release:
+gh workflow run cli-binaries.yml --ref vX.Y.Z -f target=downstream -f downstream=all
+gh workflow run cli-binaries.yml --ref vX.Y.Z -f target=downstream -f downstream=homebrew
+gh workflow run cli-binaries.yml --ref vX.Y.Z -f target=downstream -f downstream=scoop
 ```
 
 ### Preview, then stable
