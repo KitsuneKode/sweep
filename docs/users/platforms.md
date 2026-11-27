@@ -31,7 +31,7 @@ gzip assets through the release workflow.
 
 ## Runtime and engine selection
 
-Node.js 20.3+ supports the plain npm CLI. The full-screen UI needs Bun and
+Node.js 22.12+ supports the plain npm CLI. The full-screen UI needs Bun and
 OpenTUI, or a standalone build that embeds them. Both UI streams must be TTYs.
 
 `--engine auto` prefers a usable Rust engine and otherwise uses JavaScript.

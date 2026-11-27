@@ -5,7 +5,7 @@ description: Install Sweep and complete your first read-only review.
 
 ## Install
 
-For command-line scans and cleanup, use Node.js 20.3 or newer:
+For command-line scans and cleanup, use Node.js 22.12 or newer:
 
 ```sh
 npm install -g @kitsunekode/sweep
@@ -30,7 +30,7 @@ older than 26.4, pnpm and Yarn 1 skip linking it (Yarn 1 prints an engine
 warning), and npm leaves `@opentui/core` unmet and may still extract a
 `@opentui/core-<platform>` package unless `--omit=optional` is passed. In every
 case, `sweep` installs and runs CLI commands (`sweep`, `sweep scan`,
-`sweep clean`, `sweep plan`, `sweep apply`) on Node.js 20.3+. A qualified
+`sweep clean`, `sweep plan`, `sweep apply`) on Node.js 22.12+. A qualified
 standalone release embeds the UI with no Node or Bun required; see the release's
 checksum and platform instructions.
 

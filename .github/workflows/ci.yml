@@ -79,12 +79,55 @@ jobs:
       - name: Check, build, and preflight
         run: bunx turbo run check build preflight --filter "@kitsunekode/*" --continue
 
+  node-compat:
+    name: node compatibility (22.12, 22, 24, 26)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build CLI bundle
+        run: bun run --cwd apps/cli build
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: "20.3.0"
+          node-version: "22.12.x"
 
-      - name: Verify installed tarball on declared minimum Node (20.3.0, optional deps omitted)
-        run: bun run scripts/smoke-min-node.ts --expect-version 20.3.0
+      - name: Pack @kitsunekode/sweep tarball
+        run: |
+          mkdir -p "$RUNNER_TEMP/sweep-pack"
+          npm pack -w @kitsunekode/sweep --pack-destination "$RUNNER_TEMP/sweep-pack"
+
+      - name: Verify installed tarball on Node 22.12.x (optional deps omitted)
+        run: bun run scripts/smoke-min-node.ts --expect-prefix 22.12. --tarball "$RUNNER_TEMP"/sweep-pack/kitsunekode-sweep-*.tgz
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.x"
+
+      - name: Verify installed tarball on latest Node 22.x (optional deps omitted)
+        run: bun run scripts/smoke-min-node.ts --expect-prefix 22. --tarball "$RUNNER_TEMP"/sweep-pack/kitsunekode-sweep-*.tgz
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24.x"
+
+      - name: Verify installed tarball on latest Node 24.x (optional deps omitted)
+        run: bun run scripts/smoke-min-node.ts --expect-prefix 24. --tarball "$RUNNER_TEMP"/sweep-pack/kitsunekode-sweep-*.tgz
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26.x"
+
+      - name: Verify installed tarball on latest Node 26.x (optional deps omitted)
+        run: bun run scripts/smoke-min-node.ts --expect-prefix 26. --tarball "$RUNNER_TEMP"/sweep-pack/kitsunekode-sweep-*.tgz
 
   docs:
     name: documentation foundation
