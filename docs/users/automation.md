@@ -136,10 +136,14 @@ preserve JSON mode. Known apply refusals include a remediation `hint`.
 Earlier stderr lines can contain warnings. Stdout remains reserved for plans and
 completed reports. An `applyOutcome: "not_started"` means that this request
 refused before removal; `"unknown"` means no trusted final report established the
-result. A known size refusal has code `size_limit_exceeded`, and cooperative lock
-contention has code `apply_busy`. A plan resource refusal before backend entry
-has code `resource_limit_exceeded` and outcome `not_started`. These codes do not
-authorize automatic retries.
+result. Known apply refusal codes (all with `applyOutcome: "not_started"`) are
+`size_limit_exceeded`, `current_size_unavailable`, `apply_busy` (cooperative
+lock contention), `resource_limit_exceeded`, `engine_unavailable`,
+`git_tracked` (a queued path is or contains a git-tracked file or committed
+symlink), `tracked_status_unknown` (a repository candidate's tracked status
+could not be verified), and `contains_git_repository` (a queued directory
+contains a `.git` entry and was not explicitly confirmed one at a time). These
+codes do not authorize automatic retries.
 Only cooperative lock contention is marked retryable; wait for the holder to
 finish. Never delete a lock based only on a PID observation. Human deletion
 progress goes to stderr, and report delivery remains part of the destructive

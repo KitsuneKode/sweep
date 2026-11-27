@@ -122,7 +122,7 @@ export function lookupExecutable(
   if (isExplicitBinaryPath(binary, platform)) {
     const abs = pathMod.resolve(cwd, binary);
     if (checkFile(abs)) return { resolvedPath: abs };
-    if (platform === "win32" && pathMod.extname(abs) === "") {
+    if (platform === "win32") {
       for (const ext of windowsShellFreeExtensions(options.pathextEnv)) {
         const candidate = abs + ext;
         if (checkFile(candidate)) return { resolvedPath: candidate };
@@ -136,8 +136,8 @@ export function lookupExecutable(
 
   const entries = rawPath.split(pathDelimiter);
   if (platform === "win32") {
-    const hasExt = pathMod.extname(binary) !== "";
-    const suffixes = hasExt ? [""] : windowsShellFreeExtensions(options.pathextEnv);
+    const nativeExts = windowsShellFreeExtensions(options.pathextEnv);
+    const suffixes = pathMod.extname(binary) !== "" ? ["", ...nativeExts] : nativeExts;
     for (const rawDir of entries) {
       const dir = stripOuterQuotes(rawDir);
       if (!isAbsolutePathEntry(dir, "win32")) continue;

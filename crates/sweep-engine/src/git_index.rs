@@ -1,22 +1,27 @@
-//! Which scan candidates hold git-tracked content.
+//! Which scan candidates hold git-tracked content or nested git repositories.
 //!
 //! Build output is never committed. A candidate that is, or contains, a path
 //! in any enclosing repository's index holds authored work whatever its name.
 //!
 //! 1. Git is the source of truth: when an absolute `git` executable is on
-//!    `PATH`, every enclosing repository is queried via a sanitized
-//!    `git ls-files -z --cached` invocation (all inherited `GIT_*` variables
-//!    cleared, `core.fsmonitor=false`, `LC_ALL=C`). Its answer counts only on
-//!    exit 0 with valid NUL-delimited output; any error, timeout, or parse
-//!    failure marks every candidate in that repository `unknown`.
-//! 2. The native index reader is used only when `git` is unavailable. Its
-//!    answer counts only if the repository validates (gitdir resolves, `HEAD`
-//!    exists and is readable, the index parses and its SHA-1/SHA-256 checksum
-//!    verifies) and the parsed index is non-empty; any validation failure or
+//!    `PATH`, every enclosing repository (including the candidate directory
+//!    itself when it holds `.git`) is verified with `git rev-parse --show-toplevel`
+//!    and queried once via a sanitized `git ls-files -z --cached --full-name`
+//!    invocation (all inherited `GIT_*` variables cleared, `core.fsmonitor=false`,
+//!    `LC_ALL=C`). Candidates are matched locally using the repository's own
+//!    folding rules (`core.ignorecase`, `core.precomposeunicode` / macOS NFC).
+//!    Any mismatch, error, timeout, or parse failure marks every candidate in
+//!    that repository `unknown`.
+//! 2. The native index reader is used only when `git` is unavailable. Every
+//!    file it opens uses a non-blocking, no-follow, regular-file check. Its
+//!    answer counts only if the repository validates (gitdir resolves, common
+//!    config parses and resolves `extensions.objectFormat`, `HEAD` matches the
+//!    object format, and the index parses and verifies its checksum for that
+//!    exact hash length) with a non-empty index; any validation failure or
 //!    empty native result marks every candidate in that repository `unknown`.
-//! 3. Candidates are checked against every enclosing repository up to the
-//!    filesystem root: tracked if any enclosing repository tracks it, unknown
-//!    if any enclosing check is unknown.
+//! 3. Directory candidates are walked with a bounded non-symlink-following
+//!    search for any `.git` entry inside them (`contains_git_repo`; hitting a
+//!    bound or unreadable subdirectory marks the candidate `unknown`).
 
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -27,28 +32,39 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use unicode_normalization::UnicodeNormalization;
 
 /// Larger indexes exist only in very large monorepos; git reads those fine.
 const MAX_INDEX_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 const MAX_GIT_STDOUT: u64 = 256 * 1024 * 1024;
+const MAX_GIT_META_STDOUT: u64 = 4 * 1024 * 1024;
 const MAX_ENTRIES: u32 = 20_000_000;
 const MAX_PATH_BYTES: usize = 64 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
-const PATHSPEC_CHUNK_BYTES: usize = 64 * 1024;
 const MAX_WORKERS: usize = 8;
 
-/// Classification of repository candidates checked for git-tracked files.
+const MAX_NESTED_GIT_DIRS: usize = 100_000;
+const MAX_NESTED_GIT_ENTRIES: usize = 1_000_000;
+const MAX_NESTED_GIT_DEPTH: usize = 128;
+
+/// Classification of repository candidates checked for git-tracked files and
+/// nested git repositories.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct TrackedPaths {
     /// Paths confirmed to be, or contain, git-tracked files.
     pub tracked: HashSet<PathBuf>,
-    /// Paths inside a git repository whose tracked status could not be checked.
+    /// Paths inside a git repository (or whose nested-repo search hit a bound)
+    /// whose tracked status could not be checked.
     pub unknown: HashSet<PathBuf>,
+    /// Directory candidates containing a `.git` entry at or below them.
+    pub contains_git_repo: HashSet<PathBuf>,
 }
 
-/// Classify `paths` into git-tracked and unknown-status subsets.
+/// Classify `paths` into git-tracked, unknown-status, and nested-repo subsets.
 ///
-/// `paths` are absolute. Paths outside any git repository appear in neither set.
+/// `paths` are absolute. Paths outside any git repository with no nested `.git`
+/// appear in none of the sets.
 pub fn tracked_paths(paths: &[PathBuf]) -> TrackedPaths {
     tracked_paths_with_path(
         paths,
@@ -64,46 +80,93 @@ fn tracked_paths_with_path(
 ) -> TrackedPaths {
     let mut by_root: HashMap<PathBuf, Vec<&PathBuf>> = HashMap::new();
     let mut root_cache: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    let mut dir_candidates: Vec<&PathBuf> = Vec::new();
+    let mut unknown_initial: HashSet<PathBuf> = HashSet::new();
+
     for path in paths {
-        let Some(parent) = path.parent() else {
+        let is_dir = is_real_directory(path);
+        let start = if is_dir {
+            path.as_path()
+        } else if let Some(parent) = path.parent() {
+            parent
+        } else {
             continue;
         };
-        for root in find_enclosing_repo_roots(parent, &mut root_cache) {
+        for root in find_enclosing_repo_roots(start, &mut root_cache) {
             by_root.entry(root).or_default().push(path);
         }
+        if is_dir {
+            dir_candidates.push(path);
+        } else if let Err(err) = std::fs::symlink_metadata(path) {
+            if err.kind() == std::io::ErrorKind::PermissionDenied {
+                unknown_initial.insert(path.clone());
+            }
+        }
     }
-    if by_root.is_empty() {
+
+    if by_root.is_empty() && dir_candidates.is_empty() && unknown_initial.is_empty() {
         return TrackedPaths::default();
     }
 
     let git_binary = resolve_absolute_on_path_in("git", path_env, pathext_env);
     let git_binary = git_binary.as_deref();
     let repos: Vec<(PathBuf, Vec<&PathBuf>)> = by_root.into_iter().collect();
-    let result = Mutex::new(TrackedPaths::default());
-    let next = AtomicUsize::new(0);
+    let result = Mutex::new(TrackedPaths {
+        tracked: HashSet::new(),
+        unknown: unknown_initial,
+        contains_git_repo: HashSet::new(),
+    });
+    let total_work = repos.len() + dir_candidates.len();
+    let next_repo = AtomicUsize::new(0);
+    let next_dir = AtomicUsize::new(0);
     let workers = std::thread::available_parallelism()
         .map(usize::from)
         .unwrap_or(1)
         .clamp(1, MAX_WORKERS)
-        .min(repos.len().max(1));
+        .min(total_work.max(1));
+
     std::thread::scope(|scope| {
         for _ in 0..workers {
-            scope.spawn(|| loop {
-                let index = next.fetch_add(1, Ordering::Relaxed);
-                let Some((root, members)) = repos.get(index) else {
-                    break;
-                };
-                let (found_tracked, found_unknown) = tracked_in_repo(root, members, git_binary);
-                if !found_tracked.is_empty() || !found_unknown.is_empty() {
-                    let mut guard = result
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    guard.tracked.extend(found_tracked);
-                    guard.unknown.extend(found_unknown);
+            scope.spawn(|| {
+                loop {
+                    let index = next_repo.fetch_add(1, Ordering::Relaxed);
+                    let Some((root, members)) = repos.get(index) else {
+                        break;
+                    };
+                    let (found_tracked, found_unknown) = tracked_in_repo(root, members, git_binary);
+                    if !found_tracked.is_empty() || !found_unknown.is_empty() {
+                        let mut guard = result
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        guard.tracked.extend(found_tracked);
+                        guard.unknown.extend(found_unknown);
+                    }
+                }
+                loop {
+                    let index = next_dir.fetch_add(1, Ordering::Relaxed);
+                    let Some(&dir) = dir_candidates.get(index) else {
+                        break;
+                    };
+                    match contains_nested_git_dir(dir) {
+                        NestedGitStatus::Found => {
+                            let mut guard = result
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            guard.contains_git_repo.insert(dir.clone());
+                        }
+                        NestedGitStatus::Unknown => {
+                            let mut guard = result
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            guard.unknown.insert(dir.clone());
+                        }
+                        NestedGitStatus::NotFound => {}
+                    }
                 }
             });
         }
     });
+
     let mut out = result
         .into_inner()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -111,8 +174,125 @@ fn tracked_paths_with_path(
     out
 }
 
+fn is_real_directory(path: &Path) -> bool {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if !meta.is_dir() || meta.is_symlink() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 {
+            return false;
+        }
+    }
+    true
+}
+
 fn has_dot_git(dir: &Path) -> bool {
     std::fs::symlink_metadata(dir.join(".git")).is_ok()
+}
+
+fn is_dot_git_name(name: &OsStr) -> bool {
+    if cfg!(any(target_os = "macos", windows)) {
+        name.to_str()
+            .is_some_and(|text| text.eq_ignore_ascii_case(".git"))
+    } else {
+        name == OsStr::new(".git")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NestedGitStatus {
+    Found,
+    NotFound,
+    Unknown,
+}
+
+fn contains_nested_git_dir(candidate: &Path) -> NestedGitStatus {
+    contains_nested_git_with_limits(
+        candidate,
+        MAX_NESTED_GIT_DIRS,
+        MAX_NESTED_GIT_ENTRIES,
+        MAX_NESTED_GIT_DEPTH,
+    )
+}
+
+fn contains_nested_git_with_limits(
+    candidate: &Path,
+    max_dirs: usize,
+    max_entries: usize,
+    max_depth: usize,
+) -> NestedGitStatus {
+    if !is_real_directory(candidate) {
+        return NestedGitStatus::NotFound;
+    }
+    let mut stack: Vec<(PathBuf, usize)> = vec![(candidate.to_path_buf(), 0)];
+    let mut visited_dirs: usize = 0;
+    let mut visited_entries: usize = 0;
+    let mut saw_error = false;
+
+    while let Some((dir, depth)) = stack.pop() {
+        visited_dirs += 1;
+        if visited_dirs > max_dirs {
+            return NestedGitStatus::Unknown;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => {
+                saw_error = true;
+                continue;
+            }
+        };
+        for entry in entries {
+            visited_entries += 1;
+            if visited_entries > max_entries {
+                return NestedGitStatus::Unknown;
+            }
+            let Ok(entry) = entry else {
+                saw_error = true;
+                continue;
+            };
+            if is_dot_git_name(&entry.file_name()) {
+                return NestedGitStatus::Found;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                saw_error = true;
+                continue;
+            };
+            if file_type.is_symlink() || !file_type.is_dir() {
+                continue;
+            }
+            let child_path = entry.path();
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                match std::fs::symlink_metadata(&child_path) {
+                    Ok(meta) if meta.file_attributes() & 0x400 != 0 => continue,
+                    Ok(_) => {}
+                    Err(_) => {
+                        saw_error = true;
+                        continue;
+                    }
+                }
+            }
+            if depth >= max_depth {
+                return NestedGitStatus::Unknown;
+            }
+            if visited_dirs + stack.len() >= max_dirs {
+                return NestedGitStatus::Unknown;
+            }
+            stack.push((child_path, depth + 1));
+        }
+    }
+
+    if saw_error {
+        NestedGitStatus::Unknown
+    } else {
+        NestedGitStatus::NotFound
+    }
 }
 
 /// Every enclosing ancestor holding `.git` (a directory, a gitfile for worktrees
@@ -146,68 +326,225 @@ fn find_enclosing_repo_roots(
     inherited
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FoldingRules {
+    ignore_case: bool,
+    precompose_unicode: bool,
+}
+
+fn relative_path_bytes(root: &Path, path: &Path) -> Option<Vec<u8>> {
+    let rel = path.strip_prefix(root).ok()?;
+    #[cfg(windows)]
+    {
+        let text = rel.to_str()?;
+        Some(text.replace('\\', "/").into_bytes())
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        Some(rel.as_os_str().as_bytes().to_vec())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let text = rel.to_str()?;
+        Some(text.as_bytes().to_vec())
+    }
+}
+
+fn fold_path_bytes(bytes: &[u8], rules: FoldingRules) -> Vec<u8> {
+    if !rules.ignore_case && !rules.precompose_unicode {
+        return bytes.to_vec();
+    }
+    if bytes.is_ascii() {
+        return if rules.ignore_case {
+            bytes.to_ascii_lowercase()
+        } else {
+            bytes.to_vec()
+        };
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => {
+            let normalized: String = if rules.precompose_unicode {
+                text.nfc().collect()
+            } else {
+                text.to_owned()
+            };
+            if rules.ignore_case {
+                normalized.to_lowercase().into_bytes()
+            } else {
+                normalized.into_bytes()
+            }
+        }
+        Err(_) => {
+            if rules.ignore_case {
+                bytes.to_ascii_lowercase()
+            } else {
+                bytes.to_vec()
+            }
+        }
+    }
+}
+
+fn match_entries<'a, I>(
+    entries: I,
+    rels: &[(Vec<u8>, &'a PathBuf)],
+    rules: FoldingRules,
+) -> HashSet<PathBuf>
+where
+    I: Iterator<Item = &'a [u8]>,
+{
+    let mut tracked = HashSet::new();
+    if rels.is_empty() {
+        return tracked;
+    }
+    if !rules.ignore_case && !rules.precompose_unicode {
+        let mut by_rel: HashMap<&[u8], Vec<&PathBuf>> = HashMap::new();
+        for (rel, path) in rels {
+            by_rel.entry(rel.as_slice()).or_default().push(*path);
+        }
+        for file in entries {
+            let mut prefix = file;
+            loop {
+                if let Some(paths) = by_rel.get(prefix) {
+                    for path in paths {
+                        tracked.insert((*path).clone());
+                    }
+                }
+                match prefix.iter().rposition(|&byte| byte == b'/') {
+                    Some(cut) => prefix = &prefix[..cut],
+                    None => break,
+                }
+            }
+        }
+        return tracked;
+    }
+
+    let mut by_key: HashMap<Vec<u8>, Vec<&PathBuf>> = HashMap::new();
+    for (rel, path) in rels {
+        by_key
+            .entry(fold_path_bytes(rel, rules))
+            .or_default()
+            .push(*path);
+    }
+    for file in entries {
+        let folded = fold_path_bytes(file, rules);
+        let mut prefix = folded.as_slice();
+        loop {
+            if let Some(paths) = by_key.get(prefix) {
+                for path in paths {
+                    tracked.insert((*path).clone());
+                }
+            }
+            match prefix.iter().rposition(|&byte| byte == b'/') {
+                Some(cut) => prefix = &prefix[..cut],
+                None => break,
+            }
+        }
+    }
+    tracked
+}
+
 fn tracked_in_repo(
     root: &Path,
     members: &[&PathBuf],
     git_binary: Option<&Path>,
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    // Index paths are `/`-separated bytes relative to the work tree.
+    let mut repo_root_members: Vec<&PathBuf> = Vec::new();
     let mut rels: Vec<(Vec<u8>, &PathBuf)> = Vec::new();
     let mut unknown: Vec<PathBuf> = Vec::new();
     for &path in members {
-        match path.strip_prefix(root).ok().and_then(|rel| rel.to_str()) {
-            Some(text) if !text.is_empty() => {
-                rels.push((text.replace('\\', "/").into_bytes(), path));
-            }
-            _ => unknown.push(path.clone()),
+        match relative_path_bytes(root, path) {
+            Some(rel) if rel.is_empty() => repo_root_members.push(path),
+            Some(rel) => rels.push((rel, path)),
+            None => unknown.push(path.clone()),
         }
     }
-    if rels.is_empty() {
+    if repo_root_members.is_empty() && rels.is_empty() {
         return (Vec::new(), unknown);
     }
     if let Some(git_binary) = git_binary {
-        let (tracked, mut git_unknown) = tracked_via_git(git_binary, root, &rels);
+        let (tracked, mut git_unknown) =
+            tracked_via_git(git_binary, root, &repo_root_members, &rels);
         unknown.append(&mut git_unknown);
         return (tracked, unknown);
     }
-    match read_index_paths(root) {
-        Ok(entries) => {
-            let tracked = rels
-                .into_iter()
-                .filter(|(rel, _)| contains_tracked(&entries, rel))
-                .map(|(_, path)| path.clone())
-                .collect();
-            (tracked, unknown)
+    match read_index_native(root) {
+        Ok((entries, rules)) => {
+            let mut tracked = HashSet::new();
+            if !entries.is_empty() {
+                for path in repo_root_members {
+                    tracked.insert(path.clone());
+                }
+                tracked.extend(match_entries(
+                    entries.iter().map(Vec::as_slice),
+                    &rels,
+                    rules,
+                ));
+            }
+            (tracked.into_iter().collect(), unknown)
         }
         Err(IndexError::Unsupported) => {
+            unknown.extend(repo_root_members.into_iter().cloned());
             unknown.extend(rels.into_iter().map(|(_, path)| path.clone()));
             (Vec::new(), unknown)
         }
     }
 }
 
-/// `entries` is sorted. A candidate is tracked when an entry equals it or
-/// lies beneath it. `-` and `.` sort before `/`, so `dist-x` sits between
-/// `dist` and `dist/a`: search for the `dist/` prefix explicitly.
-fn contains_tracked(entries: &[Vec<u8>], rel: &[u8]) -> bool {
-    if entries
-        .binary_search_by(|entry| entry.as_slice().cmp(rel))
-        .is_ok()
-    {
-        return true;
-    }
-    let mut prefix = rel.to_vec();
-    prefix.push(b'/');
-    let at = entries.partition_point(|entry| entry.as_slice() < prefix.as_slice());
-    entries
-        .get(at)
-        .is_some_and(|entry| entry.starts_with(&prefix))
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum IndexError {
     /// Native reader cannot validate or read this repository's index cleanly.
     Unsupported,
+}
+
+/// Open and read a regular file without following symlinks and without blocking
+/// on FIFOs or device nodes.
+fn read_regular_file_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>, IndexError> {
+    #[cfg(unix)]
+    let file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|_| IndexError::Unsupported)?
+    };
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::MetadataExt;
+        let link_meta = std::fs::symlink_metadata(path).map_err(|_| IndexError::Unsupported)?;
+        if !link_meta.is_file() || (link_meta.file_attributes() & 0x400 != 0) {
+            return Err(IndexError::Unsupported);
+        }
+        std::fs::OpenOptions::new()
+            .read(true)
+            .open(path)
+            .map_err(|_| IndexError::Unsupported)?
+    };
+    #[cfg(not(any(unix, windows)))]
+    let file = {
+        let link_meta = std::fs::symlink_metadata(path).map_err(|_| IndexError::Unsupported)?;
+        if !link_meta.is_file() || link_meta.is_symlink() {
+            return Err(IndexError::Unsupported);
+        }
+        std::fs::OpenOptions::new()
+            .read(true)
+            .open(path)
+            .map_err(|_| IndexError::Unsupported)?
+    };
+
+    let meta = file.metadata().map_err(|_| IndexError::Unsupported)?;
+    if !meta.is_file() || meta.len() > max_bytes {
+        return Err(IndexError::Unsupported);
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(meta.len()).unwrap_or(0));
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| IndexError::Unsupported)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(IndexError::Unsupported);
+    }
+    Ok(bytes)
 }
 
 /// Resolve the git directory for `root` (`.git` directory or `gitdir:` file).
@@ -221,7 +558,8 @@ fn resolve_gitdir(root: &Path) -> Result<PathBuf, IndexError> {
         return Err(IndexError::Unsupported);
     }
     // Worktrees and submodules: `gitdir: <path>`, relative to the work tree.
-    let text = std::fs::read_to_string(&dot_git).map_err(|_| IndexError::Unsupported)?;
+    let bytes = read_regular_file_bounded(&dot_git, 4096)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| IndexError::Unsupported)?;
     let trimmed = text.trim_end_matches(['\r', '\n']);
     if trimmed.contains(['\r', '\n', '\0']) {
         return Err(IndexError::Unsupported);
@@ -243,19 +581,248 @@ fn resolve_gitdir(root: &Path) -> Result<PathBuf, IndexError> {
     Ok(gitdir)
 }
 
-/// Confirm `HEAD` exists and is readable as a symbolic ref or commit OID.
-fn validate_head(gitdir: &Path) -> Result<(), IndexError> {
-    let head_path = gitdir.join("HEAD");
-    let file = std::fs::File::open(&head_path).map_err(|_| IndexError::Unsupported)?;
-    let meta = file.metadata().map_err(|_| IndexError::Unsupported)?;
-    if !meta.is_file() || meta.len() == 0 || meta.len() > 4096 {
+/// Resolve the common git directory for `gitdir` (handling linked worktrees).
+fn resolve_commondir(gitdir: &Path) -> Result<PathBuf, IndexError> {
+    let commondir_file = gitdir.join("commondir");
+    match std::fs::symlink_metadata(&commondir_file) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(gitdir.to_path_buf()),
+        Err(_) => Err(IndexError::Unsupported),
+        Ok(_) => {
+            let bytes = read_regular_file_bounded(&commondir_file, 4096)?;
+            let text = std::str::from_utf8(&bytes).map_err(|_| IndexError::Unsupported)?;
+            let trimmed = text.trim_end_matches(['\r', '\n']);
+            if trimmed.is_empty() || trimmed.contains(['\r', '\n', '\0']) {
+                return Err(IndexError::Unsupported);
+            }
+            let target = Path::new(trimmed);
+            let resolved = if target.is_absolute() {
+                target.to_path_buf()
+            } else {
+                gitdir.join(target)
+            };
+            if !std::fs::metadata(&resolved).is_ok_and(|meta| meta.is_dir()) {
+                return Err(IndexError::Unsupported);
+            }
+            Ok(resolved)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NativeRepoConfig {
+    hash_len: usize,
+    rules: FoldingRules,
+    worktree_config: bool,
+}
+
+fn parse_git_bool(raw: Option<&str>) -> Result<bool, IndexError> {
+    let Some(raw) = raw else {
+        return Ok(true);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(false);
+    }
+    if trimmed.eq_ignore_ascii_case("true")
+        || trimmed.eq_ignore_ascii_case("yes")
+        || trimmed.eq_ignore_ascii_case("on")
+        || trimmed == "1"
+    {
+        return Ok(true);
+    }
+    if trimmed.eq_ignore_ascii_case("false")
+        || trimmed.eq_ignore_ascii_case("no")
+        || trimmed.eq_ignore_ascii_case("off")
+        || trimmed == "0"
+    {
+        return Ok(false);
+    }
+    Err(IndexError::Unsupported)
+}
+
+fn unquote_git_config_value(raw: &str) -> Result<String, IndexError> {
+    let mut out = String::new();
+    let mut in_quotes = false;
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        if !in_quotes && (ch == '#' || ch == ';') {
+            break;
+        }
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            continue;
+        }
+        if ch == '\\' {
+            let Some(next) = chars.next() else {
+                return Err(IndexError::Unsupported);
+            };
+            match next {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                'b' => out.push('\x08'),
+                '"' => out.push('"'),
+                '\\' => out.push('\\'),
+                _ => return Err(IndexError::Unsupported),
+            }
+            continue;
+        }
+        out.push(ch);
+    }
+    if in_quotes {
         return Err(IndexError::Unsupported);
     }
-    let mut bytes = Vec::with_capacity(usize::try_from(meta.len()).unwrap_or(0));
-    file.take(4097)
-        .read_to_end(&mut bytes)
-        .map_err(|_| IndexError::Unsupported)?;
-    if bytes.is_empty() || bytes.len() > 4096 {
+    Ok(out.trim().to_owned())
+}
+
+fn parse_config_file(
+    text: &str,
+    repo_format_version: &mut u32,
+    object_format: &mut Option<String>,
+    ignore_case: &mut Option<bool>,
+    precompose_unicode: &mut Option<bool>,
+    worktree_config: &mut Option<bool>,
+) -> Result<(), IndexError> {
+    let mut section = String::new();
+    let mut has_subsection = false;
+
+    for raw_line in text.lines() {
+        let line = raw_line.trim_start();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        // Fail closed on line continuations to avoid misparsing multi-line config values.
+        if raw_line.trim_end_matches('\r').ends_with('\\') {
+            return Err(IndexError::Unsupported);
+        }
+        if let Some(rest) = line.strip_prefix('[') {
+            let Some(close) = rest.find(']') else {
+                return Err(IndexError::Unsupported);
+            };
+            let header = rest[..close].trim();
+            let trailing = rest[close + 1..].trim();
+            if !trailing.is_empty() && !trailing.starts_with('#') && !trailing.starts_with(';') {
+                return Err(IndexError::Unsupported);
+            }
+            let (sec_name, sub) = if let Some(quote_start) = header.find('"') {
+                (header[..quote_start].trim(), true)
+            } else {
+                (header, false)
+            };
+            section = sec_name.to_ascii_lowercase();
+            has_subsection = sub;
+            if section == "include" || section == "includeif" {
+                return Err(IndexError::Unsupported);
+            }
+            continue;
+        }
+        if has_subsection {
+            continue;
+        }
+        let (key_raw, val_raw) = match line.split_once('=') {
+            Some((k, v)) => (k.trim().to_owned(), Some(unquote_git_config_value(v)?)),
+            None => (unquote_git_config_value(line)?, None),
+        };
+        let key = key_raw.to_ascii_lowercase();
+        match (section.as_str(), key.as_str()) {
+            ("core", "repositoryformatversion") => {
+                let val = val_raw.as_deref().ok_or(IndexError::Unsupported)?;
+                let parsed: u32 = val.parse().map_err(|_| IndexError::Unsupported)?;
+                if parsed > 1 {
+                    return Err(IndexError::Unsupported);
+                }
+                *repo_format_version = parsed;
+            }
+            ("core", "ignorecase") => {
+                *ignore_case = Some(parse_git_bool(val_raw.as_deref())?);
+            }
+            ("core", "precomposeunicode") => {
+                *precompose_unicode = Some(parse_git_bool(val_raw.as_deref())?);
+            }
+            ("extensions", "objectformat") => {
+                let val = val_raw
+                    .as_deref()
+                    .ok_or(IndexError::Unsupported)?
+                    .to_ascii_lowercase();
+                *object_format = Some(val);
+            }
+            ("extensions", "worktreeconfig") => {
+                *worktree_config = Some(parse_git_bool(val_raw.as_deref())?);
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn read_native_repo_config(gitdir: &Path) -> Result<NativeRepoConfig, IndexError> {
+    let commondir = resolve_commondir(gitdir)?;
+    let config_path = commondir.join("config");
+    let config_bytes = read_regular_file_bounded(&config_path, MAX_CONFIG_BYTES)?;
+    let config_text = std::str::from_utf8(&config_bytes).map_err(|_| IndexError::Unsupported)?;
+
+    let mut repo_format_version: u32 = 0;
+    let mut object_format: Option<String> = None;
+    let mut ignore_case: Option<bool> = None;
+    let mut precompose_unicode: Option<bool> = None;
+    let mut worktree_config: Option<bool> = None;
+
+    parse_config_file(
+        config_text,
+        &mut repo_format_version,
+        &mut object_format,
+        &mut ignore_case,
+        &mut precompose_unicode,
+        &mut worktree_config,
+    )?;
+
+    let has_worktree_config = repo_format_version >= 1 && worktree_config.unwrap_or(false);
+    if has_worktree_config {
+        let wt_config_path = gitdir.join("config.worktree");
+        match std::fs::symlink_metadata(&wt_config_path) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(IndexError::Unsupported),
+            Ok(_) => {
+                let wt_bytes = read_regular_file_bounded(&wt_config_path, MAX_CONFIG_BYTES)?;
+                let wt_text =
+                    std::str::from_utf8(&wt_bytes).map_err(|_| IndexError::Unsupported)?;
+                parse_config_file(
+                    wt_text,
+                    &mut repo_format_version,
+                    &mut object_format,
+                    &mut ignore_case,
+                    &mut precompose_unicode,
+                    &mut worktree_config,
+                )?;
+            }
+        }
+    }
+
+    let hash_len = if repo_format_version >= 1 {
+        match object_format.as_deref() {
+            None | Some("sha1") => 20,
+            Some("sha256") => 32,
+            Some(_) => return Err(IndexError::Unsupported),
+        }
+    } else {
+        20
+    };
+
+    Ok(NativeRepoConfig {
+        hash_len,
+        rules: FoldingRules {
+            ignore_case: ignore_case.unwrap_or(false),
+            precompose_unicode: precompose_unicode.unwrap_or(false) || cfg!(target_os = "macos"),
+        },
+        worktree_config: has_worktree_config,
+    })
+}
+
+/// Confirm `HEAD` exists as a regular file and is readable as a symbolic ref
+/// or commit OID matching `hash_len`.
+fn validate_head(gitdir: &Path, hash_len: usize) -> Result<(), IndexError> {
+    let head_path = gitdir.join("HEAD");
+    let bytes = read_regular_file_bounded(&head_path, 4096)?;
+    if bytes.is_empty() {
         return Err(IndexError::Unsupported);
     }
     let text = std::str::from_utf8(&bytes).map_err(|_| IndexError::Unsupported)?;
@@ -267,36 +834,27 @@ fn validate_head(gitdir: &Path) -> Result<(), IndexError> {
         .strip_prefix("ref:")
         .map(str::trim)
         .is_some_and(|target| !target.is_empty());
+    let expected_hex_len = hash_len * 2;
     let is_oid =
-        (line.len() == 40 || line.len() == 64) && line.bytes().all(|byte| byte.is_ascii_hexdigit());
+        line.len() == expected_hex_len && line.bytes().all(|byte| byte.is_ascii_hexdigit());
     if !is_symref && !is_oid {
         return Err(IndexError::Unsupported);
     }
     Ok(())
 }
 
-fn read_index_paths(root: &Path) -> Result<Vec<Vec<u8>>, IndexError> {
+fn read_index_native(root: &Path) -> Result<(Vec<Vec<u8>>, FoldingRules), IndexError> {
     let gitdir = resolve_gitdir(root)?;
-    validate_head(&gitdir)?;
+    let config = read_native_repo_config(&gitdir)?;
+    let _ = config.worktree_config;
+    validate_head(&gitdir, config.hash_len)?;
     let path = gitdir.join("index");
-    let file = std::fs::File::open(&path).map_err(|_| IndexError::Unsupported)?;
-    let len = file.metadata().map_err(|_| IndexError::Unsupported)?.len();
-    if len > MAX_INDEX_BYTES {
-        return Err(IndexError::Unsupported);
-    }
-    let mut bytes = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
-    file.take(MAX_INDEX_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| IndexError::Unsupported)?;
-    if bytes.len() as u64 > MAX_INDEX_BYTES {
-        return Err(IndexError::Unsupported);
-    }
-    // SHA-1 repositories are the norm; SHA-256 ones store 32-byte names.
-    let entries = parse_index(&bytes, 20).or_else(|_| parse_index(&bytes, 32))?;
+    let bytes = read_regular_file_bounded(&path, MAX_INDEX_BYTES)?;
+    let entries = parse_index(&bytes, config.hash_len)?;
     if entries.is_empty() {
         return Err(IndexError::Unsupported);
     }
-    Ok(entries)
+    Ok((entries, config.rules))
 }
 
 fn verify_index_checksum(payload: &[u8], expected: &[u8]) -> bool {
@@ -528,71 +1086,193 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// Ask `git ls-files -z --cached` with a sanitized environment. Any non-zero
-/// exit, timeout, or parse problem makes every path in this repository unknown.
+#[cfg(windows)]
+fn normalize_win_canonical(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    let stripped = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        raw.into_owned()
+    };
+    stripped.replace('/', "\\").to_lowercase()
+}
+
+fn same_repo_root(expected: &Path, reported: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let (Ok(a), Ok(b)) = (std::fs::metadata(expected), std::fs::metadata(reported)) {
+            if a.ino() != 0 && b.ino() != 0 {
+                return a.dev() == b.dev() && a.ino() == b.ino();
+            }
+        }
+    }
+    let (Ok(a), Ok(b)) = (
+        std::fs::canonicalize(expected),
+        std::fs::canonicalize(reported),
+    ) else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        normalize_win_canonical(&a) == normalize_win_canonical(&b)
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
+fn verify_git_toplevel(git_binary: &Path, root: &Path) -> bool {
+    let Some(stdout) = run_git_command(
+        git_binary,
+        root,
+        &["rev-parse", "--show-toplevel"],
+        MAX_GIT_META_STDOUT,
+    ) else {
+        return false;
+    };
+    let mut trimmed = stdout.as_slice();
+    while let Some(&last) = trimmed.last() {
+        if last == b'\n' || last == b'\r' {
+            trimmed = &trimmed[..trimmed.len() - 1];
+        } else {
+            break;
+        }
+    }
+    if trimmed.is_empty() || trimmed.iter().any(|&b| b == 0 || b == b'\n' || b == b'\r') {
+        return false;
+    }
+    #[cfg(unix)]
+    let reported = {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(OsStr::from_bytes(trimmed))
+    };
+    #[cfg(not(unix))]
+    let reported = {
+        let Ok(text) = std::str::from_utf8(trimmed) else {
+            return false;
+        };
+        PathBuf::from(text)
+    };
+    same_repo_root(root, &reported)
+}
+
+fn read_git_folding_config(git_binary: &Path, root: &Path) -> Option<FoldingRules> {
+    let stdout = run_git_command(
+        git_binary,
+        root,
+        &["config", "--list", "--null"],
+        MAX_GIT_META_STDOUT,
+    )?;
+    if !stdout.is_empty() && !stdout.ends_with(b"\0") {
+        return None;
+    }
+    let mut ignore_case = false;
+    let mut precompose_unicode = false;
+    for entry in stdout.split(|&byte| byte == 0).filter(|e| !e.is_empty()) {
+        let (key, val) = match entry.iter().position(|&b| b == b'\n') {
+            Some(cut) => (&entry[..cut], Some(&entry[cut + 1..])),
+            None => (entry, None),
+        };
+        if key == b"core.ignorecase" {
+            let val_str = match val {
+                Some(v) => Some(std::str::from_utf8(v).ok()?),
+                None => None,
+            };
+            ignore_case = parse_git_bool(val_str).ok()?;
+        } else if key == b"core.precomposeunicode" {
+            let val_str = match val {
+                Some(v) => Some(std::str::from_utf8(v).ok()?),
+                None => None,
+            };
+            precompose_unicode = parse_git_bool(val_str).ok()?;
+        }
+    }
+    Some(FoldingRules {
+        ignore_case,
+        precompose_unicode: precompose_unicode || cfg!(target_os = "macos"),
+    })
+}
+
+/// Verify the repository root and list all tracked paths once via
+/// `git ls-files -z --cached --full-name`, then match candidates locally
+/// using the repository's folding rules.
 fn tracked_via_git(
     git_binary: &Path,
     root: &Path,
+    repo_root_members: &[&PathBuf],
     rels: &[(Vec<u8>, &PathBuf)],
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let all_unknown = || {
-        (
-            Vec::new(),
-            rels.iter().map(|(_, path)| (*path).clone()).collect(),
-        )
+        let mut out: Vec<PathBuf> = repo_root_members.iter().map(|p| (*p).clone()).collect();
+        out.extend(rels.iter().map(|(_, path)| (*path).clone()));
+        (Vec::new(), out)
     };
-    let by_rel: HashMap<&[u8], &PathBuf> = rels
-        .iter()
-        .map(|(rel, path)| (rel.as_slice(), *path))
-        .collect();
-    let mut tracked = Vec::new();
-    let mut chunk: Vec<&str> = Vec::new();
-    let mut chunk_bytes = 0;
-    let flush = |chunk: &mut Vec<&str>, tracked: &mut Vec<PathBuf>| -> bool {
-        if chunk.is_empty() {
-            return true;
-        }
-        let ok = match run_git_ls_files(git_binary, root, chunk) {
-            Some(stdout) => {
-                for file in stdout.split(|&byte| byte == 0).filter(|f| !f.is_empty()) {
-                    let mut rel = file;
-                    loop {
-                        if let Some(path) = by_rel.get(rel) {
-                            tracked.push((*path).clone());
-                            break;
-                        }
-                        match rel.iter().rposition(|&byte| byte == b'/') {
-                            Some(cut) => rel = &rel[..cut],
-                            None => break,
-                        }
-                    }
-                }
-                true
-            }
-            None => false,
-        };
-        chunk.clear();
-        ok
-    };
-    for (rel, _) in rels {
-        let Ok(text) = std::str::from_utf8(rel) else {
-            return all_unknown();
-        };
-        if !chunk.is_empty() && chunk_bytes + text.len() + 1 > PATHSPEC_CHUNK_BYTES {
-            if !flush(&mut chunk, &mut tracked) {
-                return all_unknown();
-            }
-            chunk_bytes = 0;
-        }
-        chunk.push(text);
-        chunk_bytes += text.len() + 1;
-    }
-    if !flush(&mut chunk, &mut tracked) {
+    if !verify_git_toplevel(git_binary, root) {
         return all_unknown();
     }
-    tracked.sort();
-    tracked.dedup();
-    (tracked, Vec::new())
+    let Some(stdout) = run_git_command(
+        git_binary,
+        root,
+        &["ls-files", "-z", "--cached", "--full-name"],
+        MAX_GIT_STDOUT,
+    ) else {
+        return all_unknown();
+    };
+    if !stdout.is_empty() && !stdout.ends_with(b"\0") {
+        return all_unknown();
+    }
+    let entries: Vec<&[u8]> = stdout
+        .split(|&byte| byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    if entries.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    let mut tracked: HashSet<PathBuf> = HashSet::new();
+    for path in repo_root_members {
+        tracked.insert((*path).clone());
+    }
+    if rels.is_empty() {
+        return (tracked.into_iter().collect(), Vec::new());
+    }
+
+    // Pass 1: exact match (plus NFC on macOS where precompose equivalence is always active).
+    let base_rules = FoldingRules {
+        ignore_case: false,
+        precompose_unicode: cfg!(target_os = "macos"),
+    };
+    tracked.extend(match_entries(entries.iter().copied(), rels, base_rules));
+
+    let remaining: Vec<(Vec<u8>, &PathBuf)> = rels
+        .iter()
+        .filter(|(_, path)| !tracked.contains(*path))
+        .map(|(rel, path)| (rel.clone(), *path))
+        .collect();
+    if remaining.is_empty() {
+        return (tracked.into_iter().collect(), Vec::new());
+    }
+
+    // Only query `git config` when case or Unicode folding could actually match a remaining candidate.
+    let max_rules = FoldingRules {
+        ignore_case: true,
+        precompose_unicode: true,
+    };
+    let potential = match_entries(entries.iter().copied(), &remaining, max_rules);
+    if !potential.is_empty() {
+        let Some(rules) = read_git_folding_config(git_binary, root) else {
+            return all_unknown();
+        };
+        if rules != base_rules {
+            tracked.extend(match_entries(entries.iter().copied(), &remaining, rules));
+        }
+    }
+
+    (tracked.into_iter().collect(), Vec::new())
 }
 
 #[cfg(unix)]
@@ -628,6 +1308,31 @@ fn windows_shell_free_extensions(pathext: Option<&OsStr>) -> Vec<String> {
     }
 }
 
+#[cfg(any(windows, test))]
+fn strip_outer_quotes(entry: &str) -> &str {
+    entry
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(entry)
+}
+
+#[cfg(any(windows, test))]
+fn is_windows_absolute_dir(dir: &str) -> bool {
+    if dir.trim().is_empty() {
+        return false;
+    }
+    let bytes = dir.as_bytes();
+    let drive_abs = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/');
+    let unc_abs = bytes.len() >= 3
+        && ((bytes[0] == b'\\' && bytes[1] == b'\\') || (bytes[0] == b'/' && bytes[1] == b'/'))
+        && bytes[2] != b'\\'
+        && bytes[2] != b'/';
+    drive_abs || unc_abs
+}
+
 /// Resolve a bare command name using only absolute `PATH` directories.
 /// Skips empty, whitespace-only, `.`, and relative entries on every platform.
 fn resolve_absolute_on_path_in(
@@ -636,46 +1341,55 @@ fn resolve_absolute_on_path_in(
     #[cfg_attr(not(windows), allow(unused_variables))] pathext_env: Option<&OsStr>,
 ) -> Option<PathBuf> {
     let path_env = path_env?;
-    for dir in std::env::split_paths(path_env) {
-        if dir.as_os_str().is_empty()
-            || dir.to_str().is_some_and(|text| text.trim().is_empty())
-            || !dir.is_absolute()
-        {
-            continue;
+    #[cfg(windows)]
+    {
+        let raw_path = path_env.to_str()?;
+        let extensions = windows_shell_free_extensions(pathext_env);
+        for raw_dir in raw_path.split(';') {
+            let dir_str = strip_outer_quotes(raw_dir);
+            if !is_windows_absolute_dir(dir_str) {
+                continue;
+            }
+            let dir = Path::new(dir_str);
+            let literal = dir.join(binary);
+            if std::fs::metadata(&literal).is_ok_and(|meta| meta.is_file()) {
+                return Some(literal);
+            }
+            for ext in &extensions {
+                let candidate = dir.join(format!("{binary}{ext}"));
+                if std::fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
+                    return Some(candidate);
+                }
+            }
         }
-        #[cfg(windows)]
-        {
-            let has_ext = Path::new(binary).extension().is_some();
-            if has_ext {
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        for dir in std::env::split_paths(path_env) {
+            if dir.as_os_str().is_empty()
+                || dir.to_str().is_some_and(|text| text.trim().is_empty())
+                || !dir.is_absolute()
+            {
+                continue;
+            }
+            #[cfg(unix)]
+            {
+                let candidate = dir.join(binary);
+                if is_executable_file(&candidate) {
+                    return Some(candidate);
+                }
+            }
+            #[cfg(not(unix))]
+            {
                 let candidate = dir.join(binary);
                 if std::fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
                     return Some(candidate);
                 }
-            } else {
-                for ext in windows_shell_free_extensions(pathext_env) {
-                    let candidate = dir.join(format!("{binary}{ext}"));
-                    if std::fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
-                        return Some(candidate);
-                    }
-                }
             }
         }
-        #[cfg(unix)]
-        {
-            let candidate = dir.join(binary);
-            if is_executable_file(&candidate) {
-                return Some(candidate);
-            }
-        }
-        #[cfg(not(any(unix, windows)))]
-        {
-            let candidate = dir.join(binary);
-            if std::fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
-                return Some(candidate);
-            }
-        }
+        None
     }
-    None
 }
 
 fn is_git_env_key(key: &OsStr) -> bool {
@@ -684,7 +1398,12 @@ fn is_git_env_key(key: &OsStr) -> bool {
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"git_"))
 }
 
-fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Option<Vec<u8>> {
+fn run_git_command(
+    git_binary: &Path,
+    root: &Path,
+    subcommand_args: &[&str],
+    max_stdout: u64,
+) -> Option<Vec<u8>> {
     let mut cmd = Command::new(git_binary);
     cmd.env_clear();
     for (key, value) in std::env::vars_os() {
@@ -704,8 +1423,7 @@ fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Optio
             "-C",
         ])
         .arg(root)
-        .args(["ls-files", "-z", "--cached", "--"])
-        .args(pathspecs)
+        .args(subcommand_args)
         .env("LC_ALL", "C")
         .env("LANG", "C")
         .env("LANGUAGE", "C")
@@ -724,10 +1442,10 @@ fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Optio
         let mut out = Vec::new();
         stdout
             .by_ref()
-            .take(MAX_GIT_STDOUT + 1)
+            .take(max_stdout + 1)
             .read_to_end(&mut out)
             .ok()
-            .and_then(|_| (out.len() as u64 <= MAX_GIT_STDOUT).then_some(out))
+            .and_then(|_| (out.len() as u64 <= max_stdout).then_some(out))
     });
     let deadline = Instant::now() + GIT_TIMEOUT;
     let status = loop {
@@ -742,9 +1460,6 @@ fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Optio
         }
     };
     let out = reader.join().ok().flatten()?;
-    if !out.is_empty() && !out.ends_with(b"\0") {
-        return None;
-    }
     status
         .filter(std::process::ExitStatus::success)
         .map(|_| out)
@@ -799,6 +1514,19 @@ mod tests {
 
     const PATHS: &[&[u8]] = &[b"apps/web/dist/vendor.js", b"dist-x/a", b"src/main.rs"];
 
+    fn contains_exact(entries: &[Vec<u8>], rel: &[u8]) -> bool {
+        let p = PathBuf::from("/fake");
+        let matched = match_entries(
+            entries.iter().map(Vec::as_slice),
+            &[(rel.to_vec(), &p)],
+            FoldingRules {
+                ignore_case: false,
+                precompose_unicode: false,
+            },
+        );
+        matched.contains(&p)
+    }
+
     #[test]
     fn reads_v2_v3_and_v4_indexes_alike() {
         for version in [2, 3, 4] {
@@ -809,13 +1537,13 @@ mod tests {
                 "version {version}"
             );
             let entries = parsed.unwrap_or_default();
-            assert!(contains_tracked(&entries, b"apps/web/dist"));
-            assert!(contains_tracked(&entries, b"src/main.rs"));
+            assert!(contains_exact(&entries, b"apps/web/dist"));
+            assert!(contains_exact(&entries, b"src/main.rs"));
             assert!(
-                !contains_tracked(&entries, b"dist"),
+                !contains_exact(&entries, b"dist"),
                 "dist-x must not count as dist"
             );
-            assert!(!contains_tracked(&entries, b"apps/web/dis"));
+            assert!(!contains_exact(&entries, b"apps/web/dis"));
         }
     }
 
@@ -891,6 +1619,20 @@ mod tests {
     }
 
     #[test]
+    fn windows_path_quote_stripping_and_absolute_check() {
+        assert_eq!(
+            strip_outer_quotes(r#""C:\Program Files\Git\cmd""#),
+            r"C:\Program Files\Git\cmd"
+        );
+        assert_eq!(strip_outer_quotes(r"C:\Git\cmd"), r"C:\Git\cmd");
+        assert!(is_windows_absolute_dir(r"C:\Program Files\Git\cmd"));
+        assert!(is_windows_absolute_dir(r"\\server\share\bin"));
+        assert!(!is_windows_absolute_dir("C:relative"));
+        assert!(!is_windows_absolute_dir(r"\root-relative"));
+        assert!(!is_windows_absolute_dir("   "));
+    }
+
+    #[test]
     fn unsupported_index_without_git_marks_repo_paths_unknown() -> std::io::Result<()> {
         let dir = tempfile::tempdir()?;
         let repo = dir.path().join("repo");
@@ -900,8 +1642,24 @@ mod tests {
         std::fs::create_dir_all(repo.join(".git"))?;
         std::fs::create_dir_all(&repo_dist)?;
         std::fs::create_dir_all(&outside_dist)?;
-        // Split index extension forces fallback to git.
-        let split = index(2, PATHS, &[(b"link", b"0123456789")]);
+        std::fs::write(repo.join(".git").join("HEAD"), b"ref: refs/heads/main\n")?;
+        std::fs::write(
+            repo.join(".git").join("config"),
+            b"[core]\n\trepositoryformatversion = 0\n",
+        )?;
+        // First confirm the same fixture without the `link` extension succeeds cleanly.
+        let valid = index(2, &[b"dist/vendor.js"], &[]);
+        std::fs::write(repo.join(".git").join("index"), valid)?;
+        let ok = tracked_paths_with_path(
+            &[repo_dist.clone(), outside_dist.clone()],
+            Some(OsStr::new("")),
+            None,
+        );
+        assert!(ok.tracked.contains(&repo_dist));
+        assert!(ok.unknown.is_empty());
+
+        // Now add the split index extension so the index parser itself rejects it.
+        let split = index(2, &[b"dist/vendor.js"], &[(b"link", b"0123456789")]);
         std::fs::write(repo.join(".git").join("index"), split)?;
 
         let result = tracked_paths_with_path(
@@ -916,8 +1674,14 @@ mod tests {
     }
 
     fn run_git(repo: &Path, args: &[&str]) -> bool {
-        Command::new("git")
-            .arg("-C")
+        let mut cmd = Command::new("git");
+        cmd.env_clear();
+        for (key, value) in std::env::vars_os() {
+            if !is_git_env_key(&key) {
+                cmd.env(key, value);
+            }
+        }
+        cmd.arg("-C")
             .arg(repo)
             .args(args)
             .stdin(Stdio::null())
@@ -963,7 +1727,7 @@ mod tests {
 
         let target = empty_gitdir.to_string_lossy().replace('\\', "/");
         std::fs::write(repo.join(".git"), format!("gitdir: {target}\n"))?;
-        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+        assert_eq!(read_index_native(&repo), Err(IndexError::Unsupported));
 
         let result = tracked_paths(std::slice::from_ref(&candidate));
         assert!(result.tracked.is_empty());
@@ -982,7 +1746,7 @@ mod tests {
         std::fs::create_dir_all(repo.join(".git"))?;
         std::fs::create_dir_all(&candidate)?;
 
-        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+        assert_eq!(read_index_native(&repo), Err(IndexError::Unsupported));
         let result = tracked_paths(std::slice::from_ref(&candidate));
         assert!(result.tracked.is_empty());
         assert!(result.unknown.contains(&candidate));
@@ -1012,7 +1776,7 @@ mod tests {
         assert!(run_git(&repo, &["commit", "-qm", "init"]));
         std::fs::remove_file(repo.join(".git").join("index"))?;
 
-        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+        assert_eq!(read_index_native(&repo), Err(IndexError::Unsupported));
 
         let with_git = tracked_paths(std::slice::from_ref(&candidate));
         assert!(with_git.tracked.is_empty());
@@ -1097,7 +1861,7 @@ mod tests {
         let target = fake_gitdir.to_string_lossy().replace('\\', "/");
         std::fs::write(repo.join(".git"), format!("gitdir: {target}\n"))?;
 
-        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+        assert_eq!(read_index_native(&repo), Err(IndexError::Unsupported));
 
         // Both with git on PATH and without git on PATH, the candidate must be unknown.
         let with_git = tracked_paths(std::slice::from_ref(&candidate));
@@ -1109,9 +1873,13 @@ mod tests {
         assert!(without_git.tracked.is_empty());
         assert!(without_git.unknown.contains(&candidate));
 
-        // Even with a valid HEAD added, an empty native index must still be unknown without git.
+        // Even with a valid HEAD + config added, an empty native index must still be unknown without git.
         std::fs::write(fake_gitdir.join("HEAD"), b"ref: refs/heads/main\n")?;
-        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+        std::fs::write(
+            fake_gitdir.join("config"),
+            b"[core]\n\trepositoryformatversion = 0\n",
+        )?;
+        assert_eq!(read_index_native(&repo), Err(IndexError::Unsupported));
         let without_git_with_head =
             tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
         assert!(without_git_with_head.tracked.is_empty());
@@ -1253,6 +2021,283 @@ mod tests {
         );
         assert!(result.tracked.is_empty());
         assert!(result.unknown.contains(&candidate));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backslash_directory_name_is_preserved_on_unix() -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let candidate = repo.join(r"a\b").join("node_modules");
+        std::fs::create_dir_all(candidate.join("pkg"))?;
+        std::fs::write(
+            candidate.join("pkg").join("index.js"),
+            b"module.exports = 1;\n",
+        )?;
+
+        assert!(run_git(&repo, &["init", "-q"]));
+        assert!(run_git(&repo, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&repo, &["config", "user.name", "t"]));
+        assert!(run_git(&repo, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&repo, &["add", r"a\b/node_modules/pkg/index.js"]));
+        assert!(run_git(&repo, &["commit", "-qm", "init"]));
+
+        let with_git = tracked_paths(std::slice::from_ref(&candidate));
+        assert!(with_git.tracked.contains(&candidate));
+        assert!(with_git.unknown.is_empty());
+
+        let without_git =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(without_git.tracked.contains(&candidate));
+        assert!(without_git.unknown.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn broken_inner_git_inside_healthy_outer_repo_marks_unknown_via_toplevel_mismatch(
+    ) -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let outer = dir.path().join("outer");
+        let inner = outer.join("inner");
+        let candidate = inner.join("node_modules");
+        std::fs::create_dir_all(inner.join(".git"))?;
+        std::fs::create_dir_all(&candidate)?;
+        std::fs::write(outer.join("readme.txt"), b"outer\n")?;
+
+        assert!(run_git(&outer, &["init", "-q"]));
+        assert!(run_git(&outer, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&outer, &["config", "user.name", "t"]));
+        assert!(run_git(&outer, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&outer, &["add", "readme.txt"]));
+        assert!(run_git(&outer, &["commit", "-qm", "init"]));
+
+        // inner/.git has no HEAD, so `git -C inner` discovers `outer` instead of `inner`.
+        let with_git = tracked_paths(std::slice::from_ref(&candidate));
+        assert!(with_git.tracked.is_empty());
+        assert!(with_git.unknown.contains(&candidate));
+        Ok(())
+    }
+
+    #[test]
+    fn nested_candidates_both_marked_tracked_when_inner_has_tracked_file() -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let outer_cand = repo.join("dist");
+        let inner_cand = outer_cand.join("cache");
+        std::fs::create_dir_all(&inner_cand)?;
+        std::fs::write(inner_cand.join("work.js"), b"1\n")?;
+
+        assert!(run_git(&repo, &["init", "-q"]));
+        assert!(run_git(&repo, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&repo, &["config", "user.name", "t"]));
+        assert!(run_git(&repo, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&repo, &["add", "dist/cache/work.js"]));
+        assert!(run_git(&repo, &["commit", "-qm", "init"]));
+
+        let result = tracked_paths(&[outer_cand.clone(), inner_cand.clone()]);
+        assert!(result.tracked.contains(&outer_cand));
+        assert!(result.tracked.contains(&inner_cand));
+        assert!(result.unknown.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn candidate_as_repo_and_nested_repo_inside_candidate_are_detected() -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+
+        // 1. node_modules is itself a git repository with commits.
+        let self_repo = dir.path().join("proj-a").join("node_modules");
+        std::fs::create_dir_all(self_repo.join("pkg"))?;
+        std::fs::write(self_repo.join("pkg").join("index.js"), b"1\n")?;
+        assert!(run_git(&self_repo, &["init", "-q"]));
+        assert!(run_git(
+            &self_repo,
+            &["config", "user.email", "t@example.com"]
+        ));
+        assert!(run_git(&self_repo, &["config", "user.name", "t"]));
+        assert!(run_git(&self_repo, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&self_repo, &["add", "pkg/index.js"]));
+        assert!(run_git(&self_repo, &["commit", "-qm", "init"]));
+
+        // 2. node_modules/pkg is a nested repo inside a gitignored node_modules.
+        let outer = dir.path().join("proj-b");
+        let nested_nm = outer.join("node_modules");
+        let nested_pkg = nested_nm.join("pkg");
+        std::fs::create_dir_all(&nested_pkg)?;
+        std::fs::write(outer.join(".gitignore"), b"node_modules\n")?;
+        std::fs::write(nested_pkg.join("index.js"), b"1\n")?;
+        assert!(run_git(&outer, &["init", "-q"]));
+        assert!(run_git(&outer, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&outer, &["config", "user.name", "t"]));
+        assert!(run_git(&outer, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&outer, &["add", ".gitignore"]));
+        assert!(run_git(&outer, &["commit", "-qm", "init"]));
+        assert!(run_git(&nested_pkg, &["init", "-q"]));
+        assert!(run_git(
+            &nested_pkg,
+            &["config", "user.email", "t@example.com"]
+        ));
+        assert!(run_git(&nested_pkg, &["config", "user.name", "t"]));
+        assert!(run_git(&nested_pkg, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&nested_pkg, &["add", "index.js"]));
+        assert!(run_git(&nested_pkg, &["commit", "-qm", "init"]));
+
+        let result = tracked_paths(&[self_repo.clone(), nested_nm.clone()]);
+        assert!(result.tracked.contains(&self_repo));
+        assert!(result.contains_git_repo.contains(&self_repo));
+        assert!(!result.tracked.contains(&nested_nm));
+        assert!(result.contains_git_repo.contains(&nested_nm));
+        assert!(result.unknown.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn nested_git_bound_hit_returns_unknown() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let cand = dir.path().join("node_modules");
+        std::fs::create_dir_all(cand.join("a").join("b").join("c"))?;
+        assert_eq!(
+            contains_nested_git_with_limits(&cand, 2, 100, 10),
+            NestedGitStatus::Unknown
+        );
+        assert_eq!(
+            contains_nested_git_with_limits(&cand, 100, 100, 1),
+            NestedGitStatus::Unknown
+        );
+        assert_eq!(
+            contains_nested_git_with_limits(&cand, 100, 100, 10),
+            NestedGitStatus::NotFound
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_head_does_not_block_and_marks_unknown_without_git() -> std::io::Result<()> {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let candidate = repo.join("node_modules");
+        std::fs::create_dir_all(repo.join(".git"))?;
+        std::fs::create_dir_all(&candidate)?;
+        std::fs::write(
+            repo.join(".git").join("config"),
+            b"[core]\n\trepositoryformatversion = 0\n",
+        )?;
+        let valid = index(2, &[b"node_modules/pkg/index.js"], &[]);
+        std::fs::write(repo.join(".git").join("index"), valid)?;
+
+        let head_path = repo.join(".git").join("HEAD");
+        let c_path = CString::new(head_path.as_os_str().as_bytes())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        let rc = unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) };
+        assert_eq!(rc, 0, "mkfifo failed");
+
+        let started = Instant::now();
+        let result =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "FIFO HEAD must not block"
+        );
+        assert!(result.tracked.is_empty());
+        assert!(result.unknown.contains(&candidate));
+        Ok(())
+    }
+
+    #[test]
+    fn sha256_repo_with_sha1_index_marks_unknown_without_git() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let candidate = repo.join("node_modules");
+        std::fs::create_dir_all(repo.join(".git"))?;
+        std::fs::create_dir_all(&candidate)?;
+        std::fs::write(repo.join(".git").join("HEAD"), b"ref: refs/heads/main\n")?;
+        std::fs::write(
+            repo.join(".git").join("config"),
+            b"[core]\n\trepositoryformatversion = 1\n[extensions]\n\tobjectformat = sha256\n",
+        )?;
+        // A valid SHA-1 index inside a SHA-256 repository must be rejected.
+        let sha1_idx = index(2, &[b"src/other.js"], &[]);
+        std::fs::write(repo.join(".git").join("index"), sha1_idx)?;
+
+        assert_eq!(read_index_native(&repo), Err(IndexError::Unsupported));
+        let result =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(result.tracked.is_empty());
+        assert!(result.unknown.contains(&candidate));
+        Ok(())
+    }
+
+    #[test]
+    fn ignorecase_and_precompose_unicode_folding_match_candidates() -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let nm_lower = repo.join("node_modules");
+        std::fs::create_dir_all(nm_lower.join("pkg"))?;
+        std::fs::write(nm_lower.join("pkg").join("index.js"), b"1\n")?;
+        assert!(run_git(&repo, &["init", "-q"]));
+        assert!(run_git(&repo, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&repo, &["config", "user.name", "t"]));
+        assert!(run_git(&repo, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&repo, &["add", "node_modules/pkg/index.js"]));
+        assert!(run_git(&repo, &["commit", "-qm", "init"]));
+        assert!(run_git(&repo, &["config", "core.ignorecase", "true"]));
+
+        let nm_upper = repo.join("Node_Modules");
+        let with_git = tracked_paths(std::slice::from_ref(&nm_upper));
+        assert!(with_git.tracked.contains(&nm_upper));
+        assert!(with_git.unknown.is_empty());
+
+        let without_git =
+            tracked_paths_with_path(std::slice::from_ref(&nm_upper), Some(OsStr::new("")), None);
+        assert!(without_git.tracked.contains(&nm_upper));
+        assert!(without_git.unknown.is_empty());
+
+        // Unicode NFC vs NFD equivalence when core.precomposeunicode = true.
+        let nfc_dir = repo.join("caf\u{00e9}").join("node_modules");
+        std::fs::create_dir_all(nfc_dir.join("pkg"))?;
+        std::fs::write(nfc_dir.join("pkg").join("index.js"), b"1\n")?;
+        assert!(run_git(
+            &repo,
+            &["config", "core.precomposeunicode", "true"]
+        ));
+        assert!(run_git(
+            &repo,
+            &["add", "caf\u{00e9}/node_modules/pkg/index.js"]
+        ));
+        assert!(run_git(&repo, &["commit", "-qm", "nfc"]));
+
+        let nfd_candidate = repo.join("cafe\u{0301}").join("node_modules");
+        let with_git_nfd = tracked_paths(std::slice::from_ref(&nfd_candidate));
+        assert!(with_git_nfd.tracked.contains(&nfd_candidate));
+        assert!(with_git_nfd.unknown.is_empty());
+
+        let without_git_nfd = tracked_paths_with_path(
+            std::slice::from_ref(&nfd_candidate),
+            Some(OsStr::new("")),
+            None,
+        );
+        assert!(without_git_nfd.tracked.contains(&nfd_candidate));
+        assert!(without_git_nfd.unknown.is_empty());
         Ok(())
     }
 }

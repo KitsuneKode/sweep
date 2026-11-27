@@ -169,7 +169,14 @@ fn tracked_status_reports_unknown_when_index_fallback_has_no_git_on_path() {
     let repo_candidate = repo.join("node_modules");
     let outside_candidate = outside.join("node_modules");
     std::fs::create_dir_all(repo.join(".git")).unwrap_or_else(|err| panic!("mkdir: {err}"));
-    // Unparseable index forces the native reader onto the git fallback path.
+    std::fs::write(repo.join(".git").join("HEAD"), b"ref: refs/heads/main\n")
+        .unwrap_or_else(|err| panic!("write HEAD: {err}"));
+    std::fs::write(
+        repo.join(".git").join("config"),
+        b"[core]\n\trepositoryformatversion = 0\n",
+    )
+    .unwrap_or_else(|err| panic!("write config: {err}"));
+    // Unparseable index forces the native reader to reject the index itself.
     std::fs::write(repo.join(".git").join("index"), b"NOT_A_VALID_INDEX")
         .unwrap_or_else(|err| panic!("write: {err}"));
     std::fs::create_dir_all(&repo_candidate).unwrap_or_else(|err| panic!("mkdir: {err}"));
@@ -198,7 +205,7 @@ fn tracked_status_reports_unknown_when_index_fallback_has_no_git_on_path() {
         .split('\0')
         .filter(|entry| !entry.is_empty())
         .collect();
-    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V3"));
+    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V4"));
     assert!(records.contains(&format!("U\t{}", repo_candidate.display()).as_str()));
     assert!(!records.contains(&format!("T\t{}", repo_candidate.display()).as_str()));
     assert!(!records.contains(&format!("U\t{}", outside_candidate.display()).as_str()));
@@ -264,7 +271,7 @@ fn tracked_gitfile_without_index_marks_unknown_and_fails_legacy_mode() {
         .split('\0')
         .filter(|entry| !entry.is_empty())
         .collect();
-    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V3"));
+    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V4"));
     assert!(records.contains(&format!("U\t{}", candidate.display()).as_str()));
     assert!(!records.contains(&format!("T\t{}", candidate.display()).as_str()));
 
@@ -337,7 +344,7 @@ fn tracked_valid_repo_with_deleted_index_stays_empty_in_both_modes() {
         .split('\0')
         .filter(|entry| !entry.is_empty())
         .collect();
-    assert_eq!(records, vec!["SWEEP_TRACKED_V3"]);
+    assert_eq!(records, vec!["SWEEP_TRACKED_V4"]);
 
     let legacy_out = Command::cargo_bin("sweep-engine")
         .unwrap_or_else(|err| panic!("failed to locate sweep-engine binary: {err}"))
@@ -364,9 +371,19 @@ fn tracked_ignores_inherited_git_env_and_handles_nested_and_empty_index_gitfile(
     }
     let root = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
     let run_git = |cwd: &std::path::Path, args: &[&str]| {
+        let mut cmd = std::process::Command::new("git");
+        cmd.env_clear();
+        for (key, value) in std::env::vars_os() {
+            let is_git = key
+                .as_encoded_bytes()
+                .get(..4)
+                .is_some_and(|p| p.eq_ignore_ascii_case(b"git_"));
+            if !is_git {
+                cmd.env(key, value);
+            }
+        }
         assert!(
-            std::process::Command::new("git")
-                .arg("-C")
+            cmd.arg("-C")
                 .arg(cwd)
                 .args(args)
                 .status()
@@ -376,10 +393,29 @@ fn tracked_ignores_inherited_git_env_and_handles_nested_and_empty_index_gitfile(
         );
     };
 
-    // Empty repo + 32-byte empty index to try to spoof GIT_DIR / GIT_INDEX_FILE.
+    // Empty repo + 32-byte empty SHA-1 index to try to spoof GIT_DIR / GIT_INDEX_FILE.
     let empty_repo = root.path().join("empty-repo");
     std::fs::create_dir_all(&empty_repo).unwrap_or_else(|err| panic!("mkdir: {err}"));
-    run_git(&empty_repo, &["init", "-q"]);
+    {
+        let mut cmd = std::process::Command::new("git");
+        cmd.env_clear();
+        for (key, value) in std::env::vars_os() {
+            let is_git = key
+                .as_encoded_bytes()
+                .get(..4)
+                .is_some_and(|p| p.eq_ignore_ascii_case(b"git_"));
+            if !is_git {
+                cmd.env(key, value);
+            }
+        }
+        assert!(cmd
+            .env("GIT_DEFAULT_HASH", "sha1")
+            .arg("-C")
+            .arg(&empty_repo)
+            .args(["init", "-q"])
+            .status()
+            .is_ok_and(|s| s.success()));
+    }
     run_git(&empty_repo, &["config", "user.email", "t@example.com"]);
     run_git(&empty_repo, &["config", "user.name", "t"]);
     run_git(&empty_repo, &["config", "commit.gpgsign", "false"]);
@@ -449,7 +485,7 @@ fn tracked_ignores_inherited_git_env_and_handles_nested_and_empty_index_gitfile(
         .split('\0')
         .filter(|entry| !entry.is_empty())
         .collect();
-    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V3"));
+    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V4"));
     assert!(records.contains(&format!("T\t{}", nested_nm.display()).as_str()));
     assert!(records.contains(&format!("U\t{}", broken_nm.display()).as_str()));
     assert!(!records.contains(&format!("T\t{}", broken_nm.display()).as_str()));

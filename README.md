@@ -39,9 +39,10 @@ Space queues a project, Enter opens it, `i` queues every idle project,
   history and its own files, never from its build output, so a reinstall does
   not make a forgotten project look busy. `sweep --idle 30d` selects only
   projects nobody has touched for a month.
-- **It will not remove your work.** Anything git tracks, project files (`src`,
+- **It will not remove your work.** Files tracked by any discoverable git
+  repository (at, above, or inside a candidate), project files (`src`,
   manifests, lockfiles, `.env*`), version-control folders and system roots are
-  blocked whatever a pattern or flag says. Each path is checked again right
+  protected whatever a pattern or flag says. Each path is checked again right
   before removal.
 - **It is fast.** A Rust engine finds and sizes 4,000 artifacts across 65,000
   folders in under a second, and the terminal UI fills in while it scans.

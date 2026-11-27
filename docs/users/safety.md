@@ -47,17 +47,33 @@ to bypass a refusal.
 Some things are not Sweep's to remove, whatever a pattern or flag says. They
 appear in a scan as **blocked** and cannot be selected:
 
-- **Anything git tracks.** When `git` is available, Sweep checks every
-  enclosing repository with a sanitized `git ls-files --cached` invocation
-  (`core.fsmonitor` disabled and inherited `GIT_*` overrides cleared) and
-  trusts its answer only on exit 0, so a valid repository with a deleted index
-  matches `git` while any error or timeout marks those items `dangerous`
-  (`tracked-status-unknown`). When `git` is unavailable, Sweep uses the native
-  index reader only if the repository validates (gitdir, readable `HEAD`,
-  verified index checksum) with a non-empty index; any validation failure,
-  empty native result, or missing check marks items `tracked-status-unknown`,
-  never pre-selected, and refused again just before removal regardless of
-  flags or tier.
+- **Files tracked by a discoverable git repository.** Sweep protects files
+  tracked by any repository whose `.git` is at or above the candidate path
+  (including committed symlinks named like an artifact) and detects repositories
+  inside a candidate. When `git` is available, Sweep verifies each enclosing
+  repository's root with `git rev-parse --show-toplevel` and lists tracked paths
+  once via a sanitized `git ls-files -z --cached --full-name` invocation
+  (`core.fsmonitor` disabled and inherited `GIT_*` overrides cleared), matching
+  candidates locally with that repository's `core.ignorecase` and
+  `core.precomposeunicode` (or macOS NFC/NFD) folding rules. A valid repository
+  with a deleted index matches `git`, while any toplevel mismatch, error, or
+  timeout marks those items `dangerous` (`tracked-status-unknown`). When `git`
+  is unavailable, Sweep uses the native index reader only if the repository
+  validates (gitdir, regular config + `extensions.objectFormat`, regular `HEAD`,
+  and verified index checksum for that hash format) with a non-empty index; any
+  validation failure, empty native result, or missing check marks items
+  `tracked-status-unknown`, never pre-selected, and refused again just before
+  removal regardless of flags or tier. A detached work tree configured only
+  through a bare repository's `core.worktree` or `GIT_DIR`/`GIT_WORK_TREE` in
+  the environment has no `.git` entry in the tree and is not detected.
+- **Candidates containing a git repository.** Any directory candidate that
+  contains a `.git` entry at or below it (checked by a bounded,
+  non-symlink-following walk; hitting the bound marks the candidate
+  `tracked-status-unknown`) becomes at least `dangerous` with reason
+  `contains-git-repository`. It is never pre-selected and is refused at apply
+  (`contains_git_repository`) unless explicitly selected one at a time in the
+  interactive UI (and stays `blocked` if its own or an enclosing repository
+  tracks files inside it).
 - **Project files**: `src`, `.sweeprc`, `.env` and `.env.*`, and manifests and
   lockfiles such as `package.json`, `Cargo.toml`, `go.mod` and `pyproject.toml`.
   A repository's own `.sweeprc` can add patterns, but it cannot make these

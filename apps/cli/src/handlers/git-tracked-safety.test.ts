@@ -4,6 +4,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -17,6 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
+import { gitEnv } from "@kitsunekode/sweep-core/git-tracked";
 import {
   isRustEngineAvailable,
   lookupExecutable,
@@ -46,20 +48,20 @@ function makeRoot(prefix: string): string {
 }
 
 function runGit(cwd: string, ...args: string[]): void {
-  const res = spawnSync("git", ["-C", cwd, ...args], { stdio: "ignore" });
+  const res = spawnSync("git", ["-C", cwd, ...args], { stdio: "ignore", env: gitEnv() });
   expect(res.status).toBe(0);
 }
 
-function initRepo(dir: string): void {
+function initRepo(dir: string, extraInitArgs: string[] = []): void {
   mkdirSync(dir, { recursive: true });
-  runGit(dir, "init", "-q");
+  runGit(dir, "init", "-q", ...extraInitArgs);
   runGit(dir, "config", "user.email", "t@example.com");
   runGit(dir, "config", "user.name", "t");
   runGit(dir, "config", "commit.gpgsign", "false");
 }
 
 function makeEmptyIndexRepo(dir: string): { gitDir: string; emptyIndex: string } {
-  initRepo(dir);
+  initRepo(dir, ["--object-format=sha1"]);
   writeFileSync(join(dir, "tmp.txt"), "x\n");
   runGit(dir, "add", "tmp.txt");
   runGit(dir, "rm", "--cached", "-q", "tmp.txt");
@@ -149,16 +151,44 @@ function hasTrashDir(dir: string): boolean {
   return readdirSync(dir).some((name) => name.startsWith(".sweep-trash-"));
 }
 
+function pathEntryStillPresent(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function refusalCodeForReason(
+  reason: "git-tracked" | "tracked-status-unknown" | "contains-git-repository",
+): "git_tracked" | "tracked_status_unknown" | "contains_git_repository" {
+  if (reason === "git-tracked") return "git_tracked";
+  if (reason === "contains-git-repository") return "contains_git_repository";
+  return "tracked_status_unknown";
+}
+
 function assertProtectedAcrossAllRoutes(options: {
   root: string;
   target: string;
   committedFile: string;
   engine: "js" | "rust";
   expectedTier: "blocked" | "dangerous";
-  expectedReason: "git-tracked" | "tracked-status-unknown";
+  expectedReason: "git-tracked" | "tracked-status-unknown" | "contains-git-repository";
+  candidatePathMatch?: (candidatePath: string) => boolean;
   extraEnv?: Record<string, string | undefined>;
 }): void {
-  const { root, target, committedFile, engine, expectedTier, expectedReason, extraEnv } = options;
+  const {
+    root,
+    target,
+    committedFile,
+    engine,
+    expectedTier,
+    expectedReason,
+    candidatePathMatch,
+    extraEnv,
+  } = options;
+  const expectedRefusal = refusalCodeForReason(expectedReason);
 
   // 1. Default plan: candidate is classified properly and not selected.
   const planRes = runCli(
@@ -167,7 +197,9 @@ function assertProtectedAcrossAllRoutes(options: {
   );
   expect(planRes.status).toBe(0);
   const defaultPlan = JSON.parse(planRes.stdout) as ScanPlan;
-  const nm = defaultPlan.candidates.find((candidate) => candidate.name === "node_modules");
+  const nm = defaultPlan.candidates.find((candidate) =>
+    candidatePathMatch ? candidatePathMatch(candidate.path) : candidate.name === "node_modules",
+  );
   expect(nm).toBeDefined();
   expect(nm?.riskTier).toBe(expectedTier);
   expect(nm?.reasons).toContain(expectedReason);
@@ -180,7 +212,7 @@ function assertProtectedAcrossAllRoutes(options: {
     buildEngineEnv(root, engine, extraEnv),
   );
   expect(defaultClean.status).toBe(0);
-  expect(existsSync(committedFile)).toBe(true);
+  expect(pathEntryStillPresent(committedFile)).toBe(true);
 
   // 2. --select all --include-dangerous --allow-dangerous --yes does not delete it.
   const dangerousClean = runCli(
@@ -200,11 +232,11 @@ function assertProtectedAcrossAllRoutes(options: {
   );
   if (expectedTier === "dangerous") {
     expect(dangerousClean.status).toBe(2);
-    expect(dangerousClean.stderr).toContain("tracked_status_unknown");
+    expect(dangerousClean.stderr).toContain(expectedRefusal);
   } else {
     expect(dangerousClean.status).toBe(0);
   }
-  expect(existsSync(committedFile)).toBe(true);
+  expect(pathEntryStillPresent(committedFile)).toBe(true);
 
   // 3. A saved plan applied later does not delete it (even when saved with --select all --include-dangerous
   // and even if the saved plan explicitly selects the candidate id).
@@ -221,11 +253,11 @@ function assertProtectedAcrossAllRoutes(options: {
   );
   if (expectedTier === "dangerous") {
     expect(applySaved.status).toBe(2);
-    expect(applySaved.stderr).toContain("tracked_status_unknown");
+    expect(applySaved.stderr).toContain(expectedRefusal);
   } else {
     expect(applySaved.status).toBe(0);
   }
-  expect(existsSync(committedFile)).toBe(true);
+  expect(pathEntryStillPresent(committedFile)).toBe(true);
 
   // Also test applying a forged saved plan that claims node_modules is safe and selected.
   const forgedPlan = JSON.parse(readFileSync(savedPlanPath, "utf8")) as ScanPlan;
@@ -243,10 +275,8 @@ function assertProtectedAcrossAllRoutes(options: {
     buildEngineEnv(root, engine, extraEnv),
   );
   expect(applyForged.status).toBe(2);
-  expect(applyForged.stderr).toContain(
-    expectedTier === "dangerous" ? "tracked_status_unknown" : "git_tracked",
-  );
-  expect(existsSync(committedFile)).toBe(true);
+  expect(applyForged.stderr).toContain(expectedRefusal);
+  expect(pathEntryStillPresent(committedFile)).toBe(true);
 
   // 4. --trash does not delete it and creates no .sweep-trash-* directory.
   const trashClean = runCli(
@@ -267,11 +297,11 @@ function assertProtectedAcrossAllRoutes(options: {
   );
   if (expectedTier === "dangerous") {
     expect(trashClean.status).toBe(2);
-    expect(trashClean.stderr).toContain("tracked_status_unknown");
+    expect(trashClean.stderr).toContain(expectedRefusal);
   } else {
     expect(trashClean.status).toBe(0);
   }
-  expect(existsSync(committedFile)).toBe(true);
+  expect(pathEntryStillPresent(committedFile)).toBe(true);
   expect(hasTrashDir(target)).toBe(false);
 }
 
@@ -563,6 +593,279 @@ describe.skipIf(!HAS_GIT)("git-tracked CLI safety matrix across engines", () => 
         );
         expect(cleanRes.status).toBe(0);
         expect(existsSync(file)).toBe(false);
+      }
+    },
+    SAFETY_TEST_TIMEOUT_MS,
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "backslash directory name a\\b/node_modules/pkg/index.js stays blocked across all routes in both engines",
+    () => {
+      const root = makeRoot("sweep-matrix-backslash-");
+      const repo = join(root, "repo");
+      initRepo(repo);
+      const subDir = join(repo, "a\\b");
+      mkdirSync(join(subDir, "node_modules", "pkg"), { recursive: true });
+      writeFileSync(join(subDir, "package.json"), "{}\n");
+      const committedFile = join(subDir, "node_modules", "pkg", "index.js");
+      writeFileSync(committedFile, "module.exports = 'backslash';\n");
+      runGit(repo, "add", "a\\b/package.json", "a\\b/node_modules/pkg/index.js");
+      runGit(repo, "commit", "-qm", "backslash");
+
+      for (const engine of ENGINES) {
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: repo,
+          committedFile,
+          engine,
+          expectedTier: "blocked",
+          expectedReason: "git-tracked",
+        });
+      }
+    },
+    SAFETY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "node_modules that is itself a git repository with commits is blocked across all routes in both engines",
+    () => {
+      const root = makeRoot("sweep-matrix-self-repo-");
+      const proj = join(root, "proj");
+      const nm = join(proj, "node_modules");
+      mkdirSync(join(nm, "pkg"), { recursive: true });
+      writeFileSync(join(proj, "package.json"), "{}\n");
+      const committedFile = join(nm, "pkg", "index.js");
+      writeFileSync(committedFile, "module.exports = 'self-repo';\n");
+      initRepo(nm);
+      runGit(nm, "add", "pkg/index.js");
+      runGit(nm, "commit", "-qm", "init");
+
+      for (const engine of ENGINES) {
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: proj,
+          committedFile,
+          engine,
+          expectedTier: "blocked",
+          expectedReason: "git-tracked",
+        });
+      }
+    },
+    SAFETY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "nested git repository at node_modules/pkg inside a gitignored node_modules is protected across all routes in both engines",
+    () => {
+      const root = makeRoot("sweep-matrix-nested-inside-");
+      const repo = join(root, "repo");
+      const nestedPkg = join(repo, "node_modules", "pkg");
+      mkdirSync(nestedPkg, { recursive: true });
+      writeFileSync(join(repo, "package.json"), "{}\n");
+      writeFileSync(join(repo, ".gitignore"), "node_modules/\n");
+      const committedFile = join(nestedPkg, "index.js");
+      writeFileSync(committedFile, "module.exports = 'nested-repo';\n");
+
+      initRepo(repo);
+      runGit(repo, "add", "package.json", ".gitignore");
+      runGit(repo, "commit", "-qm", "outer");
+
+      initRepo(nestedPkg);
+      runGit(nestedPkg, "add", "index.js");
+      runGit(nestedPkg, "commit", "-qm", "inner");
+
+      for (const engine of ENGINES) {
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: repo,
+          committedFile,
+          engine,
+          expectedTier: "dangerous",
+          expectedReason: "contains-git-repository",
+        });
+      }
+    },
+    SAFETY_TEST_TIMEOUT_MS,
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "committed symlink named node_modules is blocked across all routes in both engines",
+    () => {
+      const root = makeRoot("sweep-matrix-symlink-");
+      const repo = join(root, "repo");
+      initRepo(repo);
+      mkdirSync(join(repo, "real"), { recursive: true });
+      writeFileSync(join(repo, "package.json"), "{}\n");
+      writeFileSync(join(repo, "real", "index.js"), "module.exports = 'real';\n");
+      const linkPath = join(repo, "node_modules");
+      symlinkSync("real", linkPath);
+      runGit(repo, "add", "package.json", "real/index.js", "node_modules");
+      runGit(repo, "commit", "-qm", "symlink");
+
+      for (const engine of ENGINES) {
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: repo,
+          committedFile: linkPath,
+          engine,
+          expectedTier: "blocked",
+          expectedReason: "git-tracked",
+        });
+      }
+    },
+    SAFETY_TEST_TIMEOUT_MS,
+  );
+
+  test.skipIf(process.platform === "win32" || process.platform === "darwin")(
+    "core.ignorecase=true protects a differently cased candidate across all routes in both engines",
+    () => {
+      const root = makeRoot("sweep-matrix-icase-");
+      const repo = join(root, "repo");
+      initRepo(repo);
+      mkdirSync(join(repo, "Node_Modules", "pkg"), { recursive: true });
+      writeFileSync(join(repo, "package.json"), "{}\n");
+      writeFileSync(join(repo, "Node_Modules", "pkg", "index.js"), "module.exports = 'upper';\n");
+      runGit(repo, "add", "package.json", "Node_Modules/pkg/index.js");
+      runGit(repo, "commit", "-qm", "upper");
+      runGit(repo, "config", "core.ignorecase", "true");
+
+      // On case-sensitive Linux, create a differently cased sibling `node_modules`
+      // that matches the default pattern while git tracks `Node_Modules/...`.
+      const lowerFile = join(repo, "node_modules", "pkg", "index.js");
+      mkdirSync(dirname(lowerFile), { recursive: true });
+      writeFileSync(lowerFile, "module.exports = 'lower';\n");
+
+      for (const engine of ENGINES) {
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: repo,
+          committedFile: lowerFile,
+          engine,
+          expectedTier: "blocked",
+          expectedReason: "git-tracked",
+        });
+      }
+    },
+    SAFETY_TEST_TIMEOUT_MS,
+  );
+
+  test.skipIf(process.platform === "win32" || process.platform === "darwin")(
+    "NFD vs NFC names are protected under core.precomposeunicode=true across all routes in both engines",
+    () => {
+      const root = makeRoot("sweep-matrix-unicode-");
+      const repo = join(root, "repo");
+      initRepo(repo);
+      const nfcDir = join(repo, "caf\u00e9");
+      mkdirSync(join(nfcDir, "node_modules", "pkg"), { recursive: true });
+      writeFileSync(join(nfcDir, "package.json"), "{}\n");
+      writeFileSync(join(nfcDir, "node_modules", "pkg", "index.js"), "module.exports = 'nfc';\n");
+      runGit(repo, "config", "core.precomposeunicode", "true");
+      runGit(repo, "add", "caf\u00e9/package.json", "caf\u00e9/node_modules/pkg/index.js");
+      runGit(repo, "commit", "-qm", "nfc");
+
+      const nfdDir = join(repo, "cafe\u0301");
+      const nfdNm = join(nfdDir, "node_modules");
+      const nfdFile = join(nfdNm, "pkg", "index.js");
+      mkdirSync(dirname(nfdFile), { recursive: true });
+      writeFileSync(join(nfdDir, "package.json"), "{}\n");
+      writeFileSync(nfdFile, "module.exports = 'nfd';\n");
+
+      for (const engine of ENGINES) {
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: repo,
+          committedFile: nfdFile,
+          engine,
+          expectedTier: "blocked",
+          expectedReason: "git-tracked",
+          candidatePathMatch: (p) => p === nfdNm,
+        });
+      }
+    },
+    SAFETY_TEST_TIMEOUT_MS,
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "FIFO .git/HEAD with git missing does not hang and marks unknown across all routes in both engines",
+    () => {
+      const mkfifo = spawnSync("mkfifo", ["--version"], { stdio: "ignore" });
+      if (mkfifo.error) return;
+      const root = makeRoot("sweep-matrix-fifo-head-");
+      const repo = join(root, "repo");
+      initRepo(repo);
+      const committedFile = commitNodeModules(repo);
+      const headPath = join(repo, ".git", "HEAD");
+      unlinkSync(headPath);
+      expect(spawnSync("mkfifo", [headPath], { stdio: "ignore" }).status).toBe(0);
+      const pathWithoutGit = buildPathWithoutGit(join(root, "no-git-bin"));
+
+      const started = performance.now();
+      for (const engine of ENGINES) {
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: repo,
+          committedFile,
+          engine,
+          expectedTier: "dangerous",
+          expectedReason: "tracked-status-unknown",
+          extraEnv: { PATH: pathWithoutGit },
+        });
+      }
+      expect(performance.now() - started).toBeLessThan(20_000);
+    },
+    SAFETY_TEST_TIMEOUT_MS,
+  );
+
+  test(
+    "SHA-256 repository with a SHA-1-length index marks unknown across all routes in both engines",
+    () => {
+      const root = makeRoot("sweep-matrix-sha256-mismatch-");
+      // Build a real non-empty SHA-1 index tracking an unrelated file.
+      const sha1Src = join(root, "sha1-src");
+      initRepo(sha1Src, ["--object-format=sha1"]);
+      writeFileSync(join(sha1Src, "other.js"), "1\n");
+      runGit(sha1Src, "add", "other.js");
+      runGit(sha1Src, "commit", "-qm", "sha1");
+
+      // Create a SHA-256 repository and replace its index with the SHA-1 index.
+      const repo = join(root, "sha256-repo");
+      mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });
+      writeFileSync(join(repo, "package.json"), "{}\n");
+      const committedFile = join(repo, "node_modules", "pkg", "index.js");
+      writeFileSync(committedFile, "module.exports = 'sha256';\n");
+      const initSha256 = spawnSync("git", ["-C", repo, "init", "-q", "--object-format=sha256"], {
+        stdio: "ignore",
+        env: gitEnv(),
+      });
+      if (initSha256.status !== 0) return; // git too old for sha256
+      runGit(repo, "config", "user.email", "t@example.com");
+      runGit(repo, "config", "user.name", "t");
+      runGit(repo, "config", "commit.gpgsign", "false");
+      runGit(repo, "add", "package.json", "node_modules/pkg/index.js");
+      runGit(repo, "commit", "-qm", "sha256");
+      copyFileSync(join(sha1Src, ".git", "index"), join(repo, ".git", "index"));
+
+      const pathWithoutGit = buildPathWithoutGit(join(root, "no-git-bin"));
+      for (const engine of ENGINES) {
+        // Without git on PATH: native fallback enforces extensions.objectFormat = sha256 and rejects the SHA-1 index.
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: repo,
+          committedFile,
+          engine,
+          expectedTier: "dangerous",
+          expectedReason: "tracked-status-unknown",
+          extraEnv: { PATH: pathWithoutGit },
+        });
+        // With git on PATH: git also fails on the mismatched index and fails closed as unknown.
+        assertProtectedAcrossAllRoutes({
+          root,
+          target: repo,
+          committedFile,
+          engine,
+          expectedTier: "dangerous",
+          expectedReason: "tracked-status-unknown",
+        });
       }
     },
     SAFETY_TEST_TIMEOUT_MS,

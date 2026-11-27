@@ -85,7 +85,9 @@ export function fatalErrorDocument(err: unknown, applyOutcome?: "not_started" | 
                         ? "Remove git-tracked items from the selection or untrack them first. Nothing was removed."
                         : err.refusalCode === "tracked_status_unknown"
                           ? "Restore git or the native engine so Sweep can verify tracked files, then re-scan before applying. Nothing was removed."
-                          : "Inspect unreadable or unsupported entries before creating a newly reviewed plan.",
+                          : err.refusalCode === "contains_git_repository"
+                            ? "Candidate contains a git repository (.git). Remove it individually in interactive mode (`sweep ui`) or exclude it from bulk apply. Nothing was removed."
+                            : "Inspect unreadable or unsupported entries before creating a newly reviewed plan.",
           }
         : {}),
     ...(unknownOutcome || refused || applyOutcome

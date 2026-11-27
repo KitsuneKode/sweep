@@ -603,6 +603,8 @@ export async function executePlanDeletion(
     trash?: boolean;
     maxSizeGB?: number | null;
     forceLarge?: boolean;
+    /** True only when a human explicitly confirmed a single item one at a time (TUI `x`). */
+    explicitSingleSelection?: boolean;
     /** External cancel (in-session TUI apply): stops scheduling like SIGINT. */
     signal?: AbortSignal;
     onProgress?: (progress: ApplyProgress) => void;
@@ -626,13 +628,14 @@ export async function executePlanDeletion(
   // mkdir below can never run against a root a forged plan would fail on.
   assertSafeCwd(plan.targetDir);
   // Tiers in a plan are claims. Whatever the plan says, nothing git tracks is
-  // removed: ask git again, at the last moment, about exactly what is queued.
+  // removed: ask git again, at the last moment, about exactly what is queued
+  // (including symlink candidates, whose link path itself can be committed).
   {
     const selectedIds = new Set(plan.selectedCandidateIds);
-    const queued = plan.candidates.filter(
-      (candidate) => selectedIds.has(candidate.id) && !candidate.isSymlink,
+    const queued = plan.candidates.filter((candidate) => selectedIds.has(candidate.id));
+    const { tracked, unknown, containsGitRepo } = gitTrackedPaths(
+      queued.map((candidate) => candidate.path),
     );
-    const { tracked, unknown } = gitTrackedPaths(queued.map((candidate) => candidate.path));
     if (tracked.size > 0) {
       const first = sanitizeTerminalText([...tracked][0]!);
       throw new ApplyRefusedError(
@@ -645,6 +648,15 @@ export async function executePlanDeletion(
       throw new ApplyRefusedError(
         `${unknown.size} queued item(s) could not be checked for git-tracked files (e.g. ${first}). Sweep refuses to remove repository items whose tracked status is unknown; nothing was removed.`,
         "tracked_status_unknown",
+      );
+    }
+    const allowSingleRepoRemoval =
+      options.explicitSingleSelection === true && selectedIds.size === 1;
+    if (containsGitRepo.size > 0 && !allowSingleRepoRemoval) {
+      const first = sanitizeTerminalText([...containsGitRepo][0]!);
+      throw new ApplyRefusedError(
+        `${containsGitRepo.size} queued item(s) contain a git repository (e.g. ${first}). Sweep refuses to remove items containing .git unless explicitly selected one at a time; nothing was removed.`,
+        "contains_git_repository",
       );
     }
   }

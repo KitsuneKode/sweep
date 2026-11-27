@@ -78,6 +78,15 @@ test("automation errors distinguish a proven refusal from uncertain mutation", (
     applyOutcome: "not_started",
     retryable: false,
   });
+  expect(
+    fatalErrorDocument(new ApplyRefusedError("nested repo", "contains_git_repository"), "unknown"),
+  ).toMatchObject({
+    type: "error",
+    code: "contains_git_repository",
+    exitCode: 2,
+    applyOutcome: "not_started",
+    retryable: false,
+  });
 });
 
 test("unknown apply outcomes are failures, never ordinary user aborts", () => {

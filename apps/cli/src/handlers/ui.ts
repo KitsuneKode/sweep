@@ -235,6 +235,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
             trash: request.trash,
             maxSizeGB: configFor(request.plan.targetDir).maxSizeGB,
             forceLarge: opts.forceLarge || request.overrideSizeLimit === true,
+            ...(request.explicitSingleSelection ? { explicitSingleSelection: true } : {}),
             signal: request.signal,
             ...(request.onProgress ? { onProgress: request.onProgress } : {}),
           },
@@ -310,6 +311,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       {
         maxSizeGB: planConfig.maxSizeGB,
         forceLarge,
+        ...(outcome.explicitSingleSelection ? { explicitSingleSelection: true } : {}),
         ...(useTrash ? { trash: true } : {}),
       },
     );

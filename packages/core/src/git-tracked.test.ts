@@ -20,12 +20,13 @@ import {
   gitTrackedPaths,
   gitTrackedPathsViaEngine,
   gitTrackedPathsViaGit,
+  scanCandidateForDotGit,
 } from "./git-tracked.js";
 import { isRustEngineAvailable } from "./rust-engine.js";
 
 let root: string;
 const git = (...args: string[]) =>
-  spawnSync("git", ["-C", root, ...args], { stdio: "ignore", env: { ...process.env } });
+  spawnSync("git", ["-C", root, ...args], { stdio: "ignore", env: gitEnv() });
 
 function write(rel: string, contents = "x\n") {
   const path = join(root, rel);
@@ -56,6 +57,7 @@ const IMPLEMENTATIONS = [
       gitTrackedPathsViaEngine(paths) ?? {
         tracked: new Set<string>(["<no answer>"]),
         unknown: new Set<string>(),
+        containsGitRepo: new Set<string>(),
       },
     available: hasGit && isRustEngineAvailable(),
   },
@@ -148,7 +150,7 @@ for (const impl of IMPLEMENTATIONS) {
       const sha = mkdtempSync(join(tmpdir(), "sweep-git-sha256-"));
       try {
         const run = (...args: string[]) =>
-          spawnSync("git", ["-C", sha, ...args], { stdio: "ignore" }).status;
+          spawnSync("git", ["-C", sha, ...args], { stdio: "ignore", env: gitEnv() }).status;
         if (run("init", "-q", "--object-format=sha256") !== 0) return; // git too old
         run("config", "user.email", "t@example.com");
         run("config", "user.name", "t");
@@ -310,7 +312,11 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
       writeFileSync(join(root, ".git"), `gitdir: ${emptyGitdir.replaceAll("\\", "/")}\n`);
 
       const nmPath = join(root, "node_modules");
-      const expected = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      const expected = {
+        tracked: new Set<string>(),
+        unknown: new Set([nmPath]),
+        containsGitRepo: new Set<string>(),
+      };
       expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
       expect(gitTrackedPaths([nmPath])).toEqual(expected);
       if (isRustEngineAvailable()) {
@@ -347,7 +353,11 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
       mkdirSync(join(fakeRepo, ".git"), { recursive: true });
       const nmPath = join(fakeRepo, "node_modules");
       mkdirSync(nmPath, { recursive: true });
-      const expected = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      const expected = {
+        tracked: new Set<string>(),
+        unknown: new Set([nmPath]),
+        containsGitRepo: new Set<string>(),
+      };
       expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
       expect(gitTrackedPaths([nmPath])).toEqual(expected);
       if (isRustEngineAvailable()) {
@@ -366,7 +376,11 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
     unlinkSync(join(root, ".git", "index"));
 
     const nmPath = join(root, "node_modules");
-    const empty = { tracked: new Set<string>(), unknown: new Set<string>() };
+    const empty = {
+      tracked: new Set<string>(),
+      unknown: new Set<string>(),
+      containsGitRepo: new Set<string>(),
+    };
     expect(gitTrackedPathsViaGit([nmPath])).toEqual(empty);
     expect(gitTrackedPaths([nmPath])).toEqual(empty);
     if (isRustEngineAvailable()) {
@@ -377,7 +391,11 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
     try {
       process.env.PATH =
         process.platform === "win32" ? "C:\\nonexistent-sweep-no-git" : "/nonexistent-sweep-no-git";
-      const unknown = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      const unknown = {
+        tracked: new Set<string>(),
+        unknown: new Set([nmPath]),
+        containsGitRepo: new Set<string>(),
+      };
       expect(gitTrackedPathsViaGit([nmPath])).toEqual(unknown);
       expect(gitTrackedPaths([nmPath])).toEqual(unknown);
       if (isRustEngineAvailable()) {
@@ -414,6 +432,7 @@ test.skipIf(process.platform === "win32")(
         expect(gitTrackedPathsViaGit([join(work, "dist")])).toEqual({
           tracked: new Set(),
           unknown: new Set([join(work, "dist")]),
+          containsGitRepo: new Set(),
         });
         expect(existsSync(marker)).toBe(false);
       }
@@ -460,12 +479,14 @@ test("gitEnv drops all inherited GIT_* variables and sets hardened defaults", ()
   expect(cleaned.GIT_NO_LAZY_FETCH).toBe("1");
 });
 
-describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => {
+describe.skipIf(!hasGit)("round 5 & round 6 git-tracked invariants (both engines)", () => {
   function makeEmptyIndexRepo(dir: string): { gitDir: string; emptyIndex: string } {
     mkdirSync(dir, { recursive: true });
     const run = (...args: string[]) =>
-      expect(spawnSync("git", ["-C", dir, ...args], { stdio: "ignore" }).status).toBe(0);
-    run("init", "-q");
+      expect(
+        spawnSync("git", ["-C", dir, ...args], { stdio: "ignore", env: gitEnv() }).status,
+      ).toBe(0);
+    run("init", "-q", "--object-format=sha1");
     run("config", "user.email", "t@example.com");
     run("config", "user.name", "t");
     run("config", "commit.gpgsign", "false");
@@ -492,7 +513,11 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
       writeFileSync(join(root, ".git"), `gitdir: ${fakeGitdir.replaceAll("\\", "/")}\n`);
 
       const nmPath = join(root, "node_modules");
-      const expected = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      const expected = {
+        tracked: new Set<string>(),
+        unknown: new Set([nmPath]),
+        containsGitRepo: new Set<string>(),
+      };
       expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
       expect(gitTrackedPaths([nmPath])).toEqual(expected);
       if (isRustEngineAvailable()) {
@@ -520,7 +545,11 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
       process.env.GIT_WORK_TREE = join(scratch, "empty-repo");
 
       const nmPath = join(root, "node_modules");
-      const expected = { tracked: new Set([nmPath]), unknown: new Set<string>() };
+      const expected = {
+        tracked: new Set([nmPath]),
+        unknown: new Set<string>(),
+        containsGitRepo: new Set<string>(),
+      };
       expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
       expect(gitTrackedPaths([nmPath])).toEqual(expected);
       if (isRustEngineAvailable()) {
@@ -543,11 +572,18 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
     git("add", "package.json", "nested/node_modules/pkg/index.js");
     git("commit", "-qm", "init");
     expect(
-      spawnSync("git", ["-C", join(root, "nested"), "init", "-q"], { stdio: "ignore" }).status,
+      spawnSync("git", ["-C", join(root, "nested"), "init", "-q"], {
+        stdio: "ignore",
+        env: gitEnv(),
+      }).status,
     ).toBe(0);
 
     const nmPath = join(root, "nested", "node_modules");
-    const expected = { tracked: new Set([nmPath]), unknown: new Set<string>() };
+    const expected = {
+      tracked: new Set([nmPath]),
+      unknown: new Set<string>(),
+      containsGitRepo: new Set<string>(),
+    };
     expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
     expect(gitTrackedPaths([nmPath])).toEqual(expected);
     if (isRustEngineAvailable()) {
@@ -562,7 +598,9 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
       mkdirSync(join(subSrc, "node_modules", "pkg"), { recursive: true });
       writeFileSync(join(subSrc, "node_modules", "pkg", "index.js"), "module.exports = 1;\n");
       const runSub = (...args: string[]) =>
-        expect(spawnSync("git", ["-C", subSrc, ...args], { stdio: "ignore" }).status).toBe(0);
+        expect(
+          spawnSync("git", ["-C", subSrc, ...args], { stdio: "ignore", env: gitEnv() }).status,
+        ).toBe(0);
       runSub("init", "-q");
       runSub("config", "user.email", "t@example.com");
       runSub("config", "user.name", "t");
@@ -577,7 +615,7 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
         spawnSync(
           "git",
           ["-C", root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", subSrc, "sub"],
-          { stdio: "ignore" },
+          { stdio: "ignore", env: gitEnv() },
         ).status,
       ).toBe(0);
       git("commit", "-qm", "add sub");
@@ -587,7 +625,11 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
       mkdirSync(subUntracked, { recursive: true });
       writeFileSync(join(subUntracked, "out.js"), "x\n");
 
-      const expected = { tracked: new Set([subTracked]), unknown: new Set<string>() };
+      const expected = {
+        tracked: new Set([subTracked]),
+        unknown: new Set<string>(),
+        containsGitRepo: new Set<string>(),
+      };
       expect(gitTrackedPathsViaGit([subTracked, subUntracked])).toEqual(expected);
       expect(gitTrackedPaths([subTracked, subUntracked])).toEqual(expected);
       if (isRustEngineAvailable()) {
@@ -617,7 +659,11 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
 
       process.env.PATH = fakeBin;
       const nmPath = join(root, "node_modules");
-      const expected = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      const expected = {
+        tracked: new Set<string>(),
+        unknown: new Set([nmPath]),
+        containsGitRepo: new Set<string>(),
+      };
       expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
       expect(gitTrackedPaths([nmPath])).toEqual(expected);
       if (isRustEngineAvailable()) {
@@ -659,6 +705,7 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
         expect(gitTrackedPaths([nmPath])).toEqual({
           tracked: new Set([nmPath]),
           unknown: new Set<string>(),
+          containsGitRepo: new Set<string>(),
         });
       } finally {
         if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
@@ -667,4 +714,101 @@ describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => 
       }
     },
   );
+
+  test.skipIf(process.platform === "win32")(
+    "backslash in a Unix directory name stays literal in both engines",
+    () => {
+      write("a\\b/node_modules/pkg/index.js", "module.exports = 1;\n");
+      git("add", "a\\b/node_modules/pkg/index.js");
+      git("commit", "-qm", "backslash");
+
+      const candidate = join(root, "a\\b", "node_modules");
+      const expected = {
+        tracked: new Set([candidate]),
+        unknown: new Set<string>(),
+        containsGitRepo: new Set<string>(),
+      };
+      expect(gitTrackedPathsViaGit([candidate])).toEqual(expected);
+      expect(gitTrackedPaths([candidate])).toEqual(expected);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([candidate])).toEqual(expected);
+      }
+    },
+  );
+
+  test("core.ignorecase=true and Unicode NFC/NFD folding agree in both engines", () => {
+    write("node_modules/pkg/index.js", "module.exports = 1;\n");
+    write("caf\u00e9/node_modules/pkg/index.js", "module.exports = 1;\n");
+    git("config", "core.ignorecase", "true");
+    git("config", "core.precomposeunicode", "true");
+    git("add", "node_modules/pkg/index.js", "caf\u00e9/node_modules/pkg/index.js");
+    git("commit", "-qm", "folding");
+
+    const upperCaseCandidate = join(root, "Node_Modules");
+    const nfdCandidate = join(root, "cafe\u0301", "node_modules");
+    const expected = {
+      tracked: new Set([upperCaseCandidate, nfdCandidate]),
+      unknown: new Set<string>(),
+      containsGitRepo: new Set<string>(),
+    };
+    expect(gitTrackedPathsViaGit([upperCaseCandidate, nfdCandidate])).toEqual(expected);
+    if (isRustEngineAvailable()) {
+      expect(gitTrackedPathsViaEngine([upperCaseCandidate, nfdCandidate])).toEqual(expected);
+    }
+  });
+
+  test("broken inner .git inside healthy outer repo fails closed via rev-parse toplevel check", () => {
+    write("README.md", "outer\n");
+    git("add", "README.md");
+    git("commit", "-qm", "outer");
+    const inner = join(root, "inner");
+    const candidate = join(inner, "node_modules");
+    mkdirSync(join(inner, ".git"), { recursive: true });
+    mkdirSync(candidate, { recursive: true });
+
+    const expected = {
+      tracked: new Set<string>(),
+      unknown: new Set([candidate]),
+      containsGitRepo: new Set<string>(),
+    };
+    expect(gitTrackedPathsViaGit([candidate])).toEqual(expected);
+    if (isRustEngineAvailable()) {
+      expect(gitTrackedPathsViaEngine([candidate])).toEqual(expected);
+    }
+  });
+
+  test("nested candidates dist and dist/cache are both reported tracked", () => {
+    write("dist/cache/work.js", "1\n");
+    git("add", "dist/cache/work.js");
+    git("commit", "-qm", "nested");
+    const outerCand = join(root, "dist");
+    const innerCand = join(outerCand, "cache");
+    const expected = {
+      tracked: new Set([outerCand, innerCand]),
+      unknown: new Set<string>(),
+      containsGitRepo: new Set<string>(),
+    };
+    expect(gitTrackedPathsViaGit([outerCand, innerCand])).toEqual(expected);
+    if (isRustEngineAvailable()) {
+      expect(gitTrackedPathsViaEngine([outerCand, innerCand])).toEqual(expected);
+    }
+  });
+
+  test("bounded nested .git search detects nested repos and marks bound overflow unknown", () => {
+    const cand = join(root, "bounded-nm");
+    mkdirSync(join(cand, "a", "b", "c"), { recursive: true });
+    expect(scanCandidateForDotGit(cand, { maxDirs: 2, maxEntries: 100, maxDepth: 10 })).toBe(
+      "unknown",
+    );
+    expect(scanCandidateForDotGit(cand, { maxDirs: 100, maxEntries: 100, maxDepth: 1 })).toBe(
+      "unknown",
+    );
+    expect(scanCandidateForDotGit(cand, { maxDirs: 100, maxEntries: 100, maxDepth: 10 })).toBe(
+      "not_found",
+    );
+    mkdirSync(join(cand, "a", "b", ".git"), { recursive: true });
+    expect(scanCandidateForDotGit(cand, { maxDirs: 100, maxEntries: 100, maxDepth: 10 })).toBe(
+      "found",
+    );
+  });
 });

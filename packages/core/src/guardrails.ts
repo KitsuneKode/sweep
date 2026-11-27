@@ -198,7 +198,8 @@ export type ApplyRefusalCode =
   | "resource_limit_exceeded"
   | "engine_unavailable"
   | "git_tracked"
-  | "tracked_status_unknown";
+  | "tracked_status_unknown"
+  | "contains_git_repository";
 export class ApplyRefusedError extends GuardrailError {
   readonly applyOutcome = "not_started" as const;
   constructor(
@@ -224,6 +225,7 @@ export function isApplyRefusedError(error: unknown): error is ApplyRefusedError 
       "engine_unavailable",
       "git_tracked",
       "tracked_status_unknown",
+      "contains_git_repository",
     ].includes(value.refusalCode ?? "")
   );
 }

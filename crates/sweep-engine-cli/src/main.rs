@@ -133,9 +133,10 @@ fn run() -> Result<(), CliFailure> {
 }
 
 /// Which of the NUL-separated absolute paths on stdin are, or contain,
-/// git-tracked files. With `--status`, emits `SWEEP_TRACKED_V3\0` followed by
-/// `T\t<path>\0` for tracked paths and `U\t<path>\0` for repository paths whose
-/// tracked status could not be checked.
+/// git-tracked files or nested git repositories. With `--status`, emits
+/// `SWEEP_TRACKED_V4\0` followed by `T\t<path>\0` for tracked paths,
+/// `U\t<path>\0` for repository paths whose tracked status could not be
+/// checked, and `R\t<path>\0` for directory candidates containing `.git`.
 fn run_tracked() -> Result<(), CliFailure> {
     use std::io::{Read, Write};
     let status_mode = match arg(2)?.as_deref() {
@@ -170,17 +171,22 @@ fn run_tracked() -> Result<(), CliFailure> {
     let result = sweep_engine::git_index::tracked_paths(&paths);
     let mut out = Vec::new();
     if status_mode {
-        out.extend_from_slice(b"SWEEP_TRACKED_V3\0");
+        out.extend_from_slice(b"SWEEP_TRACKED_V4\0");
         for path in &paths {
-            let Some(text) = path.to_str() else {
-                continue;
-            };
+            let text = path
+                .to_str()
+                .ok_or_else(|| CliFailure::failure("tracked path is not valid UTF-8"))?;
             if result.tracked.contains(path) {
                 out.extend_from_slice(b"T\t");
                 out.extend_from_slice(text.as_bytes());
                 out.push(0);
             } else if result.unknown.contains(path) {
                 out.extend_from_slice(b"U\t");
+                out.extend_from_slice(text.as_bytes());
+                out.push(0);
+            }
+            if result.contains_git_repo.contains(path) {
+                out.extend_from_slice(b"R\t");
                 out.extend_from_slice(text.as_bytes());
                 out.push(0);
             }
@@ -193,10 +199,11 @@ fn run_tracked() -> Result<(), CliFailure> {
         }
         for path in &paths {
             if result.tracked.contains(path) {
-                if let Some(text) = path.to_str() {
-                    out.extend_from_slice(text.as_bytes());
-                    out.push(0);
-                }
+                let text = path
+                    .to_str()
+                    .ok_or_else(|| CliFailure::failure("tracked path is not valid UTF-8"))?;
+                out.extend_from_slice(text.as_bytes());
+                out.push(0);
             }
         }
     }

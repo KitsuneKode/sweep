@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
+import { gitEnv } from "@kitsunekode/sweep-core/git-tracked";
 import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
 import { lookupExecutable } from "@kitsunekode/sweep-core/rust-engine";
 import type { ApplyProgress, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
@@ -405,7 +406,7 @@ test.skipIf(!hasGit)(
     writeFileSync(committedFile, "module.exports = 'committed';\n");
 
     const runGit = (...args: string[]) => {
-      const res = spawnSync("git", ["-C", repo, ...args], { stdio: "ignore" });
+      const res = spawnSync("git", ["-C", repo, ...args], { stdio: "ignore", env: gitEnv() });
       expect(res.status).toBe(0);
     };
     runGit("init", "-q");
@@ -477,6 +478,100 @@ test.skipIf(!hasGit)(
       else process.env.PATH = previousPath;
       if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
       else process.env.SWEEP_ENGINE_PATH = previousEngine;
+    }
+  },
+);
+
+test.skipIf(!hasGit)(
+  "contains-git-repository refuses bulk apply but permits explicitSingleSelection, while git-tracked always refuses",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-nested-repo-apply-"));
+    roots.push(root);
+    const configDir = join(root, "config");
+    const repo = join(root, "repo");
+    const nestedPkg = join(repo, "node_modules", "pkg");
+    mkdirSync(nestedPkg, { recursive: true });
+    writeFileSync(join(repo, "package.json"), "{}\n");
+    writeFileSync(join(repo, ".gitignore"), "node_modules/\n");
+    writeFileSync(join(nestedPkg, "index.js"), "module.exports = 1;\n");
+
+    const runGitIn = (dir: string, ...args: string[]) => {
+      const res = spawnSync("git", ["-C", dir, ...args], { stdio: "ignore", env: gitEnv() });
+      expect(res.status).toBe(0);
+    };
+    runGitIn(repo, "init", "-q");
+    runGitIn(repo, "config", "user.email", "t@example.com");
+    runGitIn(repo, "config", "user.name", "t");
+    runGitIn(repo, "config", "commit.gpgsign", "false");
+    runGitIn(repo, "add", "package.json", ".gitignore");
+    runGitIn(repo, "commit", "-qm", "init");
+
+    runGitIn(nestedPkg, "init", "-q");
+    runGitIn(nestedPkg, "config", "user.email", "t@example.com");
+    runGitIn(nestedPkg, "config", "user.name", "t");
+    runGitIn(nestedPkg, "config", "commit.gpgsign", "false");
+    runGitIn(nestedPkg, "add", "index.js");
+    runGitIn(nestedPkg, "commit", "-qm", "nested init");
+
+    const prevConfig = process.env.SWEEP_CONFIG_DIR;
+    process.env.SWEEP_CONFIG_DIR = configDir;
+    try {
+      const { plan } = await scanToPlan(repo, DEFAULT_CONFIG, {
+        selectionPolicy: { mode: "all", includeDangerous: true },
+      });
+      const nm = plan.candidates.find((c) => c.name === "node_modules");
+      expect(nm?.riskTier).toBe("dangerous");
+      expect(nm?.reasons).toContain("contains-git-repository");
+      expect(nm?.selectedByDefault).toBe(false);
+
+      // Default/bulk apply refuses with contains_git_repository.
+      await expect(executePlanDeletion(plan, "js", { quiet: true })).rejects.toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "contains_git_repository",
+      });
+      expect(existsSync(join(nestedPkg, "index.js"))).toBe(true);
+
+      // Explicit single-item confirmation (TUI `x`) permits removing that one candidate.
+      const singleRes = await executePlanDeletion(plan, "js", {
+        quiet: true,
+        explicitSingleSelection: true,
+      });
+      expect(singleRes.report.deletedCount).toBe(1);
+      expect(existsSync(join(nestedPkg, "index.js"))).toBe(false);
+
+      // Contrast: a node_modules that is itself a git repo with commits is git-tracked and refused even with explicitSingleSelection.
+      const selfRepoParent = join(root, "self-repo-parent");
+      const selfNm = join(selfRepoParent, "node_modules");
+      mkdirSync(join(selfNm, "pkg"), { recursive: true });
+      writeFileSync(join(selfRepoParent, "package.json"), "{}\n");
+      writeFileSync(join(selfNm, "pkg", "index.js"), "module.exports = 2;\n");
+      runGitIn(selfNm, "init", "-q");
+      runGitIn(selfNm, "config", "user.email", "t@example.com");
+      runGitIn(selfNm, "config", "user.name", "t");
+      runGitIn(selfNm, "config", "commit.gpgsign", "false");
+      runGitIn(selfNm, "add", "pkg/index.js");
+      runGitIn(selfNm, "commit", "-qm", "self init");
+
+      const { plan: selfPlan } = await scanToPlan(selfRepoParent, DEFAULT_CONFIG);
+      const selfCand = selfPlan.candidates.find((c) => c.name === "node_modules");
+      expect(selfCand?.riskTier).toBe("blocked");
+      expect(selfCand?.reasons).toContain("git-tracked");
+      expect(selfCand?.reasons).toContain("contains-git-repository");
+      const forcedSingle = {
+        ...selfPlan,
+        selectedCandidateIds: [selfCand!.id],
+        summary: { ...selfPlan.summary, selectedCount: 1 },
+      };
+      await expect(
+        executePlanDeletion(forcedSingle, "js", { quiet: true, explicitSingleSelection: true }),
+      ).rejects.toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "git_tracked",
+      });
+      expect(existsSync(join(selfNm, "pkg", "index.js"))).toBe(true);
+    } finally {
+      if (prevConfig === undefined) delete process.env.SWEEP_CONFIG_DIR;
+      else process.env.SWEEP_CONFIG_DIR = prevConfig;
     }
   },
 );
