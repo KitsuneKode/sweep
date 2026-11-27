@@ -75,8 +75,8 @@ worktree branches 10 are merged locally, 4 more only on the remote, and
 **44 were never pushed**. Ancestry is right there (the repo merges PRs with
 merge commits); the space is mostly unfinished agent work, not finished work.
 No branch reads `upstream_gone` because GitHub's "delete branch on merge" is
-off for both repositories; turning it on plus `fetch.prune` makes squash
-merges visible without any extra git calls.
+off for both repositories; turning it on plus `fetch.prune` surfaces missing
+tracking branches as a signal to check in git without any extra git calls.
 
 One repository (`.worktrees/main-regression-20261007`) is a full clone inside
 another repo's `.worktrees`, with 27 worktrees of its own. It is reported as
@@ -96,7 +96,7 @@ the stubs. Removes ~80% of rows on a monorepo-heavy tree.
 ### W3 — Removing a finished worktree (new authority, own PR)
 
 Per remaining-work rule 5 this lands alone. `git worktree remove` (never
-`--force`) for a worktree that is `merged` or `upstream_gone`, clean
+`--force`) for a worktree that is `merged`, clean
 (`git status --porcelain` empty, checked at the destructive boundary), not
 locked and not the current directory. Dirty worktrees are listed with what is
 uncommitted and cannot be queued. Receipt names the branch that stays.

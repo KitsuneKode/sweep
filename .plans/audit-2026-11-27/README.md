@@ -2,16 +2,15 @@ Status: in_progress
 Scope: repo
 Created: 2026-11-27
 Updated: 2026-11-27
-Commit: uncommitted
+Commit: t3/land-worktree-audit-fixes
 
 # 2026-11-27 Repository Audit Index
 
-This directory captures two independent repository audits of `sweep` at commit
-`a5a1c41` plus the owner's uncommitted `feat/worktree-units` changes, together
-with the merged phase plan and owner decisions that govern remediation.
+This index records the owner decisions and phased remediation plan derived from
+the 2026-11-27 repository audits of `sweep` at commit `a5a1c41` plus the
+`feat/worktree-units` branch. Full raw audit reports are kept privately outside
+the public repository.
 
-- [Codex audit report (`A01`–`A18`)](codex-sol.md)
-- [Antigravity audit report (`F01`–`F20`)](antigravity-neon.md)
 - Merged tracking ledger (`AU01`–`AU28`): [remaining-work.md](../remaining-work.md)
 
 ## Owner Decisions (`D1`–`D10`)
@@ -31,41 +30,39 @@ with the merged phase plan and owner decisions that govern remediation.
 
 ## Private Security Advisories
 
-The following items are tracked as **private security advisories** (not public
-issues) and scheduled for Phase 4. Do not document exploitation details or
-reproduction payloads in public issues, PRs, or changelogs prior to release:
+Tracked privately under `D6` (no implementation or exploitation details are
+recorded in this public repository):
 
-1. **`AU22` — Windows bare executable resolution** (Codex prior #3; Antigravity `F07`):
-   Resolve external executables strictly to verified absolute paths across JS
-   and Rust subprocess callers, and avoid falling through to `PATH` when
-   standalone embedded extraction fails.
-2. **`AU23` — Untrusted `.git` / cache file reads and system-subtree guardrails**
-   (Antigravity `F03`, `F09`): Harden file opens for untrusted `.git` metadata
-   (such as non-blocking / no-symlink-follow bounded reads in Rust `.git/index`
-   and cache files) and tighten OS system-subtree guardrails. _(Note: UI
-   `.git/HEAD` bounded no-follow reads and terminal branch sanitization landed
-   in Phase 0 under `AU01`.)_
-3. **`AU24` — `sweep init` check-then-write race** (Codex `A06`; Antigravity `F14`):
-   Enforce exclusive creation and staged replacement at the actual file
-   operation boundary, aligned with the TUI config writer.
+| ID     | Title                                              | Phase   |
+| ------ | -------------------------------------------------- | ------- |
+| `AU22` | Subprocess executable resolution hardening         | Phase 4 |
+| `AU23` | Untrusted metadata file handling and root controls | Phase 4 |
+| `AU24` | Config initialization write atomicity              | Phase 4 |
 
 ## Phase Plan
 
 ### Phase 0 — Land worktree WIP & audit ledger (`AU01`, `AU02` budget) — _this PR_
 
 - Land owner WIP from `feat/worktree-units` as a dedicated first commit.
-- Apply D5 worktree labeling fixes: `upstream_gone` never enters "Finished
-  worktrees" and labels as `"Tracking branch missing · check git"`; zero-commit
-  and dirty worktrees never count as `merged`; verified base required.
-- Force `LC_ALL=C` and `LANG=C` in JS (`GIT_ENV`) and Rust (`git_index.rs`) git
-  invocations.
+- Apply D5 worktree labeling fixes: evaluate `upstream_gone` before merge
+  classification; show `app · branch missing` on the row and `"Tracking branch
+  missing · check git"` in the details margin; reserve **Finished worktrees**
+  for clean, proven-merged worktrees against a verified base (`origin/HEAD`,
+  else main worktree branch when no `origin` remote is configured, never a
+  guessed local `main`/`master`).
+- Determine worktree cleanliness data-only (parse `.git/index`, verify stat
+  data and `ls-tree`, reject unsupported index layouts/flags/submodules and
+  in-progress operations, bounded `.gitignore`/`info/exclude` untracked walk)
+  with no `git status` spawn; sanitize environment and flags across all JS and
+  Rust git invocations; keep split-index reads read-only.
+- Canonicalize worktree roots and `worktreeOf` paths across platforms; verify
+  opened reflog real paths stay under `logs/refs/heads`.
 - Sanitize git-derived terminal strings (`ProjectDetails.tsx`) and harden
-  `project-details.ts` `.git/HEAD` reads (size bound, no symlink following,
-  `gitdir:` support).
-- Bound worktree git enrichment with a per-scan time budget (Codex `A12`),
-  degrading remaining repos to unknown on expiry.
-- Record the 2026-11-27 audit in `remaining-work.md` and this index, and remove
-  the approved stray folders from the owner's checkout.
+  `project-details.ts` `.git/HEAD` reads.
+- Bound worktree enrichment with a monotonic per-scan deadline and cancellable
+  async subprocesses; omit presentation-only worktree fields from native apply
+  payloads for compatibility with older engines.
+- Record the 2026-11-27 audit ledger in `remaining-work.md` and this index.
 
 ### Phase 1 — Release `0.5.3` readiness (`AU03`–`AU10`)
 
@@ -114,9 +111,7 @@ reproduction payloads in public issues, PRs, or changelogs prior to release:
 
 ### Phase 4 — Private security fixes (`AU22`–`AU24`)
 
-- Land private fixes for Windows bare executable resolution, untrusted `.git` /
-  cache reads + OS system-subtree guardrails, and `sweep init` create/replace
-  atomicity (D6).
+- Tracked privately under `D6`.
 
 ### Phase 5 — UI consistency (`AU25`, `AU26` a11y/mobile)
 
