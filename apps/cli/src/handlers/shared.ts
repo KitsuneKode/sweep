@@ -635,17 +635,16 @@ export async function executePlanDeletion(
     const { tracked, unknown } = gitTrackedPaths(queued.map((candidate) => candidate.path));
     if (tracked.size > 0) {
       const first = sanitizeTerminalText([...tracked][0]!);
-      throw new GuardrailError(
+      throw new ApplyRefusedError(
         `${tracked.size} queued item(s) contain git-tracked files (e.g. ${first}). Nothing was removed.`,
+        "git_tracked",
       );
     }
-    const unapprovedUnknown = queued.filter(
-      (candidate) => unknown.has(candidate.path) && candidate.riskTier !== "dangerous",
-    );
-    if (unapprovedUnknown.length > 0) {
-      const first = sanitizeTerminalText(unapprovedUnknown[0]!.path);
-      throw new GuardrailError(
-        `${unapprovedUnknown.length} queued item(s) could not be checked for git-tracked files (e.g. ${first}). Re-scan or approve as dangerous before removing.`,
+    if (unknown.size > 0) {
+      const first = sanitizeTerminalText([...unknown][0]!);
+      throw new ApplyRefusedError(
+        `${unknown.size} queued item(s) could not be checked for git-tracked files (e.g. ${first}). Sweep refuses to remove repository items whose tracked status is unknown; nothing was removed.`,
+        "tracked_status_unknown",
       );
     }
   }

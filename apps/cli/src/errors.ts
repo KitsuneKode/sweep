@@ -81,7 +81,11 @@ export function fatalErrorDocument(err: unknown, applyOutcome?: "not_started" | 
                     ? "Review a smaller selection or subtree within the resource budget. Nothing was removed; do not increase limits automatically."
                     : err.refusalCode === "size_limit_exceeded"
                       ? "Review the queue or configured size policy. Do not widen deletion authorization automatically."
-                      : "Inspect unreadable or unsupported entries before creating a newly reviewed plan.",
+                      : err.refusalCode === "git_tracked"
+                        ? "Remove git-tracked items from the selection or untrack them first. Nothing was removed."
+                        : err.refusalCode === "tracked_status_unknown"
+                          ? "Restore git or the native engine so Sweep can verify tracked files, then re-scan before applying. Nothing was removed."
+                          : "Inspect unreadable or unsupported entries before creating a newly reviewed plan.",
           }
         : {}),
     ...(unknownOutcome || refused || applyOutcome

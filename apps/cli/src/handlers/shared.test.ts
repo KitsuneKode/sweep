@@ -1,6 +1,8 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -11,10 +13,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
 import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
+import { lookupExecutable } from "@kitsunekode/sweep-core/rust-engine";
 import type { ApplyProgress, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import {
   assertDangerousConsent,
@@ -46,7 +49,8 @@ test.skipIf(process.platform === "win32")(
 afterEach(() => {
   if (previousConfig === undefined) delete process.env.SWEEP_CONFIG_DIR;
   else process.env.SWEEP_CONFIG_DIR = previousConfig;
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0))
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
 async function fixture() {
@@ -369,3 +373,110 @@ test("resource refusal never arms a journal or creates trash", async () => {
   expect(existsSync(join(process.env.SWEEP_CONFIG_DIR!, "journals"))).toBe(false);
   expect(readdirSync(plan.targetDir).some((name) => name.startsWith(".sweep-trash-"))).toBe(false);
 });
+
+function buildPathWithoutGit(tempBin: string): string {
+  const nodePath = lookupExecutable("node").resolvedPath;
+  const nodeDir = nodePath ? dirname(nodePath) : undefined;
+  if (nodePath && nodeDir) {
+    if (!lookupExecutable("git", { pathEnv: nodeDir }).resolvedPath) {
+      return `${tempBin}${delimiter}${nodeDir}`;
+    }
+    const target = join(tempBin, basename(nodePath));
+    if (process.platform === "win32") copyFileSync(nodePath, target);
+    else symlinkSync(nodePath, target);
+  }
+  return tempBin;
+}
+
+const hasGit = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;
+
+test.skipIf(!hasGit)(
+  "pre-apply recheck refuses dangerous unknown-tracked candidates and CLI --select all --include-dangerous with no git and no engine",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-unknown-tracked-apply-"));
+    roots.push(root);
+    const repo = join(root, "repo");
+    const configDir = join(root, "config");
+    const tempBin = join(root, "bin");
+    mkdirSync(join(repo, "node_modules", "pkg"), { recursive: true });
+    mkdirSync(tempBin, { recursive: true });
+    writeFileSync(join(repo, "package.json"), "{}\n");
+    const committedFile = join(repo, "node_modules", "pkg", "index.js");
+    writeFileSync(committedFile, "module.exports = 'committed';\n");
+
+    const runGit = (...args: string[]) => {
+      const res = spawnSync("git", ["-C", repo, ...args], { stdio: "ignore" });
+      expect(res.status).toBe(0);
+    };
+    runGit("init", "-q");
+    runGit("config", "user.email", "t@example.com");
+    runGit("config", "user.name", "t");
+    runGit("config", "commit.gpgsign", "false");
+    runGit("add", "package.json", "node_modules/pkg/index.js");
+    runGit("commit", "-qm", "init");
+
+    const pathWithoutGit = buildPathWithoutGit(tempBin);
+    const missingEngine = join(root, "missing-sweep-engine");
+    const previousPath = process.env.PATH;
+    const previousEngine = process.env.SWEEP_ENGINE_PATH;
+    process.env.SWEEP_CONFIG_DIR = configDir;
+    try {
+      process.env.PATH = pathWithoutGit;
+      process.env.SWEEP_ENGINE_PATH = missingEngine;
+      expect(lookupExecutable("git").resolvedPath).toBeUndefined();
+
+      const { plan } = await scanToPlan(repo, DEFAULT_CONFIG, {
+        selectionPolicy: { mode: "all", includeDangerous: true },
+      });
+      const nm = plan.candidates.find((candidate) => candidate.name === "node_modules");
+      expect(nm?.riskTier).toBe("dangerous");
+      expect(nm?.reasons).toContain("tracked-status-unknown");
+      expect(plan.selectedCandidateIds).toContain(nm!.id);
+
+      await expect(
+        executePlanDeletion(plan, "js", { quiet: true, trash: true }),
+      ).rejects.toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "tracked_status_unknown",
+      });
+      expect(existsSync(committedFile)).toBe(true);
+      expect(existsSync(join(configDir, "journals"))).toBe(false);
+      expect(readdirSync(repo).some((name) => name.startsWith(".sweep-trash-"))).toBe(false);
+
+      const cliBin = join(import.meta.dir, "..", "bin.ts");
+      const cliResult = spawnSync(
+        process.execPath,
+        [
+          cliBin,
+          "clean",
+          repo,
+          "--select",
+          "all",
+          "--include-dangerous",
+          "--yes",
+          "--allow-dangerous",
+          "--json",
+        ],
+        {
+          encoding: "utf8",
+        },
+      );
+      expect(cliResult.status).toBe(2);
+      expect(existsSync(committedFile)).toBe(true);
+      const stderrLines = cliResult.stderr.trim().split(/\r?\n/);
+      const errorDoc = JSON.parse(stderrLines[stderrLines.length - 1]!) as {
+        code: string;
+        applyOutcome: string;
+        message: string;
+      };
+      expect(errorDoc.code).toBe("tracked_status_unknown");
+      expect(errorDoc.applyOutcome).toBe("not_started");
+      expect(errorDoc.message).toContain("could not be checked for git-tracked files");
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previousEngine;
+    }
+  },
+);

@@ -55,7 +55,8 @@ appear in a scan as **blocked** and cannot be selected:
   with the repository's `core.fsmonitor` disabled. If Sweep cannot check
   tracked files inside a git repository, those candidates are marked
   `dangerous` with `tracked-status-unknown` and are never pre-selected. Sweep
-  checks again just before removal.
+  checks again just before removal and refuses any repository item whose tracked
+  status is still unknown, regardless of flags or tier.
 - **Project files**: `src`, `.sweeprc`, `.env` and `.env.*`, and manifests and
   lockfiles such as `package.json`, `Cargo.toml`, `go.mod` and `pyproject.toml`.
   A repository's own `.sweeprc` can add patterns, but it cannot make these
