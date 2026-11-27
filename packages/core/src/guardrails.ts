@@ -106,6 +106,52 @@ export const DARWIN_SYSTEM_ROOTS: readonly string[] = [
   "/opt/homebrew",
 ];
 
+/**
+ * Unix OS trees whose entire subtrees are refused as scan targets.
+ * `/usr`, `/var`, and `/run` stay exact-match in `BLOCKED_ROOTS` so `/var/www`,
+ * `/var/tmp`, macOS `/var/folders`, `/usr/local/...`, `/run/media/...`, and
+ * `/run/user/<uid>/gvfs/...` stay usable.
+ * Rust parity: `UNIX_PREFIX_BLOCKED_ROOTS` in `sweep-engine`.
+ */
+export const UNIX_PREFIX_BLOCKED_ROOTS: readonly string[] = [
+  "/etc",
+  "/sys",
+  "/proc",
+  "/dev",
+  "/boot",
+  "/bin",
+  "/sbin",
+  "/lib",
+  "/lib64",
+];
+
+/**
+ * Carve-outs under `UNIX_PREFIX_BLOCKED_ROOTS` where legitimate scratch builds
+ * live (e.g. Linux `/dev/shm` tmpfs).
+ * Rust parity: `UNIX_PREFIX_BLOCKED_EXCEPTIONS` in `sweep-engine`.
+ */
+export const UNIX_PREFIX_BLOCKED_EXCEPTIONS: readonly string[] = ["/dev/shm"];
+
+/**
+ * Strip Windows verbatim path prefixes (`\\?\` and `\\?\UNC\`, including `/`
+ * variants) before lexical guardrail checks so verbatim spellings are judged
+ * identically to normal Windows paths.
+ * Rust parity: `strip_verbatim_str` in `sweep-engine`.
+ */
+export function stripWindowsVerbatimPrefix(
+  inputPath: string,
+  isWindows = process.platform === "win32",
+): string {
+  if (!isWindows) return inputPath;
+  if (/^[\\/]{2}\?[\\/]unc[\\/]/i.test(inputPath)) {
+    return `\\\\${inputPath.slice(8)}`;
+  }
+  if (/^[\\/]{2}\?[\\/]/.test(inputPath)) {
+    return inputPath.slice(4);
+  }
+  return inputPath;
+}
+
 function buildBlockedRoots(): Set<string> {
   const roots = new Set<string>([
     "/",
@@ -123,6 +169,7 @@ function buildBlockedRoots(): Set<string> {
     "/sys",
     "/proc",
     "/dev",
+    "/run",
     "/tmp",
     homedir(),
   ]);
@@ -151,6 +198,21 @@ function buildBlockedRoots(): Set<string> {
   return roots;
 }
 
+function buildPrefixBlockedRoots(): string[] {
+  if (process.platform === "win32") {
+    const roots: string[] = [];
+    for (const drive of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+      roots.push(normalize(`${drive}:\\Windows`));
+    }
+    return roots;
+  }
+  const roots = [...UNIX_PREFIX_BLOCKED_ROOTS];
+  if (process.platform === "darwin") {
+    roots.push("/private/etc");
+  }
+  return roots;
+}
+
 const BLOCKED_ROOTS = buildBlockedRoots();
 
 // Case-insensitive filesystems (macOS APFS default, Windows NTFS) make
@@ -158,6 +220,13 @@ const BLOCKED_ROOTS = buildBlockedRoots();
 // fold both sides or a case-variant spelling walks straight past it.
 const CASE_FOLD_BLOCKED = process.platform === "win32" || process.platform === "darwin";
 const BLOCKED_ROOTS_LOWER = new Set([...BLOCKED_ROOTS].map((root) => root.toLowerCase()));
+const PREFIX_BLOCKED_ROOTS = buildPrefixBlockedRoots().map((root) =>
+  CASE_FOLD_BLOCKED ? root.toLowerCase() : root,
+);
+const PREFIX_BLOCKED_EXCEPTIONS =
+  process.platform === "win32"
+    ? []
+    : UNIX_PREFIX_BLOCKED_EXCEPTIONS.map((root) => (CASE_FOLD_BLOCKED ? root.toLowerCase() : root));
 
 // ─── Error type ───────────────────────────────────────────────────────────────
 
@@ -264,11 +333,26 @@ function protectedPathHint(resolved: string): string {
   return `  sweep must be run inside a project directory, not at a system root.`;
 }
 
+function isPrefixBlocked(resolved: string): boolean {
+  const candidate = CASE_FOLD_BLOCKED ? resolved.toLowerCase() : resolved;
+  if (
+    PREFIX_BLOCKED_EXCEPTIONS.some(
+      (exception) => candidate === exception || candidate.startsWith(`${exception}${sep}`),
+    )
+  ) {
+    return false;
+  }
+  return PREFIX_BLOCKED_ROOTS.some(
+    (prefix) => candidate === prefix || candidate.startsWith(`${prefix}${sep}`),
+  );
+}
+
 /** Blocked-root + depth policy on one already-resolved absolute path. */
 function assertResolvedSafe(resolved: string): void {
   const isBlocked =
     BLOCKED_ROOTS.has(resolved) ||
     (CASE_FOLD_BLOCKED && BLOCKED_ROOTS_LOWER.has(resolved.toLowerCase())) ||
+    isPrefixBlocked(resolved) ||
     aliasesProtectedRoot(resolved) ||
     pathHasProtectedVcsSegment(resolved);
 
@@ -300,7 +384,7 @@ export function assertSafeCwd(targetPath: string): void {
     throw new GuardrailError(`Path contains null byte: ${JSON.stringify(targetPath)}`);
   }
 
-  const resolved = normalize(resolve(targetPath));
+  const resolved = normalize(resolve(stripWindowsVerbatimPrefix(targetPath)));
   assertResolvedSafe(resolved);
 
   // A symlinked spelling can launder a forbidden root: `x -> /` passes the
@@ -308,7 +392,7 @@ export function assertSafeCwd(targetPath: string): void {
   // path under `/` is legitimately "within root". When the target exists,
   // run the same checks on the canonical path too.
   try {
-    const canonical = normalize(realpathSync(resolved));
+    const canonical = normalize(stripWindowsVerbatimPrefix(realpathSync(resolved)));
     if (
       canonical !== resolved &&
       !(CASE_FOLD_BLOCKED && canonical.toLowerCase() === resolved.toLowerCase())

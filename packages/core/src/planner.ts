@@ -25,7 +25,11 @@ import {
   WORKSPACE_STUB_REASON,
 } from "./candidate-insights.js";
 import { catalogMatchFor } from "./catalog.js";
-import { artifactContextReason } from "./classification.js";
+import {
+  artifactContextReason,
+  CLOUD_SYNC_REASON,
+  isInsideCloudSyncDir,
+} from "./classification.js";
 import { identityFromStat, sameFilesystemIdentity } from "./filesystem-identity.js";
 import {
   GuardrailError,
@@ -403,7 +407,10 @@ export { candidateKindFromName } from "@kitsunekode/sweep-protocol";
  * marker file) runs once per candidate. Rust parity: `classify` in
  * `sweep-engine`.
  */
-export function classifyEntry(entry: ScanEntry): { riskTier: RiskTier; reasons: string[] } {
+export function classifyEntry(
+  entry: ScanEntry,
+  home?: string,
+): { riskTier: RiskTier; reasons: string[] } {
   const reasons: string[] = [];
   const protectedVcs = pathHasProtectedVcsSegment(entry.path);
   if (protectedVcs) reasons.push("protected-vcs-path");
@@ -419,22 +426,33 @@ export function classifyEntry(entry: ScanEntry): { riskTier: RiskTier; reasons: 
         : "custom-pattern",
   );
 
-  if (protectedVcs || protectedProject) return { riskTier: "blocked", reasons };
-  if (entry.isSymlink) return { riskTier: "caution", reasons };
-  // Only names a shipping-default pattern covers can earn the safe tier. Opt-in
-  // catalog names (dist, build, out, coverage, ...) are dangerous for the same
-  // reason they are opt-in - the name can hold authored files. Enabling a
-  // pattern consents to scanning, never to pre-selection.
-  if (match !== "default") return { riskTier: "dangerous", reasons };
-  // A default name is still only presumed safe in context: right entry type,
-  // outside tool/system install trees, and with a project marker where the
-  // name is an ordinary word.
-  const contextReason = artifactContextReason(entry);
-  if (contextReason) {
-    reasons.push(contextReason);
-    return { riskTier: "dangerous", reasons };
+  let riskTier: RiskTier;
+  if (protectedVcs || protectedProject) {
+    riskTier = "blocked";
+  } else if (entry.isSymlink) {
+    riskTier = "caution";
+  } else if (match !== "default") {
+    // Only names a shipping-default pattern covers can earn the safe tier. Opt-in
+    // catalog names (dist, build, out, coverage, ...) are dangerous for the same
+    // reason they are opt-in - the name can hold authored files. Enabling a
+    // pattern consents to scanning, never to pre-selection.
+    riskTier = "dangerous";
+  } else {
+    // A default name is still only presumed safe in context: right entry type,
+    // outside tool/system install trees, and with a project marker where the
+    // name is an ordinary word.
+    const contextReason = artifactContextReason(entry, home);
+    if (contextReason) {
+      reasons.push(contextReason);
+      riskTier = "dangerous";
+    } else {
+      riskTier = "safe";
+    }
   }
-  return { riskTier: "safe", reasons };
+  if (isInsideCloudSyncDir(entry.path, home)) {
+    reasons.push(CLOUD_SYNC_REASON);
+  }
+  return { riskTier, reasons };
 }
 
 export function inferRiskTier(entry: ScanEntry): RiskTier {

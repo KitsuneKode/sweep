@@ -70,6 +70,7 @@ function projectNames(candidates: readonly ScanCandidate[]): string[] {
 const WORKSPACE_STUB_REASON = "workspace-stub";
 const SYMLINK_ALIAS_REASON = "symlink-alias";
 const GIT_TRACKED_REASON = "git-tracked";
+const CLOUD_SYNC_REASON = "cloud-sync";
 const BAR_WIDTH = 16;
 
 function isStub(candidate: ScanCandidate): boolean {
@@ -126,6 +127,7 @@ function note(candidate: ScanCandidate): string {
   if (isStub(candidate)) parts.push(pc.dim("workspace stub"));
   else if (candidate.reasons.includes(SYMLINK_ALIAS_REASON)) parts.push(pc.dim("symlink alias"));
   else if (candidate.isSymlink) parts.push(pc.dim("symlink"));
+  if (candidate.reasons.includes(CLOUD_SYNC_REASON)) parts.push(pc.dim("cloud-synced"));
   return parts.join(pc.dim(" · "));
 }
 
@@ -324,6 +326,12 @@ export function formatScanReport(
   if (counts.blocked > 0) {
     notes.push(
       `${pc.red("◌")} ${counts.blocked} blocked ${pc.dim("· git-tracked, project files or protected paths; never removed")}`,
+    );
+  }
+  const cloudSynced = visible.filter((c) => c.reasons.includes(CLOUD_SYNC_REASON)).length;
+  if (cloudSynced > 0) {
+    notes.push(
+      `${pc.yellow("!")} ${cloudSynced} ${cloudSynced === 1 ? "candidate is" : "candidates are"} inside a cloud-synced folder ${pc.dim("(removing build output may trigger a large sync)")}`,
     );
   }
   if (hiddenStubs > 0) {
