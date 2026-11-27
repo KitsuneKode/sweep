@@ -3,7 +3,6 @@
  * Run via: `bun run preflight` (turbo → apps/cli).
  */
 
-import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -32,21 +31,156 @@ const DIST = join(CLI_ROOT, "dist/sweep.js");
 const PKG_PATH = join(CLI_ROOT, "package.json");
 const ALLOWED_DIST_FILES = new Set(["sweep.js", "sweep-ui.js", "sweep-lib.js"]);
 
-const NODE =
-  process.env.npm_node_execpath ??
-  (() => {
+const NODE = process.env.npm_node_execpath ?? Bun.which("node") ?? "node";
+const RETRYABLE_RM_CODES = new Set(["EBUSY", "EPERM", "ENOTEMPTY"]);
+const activeChildren = new Set<Bun.Subprocess>();
+
+function terminateProcessTree(proc: Bun.Subprocess): void {
+  if (process.platform === "win32" && typeof proc.pid === "number") {
     try {
-      return execFileSync("command", ["-v", "node"], { encoding: "utf8" }).trim();
+      Bun.spawnSync(["taskkill", "/pid", String(proc.pid), "/t", "/f"], {
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      });
     } catch {
-      return "node";
+      // Fall back to direct kill below if taskkill is unavailable.
     }
-  })();
+  }
+  try {
+    proc.kill("SIGKILL");
+  } catch {
+    // Child process already exited.
+  }
+}
+
+export interface CommandResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+export class CommandError extends Error {
+  readonly status: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly timedOut: boolean;
+
+  constructor(message: string, result: CommandResult) {
+    super(message);
+    this.name = "CommandError";
+    this.status = result.timedOut ? null : result.exitCode;
+    this.stdout = result.stdout;
+    this.stderr = result.stderr;
+    this.timedOut = result.timedOut;
+  }
+}
+
+async function drainTimedOutStreams(
+  stdoutPromise: Promise<string>,
+  stderrPromise: Promise<string>,
+): Promise<[string, string]> {
+  let drainTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.all([stdoutPromise, stderrPromise]),
+      new Promise<[string, string]>((resolveTimeout) => {
+        drainTimer = setTimeout(() => resolveTimeout(["", ""]), 1000);
+      }),
+    ]);
+  } finally {
+    if (drainTimer !== undefined) clearTimeout(drainTimer);
+  }
+}
+
+/**
+ * Spawn a child process and always await its exit (killing and awaiting on
+ * timeout or failure) before returning, so callers never race a running child.
+ */
+export async function runCommand(
+  cmd: string[],
+  options: { cwd?: string; timeoutMs?: number } = {},
+): Promise<CommandResult> {
+  const proc = Bun.spawn(cmd, {
+    cwd: options.cwd,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  activeChildren.add(proc);
+
+  const stdoutPromise = new Response(proc.stdout).text().catch(() => "");
+  const stderrPromise = new Response(proc.stderr).text().catch(() => "");
+
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (options.timeoutMs !== undefined) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      terminateProcessTree(proc);
+    }, options.timeoutMs);
+  }
+
+  try {
+    const exitCode = await proc.exited;
+    const [stdout, stderr] = timedOut
+      ? await drainTimedOutStreams(stdoutPromise, stderrPromise)
+      : await Promise.all([stdoutPromise, stderrPromise]);
+    return { exitCode, stdout, stderr, timedOut };
+  } catch (err) {
+    if (proc.exitCode === null) {
+      terminateProcessTree(proc);
+      await proc.exited.catch(() => {});
+    }
+    throw err;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    activeChildren.delete(proc);
+  }
+}
+
+async function execCommand(
+  cmd: string[],
+  options: { cwd?: string; timeoutMs?: number } = {},
+): Promise<string> {
+  const result = await runCommand(cmd, options);
+  if (result.timedOut) {
+    throw new CommandError(
+      `command timed out after ${options.timeoutMs}ms: ${cmd.join(" ")}`,
+      result,
+    );
+  }
+  if (result.exitCode !== 0) {
+    const detail = result.stderr.trim() || result.stdout.trim();
+    throw new CommandError(
+      detail
+        ? `command failed (exit ${result.exitCode}): ${cmd.join(" ")}\n${detail}`
+        : `command failed (exit ${result.exitCode}): ${cmd.join(" ")}`,
+      result,
+    );
+  }
+  return result.stdout;
+}
+
+export async function removeTempDir(path: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (attempt >= 10 || !code || !RETRYABLE_RM_CODES.has(code)) throw err;
+      await Bun.sleep(200);
+    }
+  }
+}
 
 let failed = false;
 
-function check(label: string, fn: () => void): void {
+async function check(label: string, fn: () => void | Promise<void>): Promise<void> {
   try {
-    fn();
+    await fn();
     console.log(`  ✓  ${label}`);
   } catch (err) {
     const base = err instanceof Error ? err.message : String(err);
@@ -84,14 +218,12 @@ function linkNodeModules(source: string, destination: string): void {
   symlinkSync(source, destination, process.platform === "win32" ? "junction" : "dir");
 }
 
-function packAndExtractTarball(): ExtractedTarball {
+async function packAndExtractTarball(): Promise<ExtractedTarball> {
   const packDir = mkdtempSync(join(tmpdir(), "sweep-preflight-pack-"));
   try {
-    const out = execFileSync("npm", ["pack", "--json", "--pack-destination", packDir], {
+    const out = await execCommand(["npm", "pack", "--json", "--pack-destination", packDir], {
       cwd: CLI_ROOT,
-      encoding: "utf8",
-      timeout: 60_000,
-      stdio: ["ignore", "pipe", "pipe"],
+      timeoutMs: 60_000,
     });
     const jsonStart = out.search(/^\s*\[/m);
     const packedList = JSON.parse(jsonStart >= 0 ? out.slice(jsonStart) : out) as Array<{
@@ -118,7 +250,7 @@ function packAndExtractTarball(): ExtractedTarball {
       manifest,
     };
   } catch (err) {
-    rmSync(packDir, { recursive: true, force: true });
+    await removeTempDir(packDir);
     throw err;
   }
 }
@@ -133,275 +265,287 @@ function requirePackedFile(relPath: string): string {
   return fullPath;
 }
 
-console.log("\npreflight checks\n");
+async function main(): Promise<void> {
+  console.log("\npreflight checks\n");
 
-try {
-  check("dist/sweep.js, dist/sweep-ui.js, and dist/sweep-lib.js all exist", () => {
-    for (const file of ALLOWED_DIST_FILES) {
-      assert(existsSync(join(CLI_ROOT, "dist", file)), `missing dist/${file}. Run: bun run build`);
-    }
-  });
-
-  check("dist/sweep.js starts with shebang on line 1", () => {
-    if (!existsSync(DIST)) return;
-    const first = readFileSync(DIST, "utf8").slice(0, 22);
-    assert(first.startsWith("#!/usr/bin/env node"), `got: ${JSON.stringify(first)}`);
-  });
-
-  check("dist/sweep.js bundle size > 10 KB", () => {
-    if (!existsSync(DIST)) return;
-    const { size } = statSync(DIST);
-    assert(size > 10_000, `suspiciously small: ${size} bytes; build may have failed silently`);
-  });
-
-  check("dist/ contains only expected bundle files", () => {
-    if (!existsSync(join(CLI_ROOT, "dist"))) return;
-    const files = readdirSync(join(CLI_ROOT, "dist"));
-    const unexpected = files.filter((f) => !ALLOWED_DIST_FILES.has(f));
-    assert(unexpected.length === 0, `unexpected files in dist/: ${unexpected.join(", ")}`);
-  });
-
-  check("publish bundles stay within the 4 MiB distribution budget", () => {
-    const bytes = [...ALLOWED_DIST_FILES].reduce((total, file) => {
-      const path = join(CLI_ROOT, "dist", file);
-      return total + (existsSync(path) ? statSync(path).size : 0);
-    }, 0);
-    assert(
-      bytes <= 4 * 1024 * 1024,
-      `${bytes} bundle bytes exceed 4 MiB; review dependency/asset growth`,
-    );
-  });
-
-  check("packed manifest strips devDependencies/scripts and resolves all ranges", () => {
-    const packed = preparePublishManifest(pkg(), readCatalogs(REPO_ROOT));
-    assert(!("devDependencies" in packed), "packed manifest must not include devDependencies");
-    assert(!("scripts" in packed), "packed manifest must not include monorepo scripts");
-  });
-
-  check("packed tarball contains every exports/bin entry point and valid runtime imports", () => {
-    const distDir = join(CLI_ROOT, "dist");
-    assert(existsSync(distDir), "dist/ not found. Run: bun run build");
-    extractedTarball = packAndExtractTarball();
-    const { entries, manifest, distDir: packedDistDir } = extractedTarball;
-
-    const entryTargets = collectManifestEntryTargets(manifest);
-    assert(entryTargets.length > 0, "packed manifest has no exports/bin targets");
-    for (const target of entryTargets) {
-      assert(entries.has(target), `packed tarball is missing advertised entry point "${target}"`);
-    }
-
-    assert(existsSync(packedDistDir), "packed tarball is missing dist/");
-    const { errors } = verifyDistAgainstManifest({
-      distDir: packedDistDir,
-      packedManifest: manifest,
-      tarballEntries: entries,
-      nodeBin: NODE,
+  const onSignal = (signal: NodeJS.Signals) => {
+    const children = [...activeChildren];
+    for (const proc of children) terminateProcessTree(proc);
+    void Promise.allSettled(children.map((proc) => proc.exited)).finally(() => {
+      process.exit(signal === "SIGINT" ? 130 : 143);
     });
-    assert(errors.length === 0, errors.join("\n     "));
-  });
+  };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
 
-  check("dist/sweep-ui.js contains no React development markers", () => {
-    const uiBundle = requirePackedFile("dist/sweep-ui.js");
-    const markers = findReactDevMarkers(readFileSync(uiBundle, "utf8"));
-    assert(
-      markers.length === 0,
-      `dist/sweep-ui.js contains React development markers: ${markers.join(", ")}`,
-    );
-  });
+  try {
+    await check("dist/sweep.js, dist/sweep-ui.js, and dist/sweep-lib.js all exist", () => {
+      for (const file of ALLOWED_DIST_FILES) {
+        assert(
+          existsSync(join(CLI_ROOT, "dist", file)),
+          `missing dist/${file}. Run: bun run build`,
+        );
+      }
+    });
 
-  check("sweep --version prints a version string", () => {
-    const packedBin = requirePackedFile("dist/sweep.js");
-    const out = execFileSync(NODE, [packedBin, "--version"], { encoding: "utf8", timeout: 5000 });
-    assert(out.trim().length > 0, "version output was empty");
-    assert(/\d+\.\d+\.\d+/.test(out), `version output doesn't look like semver: ${out.trim()}`);
-  });
+    await check("dist/sweep.js starts with shebang on line 1", () => {
+      if (!existsSync(DIST)) return;
+      const first = readFileSync(DIST, "utf8").slice(0, 22);
+      assert(first.startsWith("#!/usr/bin/env node"), `got: ${JSON.stringify(first)}`);
+    });
 
-  check("sweep --help exits 0", () => {
-    const packedBin = requirePackedFile("dist/sweep.js");
-    execFileSync(NODE, [packedBin, "--help"], { encoding: "utf8", timeout: 5000 });
-  });
+    await check("dist/sweep.js bundle size > 10 KB", () => {
+      if (!existsSync(DIST)) return;
+      const { size } = statSync(DIST);
+      assert(size > 10_000, `suspiciously small: ${size} bytes; build may have failed silently`);
+    });
 
-  check("sweep rejects /tmp with exit code 2 (path-too-shallow guardrail)", () => {
-    const packedBin = requirePackedFile("dist/sweep.js");
-    try {
-      execFileSync(NODE, [packedBin, "--dry-run", "--yes", "/tmp"], {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: "pipe",
-      });
-      throw new Error("expected exit code 2 but process exited 0");
-    } catch (err: unknown) {
-      const e = err as NodeJS.ErrnoException & { status?: number };
-      if (e.message?.includes("exited 0")) throw e;
-      assert(e.status === 2, `expected exit code 2, got ${String(e.status)}`);
-    }
-  });
+    await check("dist/ contains only expected bundle files", () => {
+      if (!existsSync(join(CLI_ROOT, "dist"))) return;
+      const files = readdirSync(join(CLI_ROOT, "dist"));
+      const unexpected = files.filter((f) => !ALLOWED_DIST_FILES.has(f));
+      assert(unexpected.length === 0, `unexpected files in dist/: ${unexpected.join(", ")}`);
+    });
 
-  check("sweep rejects / with exit code 2 (blocked root guardrail)", () => {
-    const packedBin = requirePackedFile("dist/sweep.js");
-    try {
-      execFileSync(NODE, [packedBin, "--dry-run", "--yes", "/"], {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: "pipe",
-      });
-      throw new Error("expected exit code 2 but process exited 0");
-    } catch (err: unknown) {
-      const e = err as NodeJS.ErrnoException & { status?: number };
-      if (e.message?.includes("exited 0")) throw e;
-      assert(e.status === 2, `expected exit code 2, got ${String(e.status)}`);
-    }
-  });
-
-  check("package.json has all required publish fields", () => {
-    const p = pkg();
-    for (const field of [
-      "name",
-      "version",
-      "description",
-      "license",
-      "bin",
-      "files",
-      "repository",
-      "homepage",
-      "bugs",
-    ]) {
-      assert(field in p, `missing field: "${field}"`);
-    }
-  });
-
-  check("package name is @kitsunekode/sweep", () => {
-    const { name } = pkg() as { name: string };
-    assert(name === "@kitsunekode/sweep", `got: "${name}"`);
-  });
-
-  check("version is valid release semver (including prereleases)", () => {
-    const { version } = pkg() as { version: string };
-    releasePolicy(version);
-  });
-
-  check("publishConfig.access is 'public' (required for scoped packages)", () => {
-    const { publishConfig } = pkg() as { publishConfig?: { access?: string } };
-    assert(publishConfig?.access === "public", `got: ${JSON.stringify(publishConfig?.access)}`);
-  });
-
-  check("bin points to dist/sweep.js", () => {
-    const { bin } = pkg() as { bin?: Record<string, string> };
-    assert(bin?.["sweep"] === "dist/sweep.js", `got: ${JSON.stringify(bin)}`);
-  });
-
-  check("every workspace and packed exports/bin target resolves to a real file", () => {
-    const workspaceTargets = collectManifestEntryTargets(pkg());
-    assert(workspaceTargets.length > 0, "workspace manifest has no exports/bin targets");
-    for (const target of workspaceTargets) {
-      assert(existsSync(join(CLI_ROOT, target)), `missing workspace target: ${target}`);
-    }
-    const packedTargets = collectManifestEntryTargets(
-      preparePublishManifest(pkg(), readCatalogs(REPO_ROOT)),
-    );
-    assert(packedTargets.length > 0, "packed manifest has no exports/bin targets");
-    for (const target of packedTargets) {
-      assert(existsSync(join(CLI_ROOT, target)), `missing packed target: ${target}`);
-    }
-  });
-
-  check("sweep-lib.js imports without running the CLI", () => {
-    // The programmatic surface must not parse argv on import - importing the
-    // packed bundle and exiting clean proves the bin bootstrap isn't in it.
-    const lib = requirePackedFile("dist/sweep-lib.js");
-    const out = execFileSync(
-      NODE,
-      [
-        "-e",
-        `import(${JSON.stringify(pathToFileURL(lib).href)}).then(m => { if (typeof m.makeProgram !== "function") process.exit(2); })`,
-      ],
-      { encoding: "utf8", timeout: 5000, stdio: "pipe" },
-    );
-    void out;
-  });
-
-  check("sweep-ui.js loads under Bun runtime", () => {
-    const ui = requirePackedFile("dist/sweep-ui.js");
-    execFileSync(
-      process.execPath,
-      [
-        "-e",
-        `import(${JSON.stringify(pathToFileURL(ui).href)}).then(m => { if (typeof m.runSweepUiStreaming !== "function") process.exit(2); })`,
-      ],
-      { encoding: "utf8", timeout: 10_000, stdio: "pipe" },
-    );
-  });
-
-  check("files array includes dist, README.md, and LICENSE", () => {
-    const { files } = pkg() as { files?: string[] };
-    assert(Array.isArray(files), `got: ${JSON.stringify(files)}`);
-    for (const entry of ["dist", "README.md", "LICENSE"]) {
-      assert(files.includes(entry), `missing files entry: "${entry}"`);
-    }
-  });
-
-  check("optionalDependencies include all native engine packages", () => {
-    const { optionalDependencies, version } = pkg() as {
-      optionalDependencies?: Record<string, string>;
-      version: string;
-    };
-    assert(optionalDependencies, "missing optionalDependencies");
-    for (const name of NATIVE_PLATFORM_NPM_NAMES) {
-      assert(name in optionalDependencies, `missing optionalDependency: ${name}`);
+    await check("publish bundles stay within the 4 MiB distribution budget", () => {
+      const bytes = [...ALLOWED_DIST_FILES].reduce((total, file) => {
+        const path = join(CLI_ROOT, "dist", file);
+        return total + (existsSync(path) ? statSync(path).size : 0);
+      }, 0);
       assert(
-        optionalDependencies[name] === version,
-        `${name} version ${optionalDependencies[name]} !== package ${version}`,
+        bytes <= 4 * 1024 * 1024,
+        `${bytes} bundle bytes exceed 4 MiB; review dependency/asset growth`,
       );
-    }
-  });
+    });
 
-  check("native-packages templates exist for each platform", () => {
-    for (const name of NATIVE_PLATFORM_NPM_NAMES) {
-      const id = name.replace("@kitsunekode/sweep-engine-", "");
-      const templatePath = join(REPO_ROOT, "native-packages", id, "package.json");
-      assert(existsSync(templatePath), `missing template: ${templatePath}`);
-    }
-  });
+    await check("packed manifest strips devDependencies/scripts and resolves all ranges", () => {
+      const packed = preparePublishManifest(pkg(), readCatalogs(REPO_ROOT));
+      assert(!("devDependencies" in packed), "packed manifest must not include devDependencies");
+      assert(!("scripts" in packed), "packed manifest must not include monorepo scripts");
+    });
 
-  check("peerDependencies use literal semver (not catalog:)", () => {
-    const { peerDependencies } = pkg() as { peerDependencies?: Record<string, string> };
-    if (!peerDependencies) return;
-    for (const [name, version] of Object.entries(peerDependencies)) {
-      assert(version !== "catalog:", `${name} peerDependency must not use catalog: (got catalog:)`);
-    }
-  });
+    await check(
+      "packed tarball contains every exports/bin entry point and valid runtime imports",
+      async () => {
+        const distDir = join(CLI_ROOT, "dist");
+        assert(existsSync(distDir), "dist/ not found. Run: bun run build");
+        extractedTarball = await packAndExtractTarball();
+        const { entries, manifest, distDir: packedDistDir } = extractedTarball;
 
-  check(".env is not tracked by git", () => {
-    try {
-      execFileSync("git", ["-C", REPO_ROOT, "ls-files", "--error-unmatch", ".env"], {
-        stdio: "pipe",
-        encoding: "utf8",
-      });
-      throw new Error(".env IS tracked by git. Run: git rm --cached .env");
-    } catch (err: unknown) {
-      const e = err as NodeJS.ErrnoException & { status?: number };
-      if (e.message?.includes("IS tracked")) throw e;
-      assert(e.status === 1, `unexpected git exit code ${String(e.status)}`);
-    }
-  });
+        const entryTargets = collectManifestEntryTargets(manifest);
+        assert(entryTargets.length > 0, "packed manifest has no exports/bin targets");
+        for (const target of entryTargets) {
+          assert(
+            entries.has(target),
+            `packed tarball is missing advertised entry point "${target}"`,
+          );
+        }
 
-  check("no uncommitted changes to apps/ or packages/", () => {
-    const out = execFileSync(
-      "git",
-      ["-C", REPO_ROOT, "status", "--porcelain", "apps/", "packages/"],
-      { encoding: "utf8", timeout: 5000 },
+        assert(existsSync(packedDistDir), "packed tarball is missing dist/");
+        const { errors } = verifyDistAgainstManifest({
+          distDir: packedDistDir,
+          packedManifest: manifest,
+          tarballEntries: entries,
+          nodeBin: NODE,
+        });
+        assert(errors.length === 0, errors.join("\n     "));
+      },
     );
-    assert(out.trim() === "", `uncommitted changes in apps/ or packages/:\n${out}`);
-  });
-} finally {
-  const tar = extractedTarball as ExtractedTarball | null;
-  if (tar) rmSync(tar.packDir, { recursive: true, force: true });
+
+    await check("dist/sweep-ui.js contains no React development markers", () => {
+      const uiBundle = requirePackedFile("dist/sweep-ui.js");
+      const markers = findReactDevMarkers(readFileSync(uiBundle, "utf8"));
+      assert(
+        markers.length === 0,
+        `dist/sweep-ui.js contains React development markers: ${markers.join(", ")}`,
+      );
+    });
+
+    await check("sweep --version prints a version string", async () => {
+      const packedBin = requirePackedFile("dist/sweep.js");
+      const out = await execCommand([NODE, packedBin, "--version"], { timeoutMs: 15_000 });
+      assert(out.trim().length > 0, "version output was empty");
+      assert(/\d+\.\d+\.\d+/.test(out), `version output doesn't look like semver: ${out.trim()}`);
+    });
+
+    await check("sweep --help exits 0", async () => {
+      const packedBin = requirePackedFile("dist/sweep.js");
+      await execCommand([NODE, packedBin, "--help"], { timeoutMs: 15_000 });
+    });
+
+    await check("sweep rejects /tmp with exit code 2 (path-too-shallow guardrail)", async () => {
+      const packedBin = requirePackedFile("dist/sweep.js");
+      const res = await runCommand([NODE, packedBin, "--dry-run", "--yes", "/tmp"], {
+        timeoutMs: 15_000,
+      });
+      assert(!res.timedOut, "process timed out waiting for exit code 2");
+      assert(res.exitCode !== 0, "expected exit code 2 but process exited 0");
+      assert(res.exitCode === 2, `expected exit code 2, got ${String(res.exitCode)}`);
+    });
+
+    await check("sweep rejects / with exit code 2 (blocked root guardrail)", async () => {
+      const packedBin = requirePackedFile("dist/sweep.js");
+      const res = await runCommand([NODE, packedBin, "--dry-run", "--yes", "/"], {
+        timeoutMs: 15_000,
+      });
+      assert(!res.timedOut, "process timed out waiting for exit code 2");
+      assert(res.exitCode !== 0, "expected exit code 2 but process exited 0");
+      assert(res.exitCode === 2, `expected exit code 2, got ${String(res.exitCode)}`);
+    });
+
+    await check("package.json has all required publish fields", () => {
+      const p = pkg();
+      for (const field of [
+        "name",
+        "version",
+        "description",
+        "license",
+        "bin",
+        "files",
+        "repository",
+        "homepage",
+        "bugs",
+      ]) {
+        assert(field in p, `missing field: "${field}"`);
+      }
+    });
+
+    await check("package name is @kitsunekode/sweep", () => {
+      const { name } = pkg() as { name: string };
+      assert(name === "@kitsunekode/sweep", `got: "${name}"`);
+    });
+
+    await check("version is valid release semver (including prereleases)", () => {
+      const { version } = pkg() as { version: string };
+      releasePolicy(version);
+    });
+
+    await check("publishConfig.access is 'public' (required for scoped packages)", () => {
+      const { publishConfig } = pkg() as { publishConfig?: { access?: string } };
+      assert(publishConfig?.access === "public", `got: ${JSON.stringify(publishConfig?.access)}`);
+    });
+
+    await check("bin points to dist/sweep.js", () => {
+      const { bin } = pkg() as { bin?: Record<string, string> };
+      assert(bin?.["sweep"] === "dist/sweep.js", `got: ${JSON.stringify(bin)}`);
+    });
+
+    await check("every workspace and packed exports/bin target resolves to a real file", () => {
+      const workspaceTargets = collectManifestEntryTargets(pkg());
+      assert(workspaceTargets.length > 0, "workspace manifest has no exports/bin targets");
+      for (const target of workspaceTargets) {
+        assert(existsSync(join(CLI_ROOT, target)), `missing workspace target: ${target}`);
+      }
+      const packedTargets = collectManifestEntryTargets(
+        preparePublishManifest(pkg(), readCatalogs(REPO_ROOT)),
+      );
+      assert(packedTargets.length > 0, "packed manifest has no exports/bin targets");
+      for (const target of packedTargets) {
+        assert(existsSync(join(CLI_ROOT, target)), `missing packed target: ${target}`);
+      }
+    });
+
+    await check("sweep-lib.js imports without running the CLI", async () => {
+      // The programmatic surface must not parse argv on import - importing the
+      // packed bundle and exiting clean proves the bin bootstrap isn't in it.
+      const lib = requirePackedFile("dist/sweep-lib.js");
+      await execCommand(
+        [
+          NODE,
+          "-e",
+          `import(${JSON.stringify(pathToFileURL(lib).href)}).then(m => { if (typeof m.makeProgram !== "function") process.exit(2); })`,
+        ],
+        { timeoutMs: 15_000 },
+      );
+    });
+
+    await check("sweep-ui.js loads under Bun runtime", async () => {
+      const ui = requirePackedFile("dist/sweep-ui.js");
+      await execCommand(
+        [
+          process.execPath,
+          "-e",
+          `import(${JSON.stringify(pathToFileURL(ui).href)}).then(m => { if (typeof m.runSweepUiStreaming !== "function") process.exit(2); })`,
+        ],
+        { timeoutMs: 15_000 },
+      );
+    });
+
+    await check("files array includes dist, README.md, and LICENSE", () => {
+      const { files } = pkg() as { files?: string[] };
+      assert(Array.isArray(files), `got: ${JSON.stringify(files)}`);
+      for (const entry of ["dist", "README.md", "LICENSE"]) {
+        assert(files.includes(entry), `missing files entry: "${entry}"`);
+      }
+    });
+
+    await check("optionalDependencies include all native engine packages", () => {
+      const { optionalDependencies, version } = pkg() as {
+        optionalDependencies?: Record<string, string>;
+        version: string;
+      };
+      assert(optionalDependencies, "missing optionalDependencies");
+      for (const name of NATIVE_PLATFORM_NPM_NAMES) {
+        assert(name in optionalDependencies, `missing optionalDependency: ${name}`);
+        assert(
+          optionalDependencies[name] === version,
+          `${name} version ${optionalDependencies[name]} !== package ${version}`,
+        );
+      }
+    });
+
+    await check("native-packages templates exist for each platform", () => {
+      for (const name of NATIVE_PLATFORM_NPM_NAMES) {
+        const id = name.replace("@kitsunekode/sweep-engine-", "");
+        const templatePath = join(REPO_ROOT, "native-packages", id, "package.json");
+        assert(existsSync(templatePath), `missing template: ${templatePath}`);
+      }
+    });
+
+    await check("peerDependencies use literal semver (not catalog:)", () => {
+      const { peerDependencies } = pkg() as { peerDependencies?: Record<string, string> };
+      if (!peerDependencies) return;
+      for (const [name, version] of Object.entries(peerDependencies)) {
+        assert(
+          version !== "catalog:",
+          `${name} peerDependency must not use catalog: (got catalog:)`,
+        );
+      }
+    });
+
+    await check(".env is not tracked by git", async () => {
+      const res = await runCommand(
+        ["git", "-C", REPO_ROOT, "ls-files", "--error-unmatch", ".env"],
+        { timeoutMs: 10_000 },
+      );
+      assert(!res.timedOut, "git ls-files timed out");
+      assert(res.exitCode !== 0, ".env IS tracked by git. Run: git rm --cached .env");
+      assert(res.exitCode === 1, `unexpected git exit code ${String(res.exitCode)}`);
+    });
+
+    await check("no uncommitted changes to apps/ or packages/", async () => {
+      const out = await execCommand(
+        ["git", "-C", REPO_ROOT, "status", "--porcelain", "apps/", "packages/"],
+        { timeoutMs: 10_000 },
+      );
+      assert(out.trim() === "", `uncommitted changes in apps/ or packages/:\n${out}`);
+    });
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+    const tar = extractedTarball as ExtractedTarball | null;
+    if (tar) await removeTempDir(tar.packDir);
+  }
+
+  console.log();
+  if (failed) {
+    console.error("preflight failed. Fix the errors above before publishing\n");
+    process.exit(1);
+  }
+
+  console.log("all checks passed. Ready to publish\n");
 }
 
-console.log();
-if (failed) {
-  console.error("preflight failed. Fix the errors above before publishing\n");
-  process.exit(1);
+if (import.meta.main) {
+  await main();
 }
-
-console.log("all checks passed. Ready to publish\n");
