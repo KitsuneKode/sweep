@@ -460,6 +460,10 @@ body:has(.sw) {
   flex-wrap: wrap;
   gap: 0.6rem;
 }
+.sw-hero-cmds {
+  display: grid;
+  gap: 0.5rem;
+}
 .sw-hero-cmd {
   max-inline-size: 26rem;
 }

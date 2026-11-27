@@ -23,10 +23,13 @@ The npm package includes bundled JavaScript and selects a matching optional Rust
 engine package for supported platforms. Keep optional dependencies enabled if you
 want the native engine. [Platforms](platforms.md) explains fallback requirements.
 
-The full-screen UI runs on Bun. `@opentui/core` is a dependency of the package,
-so `bun add -g` and `bunx @kitsunekode/sweep ui` install it with sweep. If you
-only need scans and saved plans, Node is enough. A qualified standalone release
-embeds the UI; see the release's checksum and platform instructions.
+The full-screen UI runs on Bun. `@opentui/core` is an optional dependency of
+`@kitsunekode/sweep`, so `bun add -g @kitsunekode/sweep` and
+`bunx @kitsunekode/sweep ui .` install it automatically on Bun while Node.js
+20.3+ installs can skip it and still run all CLI commands (`sweep`, `sweep scan`,
+`sweep clean`, `sweep plan`, `sweep apply`). A qualified standalone release
+embeds the UI with no Node or Bun required; see the release's checksum and
+platform instructions.
 
 ## Scan one project
 

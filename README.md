@@ -61,8 +61,9 @@ bunx @kitsunekode/sweep ui ~/Projects  # try the UI without a global install
 
 Homebrew and the install script fetch one self-contained binary with the
 terminal UI built in (no Node or Bun needed, checksums verified). From npm,
-scan and cleanup run on Node. `sweep ui` runs on Bun; `@opentui/core` is
-installed with the package.
+scan and cleanup run on Node.js 20.3+. `sweep ui` runs on Bun; `@opentui/core`
+is an optional dependency installed automatically under Bun (`bun add -g` or
+`bunx`) and skipped when unused on older Node.
 Linux (x64, arm64), macOS (x64, arm64) and Windows (x64) are supported.
 
 For coding agents: `npx skills add KitsuneKode/sweep`.
