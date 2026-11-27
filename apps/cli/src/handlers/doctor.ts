@@ -39,7 +39,7 @@ export type DoctorCheck = {
 export function describeMissingRustEngine(
   platform: string = process.platform,
   linuxLibc: DetectedLinuxLibc = platform === "linux" ? detectLinuxLibc() : "unknown",
-  envEnginePath: string | undefined = process.env.SWEEP_ENGINE_PATH,
+  envEnginePath: string | null = process.env.SWEEP_ENGINE_PATH ?? null,
 ): string {
   if (!envEnginePath && platform === "linux" && linuxLibc === "unknown") {
     return "not found (Linux libc detection was inconclusive; no native engine package selected, falling back to JS — set SWEEP_ENGINE_PATH to override)";

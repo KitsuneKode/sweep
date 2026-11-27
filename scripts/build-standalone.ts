@@ -92,6 +92,12 @@ if (process.platform === "linux") {
     "--define",
     `process.env.OPENTUI_LIBC:${JSON.stringify(isLinuxMusl ? "musl" : "glibc")}`,
   );
+  // Exclude the opposite libc's OpenTUI package so Bun does not embed a dead
+  // 5 MiB glibc libopentui.so inside musl standalones (or vice versa).
+  const oppositeOpentui = isLinuxMusl
+    ? `@opentui/core-linux-${process.arch}`
+    : `@opentui/core-linux-${process.arch}-musl`;
+  args.push(`--external=${oppositeOpentui}`);
 }
 if (metafile) {
   args.push(`--metafile=${resolve(REPO_ROOT, metafile)}`);

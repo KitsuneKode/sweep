@@ -7,16 +7,16 @@ import { resolveEngineBackend } from "./shared.js";
 
 describe("doctor missing rust engine diagnostics", () => {
   test("reports inconclusive Linux libc reason when libc is unknown and no override is set", () => {
-    const detail = describeMissingRustEngine("linux", "unknown", undefined);
+    const detail = describeMissingRustEngine("linux", "unknown", null);
     expect(detail).toContain("inconclusive");
     expect(detail).toContain("JS");
     expect(detail).toContain("SWEEP_ENGINE_PATH");
   });
 
   test("keeps plain not found when libc is known, non-Linux, or SWEEP_ENGINE_PATH is explicitly set", () => {
-    expect(describeMissingRustEngine("linux", "glibc", undefined)).toBe("not found");
-    expect(describeMissingRustEngine("linux", "musl", undefined)).toBe("not found");
-    expect(describeMissingRustEngine("darwin", "unknown", undefined)).toBe("not found");
+    expect(describeMissingRustEngine("linux", "glibc", null)).toBe("not found");
+    expect(describeMissingRustEngine("linux", "musl", null)).toBe("not found");
+    expect(describeMissingRustEngine("darwin", "unknown", null)).toBe("not found");
     expect(describeMissingRustEngine("linux", "unknown", "/custom/engine")).toBe("not found");
   });
 
