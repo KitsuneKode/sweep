@@ -1,10 +1,16 @@
-import { join, relative, resolve } from "node:path";
-import { existsSync } from "node:fs";
-import { REPO_ROOT, readCliVersion } from "./bundle.js";
+import { existsSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { REPO_ROOT, openTuiProdJsxPlugin, readCliVersion } from "./bundle.js";
 
-// Standalone executables require the `--compile` flag on Bun's CLI - the
-// JS API (Bun.build) emits plain JS bundles, not embedded executables.
-// See https://bun.com/docs/bundler/executables
+export interface StandaloneBuildOptions {
+  entry?: string | undefined;
+  outfile: string;
+  target?: string | undefined;
+  assets?: string[] | undefined;
+  metafile?: string | undefined;
+  bytecode?: boolean | undefined;
+  version?: string | undefined;
+}
 
 function parseArgs(argv: string[]): {
   target: string;
@@ -46,77 +52,118 @@ function parseArgs(argv: string[]): {
   };
 }
 
-const version = readCliVersion();
-const { target, outfile, enginePath, metafile, noBytecode } = parseArgs(process.argv.slice(2));
-const entry = join(REPO_ROOT, "apps/cli/src/bin-standalone.ts");
-
-const hostOs = process.platform === "win32" ? "windows" : process.platform;
-const hostPrefix = `bun-${hostOs}-${process.arch}`;
-const isLinuxMusl = process.platform === "linux" && target === `${hostPrefix}-musl`;
-
-if (target && target !== hostPrefix && !isLinuxMusl) {
-  throw new Error("Standalone builds must run on the target platform to embed its native engine");
+function isLinuxMuslTarget(target: string | undefined): boolean {
+  const hostOs = process.platform === "win32" ? "windows" : process.platform;
+  const hostPrefix = `bun-${hostOs}-${process.arch}`;
+  return process.platform === "linux" && target === `${hostPrefix}-musl`;
 }
 
-const defaultNativeAsset = isLinuxMusl
-  ? `target/${process.arch === "arm64" ? "aarch64" : "x86_64"}-unknown-linux-musl/release/sweep-engine`
-  : `target/release/sweep-engine${process.platform === "win32" ? ".exe" : ""}`;
+/**
+ * Compile a self-contained Bun executable using the exact same production
+ * environment and `@opentui/react` `jsxDEV -> jsx` transform as `scripts/bundle.ts`,
+ * so OpenTUI's outer ErrorBoundary never calls an undefined `jsxDEV` in production.
+ */
+export async function buildStandaloneExecutable(options: StandaloneBuildOptions): Promise<void> {
+  const version = options.version ?? readCliVersion();
+  const entry = options.entry ?? join(REPO_ROOT, "apps/cli/src/bin-standalone.ts");
+  const outfile = resolve(REPO_ROOT, options.outfile);
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
 
-const resolvedNative = resolve(REPO_ROOT, enginePath ?? defaultNativeAsset);
-if (!existsSync(resolvedNative)) {
-  throw new Error(
-    `Native Rust engine not found at ${resolvedNative}; build it first (or pass --engine <path>)`,
-  );
+  const isLinuxMusl = isLinuxMuslTarget(options.target);
+  const define: Record<string, string> = {
+    __SWEEP_VERSION__: JSON.stringify(version),
+    "process.env.NODE_ENV": '"production"',
+    "process.env.DEV": '"false"',
+  };
+  const external: string[] = [];
+  if (process.platform === "linux") {
+    define["process.env.OPENTUI_LIBC"] = JSON.stringify(isLinuxMusl ? "musl" : "glibc");
+    // Exclude the opposite libc's OpenTUI package so Bun does not embed a dead
+    // 5 MiB glibc libopentui.so inside musl standalones (or vice versa).
+    const oppositeOpentui = isLinuxMusl
+      ? `@opentui/core-linux-${process.arch}`
+      : `@opentui/core-linux-${process.arch}-musl`;
+    external.push(oppositeOpentui);
+  }
+
+  const compile: Extract<NonNullable<Bun.BuildConfig["compile"]>, object> = {
+    outfile,
+    autoloadDotenv: false,
+    autoloadBunfig: false,
+    ...(options.assets && options.assets.length > 0 ? { assets: options.assets } : {}),
+    ...(options.target && options.target.startsWith("bun-")
+      ? { target: options.target as Bun.Build.CompileTarget }
+      : {}),
+  };
+
+  try {
+    const result = await Bun.build({
+      entrypoints: [entry],
+      compile,
+      minify: true,
+      format: "esm",
+      bytecode: options.bytecode ?? true,
+      plugins: [openTuiProdJsxPlugin],
+      ...(external.length > 0 ? { external } : {}),
+      ...(options.metafile ? { metafile: true } : {}),
+      define,
+      throw: true,
+    });
+    if (!result.success) {
+      throw new Error(`standalone build failed for ${outfile}`);
+    }
+    if (options.metafile) {
+      if (!result.metafile) {
+        throw new Error(`standalone build did not emit metafile for ${outfile}`);
+      }
+      writeFileSync(
+        resolve(REPO_ROOT, options.metafile),
+        `${JSON.stringify(result.metafile, null, 2)}\n`,
+      );
+    }
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+  }
 }
-const nativeAsset = relative(REPO_ROOT, resolvedNative);
 
-console.log(`building standalone binary (${outfile})...`);
+if (import.meta.main) {
+  const version = readCliVersion();
+  const { target, outfile, enginePath, metafile, noBytecode } = parseArgs(process.argv.slice(2));
+  const hostOs = process.platform === "win32" ? "windows" : process.platform;
+  const hostPrefix = `bun-${hostOs}-${process.arch}`;
+  const isLinuxMusl = isLinuxMuslTarget(target);
 
-const args = [
-  process.execPath, // the running bun binary
-  "build",
-  "--compile",
-  "--minify",
-  "--format=esm",
-  "--no-compile-autoload-dotenv",
-  "--no-compile-autoload-bunfig",
-  `--asset=${nativeAsset}`,
-  entry,
-  "--outfile",
-  outfile,
-  "--define",
-  `__SWEEP_VERSION__:${JSON.stringify(version)}`,
-];
-if (process.platform === "linux") {
-  args.push(
-    "--define",
-    `process.env.OPENTUI_LIBC:${JSON.stringify(isLinuxMusl ? "musl" : "glibc")}`,
-  );
-  // Exclude the opposite libc's OpenTUI package so Bun does not embed a dead
-  // 5 MiB glibc libopentui.so inside musl standalones (or vice versa).
-  const oppositeOpentui = isLinuxMusl
-    ? `@opentui/core-linux-${process.arch}`
-    : `@opentui/core-linux-${process.arch}-musl`;
-  args.push(`--external=${oppositeOpentui}`);
+  if (target && target !== hostPrefix && !isLinuxMusl) {
+    throw new Error("Standalone builds must run on the target platform to embed its native engine");
+  }
+
+  const defaultNativeAsset = isLinuxMusl
+    ? `target/${process.arch === "arm64" ? "aarch64" : "x86_64"}-unknown-linux-musl/release/sweep-engine`
+    : `target/release/sweep-engine${process.platform === "win32" ? ".exe" : ""}`;
+
+  const resolvedNative = resolve(REPO_ROOT, enginePath ?? defaultNativeAsset);
+  if (!existsSync(resolvedNative)) {
+    throw new Error(
+      `Native Rust engine not found at ${resolvedNative}; build it first (or pass --engine <path>)`,
+    );
+  }
+
+  console.log(`building standalone binary (${outfile})...`);
+  try {
+    await buildStandaloneExecutable({
+      outfile,
+      target: target || undefined,
+      assets: [resolvedNative],
+      ...(metafile !== undefined ? { metafile } : {}),
+      bytecode: !noBytecode,
+      version,
+    });
+  } catch (error) {
+    console.error(`✗ standalone build failed:`, error);
+    process.exit(1);
+  }
+
+  console.log(`✓ standalone executable ready: ${outfile}`);
 }
-if (metafile) {
-  args.push(`--metafile=${resolve(REPO_ROOT, metafile)}`);
-}
-// Opt-out exists only to measure the same source with and without bytecode.
-if (!noBytecode) args.push("--bytecode");
-if (target && target.startsWith("bun-")) {
-  args.push("--target", target);
-}
-
-const proc = Bun.spawnSync(args, {
-  cwd: REPO_ROOT,
-  stdout: "inherit",
-  stderr: "inherit",
-});
-
-if (proc.exitCode !== 0) {
-  console.error(`✗ standalone build failed (exit ${proc.exitCode})`);
-  process.exit(proc.exitCode ?? 1);
-}
-
-console.log(`✓ standalone executable ready: ${outfile}`);

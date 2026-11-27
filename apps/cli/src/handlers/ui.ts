@@ -8,6 +8,7 @@ import { CATALOG_PATTERNS, DEFAULT_PATTERN_SET } from "@kitsunekode/sweep-core/c
 import { isColdRequested, tryDropPageCache } from "@kitsunekode/sweep-core/cold";
 import { GuardrailError, assertSizeLimit } from "@kitsunekode/sweep-core/guardrails";
 import { getSelectedBytes } from "@kitsunekode/sweep-core/plan";
+import { lookupExecutable } from "@kitsunekode/sweep-core/rust-engine";
 import {
   printAborted,
   printCleanResult,
@@ -38,9 +39,11 @@ function isBunRuntime(): boolean {
   return typeof process.versions.bun === "string";
 }
 
-function bunIsInstalled(): boolean {
-  const probe = spawnSync("bun", ["--version"], { stdio: "ignore" });
-  return !probe.error && probe.status === 0;
+export function resolveBunExecutable(): string | undefined {
+  const bunBinary = lookupExecutable("bun").resolvedPath;
+  if (!bunBinary) return undefined;
+  const probe = spawnSync(bunBinary, ["--version"], { stdio: "ignore" });
+  return !probe.error && probe.status === 0 ? bunBinary : undefined;
 }
 
 /**
@@ -52,7 +55,8 @@ function bunIsInstalled(): boolean {
 function ensureBunRuntimeForUi(): boolean {
   if (isBunRuntime()) return true;
 
-  if (!bunIsInstalled()) {
+  const bunBinary = resolveBunExecutable();
+  if (!bunBinary) {
     throw new GuardrailError(
       "The interactive UI (`sweep ui`) needs the Bun runtime.\n" +
         "  • Install Bun: https://bun.sh\n" +
@@ -61,7 +65,7 @@ function ensureBunRuntimeForUi(): boolean {
   }
 
   const script = process.argv[1] ?? fileURLToPath(import.meta.url);
-  const result = spawnSync("bun", [script, ...process.argv.slice(2)], {
+  const result = spawnSync(bunBinary, [script, ...process.argv.slice(2)], {
     stdio: "inherit",
   });
   process.exit(result.status ?? 1);
@@ -116,6 +120,10 @@ export interface SweepUiModule {
  */
 export function registerUiModule(mod: SweepUiModule): void {
   registeredUiModule = mod;
+}
+
+export function hasRegisteredUiModule(): boolean {
+  return registeredUiModule !== null;
 }
 
 let registeredUiModule: SweepUiModule | null = null;
@@ -227,6 +235,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
             trash: request.trash,
             maxSizeGB: configFor(request.plan.targetDir).maxSizeGB,
             forceLarge: opts.forceLarge || request.overrideSizeLimit === true,
+            ...(request.explicitSingleSelection ? { explicitSingleSelection: true } : {}),
             signal: request.signal,
             ...(request.onProgress ? { onProgress: request.onProgress } : {}),
           },
@@ -302,6 +311,7 @@ export async function handleUi(pathArg: string, opts: CliOptions): Promise<void>
       {
         maxSizeGB: planConfig.maxSizeGB,
         forceLarge,
+        ...(outcome.explicitSingleSelection ? { explicitSingleSelection: true } : {}),
         ...(useTrash ? { trash: true } : {}),
       },
     );

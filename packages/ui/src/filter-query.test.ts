@@ -93,9 +93,12 @@ describe("compileFilter", () => {
     expect(filterAdvice("kind:")).toBeNull();
     expect(filterAdvice(">100MB is:dir")).toBeNull();
     expect(filterAdvice("is:nope")).toContain("isn't a filter");
+    expect(filterAdvice("is:nope")).not.toContain("—");
     expect(filterAdvice("older:x")).toContain("duration");
     expect(filterAdvice("risk:spicy")).toContain("isn't a tier");
+    expect(filterAdvice("risk:spicy")).not.toContain("—");
     expect(filterAdvice("ecosystem:node")).toContain("isn't a filter");
+    expect(filterAdvice("ecosystem:node")).not.toContain("—");
   });
 
   test("a leading ! negates a term", () => {

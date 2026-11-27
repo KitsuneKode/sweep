@@ -39,9 +39,10 @@ Space queues a project, Enter opens it, `i` queues every idle project,
   history and its own files, never from its build output, so a reinstall does
   not make a forgotten project look busy. `sweep --idle 30d` selects only
   projects nobody has touched for a month.
-- **It will not remove your work.** Anything git tracks, project files (`src`,
+- **It will not remove your work.** Files tracked by any discoverable git
+  repository (at, above, or inside a candidate), project files (`src`,
   manifests, lockfiles, `.env*`), version-control folders and system roots are
-  blocked whatever a pattern or flag says. Each path is checked again right
+  protected whatever a pattern or flag says. Each path is checked again right
   before removal.
 - **It is fast.** A Rust engine finds and sizes 4,000 artifacts across 65,000
   folders in under a second, and the terminal UI fills in while it scans.
@@ -54,7 +55,7 @@ Space queues a project, Enter opens it, `i` queues every idle project,
 ```bash
 brew install kitsunekode/tap/sweep     # macOS and Linux (with shell completions)
 curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
-npm install -g @kitsunekode/sweep      # commands on Node.js 20.3+
+npm install -g @kitsunekode/sweep      # commands on Node.js 22.12+
 bun add -g @kitsunekode/sweep          # commands and the terminal UI
 bunx @kitsunekode/sweep ui ~/Projects  # try the UI without a global install
 ```
@@ -73,22 +74,30 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 Scoop (`kitsunekode/scoop-bucket`) and Linux musl standalone downloads will be
-available starting with the next release (`v0.5.4+`). Minimal Alpine installs
-need `apk add libstdc++ libgcc` before running `install.sh` (only the native
-musl engine is static; the musl standalone executable links those two C++
-runtime libraries dynamically).
+available starting in `v0.5.4+`. Minimal Alpine installs need
+`apk add libstdc++ libgcc` before running `install.sh` (only the native musl
+engine is static; the musl standalone executable links those two C++ runtime
+libraries dynamically).
 
-Homebrew and the install scripts fetch one self-contained binary with the
-terminal UI built in (no Node or Bun needed, SHA-256 checksums verified).
-Release binaries also carry GitHub build provenance attestations. Substitute
-`vX.Y.Z` with the release tag you downloaded:
+Homebrew, `install.sh`, `install.ps1`, and the GitHub Releases assets (including
+`sweep-win-x64.exe` on Windows) provide one self-contained binary with the
+terminal UI built in (no Node or Bun needed). Homebrew, `install.sh`, and
+`install.ps1` verify SHA-256 checksums automatically; direct GitHub Releases
+downloads include checksum files you can verify yourself. Release binaries also
+carry GitHub build provenance attestations. Substitute `vX.Y.Z` with the release
+tag you downloaded:
 
 ```bash
 gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/vX.Y.Z
 ```
 
-From npm, scan and cleanup run on Node; `sweep ui` runs on Bun
-(`@opentui/core` is installed with the package). Linux glibc (x64, arm64, glibc
+From npm, scan and cleanup run on Node.js 22.12+. `sweep ui` runs on Bun;
+`@opentui/core` is an optional dependency installed automatically by Bun
+(`bun add -g`, `bunx`, including `bun install --production`) and Yarn 4. On Node
+older than 26.4, pnpm and Yarn 1 skip linking `@opentui/core` (Yarn 1 prints an
+engine warning), and npm leaves `@opentui/core` unmet and may still extract
+`@opentui/core-<platform>` unless `--omit=optional` is passed; in every case,
+`sweep` itself installs and runs CLI commands. Linux glibc (x64, arm64, glibc
 2.17+), Linux musl/Alpine (x64, arm64, from `v0.5.4+`), macOS (x64, arm64), and
 Windows (x64) are supported.
 

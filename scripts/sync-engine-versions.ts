@@ -18,7 +18,7 @@ const cliPkg = JSON.parse(readFileSync(CLI_PKG_PATH, "utf8")) as {
 };
 
 const version = cliPkg.version;
-const optionalDependencies: Record<string, string> = {};
+const optionalDependencies: Record<string, string> = { ...cliPkg.optionalDependencies };
 
 const sortedPlatforms = [...NATIVE_PLATFORMS].sort((a, b) => a.npmName.localeCompare(b.npmName));
 for (const platform of sortedPlatforms) {

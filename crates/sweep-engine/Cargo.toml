@@ -12,6 +12,10 @@ sweep-types = { path = "../sweep-types" }
 sha2.workspace = true
 hex.workspace = true
 serde.workspace = true
+unicode-normalization.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

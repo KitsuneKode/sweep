@@ -260,6 +260,31 @@ describe("scan report", () => {
     expect(text).toContain("idle 1h");
   });
 
+  test("cloud-sync candidates keep selection and print an informational notice", () => {
+    const lines = plain(
+      formatScanReport(
+        plan(
+          [
+            candidate({
+              id: "cs",
+              name: "node_modules",
+              kind: "node_modules",
+              path: "/work/Dropbox/app/node_modules",
+              reasons: ["default-pattern", "cloud-sync"],
+            }),
+          ],
+          ["cs"],
+        ),
+        "/work",
+        { columns: 100, disk: null },
+      ),
+    );
+    const text = lines.join("\n");
+    expect(text).toContain("1 of 1 selected");
+    expect(text).toContain("cloud-synced");
+    expect(text).toContain("1 candidate is inside a cloud-synced folder");
+  });
+
   test("an empty scan says so plainly", () => {
     const lines = plain(formatScanReport(plan([], []), "/work", { columns: 80, disk: null }));
     expect(lines.some((line) => line.includes("Nothing to clean."))).toBe(true);

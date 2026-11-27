@@ -47,25 +47,80 @@ to bypass a refusal.
 Some things are not Sweep's to remove, whatever a pattern or flag says. They
 appear in a scan as **blocked** and cannot be selected:
 
-- **Anything git tracks.** Build output is never committed, so a folder that
-  holds a tracked or staged file is authored work. The native engine reads
-  each repository's index directly, so no program runs and none of a cloned
-  project's git config is consulted. Index layouts it does not read in full
-  (split or sparse indexes) and installs without the engine ask git instead,
-  with the repository's `core.fsmonitor` disabled. Sweep checks again just
-  before removal.
+- **Files tracked by a discoverable git repository.** Sweep protects files
+  tracked by any repository whose `.git` is at or above the candidate path
+  (including committed symlinks named like an artifact) and detects repositories
+  inside a candidate. When `git` is available, Sweep verifies each enclosing
+  repository's root with `git rev-parse --show-toplevel` and lists tracked paths
+  once via a sanitized `git ls-files -z --cached --full-name` invocation
+  (`core.fsmonitor` disabled and inherited `GIT_*` overrides cleared), matching
+  candidates locally with that repository's `core.ignorecase` and
+  `core.precomposeunicode` (or macOS NFC/NFD) folding rules. A valid repository
+  with a deleted index matches `git`, while any toplevel mismatch, error, or
+  timeout marks those items `dangerous` (`tracked-status-unknown`). When `git`
+  is unavailable, Sweep uses the native index reader only if the repository
+  validates (gitdir, regular config + `extensions.objectFormat`, regular `HEAD`,
+  and verified index checksum for that hash format) with a non-empty index; any
+  validation failure, empty native result, or missing check marks items
+  `tracked-status-unknown`, never pre-selected, and refused again just before
+  removal regardless of flags or tier. A detached work tree configured only
+  through a bare repository's `core.worktree` or `GIT_DIR`/`GIT_WORK_TREE` in
+  the environment has no `.git` entry in the tree and is not detected.
+- **Candidates containing a git repository.** Any directory candidate that
+  contains a `.git` entry at or below it (checked by a bounded,
+  non-symlink-following walk; hitting the bound marks the candidate
+  `tracked-status-unknown`) becomes at least `dangerous` with reason
+  `contains-git-repository`. It is never pre-selected and is refused at apply
+  (`contains_git_repository`) unless explicitly selected one at a time in the
+  interactive UI (and stays `blocked` if its own or an enclosing repository
+  tracks files inside it).
 - **Project files**: `src`, `.sweeprc`, `.env` and `.env.*`, and manifests and
   lockfiles such as `package.json`, `Cargo.toml`, `go.mod` and `pyproject.toml`.
   A repository's own `.sweeprc` can add patterns, but it cannot make these
   removable.
-- **Version-control internals** (`.git`, `.hg`, `.jj`, ...) and system roots.
+- **Version-control internals** (`.git`, `.hg`, `.jj`, ...) and protected roots.
+  Sweep refuses to scan filesystem roots, your home folder directly, and
+  operating-system trees: anything under `/etc`, `/sys`, `/proc`, `/dev`
+  (except `/dev/shm`), `/boot`, `/bin`, `/sbin`, `/lib`, `/lib64` (plus
+  `/private/etc` on macOS) or `C:\Windows` (on any Windows drive, including
+  `\\?\` verbatim paths) is refused as a scan target. `/run`, `/usr`, and `/var`
+  themselves are refused, while directories beneath them such as
+  `/run/media/<user>/<drive>`, `/run/user/<uid>/gvfs`, `/var/www`, `/var/tmp`,
+  and `/usr/local/src` remain scannable.
 
 ## Dangerous items need consent by name
 
-Dangerous items (custom and opt-in patterns, names that can hold authored files)
-are never pre-selected. Interactively, they are listed by path before you
-confirm. An unattended run (`--yes`) refuses them unless you also pass
-`--allow-dangerous`; it still prints each path before removing it.
+Dangerous items (custom and opt-in patterns, names that can hold authored files,
+and matches inside tool or system folders) are never pre-selected.
+Interactively, they are listed by path before you confirm. An unattended run
+(`--yes`) refuses them unless you also pass `--allow-dangerous`; it still prints
+each path before removing it.
+
+Matches inside POSIX operating-system trees (except `/dev/shm`), system installs
+(such as `/usr`, `/opt`, `/home/linuxbrew/.linuxbrew`, `Windows`, `Program
+Files`; Unix OS root names do not demote Windows drive paths such as `C:\dev`),
+or personal tool, editor, agent, and package-manager homes under your home
+folder (including `~/.bun`, `~/.cargo`, `~/.npm-global`, `~/.asdf`, `~/.mise`,
+`~/.conda`, `~/miniconda3`, `~/anaconda3`, `~/go/pkg`, `~/scoop`, `~/snap`,
+`~/.var/app`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.windsurf`, `~/.claude`,
+`~/.codex`, `~/.t3/userdata`, `~/.cache`, `~/Applications`, `~/Library`, and
+`~/AppData`) are marked **dangerous** (`tool-home`) instead of safe so global
+installs and editor runtimes are never queued by default. Real project spaces
+such as `~/go/src`, `~/.t3/worktrees`, and `~/.codex/worktrees` stay cleanable
+by default. On macOS, a folder ending in `.app` is treated as an app bundle only
+when it contains `Contents/Info.plist`; outside macOS, or without
+`Contents/Info.plist`, a project folder named `example.app` is treated as an
+ordinary project folder.
+
+Candidates inside cloud-synced folders (`~/Dropbox`, `~/OneDrive`,
+`~/OneDrive - <Org>`, `~/Google Drive`, `~/My Drive`, and macOS
+`~/Library/CloudStorage/*`) keep their normal tier and selection and carry a
+non-blocking `cloud-sync` notice in scan output, because removing build output
+inside a synced folder can trigger a large sync.
+
+To clean a project that legitimately lives under a tool home, either select that
+entry explicitly in `sweep ui` (a single explicit selection) or pass
+`--include-dangerous` (with `--allow-dangerous` when combined with `-y`):
 
 ```sh
 sweep --dry-run --select all --include-dangerous   # look first

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   utimesSync,
@@ -16,6 +17,7 @@ import { tmpdir } from "node:os";
 import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { scanToPlan } from "@kitsunekode/sweep-core/engine";
+import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import {
   isRustEngineAvailable,
   resolveRustEngineBinary,
@@ -413,6 +415,215 @@ test.skipIf(!NATIVE_AVAILABLE)(
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!NATIVE_AVAILABLE)(
+  "both engines agree on .app project folders vs macOS bundles and prefix-blocked OS roots",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-app-parity-"));
+    try {
+      mkdirSync(join(root, "example.app", "node_modules", "pkg"), { recursive: true });
+      writeFileSync(join(root, "example.app", "node_modules", "pkg", "index.js"), "export {};\n");
+      mkdirSync(join(root, "Editor.app", "Contents", "Resources", "app", "node_modules", "pkg"), {
+        recursive: true,
+      });
+      writeFileSync(join(root, "Editor.app", "Contents", "Info.plist"), "<plist/>\n");
+      writeFileSync(
+        join(root, "Editor.app", "Contents", "Resources", "app", "node_modules", "pkg", "index.js"),
+        "export {};\n",
+      );
+
+      const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG);
+      const rustPlan = await scanToPlanViaRust(root, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+      });
+      expect(normalizePlan(rustPlan, root)).toEqual(normalizePlan(jsPlan, root));
+
+      const bySuffix = (plan: ScanPlan, suffix: string) =>
+        plan.candidates.find((c) => c.path.endsWith(suffix));
+      for (const plan of [jsPlan, rustPlan]) {
+        const project = bySuffix(plan, join("example.app", "node_modules"));
+        expect(project?.riskTier).toBe("safe");
+        const bundle = bySuffix(plan, join("Resources", "app", "node_modules"));
+        if (process.platform === "darwin") {
+          expect(bundle?.riskTier).toBe("dangerous");
+          expect(bundle?.reasons).toContain("tool-home");
+        } else {
+          expect(bundle?.riskTier).toBe("safe");
+        }
+      }
+
+      const refusedTarget =
+        process.platform === "win32" ? "\\\\?\\C:\\Windows\\System32" : "/etc/systemd";
+      expect(() => assertSafeCwd(refusedTarget)).toThrow(/protected path/i);
+      await expect(
+        scanToPlanViaRust(refusedTarget, {
+          config: DEFAULT_CONFIG,
+          selectionPolicy: DEFAULT_SELECTION_POLICY,
+        }),
+      ).rejects.toThrow(/protected path/i);
+
+      if (process.platform !== "win32") {
+        expect(() => assertSafeCwd("/run")).toThrow(/protected path/i);
+        await expect(
+          scanToPlanViaRust("/run", {
+            config: DEFAULT_CONFIG,
+            selectionPolicy: DEFAULT_SELECTION_POLICY,
+          }),
+        ).rejects.toThrow(/protected path/i);
+        expect(() => assertSafeCwd("/run/media/u/Data/proj")).not.toThrow();
+        expect(() => assertSafeCwd("/dev/shm/build")).not.toThrow();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!NATIVE_AVAILABLE)(
+  "both engines agree on narrowed tool homes, worktree carve-outs, and cloud-sync notices",
+  async () => {
+    const fakeHome = realpathSync(mkdtempSync(join(tmpdir(), "sweep-home-parity-")));
+    try {
+      const makeProject = (...parts: string[]) => {
+        const dir = join(fakeHome, ...parts, "node_modules", "pkg");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "index.js"), "export {};\n");
+      };
+
+      // Safe project roots (including narrowed/exempted tool homes and cloud-sync folders)
+      makeProject("go", "src", "proj");
+      makeProject(".t3", "worktrees", "x");
+      makeProject(".codex", "worktrees", "x");
+      makeProject("Dropbox", "proj");
+      makeProject("OneDrive", "Documents", "proj");
+      makeProject("OneDrive - Contoso", "proj");
+      makeProject("Google Drive", "proj");
+      makeProject("My Drive", "proj");
+
+      // Protected tool homes
+      makeProject("go", "pkg", "mod");
+      makeProject(".t3", "userdata");
+      makeProject(".codex", "skills");
+      makeProject("Library", "CloudStorage", "GoogleDrive-me", "proj");
+
+      // Scan each subtree under fakeHome in a child process so Bun's cached
+      // os.homedir() and Rust's std::env::home_dir() both see the fake HOME.
+      const roots = [
+        "go",
+        ".t3",
+        ".codex",
+        "Dropbox",
+        "OneDrive",
+        "OneDrive - Contoso",
+        "Google Drive",
+        "My Drive",
+        "Library",
+      ].map((name) => join(fakeHome, name));
+
+      const script = [
+        'import { DEFAULT_CONFIG } from "@kitsunekode/sweep-core/config";',
+        'import { scanToPlan } from "@kitsunekode/sweep-core/engine";',
+        'import { scanToPlanViaRust } from "@kitsunekode/sweep-core/rust-engine";',
+        'import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";',
+        "const roots = JSON.parse(process.argv[1]);",
+        "const js = [];",
+        "const rust = [];",
+        "for (const root of roots) {",
+        "  const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG);",
+        "  const rustPlan = await scanToPlanViaRust(root, {",
+        "    config: DEFAULT_CONFIG,",
+        "    selectionPolicy: DEFAULT_SELECTION_POLICY,",
+        "  });",
+        "  js.push({ root, plan: jsPlan });",
+        "  rust.push({ root, plan: rustPlan });",
+        "}",
+        "process.stdout.write(JSON.stringify({ js, rust }));",
+      ].join("\n");
+
+      const proc = Bun.spawnSync(["bun", "-e", script, JSON.stringify(roots)], {
+        cwd: REPO_ROOT,
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          SWEEP_CONFIG_DIR: join(fakeHome, ".sweep-config"),
+          XDG_CONFIG_HOME: join(fakeHome, ".xdg"),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (proc.exitCode !== 0) {
+        throw new Error(
+          `parity child failed (exit ${proc.exitCode}): ${Buffer.from(proc.stderr).toString("utf8")}`,
+        );
+      }
+      const { js, rust } = JSON.parse(Buffer.from(proc.stdout).toString("utf8")) as {
+        js: Array<{ root: string; plan: ScanPlan }>;
+        rust: Array<{ root: string; plan: ScanPlan }>;
+      };
+
+      const allJs: ScanPlan["candidates"] = [];
+      const allRust: ScanPlan["candidates"] = [];
+      for (let i = 0; i < roots.length; i += 1) {
+        const jsEntry = js[i]!;
+        const rustEntry = rust[i]!;
+        expect(normalizePlan(rustEntry.plan, jsEntry.root)).toEqual(
+          normalizePlan(jsEntry.plan, jsEntry.root),
+        );
+        allJs.push(...jsEntry.plan.candidates);
+        allRust.push(...rustEntry.plan.candidates);
+      }
+
+      const find = (candidates: ScanPlan["candidates"], ...parts: string[]) =>
+        candidates.find((c) => c.path === join(fakeHome, ...parts, "node_modules"));
+
+      for (const candidates of [allJs, allRust]) {
+        for (const parts of [
+          ["go", "src", "proj"],
+          [".t3", "worktrees", "x"],
+          [".codex", "worktrees", "x"],
+        ]) {
+          const cand = find(candidates, ...parts);
+          expect(cand?.riskTier).toBe("safe");
+          expect(cand?.selectedByDefault).toBe(true);
+          expect(cand?.reasons).toEqual(["default-pattern"]);
+        }
+
+        for (const parts of [
+          ["Dropbox", "proj"],
+          ["OneDrive", "Documents", "proj"],
+          ["OneDrive - Contoso", "proj"],
+          ["Google Drive", "proj"],
+          ["My Drive", "proj"],
+        ]) {
+          const cand = find(candidates, ...parts);
+          expect(cand?.riskTier).toBe("safe");
+          expect(cand?.selectedByDefault).toBe(true);
+          expect(cand?.reasons).toEqual(["default-pattern", "cloud-sync"]);
+        }
+
+        for (const parts of [
+          ["go", "pkg", "mod"],
+          [".t3", "userdata"],
+          [".codex", "skills"],
+        ]) {
+          const cand = find(candidates, ...parts);
+          expect(cand?.riskTier).toBe("dangerous");
+          expect(cand?.selectedByDefault).toBe(false);
+          expect(cand?.reasons).toEqual(["default-pattern", "tool-home"]);
+        }
+
+        const cloudStorage = find(candidates, "Library", "CloudStorage", "GoogleDrive-me", "proj");
+        expect(cloudStorage?.riskTier).toBe("dangerous");
+        expect(cloudStorage?.selectedByDefault).toBe(false);
+        expect(cloudStorage?.reasons).toEqual(["default-pattern", "tool-home", "cloud-sync"]);
+      }
+    } finally {
+      rmSync(fakeHome, { recursive: true, force: true });
     }
   },
 );

@@ -20,13 +20,15 @@ const WORD_VALUE_OPTIONS: Record<string, string> = {
   "--select": "default safe all none",
   "--resource-profile": "balanced low-memory",
   "--max-size-gb": "none",
+  "--view": "projects full",
+  "--theme": "auto dark light",
 };
 
 /**
  * Options on the root program that belong to the bare `sweep` (clean) action -
  * they do not apply after a subcommand (`sweep stats --dry-run` is rejected).
  */
-const ROOT_ACTION_OPTIONS = new Set(["--dry-run", "--trash", "--force-large"]);
+const ROOT_ACTION_OPTIONS = new Set(["--dry-run", "--trash", "--force-large", "--allow-dangerous"]);
 
 interface CompletionModel {
   commands: string[];
@@ -123,7 +125,7 @@ function zshScript(model: CompletionModel): string {
   const commandEntries = model.commands
     .map((command) => `    '${command}:sweep ${command}'`)
     .join("\n");
-  const flagEntries = model.globalFlags.map((flag) => `    '${optionSpec(flag)}'`).join("\n");
+  const rootFlagEntries = model.rootFlags.map((flag) => `    '${optionSpec(flag)}'`).join("\n");
   const cases = model.commands
     .map((command) => {
       const flags = flagsFor(model, command)
@@ -141,13 +143,13 @@ _sweep() {
   commands=(
 ${commandEntries}
   )
-  local -a shared_options
-  shared_options=(
-${flagEntries}
+  local -a root_options
+  root_options=(
+${rootFlagEntries}
   )
   if (( CURRENT == 2 )); then
     _describe 'command' commands
-    _arguments $shared_options
+    _arguments $root_options
     return
   fi
   case "$words[2]" in
@@ -175,9 +177,10 @@ function fishScript(model: CompletionModel, program: Command): string {
     const name = command.name();
     for (const option of command.options) {
       if (!option.long) continue;
+      const words = WORD_VALUE_OPTIONS[option.long];
       const gated = `-n "__fish_seen_subcommand_from ${name}"`;
       flagLines.push(
-        `complete -c sweep ${gated} -l ${option.long.slice(2)}${option.required || option.optional ? " -r" : ""}${FILE_VALUE_OPTIONS.has(option.long) ? " -F" : ""} -d "${option.description.replace(/"/g, "'")}"`,
+        `complete -c sweep ${gated} -l ${option.long.slice(2)}${words ? ` -xa "${words}"` : option.required || option.optional ? " -r" : ""}${FILE_VALUE_OPTIONS.has(option.long) ? " -F" : ""} -d "${option.description.replace(/"/g, "'")}"`,
       );
     }
   }

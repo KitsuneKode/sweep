@@ -10,13 +10,22 @@ const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 function constGroups(source: string, name: string): string[][] {
   const start = source.indexOf(`const ${name}`);
   if (start < 0) throw new Error(`missing ${name}`);
-  const end = source.indexOf("];", start);
+  const eq = source.indexOf("=", start);
+  const open = source.indexOf("[", eq);
+  const end = source.indexOf("];", open);
   const groups: string[][] = [];
-  for (const line of source.slice(start, end).split("\n")) {
-    const names = [...line.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
+  for (const group of source.slice(open + 1, end).matchAll(/\[([^[\]]+)\]/g)) {
+    const names = [...group[1]!.matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
     if (names.length > 0) groups.push(names);
   }
   return groups;
+}
+
+function constStrings(source: string, name: string): string[] {
+  const start = source.indexOf(`const ${name}`);
+  if (start < 0) throw new Error(`missing ${name}`);
+  const end = source.indexOf("];", start);
+  return [...source.slice(start, end).matchAll(/"([^"]+)"/g)].map((match) => match[1]!);
 }
 
 function rustFnStrings(source: string, name: string): string[] {
@@ -29,8 +38,10 @@ function rustFnStrings(source: string, name: string): string[] {
 describe("JS and Rust catalogs", () => {
   const fsSource = readFileSync(join(ROOT, "crates/sweep-fs/src/lib.rs"), "utf8");
   const classify = readFileSync(join(ROOT, "crates/sweep-engine/src/classify.rs"), "utf8");
+  const rustGuardrails = readFileSync(join(ROOT, "crates/sweep-engine/src/guardrails.rs"), "utf8");
   const engine = readFileSync(join(ROOT, "crates/sweep-engine/src/lib.rs"), "utf8");
   const classification = readFileSync(join(ROOT, "packages/core/src/classification.ts"), "utf8");
+  const tsGuardrails = readFileSync(join(ROOT, "packages/core/src/guardrails.ts"), "utf8");
 
   test("default and opt-in pattern sets match", () => {
     const defaults = PATTERN_CATALOG.filter((entry) => entry.byDefault).map(
@@ -41,9 +52,29 @@ describe("JS and Rust catalogs", () => {
     expect(rustFnStrings(fsSource, "opt_in_patterns").sort()).toEqual([...optIn].sort());
   });
 
-  test("tool-home prefixes match", () => {
-    for (const name of ["HOME_TOOL_DIRS", "HOME_TOOL_EXCEPTIONS", "SYSTEM_TOOL_DIRS"]) {
+  test("tool-home and cloud-sync prefixes match", () => {
+    for (const name of [
+      "HOME_TOOL_DIRS",
+      "HOME_TOOL_EXCEPTIONS",
+      "SYSTEM_TOOL_DIRS",
+      "UNIX_SYSTEM_TOOL_DIRS",
+      "UNIX_SYSTEM_TOOL_EXCEPTIONS",
+      "CLOUD_SYNC_HOME_DIRS",
+    ]) {
       expect(constGroups(classify, name)).toEqual(constGroups(classification, name));
+    }
+    expect(constStrings(classify, "CLOUD_SYNC_HOME_PREFIXES")).toEqual(
+      constStrings(classification, "CLOUD_SYNC_HOME_PREFIXES"),
+    );
+  });
+
+  test("guardrail root lists match", () => {
+    for (const name of [
+      "DARWIN_SYSTEM_ROOTS",
+      "UNIX_PREFIX_BLOCKED_ROOTS",
+      "UNIX_PREFIX_BLOCKED_EXCEPTIONS",
+    ]) {
+      expect(constStrings(rustGuardrails, name)).toEqual(constStrings(tsGuardrails, name));
     }
   });
 
