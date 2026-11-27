@@ -633,7 +633,10 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
         "wt-noreflog",
       );
 
-      // 10. CRLF with core.autocrlf=true -> undefined
+      // 10. CRLF with core.autocrlf=true:
+      //     - settled, non-racy, stat-matching merged tree -> merged
+      //     - same tree with one modified file -> undefined
+      //     - same tree racily-clean (same-second) -> undefined
       const crlfApp = join(root, "app-crlf");
       mkdirSync(crlfApp);
       git(crlfApp, "init", "-q", "-b", "main");
@@ -644,6 +647,21 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       commit(wtCrlf, "crlf.txt", "a\r\nb\r\n");
       settle(wtCrlf);
       git(crlfApp, "merge", "-q", "--ff-only", "wt-crlf");
+
+      const wtCrlfModified = join(root, "wt-crlf-modified");
+      git(crlfApp, "worktree", "add", "-q", "-b", "wt-crlf-modified", wtCrlfModified);
+      commit(wtCrlfModified, "crlf-mod.txt", "a\r\nb\r\n");
+      settle(wtCrlfModified);
+      git(crlfApp, "merge", "-q", "--ff-only", "wt-crlf-modified");
+      writeFileSync(join(wtCrlfModified, "crlf-mod.txt"), "a\r\nB\r\n");
+
+      const wtCrlfRacy = join(root, "wt-crlf-racy");
+      git(crlfApp, "worktree", "add", "-q", "-b", "wt-crlf-racy", wtCrlfRacy);
+      commit(wtCrlfRacy, "crlf-racy.txt", "a\r\nb\r\n");
+      const racyGitDir = git(wtCrlfRacy, "rev-parse", "--git-dir");
+      const racyStat = lstatSync(join(wtCrlfRacy, "crlf-racy.txt"));
+      utimesSync(join(racyGitDir, "index"), racyStat.atime, racyStat.mtime);
+      git(crlfApp, "merge", "-q", "--ff-only", "wt-crlf-racy");
 
       // 11. Required clean filter (never executes!) -> undefined
       const filterMarker = join(root, "CONTRACT_FILTER_RAN");
@@ -661,6 +679,21 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       git(filterApp, "config", "filter.reqclean.required", "true");
       git(filterApp, "config", "filter.reqclean.clean", `touch ${filterMarker}`);
 
+      // 12. working-tree-encoding attribute -> undefined
+      const encApp = join(root, "app-enc");
+      mkdirSync(encApp);
+      git(encApp, "init", "-q", "-b", "main");
+      git(encApp, "config", "core.autocrlf", "false");
+      commit(encApp, ".gitignore", "node_modules/\n");
+      const wtEnc = join(root, "wt-enc");
+      git(encApp, "worktree", "add", "-q", "-b", "wt-enc", wtEnc);
+      commit(wtEnc, ".gitattributes", "*.enc working-tree-encoding=UTF-16LE-BOM\n");
+      writeFileSync(join(wtEnc, "item.enc"), Buffer.from("\ufeffok\n", "utf16le"));
+      git(wtEnc, "add", "item.enc");
+      git(wtEnc, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "item.enc");
+      settle(wtEnc);
+      git(encApp, "merge", "-q", "--ff-only", "wt-enc");
+
       for (const dir of [
         app,
         merged,
@@ -676,7 +709,10 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
         wtInc,
         wtNoReflog,
         wtCrlf,
+        wtCrlfModified,
+        wtCrlfRacy,
         wtFilter,
+        wtEnc,
       ]) {
         seedModules(dir);
       }
@@ -741,10 +777,22 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       });
       expect(jsMap.get(canonical(join(wtCrlf, "node_modules")))).toEqual({
         worktreeOf: crlfApp,
+        worktreeState: "merged",
+      });
+      expect(jsMap.get(canonical(join(wtCrlfModified, "node_modules")))).toEqual({
+        worktreeOf: crlfApp,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(wtCrlfRacy, "node_modules")))).toEqual({
+        worktreeOf: crlfApp,
         worktreeState: undefined,
       });
       expect(jsMap.get(canonical(join(wtFilter, "node_modules")))).toEqual({
         worktreeOf: filterApp,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(wtEnc, "node_modules")))).toEqual({
+        worktreeOf: encApp,
         worktreeState: undefined,
       });
     } finally {

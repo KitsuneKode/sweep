@@ -828,20 +828,41 @@ describe.skipIf(!hasGit)("worktree info", () => {
     });
   });
 
-  test("content conversion settings (autocrlf, core.eol, filter, text, eol, working-tree-encoding) leave worktree unknown without running filters", async () => {
-    // 1. CRLF checkout with core.autocrlf=true
+  test("EOL conversions (autocrlf, core.eol, text, eol) allow settled stat-matching merged worktrees while rejecting edits, racily-clean, filter, and working-tree-encoding", async () => {
+    // 1. CRLF checkout with core.autocrlf=true:
+    //    - settled, non-racy, stat-matching merged tree -> merged
+    //    - same tree with one modified file -> unknown
+    //    - same tree racily-clean (same-second mtime) -> unknown
     const crlfRepo = join(root, "app-crlf");
     mkdirSync(crlfRepo);
     git(crlfRepo, "init", "-q", "-b", "main");
     git(crlfRepo, "config", "core.autocrlf", "true");
     commit(crlfRepo, "init", "hello\r\n");
-    const wtCrlf = join(root, "wt-crlf");
-    git(crlfRepo, "worktree", "add", "-q", "-b", "feat-crlf", wtCrlf);
-    commit(wtCrlf, "data.txt", "line1\r\nline2\r\n");
-    settleWorktree(wtCrlf);
+
+    const wtCrlfClean = join(root, "wt-crlf");
+    git(crlfRepo, "worktree", "add", "-q", "-b", "feat-crlf", wtCrlfClean);
+    commit(wtCrlfClean, "data.txt", "line1\r\nline2\r\n");
+    settleWorktree(wtCrlfClean);
     git(crlfRepo, "merge", "-q", "--ff-only", "feat-crlf");
 
-    // 2. Required clean filter (must NOT execute the filter program!)
+    const wtCrlfModified = join(root, "wt-crlf-modified");
+    git(crlfRepo, "worktree", "add", "-q", "-b", "feat-crlf-mod", wtCrlfModified);
+    commit(wtCrlfModified, "mod.txt", "line1\r\nline2\r\n");
+    settleWorktree(wtCrlfModified);
+    git(crlfRepo, "merge", "-q", "--ff-only", "feat-crlf-mod");
+    // Modify one tracked file in the CRLF checkout (same length, different content + newer mtime).
+    writeFileSync(join(wtCrlfModified, "mod.txt"), "line1\r\nLINE2\r\n");
+
+    const wtCrlfRacy = join(root, "wt-crlf-racy");
+    git(crlfRepo, "worktree", "add", "-q", "-b", "feat-crlf-racy", wtCrlfRacy);
+    commit(wtCrlfRacy, "racy.txt", "line1\r\nline2\r\n");
+    // Pin index mtime to the entry's mtime so the entry is deterministically racily clean (same-second).
+    const racyGitDir = git(wtCrlfRacy, "rev-parse", "--git-dir");
+    const racyStat = lstatSync(join(wtCrlfRacy, "racy.txt"));
+    utimesSync(join(racyGitDir, "index"), racyStat.atime, racyStat.mtime);
+    git(crlfRepo, "merge", "-q", "--ff-only", "feat-crlf-racy");
+
+    // 2. Required clean filter (must NOT execute the filter program!) -> unknown
     const filterMarker = join(root, "FILTER_RAN");
     const filterRepo = join(root, "app-filter");
     mkdirSync(filterRepo);
@@ -857,7 +878,7 @@ describe.skipIf(!hasGit)("worktree info", () => {
     git(filterRepo, "config", "filter.myclean.required", "true");
     git(filterRepo, "config", "filter.myclean.clean", `touch ${filterMarker}`);
 
-    // 3. core.eol set
+    // 3. core.eol set -> settled, non-racy, stat-matching merged tree -> merged
     const eolRepo = join(root, "app-core-eol");
     mkdirSync(eolRepo);
     git(eolRepo, "init", "-q", "-b", "main");
@@ -870,7 +891,7 @@ describe.skipIf(!hasGit)("worktree info", () => {
     settleWorktree(wtCoreEol);
     git(eolRepo, "merge", "-q", "--ff-only", "feat-core-eol");
 
-    // 4. text=auto, eol=crlf, working-tree-encoding attributes (distinct extensions per worktree)
+    // 4. text=auto and eol=crlf -> merged when settled; working-tree-encoding -> unknown
     const wtText = join(root, "wt-attr-text");
     const wtEol = join(root, "wt-attr-eol");
     const wtEnc = join(root, "wt-attr-enc");
@@ -911,22 +932,44 @@ describe.skipIf(!hasGit)("worktree info", () => {
       );
     }
 
-    expect(await new WorktreeIndex().forProject(wtCrlf)).toEqual({
+    const crlfIdx = new WorktreeIndex();
+    expect(await crlfIdx.forProject(wtCrlfClean)).toEqual({
       of: crlfRepo,
       branch: "feat-crlf",
+      state: "merged",
     });
+    expect(await crlfIdx.forProject(wtCrlfModified)).toEqual({
+      of: crlfRepo,
+      branch: "feat-crlf-mod",
+    });
+    expect(await crlfIdx.forProject(wtCrlfRacy)).toEqual({
+      of: crlfRepo,
+      branch: "feat-crlf-racy",
+    });
+
     expect(await new WorktreeIndex().forProject(wtFilter)).toEqual({
       of: filterRepo,
       branch: "feat-filter",
     });
     expect(existsSync(filterMarker)).toBe(false);
+
     expect(await new WorktreeIndex().forProject(wtCoreEol)).toEqual({
       of: eolRepo,
       branch: "feat-core-eol",
+      state: "merged",
     });
+
     const attrIdx = new WorktreeIndex();
-    expect(await attrIdx.forProject(wtText)).toEqual({ of: repo, branch: "wt-attr-text" });
-    expect(await attrIdx.forProject(wtEol)).toEqual({ of: repo, branch: "wt-attr-eol" });
+    expect(await attrIdx.forProject(wtText)).toEqual({
+      of: repo,
+      branch: "wt-attr-text",
+      state: "merged",
+    });
+    expect(await attrIdx.forProject(wtEol)).toEqual({
+      of: repo,
+      branch: "wt-attr-eol",
+      state: "merged",
+    });
     expect(await attrIdx.forProject(wtEnc)).toEqual({ of: repo, branch: "wt-attr-enc" });
   });
 

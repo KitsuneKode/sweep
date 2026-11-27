@@ -42,9 +42,11 @@ import { gitEnv, gitSafeArgs } from "./git-tracked.js";
  *   answers without running repo-configured programs:
  *   - Remotes & base: `git remote`, `git config --list --null`,
  *     `git symbolic-ref refs/remotes/origin/HEAD`, `git for-each-ref`.
- *   - Content conversion guard: `git config --list --null` (`core.autocrlf`,
- *     `core.eol`) and `git check-attr --stdin -z filter text eol
- *     working-tree-encoding`. Any enabled conversion makes the worktree unknown.
+ *   - Content conversion guard: `git check-attr --stdin -z filter
+ *     working-tree-encoding` (which runs no filters); any enabled `filter` or
+ *     `working-tree-encoding` attribute makes the worktree unknown. Pure
+ *     line-ending conversions (`text`, `eol`, `core.autocrlf`, `core.eol`) use
+ *     the same non-racy exact stat-match fast path as `git status`.
  *   - Staged changes: `git diff-index --cached --quiet --no-ext-diff
  *     --no-textconv --ignore-submodules=none <tipOid> --`.
  *   - Untracked non-ignored files: `git ls-files --others --exclude-standard -z`
@@ -139,7 +141,7 @@ const IN_PROGRESS_MARKERS = [
   "index.lock",
 ] as const;
 
-const CONVERSION_ATTRS = ["filter", "text", "eol", "working-tree-encoding"] as const;
+const UNSAFE_CONVERSION_ATTRS = ["filter", "working-tree-encoding"] as const;
 
 function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals, forceGroup = false): void {
   if (!forceGroup && (proc.exitCode !== null || proc.signalCode !== null)) return;
@@ -655,23 +657,12 @@ function parseGitConfigNull(stdout: string): Map<string, string> {
   return entries;
 }
 
-function configEnablesContentConversion(config: ReadonlyMap<string, string>): boolean {
-  const autocrlf = config.get("core.autocrlf");
-  if (autocrlf !== undefined && autocrlf.trim().toLowerCase() !== "false") {
-    return true;
-  }
-  if (config.has("core.eol")) {
-    return true;
-  }
-  return false;
-}
-
 function checkAttrOutputIsClean(stdout: string, expectedPaths: number): boolean {
   const fields = stdout.split("\0");
   // `check-attr -z` terminates every triplet with NUL, leaving one trailing empty element.
   if (fields.length === 0 || fields[fields.length - 1] !== "") return false;
   const count = fields.length - 1;
-  const expectedFields = expectedPaths * CONVERSION_ATTRS.length * 3;
+  const expectedFields = expectedPaths * UNSAFE_CONVERSION_ATTRS.length * 3;
   if (count !== expectedFields) return false;
   for (let i = 2; i < count; i += 3) {
     const value = fields[i];
@@ -811,9 +802,11 @@ export class WorktreeIndex {
    *    before all checks and verifies every tracked entry by `lstat` (rejecting
    *    split/sparse/unknown-extension indexes, gitlinks, suppressing flags,
    *    stat mismatches, and racily-clean same-second entries).
-   * 3. Checks effective conversion config (`git config --list --null`) and
-   *    attributes (`git check-attr --stdin -z filter text eol
-   *    working-tree-encoding`), failing closed if any conversion is enabled.
+   * 3. Checks effective unsafe conversion attributes (`git check-attr --stdin -z
+   *    filter working-tree-encoding`), failing closed if any `filter` or
+   *    `working-tree-encoding` attribute is enabled. Pure EOL conversions
+   *    (`text`, `eol`, `core.autocrlf`, `core.eol`) rely on step 2's non-racy
+   *    exact stat-match fast path.
    * 4. Checks staged changes via `git diff-index --cached --quiet <tipOid>`.
    * 5. Checks untracked non-ignored files via bounded
    *    `git ls-files --others --exclude-standard -z`.
@@ -886,21 +879,10 @@ export class WorktreeIndex {
       }
     }
 
-    // Check effective worktree config for content conversion (`core.autocrlf`, `core.eol`).
-    const worktreeConfigOut = await this.runBoundedGit(gitDir, [
-      `--work-tree=${realRoot}`,
-      "-C",
-      realRoot,
-      "config",
-      "--list",
-      "--null",
-    ]);
-    if (worktreeConfigOut === undefined) return false;
-    if (configEnablesContentConversion(parseGitConfigNull(worktreeConfigOut))) {
-      return false;
-    }
-
-    // Check effective conversion attributes for all tracked paths without running filters.
+    // Check unsafe conversion attributes (`filter`, `working-tree-encoding`) for
+    // all tracked paths without running filters. Pure line-ending conversions
+    // (`text`, `eol`, `core.autocrlf`, `core.eol`) are covered by the non-racy
+    // exact stat-match check above (matching Git's `git status` fast path).
     if (indexEntries.length > 0) {
       for (let start = 0; start < indexEntries.length; start += CHECK_ATTR_CHUNK_PATHS) {
         if (this.isExpired()) return false;
@@ -915,7 +897,7 @@ export class WorktreeIndex {
             "check-attr",
             "--stdin",
             "-z",
-            ...CONVERSION_ATTRS,
+            ...UNSAFE_CONVERSION_ATTRS,
           ],
           { stdin },
         );
