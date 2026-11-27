@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitTrackedPaths, gitTrackedPathsViaEngine, gitTrackedPathsViaGit } from "./git-tracked.js";
@@ -183,3 +183,36 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
     expect(byName.get("node_modules")?.riskTier).toBe("safe");
   });
 });
+
+test.skipIf(process.platform === "win32")(
+  "gitTrackedPathsViaGit never executes a planted git binary in cwd via empty or relative PATH",
+  () => {
+    const work = mkdtempSync(join(tmpdir(), "sweep-git-cwd-"));
+    const relDir = join(work, "relbin");
+    mkdirSync(join(work, ".git"), { recursive: true });
+    mkdirSync(join(work, "dist"), { recursive: true });
+    mkdirSync(relDir, { recursive: true });
+    const marker = join(work, "git-ran.marker");
+    const script = `#!/bin/sh\necho ran > ${JSON.stringify(marker)}\nprintf 'dist/a.js\\0'\nexit 0\n`;
+    writeFileSync(join(work, "git"), script);
+    writeFileSync(join(relDir, "git"), script);
+    chmodSync(join(work, "git"), 0o755);
+    chmodSync(join(relDir, "git"), 0o755);
+
+    const previousCwd = process.cwd();
+    const previousPath = process.env.PATH;
+    try {
+      process.chdir(work);
+      for (const pathEnv of ["", ":/nonexistent", "/nonexistent:", "/a::/b", ".", "./relbin"]) {
+        process.env.PATH = pathEnv;
+        expect(gitTrackedPathsViaGit([join(work, "dist")])).toEqual(new Set());
+        expect(existsSync(marker)).toBe(false);
+      }
+    } finally {
+      process.chdir(previousCwd);
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(work, { recursive: true, force: true });
+    }
+  },
+);

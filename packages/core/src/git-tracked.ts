@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
+import { lookupExecutable } from "./executable-lookup.js";
 import { probeRustEngine } from "./rust-engine.js";
 
 /**
@@ -21,8 +22,7 @@ const GIT_ARGS = [
   "-c",
   "core.quotePath=false",
 ];
-const GIT_ENV = {
-  ...process.env,
+const GIT_ENV_OVERRIDES = {
   GIT_OPTIONAL_LOCKS: "0",
   // Pathspecs are paths, never globs: a folder named `*` must not match all.
   GIT_LITERAL_PATHSPECS: "1",
@@ -71,8 +71,8 @@ export function gitTrackedPaths(paths: readonly string[]): Set<string> {
 /** Null when the engine is unavailable or did not answer cleanly. */
 export function gitTrackedPathsViaEngine(paths: readonly string[]): Set<string> | null {
   const probe = probeRustEngine();
-  if (!probe.available) return null;
-  const result = spawnSync(probe.resolvedPath ?? probe.binary, ["tracked"], {
+  if (!probe.available || !probe.resolvedPath) return null;
+  const result = spawnSync(probe.resolvedPath, ["tracked"], {
     input: `${paths.join("\0")}\0`,
     encoding: "utf8",
     timeout: 60_000,
@@ -90,6 +90,9 @@ export function gitTrackedPathsViaEngine(paths: readonly string[]): Set<string> 
 export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
   const tracked = new Set<string>();
   if (paths.length === 0) return tracked;
+  const gitBinary = lookupExecutable("git").resolvedPath;
+  if (!gitBinary) return tracked;
+  const gitEnv = { ...process.env, ...GIT_ENV_OVERRIDES };
   const rootCache = new Map<string, string | null>();
   const byRoot = new Map<string, string[]>();
   for (const path of paths) {
@@ -106,10 +109,10 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
     for (const chunk of chunked([...relToPath.keys()])) {
       // `--` ends options: a folder named `-x` stays a path, never a flag.
       const result = spawnSync(
-        "git",
+        gitBinary,
         [...GIT_ARGS, "-C", root, "ls-files", "-z", "--cached", "--", ...chunk],
         {
-          env: GIT_ENV,
+          env: gitEnv,
           encoding: "utf8",
           timeout: TIMEOUT_MS,
           maxBuffer: 256 * 1024 * 1024,

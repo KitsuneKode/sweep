@@ -74,10 +74,10 @@ export async function collectDoctorChecks(
   const rustOk = rustProbe.available;
   const rustExecutable = rustProbe.resolvedPath ?? rustProbe.binary;
   let rustSafetyOk = false;
-  if (rustOk) {
+  if (rustOk && rustProbe.resolvedPath) {
     try {
       const capabilities = JSON.parse(
-        execFileSync(rustExecutable, ["--capabilities"], {
+        execFileSync(rustProbe.resolvedPath, ["--capabilities"], {
           encoding: "utf8",
           timeout: 1000,
           killSignal: "SIGKILL",

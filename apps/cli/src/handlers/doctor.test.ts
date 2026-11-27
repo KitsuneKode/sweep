@@ -101,4 +101,81 @@ describe("collectDoctorChecks", () => {
       }
     },
   );
+
+  test("reports a full sentence reason when rust_engine is not_installed", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-doctor-not-installed-"));
+    roots.push(root);
+    const harness = join(root, "harness.ts");
+    const output = join(root, "harness.mjs");
+    const target = join(root, "project");
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, ".sweeprc"), "{}\n");
+
+    writeFileSync(join(root, "package.json"), "{}\n");
+    writeFileSync(
+      harness,
+      `
+import { collectDoctorChecks } from ${JSON.stringify(join(import.meta.dir, "doctor.ts"))};
+delete process.env.SWEEP_ENGINE_PATH;
+const checks = await collectDoctorChecks(${JSON.stringify(target)}, {
+  dryRun: false,
+  yes: false,
+  forceLarge: false,
+  pattern: [],
+  ignore: [],
+  disabledPattern: [],
+  includeDangerous: false,
+  select: "default",
+  color: false,
+  engine: "js",
+  json: false,
+  quiet: false,
+  verbose: false,
+});
+console.log(JSON.stringify(checks.find((c) => c.name === "rust_engine")));
+`,
+    );
+    const built = await Bun.build({
+      entrypoints: [harness],
+      target: "bun",
+      outdir: root,
+      naming: "harness.mjs",
+    });
+    expect(built.success).toBe(true);
+
+    const baseEnv: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.toUpperCase() === "PATH" || k === "SWEEP_ENGINE_PATH") continue;
+      baseEnv[k] = v;
+    }
+
+    const proc = Bun.spawn([process.execPath, "--no-install", output], {
+      cwd: root,
+      env: {
+        ...baseEnv,
+        PATH: "",
+        NODE_PATH: "",
+        SWEEP_CONFIG_DIR: join(root, "config"),
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect(stderr).toBe("");
+    expect(code).toBe(0);
+    const rustCheck = JSON.parse(stdout) as {
+      ok: boolean;
+      detail: string;
+      reasonKind?: string;
+      reason?: string;
+    };
+    expect(rustCheck.ok).toBe(false);
+    expect(rustCheck.detail).toBe("not found");
+    expect(rustCheck.reasonKind).toBe("not_installed");
+    expect(rustCheck.reason).toBe("Native Rust engine binary was not found.");
+  });
 });

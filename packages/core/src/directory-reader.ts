@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { opendir } from "node:fs/promises";
+import { lookupExecutable } from "./executable-lookup.js";
 import { GuardrailError } from "./guardrails.js";
 import { ResourceBudget, ResourceLimitError } from "./resource-budget.js";
 
@@ -84,7 +85,16 @@ class DirectoryWorker {
   private readonly abort: () => void;
 
   constructor(private readonly signal?: AbortSignal) {
-    this.proc = spawn("node", ["--input-type=commonjs", "-e", WORKER], { stdio: "pipe" });
+    const nodeLookup = lookupExecutable("node");
+    if (!nodeLookup.resolvedPath) {
+      const code = nodeLookup.nonExecutablePath ? "EACCES" : "ENOENT";
+      throw new DirectoryReaderRuntimeError(
+        `Node.js runtime unavailable for Bun's incremental directory reader (${code}); install Node or use the Rust engine`,
+      );
+    }
+    this.proc = spawn(nodeLookup.resolvedPath, ["--input-type=commonjs", "-e", WORKER], {
+      stdio: "pipe",
+    });
     this.abort = () => {
       const error = new Error("Directory enumeration cancelled");
       error.name = "AbortError";

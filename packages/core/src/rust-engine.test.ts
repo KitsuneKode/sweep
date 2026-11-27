@@ -1,9 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_CONFIG } from "./config.js";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import type { ScanPlan } from "@kitsunekode/sweep-protocol";
+import { DiscoveryIndexError, DiscoveryIndexSession } from "./discovery-index.js";
+import { gitTrackedPathsViaEngine } from "./git-tracked.js";
+import { ApplyRefusedError } from "./guardrails.js";
 import {
+  applyPlanViaRust,
   isRustEngineAvailable,
   lookupExecutable,
   probeRustEngine,
@@ -304,40 +317,48 @@ describe("lookupExecutable & cross-platform probe semantics", () => {
         expect(viaSpace.available).toBe(true);
         expect(viaSpace.resolvedPath).toBe(spaceEngine);
 
-        // Empty PATH segment resolves cwd like POSIX execvp.
-        const emptySeg = lookupExecutable("sweep-engine", {
-          platform: "linux",
-          pathEnv: `:/nonexistent`,
-          cwd: dir2,
-        });
-        expect(emptySeg.resolvedPath).toBe(realEngine);
+        // Empty, whitespace-only, ".", and relative POSIX PATH segments must never resolve cwd.
+        const relativeBin = join(dir2, "relbin");
+        mkdirSync(relativeBin);
+        const relativeEngine = join(relativeBin, "sweep-engine");
+        copyFileSync(process.execPath, relativeEngine);
+        chmodSync(relativeEngine, 0o755);
 
-        const trailingEmpty = lookupExecutable("sweep-engine", {
-          platform: "linux",
-          pathEnv: `/nonexistent:`,
-          cwd: dir2,
-        });
-        expect(trailingEmpty.resolvedPath).toBe(realEngine);
-
-        // PATH="" searches cwd like POSIX execvp, while PATH=" " searches literal "./ ".
-        const emptyPath = lookupExecutable("sweep-engine", {
-          platform: "linux",
-          pathEnv: "",
-          cwd: dir2,
-        });
-        expect(emptyPath.resolvedPath).toBe(realEngine);
-
-        const singleSpaceDir = join(root, " ");
+        const singleSpaceDir = join(dir2, " ");
         mkdirSync(singleSpaceDir);
         const singleSpaceEngine = join(singleSpaceDir, "sweep-engine");
         copyFileSync(process.execPath, singleSpaceEngine);
         chmodSync(singleSpaceEngine, 0o755);
-        const whitespaceOnlyPath = lookupExecutable("sweep-engine", {
+
+        for (const pathEnv of [
+          "",
+          ":/nonexistent",
+          "/nonexistent:",
+          "/nonexistent::/also-missing",
+          " ",
+          "\t",
+          ".",
+          ".:/nonexistent",
+          "relbin",
+          "./relbin",
+          "../second",
+        ]) {
+          const miss = lookupExecutable("sweep-engine", {
+            platform: "linux",
+            pathEnv,
+            cwd: dir2,
+          });
+          expect(miss.resolvedPath).toBeUndefined();
+          expect(miss.nonExecutablePath).toBeUndefined();
+        }
+
+        // An absolute entry after empty/relative entries is still found.
+        const afterSkipped = lookupExecutable("sweep-engine", {
           platform: "linux",
-          pathEnv: " ",
-          cwd: root,
+          pathEnv: `:.:relbin:${dir2}`,
+          cwd: dir2,
         });
-        expect(whitespaceOnlyPath.resolvedPath).toBe(singleSpaceEngine);
+        expect(afterSkipped.resolvedPath).toBe(realEngine);
       }
     } finally {
       if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
@@ -346,6 +367,259 @@ describe("lookupExecutable & cross-platform probe semantics", () => {
       else process.env.PATH = previousPath;
       if (previousPathext === undefined) delete process.env.PATHEXT;
       else process.env.PATHEXT = previousPathext;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("Windows lookup skips empty, whitespace-only, '.', and relative PATH segments", () => {
+    const files = new Set([
+      "C:\\work\\sweep-engine.exe",
+      "C:\\work\\relbin\\sweep-engine.exe",
+      "C:\\work\\ \\sweep-engine.exe",
+      "C:\\bin\\sweep-engine.exe",
+      "C:\\real\\sweep-engine.exe",
+      "\\\\server\\share\\bin\\sweep-engine.exe",
+    ]);
+    const has = (p: string) =>
+      files.has(p.toLowerCase()) || [...files].some((f) => f.toLowerCase() === p.toLowerCase());
+
+    for (const pathEnv of [
+      "",
+      ";C:\\nonexistent",
+      "C:\\nonexistent;",
+      "C:\\nonexistent;;C:\\missing",
+      " ",
+      '" "',
+      ".",
+      '".;"',
+      ".;C:\\nonexistent",
+      "relbin",
+      ".\\relbin",
+      "..\\work",
+      "C:relbin",
+      "\\bin",
+      "/bin",
+    ]) {
+      const miss = lookupExecutable("sweep-engine", {
+        platform: "win32",
+        pathEnv,
+        pathextEnv: ".COM;.EXE",
+        cwd: "C:\\work",
+        isFile: has,
+      });
+      expect(miss.resolvedPath).toBeUndefined();
+    }
+
+    const fromAbs = lookupExecutable("sweep-engine", {
+      platform: "win32",
+      pathEnv: ";.;relbin;C:\\real",
+      pathextEnv: ".COM;.EXE",
+      cwd: "C:\\work",
+      isFile: has,
+    });
+    expect(fromAbs.resolvedPath?.toLowerCase()).toBe("c:\\real\\sweep-engine.exe");
+
+    const fromUnc = lookupExecutable("sweep-engine", {
+      platform: "win32",
+      pathEnv: ";.;\\\\server\\share\\bin",
+      pathextEnv: ".COM;.EXE",
+      cwd: "C:\\work",
+      isFile: has,
+    });
+    expect(fromUnc.resolvedPath?.toLowerCase()).toBe("\\\\server\\share\\bin\\sweep-engine.exe");
+  });
+
+  test("engine spawn paths never execute a planted sweep-engine in cwd via empty or relative PATH", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-no-cwd-spawn-"));
+    const relDir = join(root, "relbin");
+    mkdirSync(relDir, { recursive: true });
+    const marker = join(root, "executed.marker");
+    const ext = process.platform === "win32" ? ".exe" : "";
+    const cwdPlanted = join(root, `sweep-engine${ext}`);
+    const relPlanted = join(relDir, `sweep-engine${ext}`);
+    const previousCwd = process.cwd();
+    const previousEngine = process.env.SWEEP_ENGINE_PATH;
+    const previousPath = process.env.PATH;
+
+    try {
+      if (process.platform === "win32") {
+        copyFileSync(process.execPath, cwdPlanted);
+        copyFileSync(process.execPath, relPlanted);
+      } else {
+        const script = `#!/bin/sh\necho ran > ${JSON.stringify(marker)}\nexit 0\n`;
+        writeFileSync(cwdPlanted, script);
+        writeFileSync(relPlanted, script);
+        chmodSync(cwdPlanted, 0o755);
+        chmodSync(relPlanted, 0o755);
+      }
+
+      const emptyPlan: ScanPlan = {
+        protocolVersion: "1",
+        targetDir: root,
+        createdAt: new Date(1000).toISOString(),
+        selectionPolicy: { mode: "default", includeDangerous: false },
+        candidates: [],
+        selectedCandidateIds: [],
+        summary: {
+          candidateCount: 0,
+          estimatedTotalBytes: 0,
+          scannedDirs: 1,
+          exact: false,
+          selectedCount: 0,
+          riskCounts: { safe: 0, caution: 0, dangerous: 0, blocked: 0 },
+        },
+      };
+
+      const badPaths =
+        process.platform === "win32"
+          ? [
+              "",
+              ";C:\\nonexistent-sweep-dir",
+              "C:\\nonexistent-sweep-dir;",
+              "C:\\nonexistent-sweep-dir;;C:\\also-missing",
+              " ",
+              ".",
+              ".\\relbin",
+              "relbin",
+            ]
+          : [
+              "",
+              ":/nonexistent-sweep-dir",
+              "/nonexistent-sweep-dir:",
+              "/nonexistent-sweep-dir::/also-missing",
+              " ",
+              ".",
+              "./relbin",
+              "relbin",
+            ];
+
+      process.chdir(root);
+      process.env.SWEEP_ENGINE_PATH = "sweep-engine";
+
+      for (const pathEnv of badPaths) {
+        process.env.PATH = pathEnv;
+
+        const probe = probeRustEngine();
+        expect(probe.available).toBe(false);
+        expect(probe.resolvedPath).toBeUndefined();
+
+        expect(gitTrackedPathsViaEngine([join(root, "node_modules")])).toBeNull();
+
+        await expect(
+          scanToPlanViaRust(root, {
+            config: DEFAULT_CONFIG,
+            selectionPolicy: { mode: "default", includeDangerous: false },
+          }),
+        ).rejects.toThrow(/rust engine/i);
+
+        await expect(applyPlanViaRust(emptyPlan)).rejects.toBeInstanceOf(ApplyRefusedError);
+
+        await expect(DiscoveryIndexSession.open(emptyPlan)).rejects.toBeInstanceOf(
+          DiscoveryIndexError,
+        );
+
+        expect(existsSync(marker)).toBe(false);
+      }
+    } finally {
+      process.chdir(previousCwd);
+      if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previousEngine;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("unconfigured probe outside workspace reports not_installed with a full sentence and ignores cwd binary", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-unconfigured-probe-"));
+    const harness = join(root, "harness.ts");
+    const output = join(root, "harness.mjs");
+    const ext = process.platform === "win32" ? ".exe" : "";
+    const planted = join(root, `sweep-engine${ext}`);
+    const marker = join(root, "executed.marker");
+
+    try {
+      if (process.platform === "win32") {
+        copyFileSync(process.execPath, planted);
+      } else {
+        writeFileSync(planted, `#!/bin/sh\necho ran > ${JSON.stringify(marker)}\nexit 0\n`);
+        chmodSync(planted, 0o755);
+      }
+
+      writeFileSync(join(root, "package.json"), "{}\n");
+      writeFileSync(
+        harness,
+        `
+import { probeRustEngine } from ${JSON.stringify(join(import.meta.dir, "rust-engine.ts"))};
+delete process.env.SWEEP_ENGINE_PATH;
+const result = probeRustEngine();
+console.log(JSON.stringify(result));
+`,
+      );
+      const built = await Bun.build({
+        entrypoints: [harness],
+        target: "bun",
+        outdir: root,
+        naming: "harness.mjs",
+      });
+      expect(built.success).toBe(true);
+
+      const badPaths =
+        process.platform === "win32"
+          ? [
+              "",
+              ";C:\\nonexistent-sweep-dir",
+              "C:\\nonexistent-sweep-dir;",
+              "C:\\nonexistent-sweep-dir;;C:\\also-missing",
+              ".",
+              ".\\relbin",
+              "relbin",
+            ]
+          : [
+              "",
+              ":/nonexistent-sweep-dir",
+              "/nonexistent-sweep-dir:",
+              "/a::/b",
+              ".",
+              "./relbin",
+              "relbin",
+            ];
+
+      const baseEnv: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (k.toUpperCase() === "PATH" || k === "SWEEP_ENGINE_PATH") continue;
+        baseEnv[k] = v;
+      }
+
+      for (const pathEnv of badPaths) {
+        const proc = Bun.spawn([process.execPath, "--no-install", output], {
+          cwd: root,
+          env: {
+            ...baseEnv,
+            PATH: pathEnv,
+            NODE_PATH: "",
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const [code, stdout, stderr] = await Promise.all([
+          proc.exited,
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+        ]);
+        expect(stderr).toBe("");
+        expect(code).toBe(0);
+        const result = JSON.parse(stdout) as {
+          available: boolean;
+          reasonKind?: string;
+          reason?: string;
+        };
+        expect(result.available).toBe(false);
+        expect(result.reasonKind).toBe("not_installed");
+        expect(result.reason).toBe("Native Rust engine binary was not found.");
+        expect(existsSync(marker)).toBe(false);
+      }
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

@@ -14,6 +14,7 @@
 //! cannot be read either way is reported as untracked, exactly as before.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -383,8 +384,100 @@ fn tracked_via_git(root: &Path, rels: &[(Vec<u8>, &PathBuf)]) -> Vec<PathBuf> {
     tracked
 }
 
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|meta| meta.is_file() && (meta.permissions().mode() & 0o111) != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn windows_shell_free_extensions(pathext: Option<&OsStr>) -> Vec<String> {
+    let raw = pathext.and_then(OsStr::to_str).unwrap_or(".COM;.EXE");
+    let mut ordered = Vec::new();
+    for entry in raw.split(';') {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized = if trimmed.starts_with('.') {
+            trimmed.to_ascii_lowercase()
+        } else {
+            format!(".{}", trimmed.to_ascii_lowercase())
+        };
+        if (normalized == ".exe" || normalized == ".com") && !ordered.contains(&normalized) {
+            ordered.push(normalized);
+        }
+    }
+    if ordered.is_empty() {
+        vec![".exe".to_string(), ".com".to_string()]
+    } else {
+        ordered
+    }
+}
+
+/// Resolve a bare command name using only absolute `PATH` directories.
+/// Skips empty, whitespace-only, `.`, and relative entries on every platform.
+fn resolve_absolute_on_path(binary: &str) -> Option<PathBuf> {
+    resolve_absolute_on_path_in(
+        binary,
+        std::env::var_os("PATH").as_deref(),
+        std::env::var_os("PATHEXT").as_deref(),
+    )
+}
+
+fn resolve_absolute_on_path_in(
+    binary: &str,
+    path_env: Option<&OsStr>,
+    #[cfg_attr(not(windows), allow(unused_variables))] pathext_env: Option<&OsStr>,
+) -> Option<PathBuf> {
+    let path_env = path_env?;
+    for dir in std::env::split_paths(path_env) {
+        if dir.as_os_str().is_empty()
+            || dir.to_str().is_some_and(|text| text.trim().is_empty())
+            || !dir.is_absolute()
+        {
+            continue;
+        }
+        #[cfg(windows)]
+        {
+            let has_ext = Path::new(binary).extension().is_some();
+            if has_ext {
+                let candidate = dir.join(binary);
+                if std::fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
+                    return Some(candidate);
+                }
+            } else {
+                for ext in windows_shell_free_extensions(pathext_env) {
+                    let candidate = dir.join(format!("{binary}{ext}"));
+                    if std::fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+        #[cfg(unix)]
+        {
+            let candidate = dir.join(binary);
+            if is_executable_file(&candidate) {
+                return Some(candidate);
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let candidate = dir.join(binary);
+            if std::fs::metadata(&candidate).is_ok_and(|meta| meta.is_file()) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 fn run_git_ls_files(root: &Path, pathspecs: &[&str]) -> Option<Vec<u8>> {
-    let mut child = Command::new("git")
+    let git_binary = resolve_absolute_on_path("git")?;
+    let mut child = Command::new(git_binary)
         .args([
             "-c",
             "core.fsmonitor=false",
@@ -522,5 +615,53 @@ mod tests {
         lying[8..12].copy_from_slice(&u32::MAX.to_be_bytes());
         assert_eq!(parse_index(&lying, 20), Err(IndexError::Unsupported));
         assert_eq!(parse_index(b"NOPE", 20), Err(IndexError::Unsupported));
+    }
+
+    #[test]
+    fn path_lookup_skips_empty_and_relative_entries() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let bin_dir = dir.path().join("bin");
+        std::fs::create_dir_all(&bin_dir)?;
+        let name = if cfg!(windows) { "git.exe" } else { "git" };
+        let planted = bin_dir.join(name);
+        std::fs::write(&planted, b"#!/bin/sh\nexit 0\n")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&planted)?.permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&planted, perms)?;
+        }
+
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let missing = if cfg!(windows) {
+            "C:\\nonexistent-sweep-git"
+        } else {
+            "/nonexistent-sweep-git"
+        };
+        let bad_entries = [
+            String::new(),
+            format!("{sep}{missing}"),
+            format!("{missing}{sep}"),
+            format!("{missing}{sep}{sep}{missing}"),
+            " ".to_string(),
+            ".".to_string(),
+            "bin".to_string(),
+            format!(".{}bin", std::path::MAIN_SEPARATOR),
+        ];
+        for raw in &bad_entries {
+            assert_eq!(
+                resolve_absolute_on_path_in("git", Some(OsStr::new(raw)), None),
+                None,
+                "must skip PATH entry {raw:?}"
+            );
+        }
+
+        let with_abs = format!("{sep}.{sep}bin{sep}{}", bin_dir.display());
+        assert_eq!(
+            resolve_absolute_on_path_in("git", Some(OsStr::new(&with_abs)), None),
+            Some(planted)
+        );
+        Ok(())
     }
 }

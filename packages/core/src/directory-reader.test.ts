@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { directoryEntries } from "./directory-reader.js";
@@ -90,6 +99,52 @@ test("Bun reports a runtime-missing error (not a resource budget error) when Nod
   expect(error).toContain("install Node or use the Rust engine");
   expect(error.toLowerCase()).not.toContain("resource limit");
   expect(error.toLowerCase()).not.toContain("smaller subtree");
+});
+
+test("Bun directory reader never runs a planted node binary from cwd via empty or relative PATH", async () => {
+  const relDir = join(owned, "relbin");
+  mkdirSync(relDir, { recursive: true });
+  const marker = join(owned, "node-ran.marker");
+  const ext = process.platform === "win32" ? ".exe" : "";
+  const plantedCwd = join(owned, `node${ext}`);
+  const plantedRel = join(relDir, `node${ext}`);
+  if (process.platform === "win32") {
+    copyFileSync(process.execPath, plantedCwd);
+    copyFileSync(process.execPath, plantedRel);
+  } else {
+    const script = `#!/bin/sh\necho ran > ${JSON.stringify(marker)}\nexit 0\n`;
+    writeFileSync(plantedCwd, script);
+    writeFileSync(plantedRel, script);
+    chmodSync(plantedCwd, 0o755);
+    chmodSync(plantedRel, 0o755);
+  }
+
+  const badPaths =
+    process.platform === "win32"
+      ? ["", ";C:\\nonexistent-node-dir", "C:\\nonexistent-node-dir;", ".", ".\\relbin"]
+      : ["", ":/nonexistent-node-dir", "/nonexistent-node-dir:", "/a::/b", ".", "./relbin"];
+
+  const source = `import {scan} from ${JSON.stringify(join(import.meta.dir, "scanner.ts"))}; import {DEFAULT_CONFIG} from ${JSON.stringify(join(import.meta.dir, "config.ts"))}; try { await scan(${JSON.stringify(owned)}, DEFAULT_CONFIG); process.exit(9); } catch (error) { console.error(error.name + ": " + error.message); process.exit(2); }`;
+
+  const baseEnv: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.toUpperCase() === "PATH") continue;
+    baseEnv[k] = v;
+  }
+
+  for (const pathEnv of badPaths) {
+    const proc = Bun.spawn([process.execPath, "-e", source], {
+      cwd: owned,
+      env: { ...baseEnv, PATH: pathEnv },
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    const [code, error] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+    expect(code).toBe(2);
+    expect(error).toContain("DirectoryReaderRuntimeError");
+    expect(error).toContain("Node.js runtime unavailable");
+    expect(existsSync(marker)).toBe(false);
+  }
 });
 
 test.skipIf(process.platform === "win32")(
