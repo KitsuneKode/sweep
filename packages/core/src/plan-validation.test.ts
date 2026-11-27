@@ -78,6 +78,27 @@ describe("plan validation", () => {
     boundary.candidates[0]!.reasons = Array<string>(64).fill("😀".repeat(512));
     expect(validatePlan(boundary).candidates[0]!.reasons).toHaveLength(64);
   });
+
+  test("saved plans enforce UTF-16 length limits on worktreeOf and projectRoot matching native validation", () => {
+    // 2,055 code points / 4,105 UTF-16 units: passes Unicode-code-point schema
+    // maxLength alone, so JS must enforce UTF-16 units identically to Rust.
+    const overUtf16 = `${"😀".repeat(2050)}xxxxx`;
+    expect([...overUtf16].length).toBe(2055);
+    expect(overUtf16.length).toBe(4105);
+
+    for (const field of ["worktreeOf", "projectRoot"] as const) {
+      for (const bad of ["", "x".repeat(4097), "😀".repeat(2049), overUtf16]) {
+        const plan = validPlan();
+        plan.candidates[0] = { ...plan.candidates[0]!, [field]: bad };
+        expect(() => validatePlan(plan)).toThrow(PlanValidationError);
+      }
+      const boundary = validPlan();
+      const maxUtf16 = "😀".repeat(2048);
+      expect(maxUtf16.length).toBe(4096);
+      boundary.candidates[0] = { ...boundary.candidates[0]!, [field]: maxUtf16 };
+      expect(validatePlan(boundary).candidates[0]?.[field]).toBe(maxUtf16);
+    }
+  });
   test("validatePlan accepts a well-formed plan", () => {
     const plan = validatePlan(validPlan());
     expect(plan.protocolVersion).toBe("1");

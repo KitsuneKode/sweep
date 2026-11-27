@@ -520,7 +520,12 @@ export async function scanToPlanViaRust(
     // workspace stubs and symlink aliases and recomputes the selection set.
     // The engine's one-shot plan does none of that - run the same pass here
     // so `--engine rust` and streamed/JS plans select identical ids.
-    return applyPlanInsights(validatePlan(parsed));
+    const enriched = await applyPlanInsights(
+      validatePlan(parsed),
+      options.signal ? { signal: options.signal } : undefined,
+    );
+    if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
+    return enriched;
   }
 
   const stream = new RustScanStream(absoluteTarget, options, options.exact ?? false);
@@ -529,11 +534,14 @@ export async function scanToPlanViaRust(
     waitForConsumer: options.waitForConsumer,
   });
   if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
-  return buildPlan(
+  const enriched = await buildPlan(
     absoluteTarget,
     stream.finish(),
     options.selectionPolicy ?? DEFAULT_SELECTION_POLICY,
+    options.signal ? { signal: options.signal } : undefined,
   );
+  if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
+  return enriched;
 }
 
 /** Apply via the Rust `sweep-engine` subprocess. */
@@ -615,10 +623,18 @@ export async function applyPlanViaRust(
   let activityCount = 0;
   const progress = new Set<string>();
   const began = new Set<string>();
+  // Omit presentation-only worktree metadata from the native apply payload so
+  // older native engines (with `deny_unknown_fields`) accept v1 plans cleanly.
+  const applyPayloadPlan: ScanPlan = {
+    ...plan,
+    candidates: plan.candidates.map(
+      ({ worktreeOf: _worktreeOf, worktreeState: _worktreeState, ...candidate }) => candidate,
+    ),
+  };
   try {
     await runEngineAsync(
       ["apply", "--json-control"],
-      `${JSON.stringify({ plan, maxSizeBytes, ...(preflightProgress ? { preflightProgress: true } : {}), ...(removalProgress ? { removalProgress: true } : {}) })}\n{"type":"start"}\n`,
+      `${JSON.stringify({ plan: applyPayloadPlan, maxSizeBytes, ...(preflightProgress ? { preflightProgress: true } : {}), ...(removalProgress ? { removalProgress: true } : {}) })}\n{"type":"start"}\n`,
       (line) => {
         let event: {
           type?: string;

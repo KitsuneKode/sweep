@@ -63,7 +63,7 @@ for (const scenario of [
             bytesKnown: true,
           });
         }
-        const plan = buildPlan(root, {
+        const plan = await buildPlan(root, {
           targetIdentity: readFilesystemIdentity(root),
           entries,
           estimatedTotalBytes: entries.reduce((n, e) => n + e.estimatedBytes, 0),

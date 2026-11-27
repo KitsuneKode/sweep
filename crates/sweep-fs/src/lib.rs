@@ -10,6 +10,78 @@ pub use identity::{file_identity, FileIdentity};
 #[cfg(target_os = "linux")]
 pub use removal::RemovalRoot;
 
+/// Open a regular file for reading without following leaf symlinks or blocking
+/// on FIFOs. Returns `Ok(None)` when missing (`NotFound`), and an error when
+/// the path is a symlink, reparse point, FIFO, directory, or inaccessible.
+pub fn open_regular_nofollow(path: &Path) -> std::io::Result<Option<fs::File>> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{open, Mode, OFlags};
+        use rustix::io::Errno;
+
+        let fd = match open(
+            path,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        ) {
+            Ok(fd) => fd,
+            Err(Errno::NOENT) => return Ok(None),
+            Err(err) => return Err(std::io::Error::from(err)),
+        };
+        let file = fs::File::from(fd);
+        let meta = file.metadata()?;
+        if !meta.file_type().is_file() {
+            return Err(std::io::Error::other("not a regular file"));
+        }
+        Ok(Some(file))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+
+        let lmeta = match fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        if lmeta.file_type().is_symlink() || meta_is_reparse_point(&lmeta) || !lmeta.is_file() {
+            return Err(std::io::Error::other("not a regular file"));
+        }
+        let file = match fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+        {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let meta = file.metadata()?;
+        if meta.file_type().is_symlink() || meta_is_reparse_point(&meta) || !meta.is_file() {
+            return Err(std::io::Error::other("not a regular file"));
+        }
+        Ok(Some(file))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let lmeta = match fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        if lmeta.file_type().is_symlink() || !lmeta.is_file() {
+            return Err(std::io::Error::other("not a regular file"));
+        }
+        let file = fs::File::open(path)?;
+        let meta = file.metadata()?;
+        if !meta.file_type().is_file() {
+            return Err(std::io::Error::other("not a regular file"));
+        }
+        Ok(Some(file))
+    }
+}
+
 use camino::{Utf8Path, Utf8PathBuf};
 use crossbeam_deque::{Injector, Steal, Stealer, Worker};
 use rayon::prelude::*;

@@ -944,11 +944,14 @@ export function selectSafeOnly(state: SweepUiState): SweepUiState {
 
 /** Projects untouched this long are the easy call: nobody is using them. */
 export const IDLE_RECOMMENDATION_MS = IDLE_WINDOW_MS;
+const FINISHED_WORKTREE_QUIET_MS = 86_400_000;
 
 /**
- * Safe artifacts across the whole target whose project nobody has worked on
- * for `minIdleMs`. Only measured activity counts: an artifact whose project
- * activity is unknown is never "idle". Workspace stubs stay out, as with `s`.
+ * Safe artifacts in projects filed under "Idle 30+ days" (untouched for
+ * `minIdleMs`). Only measured activity counts: unknown activity is never
+ * "idle". Workspace stubs stay out, as with `s`, and projects already filed
+ * under "Finished worktrees" (`worktreeState === "merged"` quiet for >= 24h)
+ * are excluded so the idle total and `i` key match the Idle section.
  */
 export function idleSafeCandidates(
   state: Pick<SweepUiState, "candidates">,
@@ -960,7 +963,11 @@ export function idleSafeCandidates(
       candidate.riskTier === "safe" &&
       !candidate.reasons.includes("workspace-stub") &&
       candidate.projectActiveMs !== undefined &&
-      now - candidate.projectActiveMs >= minIdleMs,
+      now - candidate.projectActiveMs >= minIdleMs &&
+      !(
+        candidate.worktreeState === "merged" &&
+        now - candidate.projectActiveMs >= FINISHED_WORKTREE_QUIET_MS
+      ),
   );
 }
 

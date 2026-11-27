@@ -1385,20 +1385,39 @@ describe("idle-project recommendation", () => {
           riskTier: "caution" as const,
           projectActiveMs: now - 90 * day,
         },
+        {
+          ...base,
+          id: "finished-old",
+          path: "/w/app/.worktrees/done/node_modules",
+          riskTier: "safe" as const,
+          projectActiveMs: now - 45 * day,
+          worktreeOf: "/w/app",
+          worktreeState: "merged" as const,
+        },
+        {
+          ...base,
+          id: "gone-old",
+          path: "/w/app/.worktrees/gone/node_modules",
+          riskTier: "safe" as const,
+          projectActiveMs: now - 45 * day,
+          worktreeOf: "/w/app",
+          worktreeState: "upstream_gone" as const,
+        },
       ],
       summary: {
-        candidateCount: 4,
-        estimatedTotalBytes: 40,
-        scannedDirs: 4,
+        candidateCount: 6,
+        estimatedTotalBytes: 60,
+        scannedDirs: 6,
         exact: false,
         selectedCount: 0,
-        riskCounts: { safe: 3, caution: 1, dangerous: 0, blocked: 0 },
+        riskCounts: { safe: 5, caution: 1, dangerous: 0, blocked: 0 },
       },
       selectedCandidateIds: [],
       createdAt: new Date(now).toISOString(),
     };
     const state = createUiState(plan as unknown as ScanPlan, { startUnselected: true });
-    expect(idleSafeCandidates(state, 30 * day, now).map((c) => c.id)).toEqual(["idle"]);
-    expect([...selectIdleSafe(state, 30 * day, now).selectedIds]).toEqual(["idle"]);
+    // Finished worktrees filed under "Finished worktrees" are excluded from the Idle section count & `i`.
+    expect(idleSafeCandidates(state, 30 * day, now).map((c) => c.id)).toEqual(["idle", "gone-old"]);
+    expect([...selectIdleSafe(state, 30 * day, now).selectedIds]).toEqual(["idle", "gone-old"]);
   });
 });
