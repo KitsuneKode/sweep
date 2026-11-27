@@ -15,7 +15,12 @@ import {
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { lookupExecutable } from "./executable-lookup.js";
-import { gitTrackedPaths, gitTrackedPathsViaEngine, gitTrackedPathsViaGit } from "./git-tracked.js";
+import {
+  gitEnv,
+  gitTrackedPaths,
+  gitTrackedPathsViaEngine,
+  gitTrackedPathsViaGit,
+} from "./git-tracked.js";
 import { isRustEngineAvailable } from "./rust-engine.js";
 
 let root: string;
@@ -420,3 +425,246 @@ test.skipIf(process.platform === "win32")(
     }
   },
 );
+
+test("gitEnv drops all inherited GIT_* variables and sets hardened defaults", () => {
+  const cleaned = gitEnv({
+    PATH: "/usr/bin",
+    HOME: "/home/tester",
+    GIT_DIR: "/tmp/evil-git",
+    GIT_INDEX_FILE: "/tmp/empty-index",
+    GIT_WORK_TREE: "/tmp/evil-worktree",
+    GIT_OBJECT_DIRECTORY: "/tmp/evil-objects",
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: "/tmp/evil-alt",
+    GIT_COMMON_DIR: "/tmp/evil-common",
+    GIT_CEILING_DIRECTORIES: "/tmp",
+    GIT_CONFIG_GLOBAL: "/tmp/evil-config",
+    GIT_CONFIG_COUNT: "1",
+    git_dir: "/tmp/lower-git",
+  });
+  expect(cleaned.PATH).toBe("/usr/bin");
+  expect(cleaned.HOME).toBe("/home/tester");
+  expect(cleaned.GIT_DIR).toBeUndefined();
+  expect(cleaned.GIT_INDEX_FILE).toBeUndefined();
+  expect(cleaned.GIT_WORK_TREE).toBeUndefined();
+  expect(cleaned.GIT_OBJECT_DIRECTORY).toBeUndefined();
+  expect(cleaned.GIT_ALTERNATE_OBJECT_DIRECTORIES).toBeUndefined();
+  expect(cleaned.GIT_COMMON_DIR).toBeUndefined();
+  expect(cleaned.GIT_CEILING_DIRECTORIES).toBeUndefined();
+  expect(cleaned.GIT_CONFIG_GLOBAL).toBeUndefined();
+  expect(cleaned.GIT_CONFIG_COUNT).toBeUndefined();
+  expect(cleaned.git_dir).toBeUndefined();
+  expect(cleaned.LC_ALL).toBe("C");
+  expect(cleaned.GIT_OPTIONAL_LOCKS).toBe("0");
+  expect(cleaned.GIT_LITERAL_PATHSPECS).toBe("1");
+  expect(cleaned.GIT_TERMINAL_PROMPT).toBe("0");
+  expect(cleaned.GIT_NO_LAZY_FETCH).toBe("1");
+});
+
+describe.skipIf(!hasGit)("round 5 git-tracked invariants (both engines)", () => {
+  function makeEmptyIndexRepo(dir: string): { gitDir: string; emptyIndex: string } {
+    mkdirSync(dir, { recursive: true });
+    const run = (...args: string[]) =>
+      expect(spawnSync("git", ["-C", dir, ...args], { stdio: "ignore" }).status).toBe(0);
+    run("init", "-q");
+    run("config", "user.email", "t@example.com");
+    run("config", "user.name", "t");
+    run("config", "commit.gpgsign", "false");
+    writeFileSync(join(dir, "tmp.txt"), "x\n");
+    run("add", "tmp.txt");
+    run("rm", "--cached", "-q", "tmp.txt");
+    return { gitDir: join(dir, ".git"), emptyIndex: join(dir, ".git", "index") };
+  }
+
+  test("32-byte empty index in a gitfile target with no HEAD is unknown in both engines", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "sweep-empty-idx-gitfile-"));
+    try {
+      const { emptyIndex } = makeEmptyIndexRepo(join(scratch, "empty-src"));
+      const fakeGitdir = join(scratch, "fake-gitdir");
+      const preserved = join(scratch, "preserved");
+      mkdirSync(fakeGitdir, { recursive: true });
+      copyFileSync(emptyIndex, join(fakeGitdir, "index"));
+
+      write("package.json", "{}\n");
+      write("node_modules/pkg/index.js", "module.exports = 1;\n");
+      git("add", "package.json", "node_modules/pkg/index.js");
+      git("commit", "-qm", "init");
+      renameSync(join(root, ".git"), preserved);
+      writeFileSync(join(root, ".git"), `gitdir: ${fakeGitdir.replaceAll("\\", "/")}\n`);
+
+      const nmPath = join(root, "node_modules");
+      const expected = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
+      expect(gitTrackedPaths([nmPath])).toEqual(expected);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([nmPath])).toEqual(expected);
+      }
+    } finally {
+      rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  test("inherited GIT_DIR and GIT_INDEX_FILE cannot spoof tracked status in either engine", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "sweep-git-env-spoof-"));
+    const prevGitDir = process.env.GIT_DIR;
+    const prevGitIndex = process.env.GIT_INDEX_FILE;
+    const prevGitWorkTree = process.env.GIT_WORK_TREE;
+    try {
+      const { gitDir, emptyIndex } = makeEmptyIndexRepo(join(scratch, "empty-repo"));
+      write("package.json", "{}\n");
+      write("node_modules/pkg/index.js", "module.exports = 1;\n");
+      git("add", "package.json", "node_modules/pkg/index.js");
+      git("commit", "-qm", "init");
+
+      process.env.GIT_DIR = gitDir;
+      process.env.GIT_INDEX_FILE = emptyIndex;
+      process.env.GIT_WORK_TREE = join(scratch, "empty-repo");
+
+      const nmPath = join(root, "node_modules");
+      const expected = { tracked: new Set([nmPath]), unknown: new Set<string>() };
+      expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
+      expect(gitTrackedPaths([nmPath])).toEqual(expected);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([nmPath])).toEqual(expected);
+      }
+    } finally {
+      if (prevGitDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = prevGitDir;
+      if (prevGitIndex === undefined) delete process.env.GIT_INDEX_FILE;
+      else process.env.GIT_INDEX_FILE = prevGitIndex;
+      if (prevGitWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = prevGitWorkTree;
+      rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  test("nested repo does not hide a parent repo tracking nested/node_modules", () => {
+    write("package.json", "{}\n");
+    write("nested/node_modules/pkg/index.js", "module.exports = 1;\n");
+    git("add", "package.json", "nested/node_modules/pkg/index.js");
+    git("commit", "-qm", "init");
+    expect(
+      spawnSync("git", ["-C", join(root, "nested"), "init", "-q"], { stdio: "ignore" }).status,
+    ).toBe(0);
+
+    const nmPath = join(root, "nested", "node_modules");
+    const expected = { tracked: new Set([nmPath]), unknown: new Set<string>() };
+    expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
+    expect(gitTrackedPaths([nmPath])).toEqual(expected);
+    if (isRustEngineAvailable()) {
+      expect(gitTrackedPathsViaEngine([nmPath])).toEqual(expected);
+    }
+  });
+
+  test("submodules keep working: tracked submodule files are blocked and untracked folders stay clean", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "sweep-submodule-"));
+    try {
+      const subSrc = join(scratch, "sub-src");
+      mkdirSync(join(subSrc, "node_modules", "pkg"), { recursive: true });
+      writeFileSync(join(subSrc, "node_modules", "pkg", "index.js"), "module.exports = 1;\n");
+      const runSub = (...args: string[]) =>
+        expect(spawnSync("git", ["-C", subSrc, ...args], { stdio: "ignore" }).status).toBe(0);
+      runSub("init", "-q");
+      runSub("config", "user.email", "t@example.com");
+      runSub("config", "user.name", "t");
+      runSub("config", "commit.gpgsign", "false");
+      runSub("add", "node_modules/pkg/index.js");
+      runSub("commit", "-qm", "sub init");
+
+      write("package.json", "{}\n");
+      git("add", "package.json");
+      git("commit", "-qm", "parent init");
+      expect(
+        spawnSync(
+          "git",
+          ["-C", root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", subSrc, "sub"],
+          { stdio: "ignore" },
+        ).status,
+      ).toBe(0);
+      git("commit", "-qm", "add sub");
+
+      const subTracked = join(root, "sub", "node_modules");
+      const subUntracked = join(root, "sub", "dist");
+      mkdirSync(subUntracked, { recursive: true });
+      writeFileSync(join(subUntracked, "out.js"), "x\n");
+
+      const expected = { tracked: new Set([subTracked]), unknown: new Set<string>() };
+      expect(gitTrackedPathsViaGit([subTracked, subUntracked])).toEqual(expected);
+      expect(gitTrackedPaths([subTracked, subUntracked])).toEqual(expected);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([subTracked, subUntracked])).toEqual(expected);
+      }
+    } finally {
+      rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  test("git exiting 1 makes a healthy repo unknown in both engines without native fallback", () => {
+    const fakeBin = mkdtempSync(join(tmpdir(), "sweep-fail-git-"));
+    const previousPath = process.env.PATH;
+    try {
+      write("package.json", "{}\n");
+      write("node_modules/pkg/index.js", "module.exports = 1;\n");
+      git("add", "package.json", "node_modules/pkg/index.js");
+      git("commit", "-qm", "init");
+
+      if (process.platform === "win32") {
+        copyFileSync(process.execPath, join(fakeBin, "git.exe"));
+      } else {
+        const fakeGit = join(fakeBin, "git");
+        writeFileSync(fakeGit, "#!/bin/sh\nexit 1\n");
+        chmodSync(fakeGit, 0o755);
+      }
+
+      process.env.PATH = fakeBin;
+      const nmPath = join(root, "node_modules");
+      const expected = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
+      expect(gitTrackedPaths([nmPath])).toEqual(expected);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([nmPath])).toEqual(expected);
+      }
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(fakeBin, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "CLI rejects an engine emitting the old SWEEP_TRACKED_V2 header and falls back to git",
+    () => {
+      const scratch = mkdtempSync(join(tmpdir(), "sweep-v2-engine-"));
+      const previousEngine = process.env.SWEEP_ENGINE_PATH;
+      try {
+        const fakeEngine = join(scratch, "sweep-engine");
+        writeFileSync(
+          fakeEngine,
+          [
+            "#!/bin/sh",
+            'if [ "$1" = "--version" ]; then echo "sweep-engine 0.5.2"; exit 0; fi',
+            'if [ "$1" = "tracked" ]; then printf "SWEEP_TRACKED_V2\\0"; exit 0; fi',
+            "exit 1",
+          ].join("\n"),
+        );
+        chmodSync(fakeEngine, 0o755);
+
+        write("package.json", "{}\n");
+        write("node_modules/pkg/index.js", "module.exports = 1;\n");
+        git("add", "package.json", "node_modules/pkg/index.js");
+        git("commit", "-qm", "init");
+
+        process.env.SWEEP_ENGINE_PATH = fakeEngine;
+        const nmPath = join(root, "node_modules");
+        expect(gitTrackedPathsViaEngine([nmPath])).toBeNull();
+        expect(gitTrackedPaths([nmPath])).toEqual({
+          tracked: new Set([nmPath]),
+          unknown: new Set<string>(),
+        });
+      } finally {
+        if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+        else process.env.SWEEP_ENGINE_PATH = previousEngine;
+        rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      }
+    },
+  );
+});

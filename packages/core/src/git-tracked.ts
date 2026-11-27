@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { lstatSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { lookupExecutable } from "./executable-lookup.js";
 import { probeRustEngine } from "./rust-engine.js";
@@ -7,14 +7,23 @@ import { probeRustEngine } from "./rust-engine.js";
 /**
  * Build output is never committed. A candidate that contains (or is) a file
  * git tracks holds authored work, whatever its name - so it is not sweep's to
- * remove. One `git ls-files` per repository answers that for every candidate
- * inside it.
+ * remove.
  *
- * Running git inside a repository sweep did not create means running with
- * that repository's config. `core.fsmonitor` can name a program to execute,
- * so every call disables it, takes no optional locks and reads only the index.
+ * 1. Git is the source of truth: when an absolute `git` executable is on
+ *    `PATH`, every enclosing repository is queried via a sanitized
+ *    `git ls-files -z --cached` invocation (all inherited `GIT_*` variables
+ *    dropped, `core.fsmonitor=false`, `LC_ALL=C`). Its answer counts only on
+ *    exit 0 with valid NUL-delimited output; any error, timeout, or parse
+ *    problem marks every candidate in that repository `unknown`.
+ * 2. The native index reader (via `sweep-engine tracked --status`) is used
+ *    only when `git` is unavailable, and its answer counts only when the
+ *    repository validates (gitdir, readable `HEAD`, verified index checksum)
+ *    with a non-empty index; any validation failure or empty native result is
+ *    `unknown`.
+ * 3. Every enclosing repository up to the filesystem root is checked.
  */
-const GIT_ARGS = [
+export const GIT_ARGS = [
+  "--no-pager",
   "-c",
   "core.fsmonitor=false",
   "-c",
@@ -22,36 +31,79 @@ const GIT_ARGS = [
   "-c",
   "core.quotePath=false",
 ];
-const GIT_ENV_OVERRIDES = {
-  GIT_OPTIONAL_LOCKS: "0",
+
+/**
+ * Hardened environment for git subprocesses:
+ * - Drops all inherited `GIT_*` overrides (`GIT_DIR`, `GIT_WORK_TREE`,
+ *   `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+ *   `GIT_COMMON_DIR`, `GIT_CEILING_DIRECTORIES`, `GIT_CONFIG_*`, etc.) so
+ *   parent environment state cannot redirect or alter git queries.
+ * - Forces C locale and disables lazy fetches, replace objects, prompts, and
+ *   optional locks.
+ */
+export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const clean: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) continue;
+    if (/^git_/i.test(key)) continue;
+    clean[key] = value;
+  }
+  clean.LC_ALL = "C";
+  clean.LANG = "C";
+  clean.LANGUAGE = "C";
+  clean.GIT_OPTIONAL_LOCKS = "0";
   // Pathspecs are paths, never globs: a folder named `*` must not match all.
-  GIT_LITERAL_PATHSPECS: "1",
-  GIT_TERMINAL_PROMPT: "0",
-};
+  clean.GIT_LITERAL_PATHSPECS = "1";
+  clean.GIT_TERMINAL_PROMPT = "0";
+  clean.GIT_NO_LAZY_FETCH = "1";
+  clean.GIT_NO_REPLACE_OBJECTS = "1";
+  return clean;
+}
+
 const TIMEOUT_MS = 10_000;
 
-/** Nearest ancestor holding `.git` (a directory, or a file for worktrees). */
-function findRepoRoot(start: string, cache: Map<string, string | null>): string | null {
-  const visited: string[] = [];
+function hasDotGit(dir: string): boolean {
+  try {
+    lstatSync(join(dir, ".git"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Every enclosing ancestor holding `.git` (directory, gitfile, or symlink),
+ * nearest first up to the filesystem root.
+ */
+function findEnclosingRepoRoots(
+  start: string,
+  cache: Map<string, readonly string[]>,
+): readonly string[] {
+  const chain: string[] = [];
   let dir = start;
+  let inherited: readonly string[] = [];
   for (;;) {
     const cached = cache.get(dir);
     if (cached !== undefined) {
-      for (const seen of visited) cache.set(seen, cached);
-      return cached;
+      inherited = cached;
+      break;
     }
-    visited.push(dir);
-    if (existsSync(join(dir, ".git"))) {
-      for (const seen of visited) cache.set(seen, dir);
-      return dir;
-    }
+    chain.push(dir);
     const parent = dirname(dir);
     if (parent === dir) {
-      for (const seen of visited) cache.set(seen, null);
-      return null;
+      inherited = [];
+      break;
     }
     dir = parent;
   }
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const ancestor = chain[i]!;
+    if (hasDotGit(ancestor)) {
+      inherited = [ancestor, ...inherited];
+    }
+    cache.set(ancestor, inherited);
+  }
+  return inherited;
 }
 
 export interface GitTrackedResult {
@@ -61,7 +113,7 @@ export interface GitTrackedResult {
   unknown: Set<string>;
 }
 
-const TRACKED_STATUS_HEADER = "SWEEP_TRACKED_V2";
+export const TRACKED_STATUS_HEADER = "SWEEP_TRACKED_V3";
 
 function emptyTrackedResult(): GitTrackedResult {
   return { tracked: new Set(), unknown: new Set() };
@@ -73,16 +125,17 @@ function emptyTrackedResult(): GitTrackedResult {
  * cannot be verified, its paths are reported in `unknown` so callers fail
  * closed instead of treating them as untracked.
  *
- * The native engine answers this by reading each repository's index itself,
- * in parallel and without running git (about ten times faster on a tree of
- * many repositories). Without it, or if it fails, git answers.
+ * When a compatible `SWEEP_TRACKED_V3` native engine is available, it runs the
+ * same git-first rule across repositories in parallel (falling back to its
+ * validated native index reader only when `git` is unavailable). Without a
+ * compatible engine, git answers directly here.
  */
 export function gitTrackedPaths(paths: readonly string[]): GitTrackedResult {
   if (paths.length === 0) return emptyTrackedResult();
   return gitTrackedPathsViaEngine(paths) ?? gitTrackedPathsViaGit(paths);
 }
 
-/** Null when the engine is unavailable or did not answer cleanly. */
+/** Null when the engine is unavailable or did not speak `SWEEP_TRACKED_V3` cleanly. */
 export function gitTrackedPathsViaEngine(paths: readonly string[]): GitTrackedResult | null {
   const probe = probeRustEngine();
   if (!probe.available || !probe.resolvedPath) return null;
@@ -94,7 +147,15 @@ export function gitTrackedPathsViaEngine(paths: readonly string[]): GitTrackedRe
     maxBuffer: 256 * 1024 * 1024,
     stdio: ["pipe", "pipe", "ignore"],
   });
-  if (result.status !== 0 || typeof result.stdout !== "string") return null;
+  if (
+    result.error !== undefined ||
+    result.signal !== null ||
+    result.status !== 0 ||
+    typeof result.stdout !== "string" ||
+    !result.stdout.endsWith("\0")
+  ) {
+    return null;
+  }
   const records = result.stdout.split("\0");
   if (records[0] !== TRACKED_STATUS_HEADER) return null;
   // Only ever answer about paths that were asked about.
@@ -118,19 +179,19 @@ export function gitTrackedPathsViaEngine(paths: readonly string[]): GitTrackedRe
   return { tracked, unknown };
 }
 
-/** One hardened `git ls-files` per repository. */
+/** Sanitized `git ls-files -z --cached` across every enclosing repository. */
 export function gitTrackedPathsViaGit(paths: readonly string[]): GitTrackedResult {
   const tracked = new Set<string>();
   const unknown = new Set<string>();
   if (paths.length === 0) return { tracked, unknown };
-  const rootCache = new Map<string, string | null>();
+  const rootCache = new Map<string, readonly string[]>();
   const byRoot = new Map<string, string[]>();
   for (const path of paths) {
-    const root = findRepoRoot(dirname(path), rootCache);
-    if (!root) continue;
-    const list = byRoot.get(root);
-    if (list) list.push(path);
-    else byRoot.set(root, [path]);
+    for (const root of findEnclosingRepoRoots(dirname(path), rootCache)) {
+      const list = byRoot.get(root);
+      if (list) list.push(path);
+      else byRoot.set(root, [path]);
+    }
   }
   if (byRoot.size === 0) return { tracked, unknown };
   const gitBinary = lookupExecutable("git").resolvedPath;
@@ -140,32 +201,50 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): GitTrackedResul
     }
     return { tracked, unknown };
   }
-  const gitEnv = { ...process.env, ...GIT_ENV_OVERRIDES };
+  const env = gitEnv();
 
   for (const [root, members] of byRoot) {
     const relToPath = new Map<string, string>();
-    for (const path of members) relToPath.set(relative(root, path).split(sep).join("/"), path);
+    for (const path of members) {
+      const rel = relative(root, path).split(sep).join("/");
+      if (!rel || rel === ".." || rel.startsWith("../")) {
+        unknown.add(path);
+        continue;
+      }
+      relToPath.set(rel, path);
+    }
+    if (relToPath.size === 0) continue;
+    const repoTracked = new Set<string>();
+    let repoFailed = false;
     for (const chunk of chunked([...relToPath.keys()])) {
       // `--` ends options: a folder named `-x` stays a path, never a flag.
       const result = spawnSync(
         gitBinary,
         [...GIT_ARGS, "-C", root, "ls-files", "-z", "--cached", "--", ...chunk],
         {
-          env: gitEnv,
+          env,
           encoding: "utf8",
           timeout: TIMEOUT_MS,
           maxBuffer: 256 * 1024 * 1024,
           stdio: ["ignore", "pipe", "ignore"],
         },
       );
-      if (result.status !== 0 || typeof result.stdout !== "string") {
-        for (const rel of chunk) {
-          const path = relToPath.get(rel);
-          if (path !== undefined) unknown.add(path);
-        }
-        continue;
+      if (
+        result.error !== undefined ||
+        result.signal !== null ||
+        result.status !== 0 ||
+        typeof result.stdout !== "string" ||
+        (result.stdout.length > 0 && !result.stdout.endsWith("\0"))
+      ) {
+        repoFailed = true;
+        break;
       }
-      collect(result.stdout, relToPath, tracked);
+      collect(result.stdout, relToPath, repoTracked);
+    }
+    if (repoFailed) {
+      for (const path of members) unknown.add(path);
+    } else {
+      for (const path of repoTracked) tracked.add(path);
     }
   }
   for (const path of tracked) unknown.delete(path);

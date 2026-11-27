@@ -133,7 +133,7 @@ fn run() -> Result<(), CliFailure> {
 }
 
 /// Which of the NUL-separated absolute paths on stdin are, or contain,
-/// git-tracked files. With `--status`, emits `SWEEP_TRACKED_V2\0` followed by
+/// git-tracked files. With `--status`, emits `SWEEP_TRACKED_V3\0` followed by
 /// `T\t<path>\0` for tracked paths and `U\t<path>\0` for repository paths whose
 /// tracked status could not be checked.
 fn run_tracked() -> Result<(), CliFailure> {
@@ -170,7 +170,7 @@ fn run_tracked() -> Result<(), CliFailure> {
     let result = sweep_engine::git_index::tracked_paths(&paths);
     let mut out = Vec::new();
     if status_mode {
-        out.extend_from_slice(b"SWEEP_TRACKED_V2\0");
+        out.extend_from_slice(b"SWEEP_TRACKED_V3\0");
         for path in &paths {
             let Some(text) = path.to_str() else {
                 continue;

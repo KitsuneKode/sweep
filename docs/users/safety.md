@@ -47,16 +47,17 @@ to bypass a refusal.
 Some things are not Sweep's to remove, whatever a pattern or flag says. They
 appear in a scan as **blocked** and cannot be selected:
 
-- **Anything git tracks.** Build output is never committed, so a folder that
-  holds a tracked or staged file is authored work. The native engine reads
-  each repository's index directly, so no program runs and none of a cloned
-  project's git config is consulted. Index layouts it does not read in full
-  (split or sparse indexes) and installs without the engine ask git instead,
-  with the repository's `core.fsmonitor` disabled. If Sweep cannot check
-  tracked files inside a git repository, those candidates are marked
-  `dangerous` with `tracked-status-unknown` and are never pre-selected. Sweep
-  checks again just before removal and refuses any repository item whose tracked
-  status is still unknown, regardless of flags or tier.
+- **Anything git tracks.** When `git` is available, Sweep checks every
+  enclosing repository with a sanitized `git ls-files --cached` invocation
+  (`core.fsmonitor` disabled and inherited `GIT_*` overrides cleared) and
+  trusts its answer only on exit 0, so a valid repository with a deleted index
+  matches `git` while any error or timeout marks those items `dangerous`
+  (`tracked-status-unknown`). When `git` is unavailable, Sweep uses the native
+  index reader only if the repository validates (gitdir, readable `HEAD`,
+  verified index checksum) with a non-empty index; any validation failure,
+  empty native result, or missing check marks items `tracked-status-unknown`,
+  never pre-selected, and refused again just before removal regardless of
+  flags or tier.
 - **Project files**: `src`, `.sweeprc`, `.env` and `.env.*`, and manifests and
   lockfiles such as `package.json`, `Cargo.toml`, `go.mod` and `pyproject.toml`.
   A repository's own `.sweeprc` can add patterns, but it cannot make these

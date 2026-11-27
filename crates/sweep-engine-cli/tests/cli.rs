@@ -198,7 +198,7 @@ fn tracked_status_reports_unknown_when_index_fallback_has_no_git_on_path() {
         .split('\0')
         .filter(|entry| !entry.is_empty())
         .collect();
-    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V2"));
+    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V3"));
     assert!(records.contains(&format!("U\t{}", repo_candidate.display()).as_str()));
     assert!(!records.contains(&format!("T\t{}", repo_candidate.display()).as_str()));
     assert!(!records.contains(&format!("U\t{}", outside_candidate.display()).as_str()));
@@ -264,7 +264,7 @@ fn tracked_gitfile_without_index_marks_unknown_and_fails_legacy_mode() {
         .split('\0')
         .filter(|entry| !entry.is_empty())
         .collect();
-    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V2"));
+    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V3"));
     assert!(records.contains(&format!("U\t{}", candidate.display()).as_str()));
     assert!(!records.contains(&format!("T\t{}", candidate.display()).as_str()));
 
@@ -337,7 +337,7 @@ fn tracked_valid_repo_with_deleted_index_stays_empty_in_both_modes() {
         .split('\0')
         .filter(|entry| !entry.is_empty())
         .collect();
-    assert_eq!(records, vec!["SWEEP_TRACKED_V2"]);
+    assert_eq!(records, vec!["SWEEP_TRACKED_V3"]);
 
     let legacy_out = Command::cargo_bin("sweep-engine")
         .unwrap_or_else(|err| panic!("failed to locate sweep-engine binary: {err}"))
@@ -351,4 +351,106 @@ fn tracked_valid_repo_with_deleted_index_stays_empty_in_both_modes() {
         String::from_utf8_lossy(&legacy_out.stderr)
     );
     assert!(legacy_out.stdout.is_empty());
+}
+
+#[test]
+fn tracked_ignores_inherited_git_env_and_handles_nested_and_empty_index_gitfile() {
+    let has_git = std::process::Command::new("git")
+        .arg("--version")
+        .status()
+        .is_ok_and(|s| s.success());
+    if !has_git {
+        return;
+    }
+    let root = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let run_git = |cwd: &std::path::Path, args: &[&str]| {
+        assert!(
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .status()
+                .is_ok_and(|s| s.success()),
+            "git {args:?} failed in {}",
+            cwd.display()
+        );
+    };
+
+    // Empty repo + 32-byte empty index to try to spoof GIT_DIR / GIT_INDEX_FILE.
+    let empty_repo = root.path().join("empty-repo");
+    std::fs::create_dir_all(&empty_repo).unwrap_or_else(|err| panic!("mkdir: {err}"));
+    run_git(&empty_repo, &["init", "-q"]);
+    run_git(&empty_repo, &["config", "user.email", "t@example.com"]);
+    run_git(&empty_repo, &["config", "user.name", "t"]);
+    run_git(&empty_repo, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(empty_repo.join("a.txt"), b"x\n").unwrap_or_else(|err| panic!("write: {err}"));
+    run_git(&empty_repo, &["add", "a.txt"]);
+    run_git(&empty_repo, &["rm", "--cached", "-q", "a.txt"]);
+    let empty_index = empty_repo.join(".git").join("index");
+    assert_eq!(
+        std::fs::metadata(&empty_index)
+            .unwrap_or_else(|err| panic!("stat empty index: {err}"))
+            .len(),
+        32
+    );
+
+    // 1. Healthy parent repo tracking nested/node_modules/pkg/index.js with `git init` in nested.
+    let parent = root.path().join("parent");
+    let nested = parent.join("nested");
+    let nested_nm = nested.join("node_modules");
+    std::fs::create_dir_all(nested_nm.join("pkg")).unwrap_or_else(|err| panic!("mkdir: {err}"));
+    std::fs::write(
+        nested_nm.join("pkg").join("index.js"),
+        b"module.exports = 1;\n",
+    )
+    .unwrap_or_else(|err| panic!("write: {err}"));
+    run_git(&parent, &["init", "-q"]);
+    run_git(&parent, &["config", "user.email", "t@example.com"]);
+    run_git(&parent, &["config", "user.name", "t"]);
+    run_git(&parent, &["config", "commit.gpgsign", "false"]);
+    run_git(&parent, &["add", "nested/node_modules/pkg/index.js"]);
+    run_git(&parent, &["commit", "-qm", "init"]);
+    run_git(&nested, &["init", "-q"]);
+
+    // 2. Gitfile target with 32-byte empty index and no HEAD.
+    let broken_repo = root.path().join("broken-repo");
+    let broken_gitdir = root.path().join("broken-gitdir");
+    let broken_nm = broken_repo.join("node_modules");
+    std::fs::create_dir_all(broken_nm.join("pkg")).unwrap_or_else(|err| panic!("mkdir: {err}"));
+    std::fs::create_dir_all(&broken_gitdir).unwrap_or_else(|err| panic!("mkdir: {err}"));
+    std::fs::write(
+        broken_nm.join("pkg").join("index.js"),
+        b"module.exports = 1;\n",
+    )
+    .unwrap_or_else(|err| panic!("write: {err}"));
+    std::fs::copy(&empty_index, broken_gitdir.join("index"))
+        .unwrap_or_else(|err| panic!("copy empty index: {err}"));
+    let target = broken_gitdir.to_string_lossy().replace('\\', "/");
+    std::fs::write(broken_repo.join(".git"), format!("gitdir: {target}\n"))
+        .unwrap_or_else(|err| panic!("write gitfile: {err}"));
+
+    let stdin = format!("{}\0{}\0", nested_nm.display(), broken_nm.display());
+    let output = Command::cargo_bin("sweep-engine")
+        .unwrap_or_else(|err| panic!("failed to locate sweep-engine binary: {err}"))
+        .args(["tracked", "--status"])
+        .env("GIT_DIR", empty_repo.join(".git"))
+        .env("GIT_INDEX_FILE", &empty_index)
+        .env("GIT_WORK_TREE", &empty_repo)
+        .write_stdin(stdin.as_bytes())
+        .output()
+        .unwrap_or_else(|err| panic!("failed to run sweep-engine tracked --status: {err}"));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records: Vec<&str> = std::str::from_utf8(&output.stdout)
+        .unwrap_or_else(|err| panic!("utf8: {err}"))
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V3"));
+    assert!(records.contains(&format!("T\t{}", nested_nm.display()).as_str()));
+    assert!(records.contains(&format!("U\t{}", broken_nm.display()).as_str()));
+    assert!(!records.contains(&format!("T\t{}", broken_nm.display()).as_str()));
 }

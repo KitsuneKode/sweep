@@ -1,19 +1,24 @@
 //! Which scan candidates hold git-tracked content.
 //!
 //! Build output is never committed. A candidate that is, or contains, a path
-//! in its repository's index holds authored work whatever its name. This is
-//! the same question `git ls-files --cached -- <paths>` answers, answered by
-//! reading `.git/index` directly: no process per repository, and none of the
-//! repository's config (a hostile clone's `core.fsmonitor` names a program)
-//! is ever consulted. Repositories are checked in parallel.
+//! in any enclosing repository's index holds authored work whatever its name.
 //!
-//! Index layouts this reader does not handle in full (a missing index, a split
-//! index, a sparse index, an unknown version, an oversized file) fall back to
-//! the hardened `git ls-files` invocation the JavaScript implementation uses.
-//! When neither the index reader nor `git` can answer for a repository, those
-//! candidates are reported as `unknown` so callers fail closed rather than
-//! treating them as untracked.
+//! 1. Git is the source of truth: when an absolute `git` executable is on
+//!    `PATH`, every enclosing repository is queried via a sanitized
+//!    `git ls-files -z --cached` invocation (all inherited `GIT_*` variables
+//!    cleared, `core.fsmonitor=false`, `LC_ALL=C`). Its answer counts only on
+//!    exit 0 with valid NUL-delimited output; any error, timeout, or parse
+//!    failure marks every candidate in that repository `unknown`.
+//! 2. The native index reader is used only when `git` is unavailable. Its
+//!    answer counts only if the repository validates (gitdir resolves, `HEAD`
+//!    exists and is readable, the index parses and its SHA-1/SHA-256 checksum
+//!    verifies) and the parsed index is non-empty; any validation failure or
+//!    empty native result marks every candidate in that repository `unknown`.
+//! 3. Candidates are checked against every enclosing repository up to the
+//!    filesystem root: tracked if any enclosing repository tracks it, unknown
+//!    if any enclosing check is unknown.
 
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::io::Read;
@@ -25,6 +30,7 @@ use std::time::{Duration, Instant};
 
 /// Larger indexes exist only in very large monorepos; git reads those fine.
 const MAX_INDEX_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_GIT_STDOUT: u64 = 256 * 1024 * 1024;
 const MAX_ENTRIES: u32 = 20_000_000;
 const MAX_PATH_BYTES: usize = 64 * 1024;
 const GIT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -57,16 +63,21 @@ fn tracked_paths_with_path(
     pathext_env: Option<&OsStr>,
 ) -> TrackedPaths {
     let mut by_root: HashMap<PathBuf, Vec<&PathBuf>> = HashMap::new();
-    let mut root_cache: HashMap<PathBuf, Option<PathBuf>> = HashMap::new();
+    let mut root_cache: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
     for path in paths {
         let Some(parent) = path.parent() else {
             continue;
         };
-        if let Some(root) = find_repo_root(parent, &mut root_cache) {
+        for root in find_enclosing_repo_roots(parent, &mut root_cache) {
             by_root.entry(root).or_default().push(path);
         }
     }
+    if by_root.is_empty() {
+        return TrackedPaths::default();
+    }
 
+    let git_binary = resolve_absolute_on_path_in("git", path_env, pathext_env);
+    let git_binary = git_binary.as_deref();
     let repos: Vec<(PathBuf, Vec<&PathBuf>)> = by_root.into_iter().collect();
     let result = Mutex::new(TrackedPaths::default());
     let next = AtomicUsize::new(0);
@@ -82,8 +93,7 @@ fn tracked_paths_with_path(
                 let Some((root, members)) = repos.get(index) else {
                     break;
                 };
-                let (found_tracked, found_unknown) =
-                    tracked_in_repo(root, members, path_env, pathext_env);
+                let (found_tracked, found_unknown) = tracked_in_repo(root, members, git_binary);
                 if !found_tracked.is_empty() || !found_unknown.is_empty() {
                     let mut guard = result
                         .lock()
@@ -101,47 +111,64 @@ fn tracked_paths_with_path(
     out
 }
 
-/// Nearest ancestor holding `.git` (a directory, or a file for worktrees
-/// and submodules). Mirrors the JavaScript walk, cache included.
-fn find_repo_root(start: &Path, cache: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<PathBuf> {
-    let mut visited = Vec::new();
+fn has_dot_git(dir: &Path) -> bool {
+    std::fs::symlink_metadata(dir.join(".git")).is_ok()
+}
+
+/// Every enclosing ancestor holding `.git` (a directory, a gitfile for worktrees
+/// and submodules, or even a broken symlink), nearest first up to the
+/// filesystem root. Mirrors the JavaScript walk, cache included.
+fn find_enclosing_repo_roots(
+    start: &Path,
+    cache: &mut HashMap<PathBuf, Vec<PathBuf>>,
+) -> Vec<PathBuf> {
+    let mut chain = Vec::new();
     let mut dir = start.to_path_buf();
-    let found = loop {
+    let mut inherited = loop {
         if let Some(cached) = cache.get(&dir) {
             break cached.clone();
         }
-        visited.push(dir.clone());
-        if dir.join(".git").exists() {
-            break Some(dir);
-        }
+        chain.push(dir.clone());
         match dir.parent() {
             Some(parent) if parent != dir => dir = parent.to_path_buf(),
-            _ => break None,
+            _ => break Vec::new(),
         }
     };
-    for seen in visited {
-        cache.insert(seen, found.clone());
+    for ancestor in chain.into_iter().rev() {
+        if has_dot_git(&ancestor) {
+            let mut roots = Vec::with_capacity(inherited.len() + 1);
+            roots.push(ancestor.clone());
+            roots.extend(inherited.iter().cloned());
+            inherited = roots;
+        }
+        cache.insert(ancestor, inherited.clone());
     }
-    found
+    inherited
 }
 
 fn tracked_in_repo(
     root: &Path,
     members: &[&PathBuf],
-    path_env: Option<&OsStr>,
-    pathext_env: Option<&OsStr>,
+    git_binary: Option<&Path>,
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
     // Index paths are `/`-separated bytes relative to the work tree.
     let mut rels: Vec<(Vec<u8>, &PathBuf)> = Vec::new();
     let mut unknown: Vec<PathBuf> = Vec::new();
     for &path in members {
         match path.strip_prefix(root).ok().and_then(|rel| rel.to_str()) {
-            Some(text) => rels.push((text.replace('\\', "/").into_bytes(), path)),
-            None => unknown.push(path.clone()),
+            Some(text) if !text.is_empty() => {
+                rels.push((text.replace('\\', "/").into_bytes(), path));
+            }
+            _ => unknown.push(path.clone()),
         }
     }
     if rels.is_empty() {
         return (Vec::new(), unknown);
+    }
+    if let Some(git_binary) = git_binary {
+        let (tracked, mut git_unknown) = tracked_via_git(git_binary, root, &rels);
+        unknown.append(&mut git_unknown);
+        return (tracked, unknown);
     }
     match read_index_paths(root) {
         Ok(entries) => {
@@ -153,9 +180,8 @@ fn tracked_in_repo(
             (tracked, unknown)
         }
         Err(IndexError::Unsupported) => {
-            let (tracked, mut git_unknown) = tracked_via_git(root, &rels, path_env, pathext_env);
-            unknown.append(&mut git_unknown);
-            (tracked, unknown)
+            unknown.extend(rels.into_iter().map(|(_, path)| path.clone()));
+            (Vec::new(), unknown)
         }
     }
 }
@@ -180,26 +206,28 @@ fn contains_tracked(entries: &[Vec<u8>], rel: &[u8]) -> bool {
 
 #[derive(Debug, PartialEq, Eq)]
 enum IndexError {
-    /// Hand this repository to `git` instead.
+    /// Native reader cannot validate or read this repository's index cleanly.
     Unsupported,
 }
 
-/// The index file `git` itself would read for this work tree.
-fn index_file(root: &Path) -> Result<PathBuf, IndexError> {
+/// Resolve the git directory for `root` (`.git` directory or `gitdir:` file).
+fn resolve_gitdir(root: &Path) -> Result<PathBuf, IndexError> {
     let dot_git = root.join(".git");
     let meta = std::fs::symlink_metadata(&dot_git).map_err(|_| IndexError::Unsupported)?;
     if meta.is_dir() {
-        return Ok(dot_git.join("index"));
+        return Ok(dot_git);
     }
     if !meta.is_file() || meta.len() > 4096 {
         return Err(IndexError::Unsupported);
     }
     // Worktrees and submodules: `gitdir: <path>`, relative to the work tree.
     let text = std::fs::read_to_string(&dot_git).map_err(|_| IndexError::Unsupported)?;
-    let gitdir = text
-        .lines()
-        .next()
-        .and_then(|line| line.strip_prefix("gitdir:"))
+    let trimmed = text.trim_end_matches(['\r', '\n']);
+    if trimmed.contains(['\r', '\n', '\0']) {
+        return Err(IndexError::Unsupported);
+    }
+    let gitdir = trimmed
+        .strip_prefix("gitdir:")
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or(IndexError::Unsupported)?;
@@ -209,14 +237,48 @@ fn index_file(root: &Path) -> Result<PathBuf, IndexError> {
     } else {
         root.join(gitdir)
     };
-    if !gitdir.is_dir() {
+    if !std::fs::metadata(&gitdir).is_ok_and(|meta| meta.is_dir()) {
         return Err(IndexError::Unsupported);
     }
-    Ok(gitdir.join("index"))
+    Ok(gitdir)
+}
+
+/// Confirm `HEAD` exists and is readable as a symbolic ref or commit OID.
+fn validate_head(gitdir: &Path) -> Result<(), IndexError> {
+    let head_path = gitdir.join("HEAD");
+    let file = std::fs::File::open(&head_path).map_err(|_| IndexError::Unsupported)?;
+    let meta = file.metadata().map_err(|_| IndexError::Unsupported)?;
+    if !meta.is_file() || meta.len() == 0 || meta.len() > 4096 {
+        return Err(IndexError::Unsupported);
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(meta.len()).unwrap_or(0));
+    file.take(4097)
+        .read_to_end(&mut bytes)
+        .map_err(|_| IndexError::Unsupported)?;
+    if bytes.is_empty() || bytes.len() > 4096 {
+        return Err(IndexError::Unsupported);
+    }
+    let text = std::str::from_utf8(&bytes).map_err(|_| IndexError::Unsupported)?;
+    let line = text.trim();
+    if line.is_empty() || line.contains(['\r', '\n', '\0']) {
+        return Err(IndexError::Unsupported);
+    }
+    let is_symref = line
+        .strip_prefix("ref:")
+        .map(str::trim)
+        .is_some_and(|target| !target.is_empty());
+    let is_oid =
+        (line.len() == 40 || line.len() == 64) && line.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !is_symref && !is_oid {
+        return Err(IndexError::Unsupported);
+    }
+    Ok(())
 }
 
 fn read_index_paths(root: &Path) -> Result<Vec<Vec<u8>>, IndexError> {
-    let path = index_file(root)?;
+    let gitdir = resolve_gitdir(root)?;
+    validate_head(&gitdir)?;
+    let path = gitdir.join("index");
     let file = std::fs::File::open(&path).map_err(|_| IndexError::Unsupported)?;
     let len = file.metadata().map_err(|_| IndexError::Unsupported)?.len();
     if len > MAX_INDEX_BYTES {
@@ -230,12 +292,105 @@ fn read_index_paths(root: &Path) -> Result<Vec<Vec<u8>>, IndexError> {
         return Err(IndexError::Unsupported);
     }
     // SHA-1 repositories are the norm; SHA-256 ones store 32-byte names.
-    parse_index(&bytes, 20).or_else(|_| parse_index(&bytes, 32))
+    let entries = parse_index(&bytes, 20).or_else(|_| parse_index(&bytes, 32))?;
+    if entries.is_empty() {
+        return Err(IndexError::Unsupported);
+    }
+    Ok(entries)
 }
 
-/// Parse the path of every index entry. Bounds-checked throughout: the file
-/// comes from a repository sweep did not create.
+fn verify_index_checksum(payload: &[u8], expected: &[u8]) -> bool {
+    match expected.len() {
+        20 => sha1_digest(payload).as_slice() == expected,
+        32 => Sha256::digest(payload).as_slice() == expected,
+        _ => false,
+    }
+}
+
+/// FIPS 180-4 SHA-1 used only to verify git index file integrity checksums.
+fn sha1_digest(data: &[u8]) -> [u8; 20] {
+    let mut h0: u32 = 0x6745_2301;
+    let mut h1: u32 = 0xEFCD_AB89;
+    let mut h2: u32 = 0x98BA_DCFE;
+    let mut h3: u32 = 0x1032_5476;
+    let mut h4: u32 = 0xC3D2_E1F0;
+
+    let compress =
+        |block: &[u8; 64], h0: &mut u32, h1: &mut u32, h2: &mut u32, h3: &mut u32, h4: &mut u32| {
+            let mut w = [0u32; 80];
+            let (words, _) = block.as_chunks::<4>();
+            for (slot, chunk) in w.iter_mut().zip(words.iter()) {
+                *slot = u32::from_be_bytes(*chunk);
+            }
+            for i in 16..80 {
+                w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+            }
+            let (mut a, mut b, mut c, mut d, mut e) = (*h0, *h1, *h2, *h3, *h4);
+            for (i, &word) in w.iter().enumerate() {
+                let (f, k) = match i {
+                    0..=19 => ((b & c) | ((!b) & d), 0x5A82_7999u32),
+                    20..=39 => (b ^ c ^ d, 0x6ED9_EBA1u32),
+                    40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC_u32),
+                    _ => (b ^ c ^ d, 0xCA62_C1D6u32),
+                };
+                let temp = a
+                    .rotate_left(5)
+                    .wrapping_add(f)
+                    .wrapping_add(e)
+                    .wrapping_add(k)
+                    .wrapping_add(word);
+                e = d;
+                d = c;
+                c = b.rotate_left(30);
+                b = a;
+                a = temp;
+            }
+            *h0 = h0.wrapping_add(a);
+            *h1 = h1.wrapping_add(b);
+            *h2 = h2.wrapping_add(c);
+            *h3 = h3.wrapping_add(d);
+            *h4 = h4.wrapping_add(e);
+        };
+
+    let (blocks, rem) = data.as_chunks::<64>();
+    for block in blocks {
+        compress(block, &mut h0, &mut h1, &mut h2, &mut h3, &mut h4);
+    }
+
+    let bit_len = (data.len() as u64).wrapping_mul(8);
+    let mut tail = [0u8; 128];
+    tail[..rem.len()].copy_from_slice(rem);
+    tail[rem.len()] = 0x80;
+    let total_tail = if rem.len() + 1 + 8 <= 64 { 64 } else { 128 };
+    tail[total_tail - 8..total_tail].copy_from_slice(&bit_len.to_be_bytes());
+    let mut first = [0u8; 64];
+    first.copy_from_slice(&tail[..64]);
+    compress(&first, &mut h0, &mut h1, &mut h2, &mut h3, &mut h4);
+    if total_tail == 128 {
+        let mut second = [0u8; 64];
+        second.copy_from_slice(&tail[64..128]);
+        compress(&second, &mut h0, &mut h1, &mut h2, &mut h3, &mut h4);
+    }
+
+    let mut out = [0u8; 20];
+    out[0..4].copy_from_slice(&h0.to_be_bytes());
+    out[4..8].copy_from_slice(&h1.to_be_bytes());
+    out[8..12].copy_from_slice(&h2.to_be_bytes());
+    out[12..16].copy_from_slice(&h3.to_be_bytes());
+    out[16..20].copy_from_slice(&h4.to_be_bytes());
+    out
+}
+
+/// Parse the path of every index entry and verify its trailing checksum.
+/// Bounds-checked throughout: the file comes from a repository sweep did not create.
 fn parse_index(bytes: &[u8], hash_len: usize) -> Result<Vec<Vec<u8>>, IndexError> {
+    if bytes.len() < 12 + hash_len {
+        return Err(IndexError::Unsupported);
+    }
+    let (payload, checksum) = bytes.split_at(bytes.len() - hash_len);
+    if !verify_index_checksum(payload, checksum) {
+        return Err(IndexError::Unsupported);
+    }
     let mut reader = Reader { bytes, at: 0 };
     if reader.take(4)? != b"DIRC" {
         return Err(IndexError::Unsupported);
@@ -373,33 +528,31 @@ impl<'a> Reader<'a> {
     }
 }
 
-/// The JavaScript implementation's invocation, unchanged: no fsmonitor, no
-/// untracked cache, no optional locks, literal pathspecs after `--`.
+/// Ask `git ls-files -z --cached` with a sanitized environment. Any non-zero
+/// exit, timeout, or parse problem makes every path in this repository unknown.
 fn tracked_via_git(
+    git_binary: &Path,
     root: &Path,
     rels: &[(Vec<u8>, &PathBuf)],
-    path_env: Option<&OsStr>,
-    pathext_env: Option<&OsStr>,
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let Some(git_binary) = resolve_absolute_on_path_in("git", path_env, pathext_env) else {
-        return (
+    let all_unknown = || {
+        (
             Vec::new(),
             rels.iter().map(|(_, path)| (*path).clone()).collect(),
-        );
+        )
     };
     let by_rel: HashMap<&[u8], &PathBuf> = rels
         .iter()
         .map(|(rel, path)| (rel.as_slice(), *path))
         .collect();
     let mut tracked = Vec::new();
-    let mut unknown = Vec::new();
     let mut chunk: Vec<&str> = Vec::new();
     let mut chunk_bytes = 0;
-    let flush = |chunk: &mut Vec<&str>, tracked: &mut Vec<PathBuf>, unknown: &mut Vec<PathBuf>| {
+    let flush = |chunk: &mut Vec<&str>, tracked: &mut Vec<PathBuf>| -> bool {
         if chunk.is_empty() {
-            return;
+            return true;
         }
-        match run_git_ls_files(&git_binary, root, chunk) {
+        let ok = match run_git_ls_files(git_binary, root, chunk) {
             Some(stdout) => {
                 for file in stdout.split(|&byte| byte == 0).filter(|f| !f.is_empty()) {
                     let mut rel = file;
@@ -414,35 +567,32 @@ fn tracked_via_git(
                         }
                     }
                 }
+                true
             }
-            None => {
-                for &rel in chunk.iter() {
-                    if let Some(path) = by_rel.get(rel.as_bytes()) {
-                        unknown.push((*path).clone());
-                    }
-                }
-            }
-        }
+            None => false,
+        };
         chunk.clear();
+        ok
     };
-    for (rel, path) in rels {
+    for (rel, _) in rels {
         let Ok(text) = std::str::from_utf8(rel) else {
-            unknown.push((*path).clone());
-            continue;
+            return all_unknown();
         };
         if !chunk.is_empty() && chunk_bytes + text.len() + 1 > PATHSPEC_CHUNK_BYTES {
-            flush(&mut chunk, &mut tracked, &mut unknown);
+            if !flush(&mut chunk, &mut tracked) {
+                return all_unknown();
+            }
             chunk_bytes = 0;
         }
         chunk.push(text);
         chunk_bytes += text.len() + 1;
     }
-    flush(&mut chunk, &mut tracked, &mut unknown);
+    if !flush(&mut chunk, &mut tracked) {
+        return all_unknown();
+    }
     tracked.sort();
     tracked.dedup();
-    unknown.sort();
-    unknown.dedup();
-    (tracked, unknown)
+    (tracked, Vec::new())
 }
 
 #[cfg(unix)]
@@ -528,9 +678,23 @@ fn resolve_absolute_on_path_in(
     None
 }
 
+fn is_git_env_key(key: &OsStr) -> bool {
+    key.as_encoded_bytes()
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"git_"))
+}
+
 fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Option<Vec<u8>> {
-    let mut child = Command::new(git_binary)
+    let mut cmd = Command::new(git_binary);
+    cmd.env_clear();
+    for (key, value) in std::env::vars_os() {
+        if !is_git_env_key(&key) {
+            cmd.env(key, value);
+        }
+    }
+    let mut child = cmd
         .args([
+            "--no-pager",
             "-c",
             "core.fsmonitor=false",
             "-c",
@@ -542,9 +706,14 @@ fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Optio
         .arg(root)
         .args(["ls-files", "-z", "--cached", "--"])
         .args(pathspecs)
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .env("LANGUAGE", "C")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .env("GIT_NO_REPLACE_OBJECTS", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -555,10 +724,10 @@ fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Optio
         let mut out = Vec::new();
         stdout
             .by_ref()
-            .take(256 * 1024 * 1024)
+            .take(MAX_GIT_STDOUT + 1)
             .read_to_end(&mut out)
             .ok()
-            .map(|_| out)
+            .and_then(|_| (out.len() as u64 <= MAX_GIT_STDOUT).then_some(out))
     });
     let deadline = Instant::now() + GIT_TIMEOUT;
     let status = loop {
@@ -573,6 +742,9 @@ fn run_git_ls_files(git_binary: &Path, root: &Path, pathspecs: &[&str]) -> Optio
         }
     };
     let out = reader.join().ok().flatten()?;
+    if !out.is_empty() && !out.ends_with(b"\0") {
+        return None;
+    }
     status
         .filter(std::process::ExitStatus::success)
         .map(|_| out)
@@ -620,7 +792,8 @@ mod tests {
             out.extend_from_slice(&u32::try_from(body.len()).unwrap_or(0).to_be_bytes());
             out.extend_from_slice(body);
         }
-        out.extend_from_slice(&[0u8; 20]);
+        let digest = sha1_digest(&out);
+        out.extend_from_slice(&digest);
         out
     }
 
@@ -852,6 +1025,234 @@ mod tests {
             tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
         assert!(without_git.tracked.is_empty());
         assert!(without_git.unknown.contains(&candidate));
+        Ok(())
+    }
+
+    #[test]
+    fn sha1_matches_nist_vectors_and_corrupt_checksum_is_rejected() {
+        assert_eq!(
+            hex::encode(sha1_digest(b"")),
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        );
+        assert_eq!(
+            hex::encode(sha1_digest(b"abc")),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
+        assert_eq!(
+            hex::encode(sha1_digest(
+                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+            )),
+            "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
+        );
+
+        let mut corrupted = index(2, PATHS, &[]);
+        let last = corrupted.len() - 1;
+        corrupted[last] ^= 0x01;
+        assert_eq!(parse_index(&corrupted, 20), Err(IndexError::Unsupported));
+    }
+
+    #[test]
+    fn is_git_env_key_matches_every_git_prefix_case_insensitively() {
+        for key in [
+            "GIT_DIR",
+            "GIT_INDEX_FILE",
+            "GIT_WORK_TREE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_COMMON_DIR",
+            "GIT_CEILING_DIRECTORIES",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_NOSYSTEM",
+            "GIT_CUSTOM_VAR",
+            "git_dir",
+            "Git_Index_File",
+        ] {
+            assert!(is_git_env_key(OsStr::new(key)), "expected drop for {key}");
+        }
+        for keep in ["PATH", "HOME", "LC_ALL", "GIT", "MY_GIT_DIR"] {
+            assert!(
+                !is_git_env_key(OsStr::new(keep)),
+                "expected keep for {keep}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_32_byte_index_in_gitfile_target_without_head_is_unknown() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let fake_gitdir = dir.path().join("fake-gitdir");
+        let candidate = repo.join("node_modules");
+        std::fs::create_dir_all(candidate.join("pkg"))?;
+        std::fs::write(
+            candidate.join("pkg").join("index.js"),
+            b"module.exports = 1;\n",
+        )?;
+        std::fs::create_dir_all(&fake_gitdir)?;
+        // 32-byte valid checksummed empty v2 index (same shape `git rm --cached` emits).
+        let empty_index = index(2, &[], &[]);
+        assert_eq!(empty_index.len(), 32);
+        std::fs::write(fake_gitdir.join("index"), &empty_index)?;
+
+        let target = fake_gitdir.to_string_lossy().replace('\\', "/");
+        std::fs::write(repo.join(".git"), format!("gitdir: {target}\n"))?;
+
+        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+
+        // Both with git on PATH and without git on PATH, the candidate must be unknown.
+        let with_git = tracked_paths(std::slice::from_ref(&candidate));
+        assert!(with_git.tracked.is_empty());
+        assert!(with_git.unknown.contains(&candidate));
+
+        let without_git =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(without_git.tracked.is_empty());
+        assert!(without_git.unknown.contains(&candidate));
+
+        // Even with a valid HEAD added, an empty native index must still be unknown without git.
+        std::fs::write(fake_gitdir.join("HEAD"), b"ref: refs/heads/main\n")?;
+        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+        let without_git_with_head =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(without_git_with_head.tracked.is_empty());
+        assert!(without_git_with_head.unknown.contains(&candidate));
+        Ok(())
+    }
+
+    #[test]
+    fn native_reader_validates_head_and_checksum_when_git_is_unavailable() -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let candidate = repo.join("node_modules");
+        std::fs::create_dir_all(candidate.join("pkg"))?;
+        std::fs::write(
+            candidate.join("pkg").join("index.js"),
+            b"module.exports = 1;\n",
+        )?;
+
+        assert!(run_git(&repo, &["init", "-q"]));
+        assert!(run_git(&repo, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&repo, &["config", "user.name", "t"]));
+        assert!(run_git(&repo, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&repo, &["add", "node_modules/pkg/index.js"]));
+        assert!(run_git(&repo, &["commit", "-qm", "init"]));
+
+        // Healthy repo without git on PATH validates and reports tracked.
+        let healthy =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(healthy.tracked.contains(&candidate));
+        assert!(healthy.unknown.is_empty());
+
+        // Missing HEAD invalidates the native reader.
+        let head_path = repo.join(".git").join("HEAD");
+        let saved_head = std::fs::read(&head_path)?;
+        std::fs::remove_file(&head_path)?;
+        let no_head =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(no_head.tracked.is_empty());
+        assert!(no_head.unknown.contains(&candidate));
+        std::fs::write(&head_path, saved_head)?;
+
+        // Corrupting the index checksum invalidates the native reader.
+        let index_path = repo.join(".git").join("index");
+        let mut raw = std::fs::read(&index_path)?;
+        let last = raw.len() - 1;
+        raw[last] ^= 0xff;
+        std::fs::write(&index_path, raw)?;
+        let bad_checksum =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(bad_checksum.tracked.is_empty());
+        assert!(bad_checksum.unknown.contains(&candidate));
+        Ok(())
+    }
+
+    #[test]
+    fn nested_repo_does_not_hide_parent_tracked_candidate() -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let parent = dir.path().join("parent");
+        let nested = parent.join("nested");
+        let candidate = nested.join("node_modules");
+        std::fs::create_dir_all(candidate.join("pkg"))?;
+        std::fs::write(
+            candidate.join("pkg").join("index.js"),
+            b"module.exports = 1;\n",
+        )?;
+
+        assert!(run_git(&parent, &["init", "-q"]));
+        assert!(run_git(&parent, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&parent, &["config", "user.name", "t"]));
+        assert!(run_git(&parent, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(
+            &parent,
+            &["add", "nested/node_modules/pkg/index.js"]
+        ));
+        assert!(run_git(&parent, &["commit", "-qm", "init"]));
+        assert!(run_git(&nested, &["init", "-q"]));
+
+        let with_git = tracked_paths(std::slice::from_ref(&candidate));
+        assert!(with_git.tracked.contains(&candidate));
+        assert!(with_git.unknown.is_empty());
+
+        let without_git =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(without_git.tracked.contains(&candidate));
+        assert!(without_git.unknown.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn failing_git_marks_healthy_repo_unknown_without_falling_back_to_native_reader(
+    ) -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let bin_dir = dir.path().join("bin");
+        let candidate = repo.join("node_modules");
+        std::fs::create_dir_all(candidate.join("pkg"))?;
+        std::fs::create_dir_all(&bin_dir)?;
+        std::fs::write(
+            candidate.join("pkg").join("index.js"),
+            b"module.exports = 1;\n",
+        )?;
+
+        assert!(run_git(&repo, &["init", "-q"]));
+        assert!(run_git(&repo, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&repo, &["config", "user.name", "t"]));
+        assert!(run_git(&repo, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&repo, &["add", "node_modules/pkg/index.js"]));
+        assert!(run_git(&repo, &["commit", "-qm", "init"]));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let fake_git = bin_dir.join("git");
+            std::fs::write(&fake_git, b"#!/bin/sh\nexit 1\n")?;
+            let mut perms = std::fs::metadata(&fake_git)?.permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_git, perms)?;
+        }
+        #[cfg(windows)]
+        {
+            // A real executable that exits non-zero when invoked with git's flags.
+            let fake_git = bin_dir.join("git.exe");
+            std::fs::copy(std::env::current_exe()?, &fake_git)?;
+        }
+
+        let result = tracked_paths_with_path(
+            std::slice::from_ref(&candidate),
+            Some(bin_dir.as_os_str()),
+            None,
+        );
+        assert!(result.tracked.is_empty());
+        assert!(result.unknown.contains(&candidate));
         Ok(())
     }
 }
