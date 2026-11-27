@@ -1,5 +1,6 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -694,6 +695,149 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       settle(wtEnc);
       git(encApp, "merge", "-q", "--ff-only", "wt-enc");
 
+      // 13. Coarse-timestamp index (mtime ns = 0, ctime sec/ns = 0) and touch -r
+      //     mtime-restored same-size edits (both engines must agree).
+      const patchIndexStat = (
+        indexPath: string,
+        targetPath: string,
+        patch: { mtimeSec?: number; mtimeNsec?: number; ctimeSec?: number; ctimeNsec?: number },
+      ) => {
+        const buf = Buffer.from(readFileSync(indexPath));
+        const count = buf.readUInt32BE(8);
+        let at = 12;
+        for (let i = 0; i < count; i++) {
+          const start = at;
+          const flags = buf.readUInt16BE(start + 60);
+          const nameStart = start + 62 + ((flags & 0x4000) !== 0 ? 2 : 0);
+          const nul = buf.indexOf(0, nameStart);
+          const entryPath = buf.subarray(nameStart, nul).toString("utf8");
+          if (entryPath === targetPath) {
+            if (patch.ctimeSec !== undefined) buf.writeUInt32BE(patch.ctimeSec >>> 0, start);
+            if (patch.ctimeNsec !== undefined) buf.writeUInt32BE(patch.ctimeNsec >>> 0, start + 4);
+            if (patch.mtimeSec !== undefined) buf.writeUInt32BE(patch.mtimeSec >>> 0, start + 8);
+            if (patch.mtimeNsec !== undefined) buf.writeUInt32BE(patch.mtimeNsec >>> 0, start + 12);
+          }
+          const fixed = nameStart - start;
+          at = start + ((fixed + (nul - nameStart) + 8) & ~7);
+        }
+        const payloadEnd = buf.length - 20;
+        createHash("sha1").update(buf.subarray(0, payloadEnd)).digest().copy(buf, payloadEnd);
+        writeFileSync(indexPath, buf);
+      };
+
+      const evenPastSec = Math.floor((Date.now() - 10_000) / 2000) * 2;
+      const evenPastDate = new Date(evenPastSec * 1000);
+
+      const wtCoarseEdited = join(root, "wt-coarse-edited");
+      git(app, "worktree", "add", "-q", "-b", "wt-coarse-edited", wtCoarseEdited);
+      commit(wtCoarseEdited, "coarse-edited.txt", "hello world\n");
+      settle(wtCoarseEdited);
+      git(
+        app,
+        "-c",
+        "commit.gpgsign=false",
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "ce",
+        "wt-coarse-edited",
+      );
+      git(app, "push", "-q", "origin", "main");
+      const coarseEditedFile = join(wtCoarseEdited, "coarse-edited.txt");
+      utimesSync(coarseEditedFile, evenPastDate, evenPastDate);
+      git(wtCoarseEdited, "update-index", "--refresh");
+      patchIndexStat(
+        join(git(wtCoarseEdited, "rev-parse", "--git-dir"), "index"),
+        "coarse-edited.txt",
+        {
+          mtimeSec: evenPastSec,
+          mtimeNsec: 0,
+          ctimeSec: 0,
+          ctimeNsec: 0,
+        },
+      );
+      writeFileSync(coarseEditedFile, "hello WORLD\n");
+      utimesSync(coarseEditedFile, evenPastDate, evenPastDate);
+
+      const wtCoarseClean = join(root, "wt-coarse-clean");
+      git(app, "worktree", "add", "-q", "-b", "wt-coarse-clean", wtCoarseClean);
+      commit(wtCoarseClean, "coarse-clean.txt", "hello world\n");
+      settle(wtCoarseClean);
+      git(
+        app,
+        "-c",
+        "commit.gpgsign=false",
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "cc",
+        "wt-coarse-clean",
+      );
+      git(app, "push", "-q", "origin", "main");
+      const coarseCleanFile = join(wtCoarseClean, "coarse-clean.txt");
+      utimesSync(coarseCleanFile, evenPastDate, evenPastDate);
+      git(wtCoarseClean, "update-index", "--refresh");
+      patchIndexStat(
+        join(git(wtCoarseClean, "rev-parse", "--git-dir"), "index"),
+        "coarse-clean.txt",
+        {
+          mtimeSec: evenPastSec,
+          mtimeNsec: 0,
+          ctimeSec: 0,
+          ctimeNsec: 0,
+        },
+      );
+
+      const wtCoarseRacy2s = join(root, "wt-coarse-racy-2s");
+      git(app, "worktree", "add", "-q", "-b", "wt-coarse-racy-2s", wtCoarseRacy2s);
+      commit(wtCoarseRacy2s, "coarse-racy.txt", "hello world\n");
+      settle(wtCoarseRacy2s);
+      git(
+        app,
+        "-c",
+        "commit.gpgsign=false",
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "cr",
+        "wt-coarse-racy-2s",
+      );
+      git(app, "push", "-q", "origin", "main");
+      const coarseRacyFile = join(wtCoarseRacy2s, "coarse-racy.txt");
+      const coarseRacyIndex = join(git(wtCoarseRacy2s, "rev-parse", "--git-dir"), "index");
+      const coarseIdxSec = Number(
+        (lstatSync(coarseRacyIndex, { bigint: true }).mtimeNs / 1_000_000_000n) & 0xffffffffn,
+      );
+      const coarseBucketSec = coarseIdxSec - 1;
+      const coarseBucketDate = new Date(coarseBucketSec * 1000);
+      utimesSync(coarseRacyFile, coarseBucketDate, coarseBucketDate);
+      git(wtCoarseRacy2s, "update-index", "--refresh");
+      patchIndexStat(coarseRacyIndex, "coarse-racy.txt", {
+        mtimeSec: coarseBucketSec,
+        mtimeNsec: 0,
+        ctimeSec: 0,
+        ctimeNsec: 0,
+      });
+      utimesSync(
+        coarseRacyIndex,
+        new Date(coarseIdxSec * 1000 + 6),
+        new Date(coarseIdxSec * 1000 + 6),
+      );
+
+      const wtTouchR = join(root, "wt-touch-r");
+      git(app, "worktree", "add", "-q", "-b", "wt-touch-r", wtTouchR);
+      commit(wtTouchR, "touch-r.txt", "hello world\n");
+      settle(wtTouchR);
+      git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "tr", "wt-touch-r");
+      git(app, "push", "-q", "origin", "main");
+      const touchRFile = join(wtTouchR, "touch-r.txt");
+      const touchRBefore = lstatSync(touchRFile);
+      writeFileSync(touchRFile, "hello WORLD\n");
+      utimesSync(touchRFile, touchRBefore.atime, touchRBefore.mtime);
+
       for (const dir of [
         app,
         merged,
@@ -713,6 +857,10 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
         wtCrlfRacy,
         wtFilter,
         wtEnc,
+        wtCoarseEdited,
+        wtCoarseClean,
+        wtCoarseRacy2s,
+        wtTouchR,
       ]) {
         seedModules(dir);
       }
@@ -793,6 +941,22 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       });
       expect(jsMap.get(canonical(join(wtEnc, "node_modules")))).toEqual({
         worktreeOf: encApp,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(wtCoarseEdited, "node_modules")))).toEqual({
+        worktreeOf: app,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(wtCoarseClean, "node_modules")))).toEqual({
+        worktreeOf: app,
+        worktreeState: "merged",
+      });
+      expect(jsMap.get(canonical(join(wtCoarseRacy2s, "node_modules")))).toEqual({
+        worktreeOf: app,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(wtTouchR, "node_modules")))).toEqual({
+        worktreeOf: app,
         worktreeState: undefined,
       });
     } finally {

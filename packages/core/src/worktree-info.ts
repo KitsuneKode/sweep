@@ -43,20 +43,26 @@ import { gitEnv, gitSafeArgs } from "./git-tracked.js";
  *   - Remotes & base: `git remote`, `git config --list --null`,
  *     `git symbolic-ref refs/remotes/origin/HEAD`, `git for-each-ref`.
  *   - Content conversion guard: `git check-attr --stdin -z filter
- *     working-tree-encoding` (which runs no filters); any enabled `filter` or
- *     `working-tree-encoding` attribute makes the worktree unknown. Pure
- *     line-ending conversions (`text`, `eol`, `core.autocrlf`, `core.eol`) use
- *     the same non-racy exact stat-match fast path as `git status`.
+ *     working-tree-encoding` (plus `text` and `eol` when weak-stat entries need
+ *     content proof); runs no filters; any enabled `filter` or
+ *     `working-tree-encoding` attribute makes the worktree unknown.
  *   - Staged changes: `git diff-index --cached --quiet --no-ext-diff
  *     --no-textconv --ignore-submodules=none <tipOid> --`.
  *   - Untracked non-ignored files: `git ls-files --others --exclude-standard -z`
  *     with `-c core.untrackedCache=false -c core.fsmonitor=false` and bounded
  *     output size and time.
+ *   - Weak-stat content proof: when an entry's stat match is weak (e.g. zero
+ *     cached mtime/ctime nanoseconds on coarse-clock filesystems, missing
+ *     ctime/uid/gid match on POSIX, or any entry on Windows), raw index blobs
+ *     are fetched via `git cat-file --batch` (no filters, bounded output/bytes)
+ *     and compared against bounded no-follow working file reads (with CRLF->LF
+ *     normalization only when effective EOL conversion applies to that path).
  * - Unstaged changes use read-only `.git/index` parsing (with trailing
  *   checksum verification, bounded path/entry limits, rejection of split/sparse
  *   indexes, unknown extensions, gitlinks/submodules, and suppressing flags)
- *   plus `lstat` comparison; any stat mismatch or racily-clean entry
- *   (same-second mtime vs index mtime) makes the worktree unknown.
+ *   plus `lstat` classification; any stat mismatch or racily-clean entry
+ *   (same-second mtime vs index mtime, or within 2 seconds when cached mtime
+ *   nanoseconds are 0) makes the worktree unknown.
  * - Index identity (dev, ino, size, mtime, ctime, trailing checksum) plus
  *   in-progress markers, HEAD branch, branch tip OID, and base ref OID are
  *   verified before and after all checks; any change makes the state unknown.
@@ -81,6 +87,16 @@ export interface WorktreeIndexOptions {
   signal?: AbortSignal;
   /** Override the `git` executable path (primarily for tests). */
   gitBinary?: string;
+  /** Override platform stat/proof rules (primarily for cross-platform tests). */
+  platform?: NodeJS.Platform;
+  /** Override `lstat` for tracked entries (primarily for coarse-timestamp tests). */
+  statEntry?: (path: string) => BigIntStats;
+  /** Cap total weak-entry content bytes compared per worktree (default 64 MiB). */
+  maxContentTotalBytes?: number;
+  /** Cap single weak-entry content bytes compared (default 8 MiB). */
+  maxContentFileBytes?: number;
+  /** Cap number of weak entries content-checked per worktree (default 10,000). */
+  maxContentFiles?: number;
 }
 
 interface RepoBranches {
@@ -108,11 +124,23 @@ export type GitRunner = (
   options?: GitRunOptions,
 ) => Promise<string | undefined> | string | undefined;
 
+type GitRawRunner = (
+  gitDir: string,
+  args: readonly string[],
+  options?: GitRunOptions,
+) => Promise<Buffer | undefined> | Buffer | undefined;
+
 const TIMEOUT_MS = 5_000;
 const KILL_GRACE_MS = 150;
 const MAX_GIT_STDOUT = 16 * 1024 * 1024;
 const MAX_UNTRACKED_STDOUT = 64 * 1024;
 export const DEFAULT_WORKTREE_BUDGET_MS = 2_000;
+export const DEFAULT_MAX_CONTENT_TOTAL_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_MAX_CONTENT_FILE_BYTES = 8 * 1024 * 1024;
+export const DEFAULT_MAX_CONTENT_FILES = 10_000;
+const CAT_FILE_BATCH_MAX_ENTRIES = 4_000;
+const CAT_FILE_BATCH_MAX_BYTES = 16 * 1024 * 1024;
+const CAT_FILE_HEADER_OVERHEAD_BYTES = 128;
 const POINTER_MAX_BYTES = 4096;
 const REFLOG_MAX_BYTES = 256 * 1024;
 const PACKED_REFS_MAX_BYTES = 8 * 1024 * 1024;
@@ -142,6 +170,7 @@ const IN_PROGRESS_MARKERS = [
 ] as const;
 
 const UNSAFE_CONVERSION_ATTRS = ["filter", "working-tree-encoding"] as const;
+const WEAK_CONVERSION_ATTRS = ["filter", "working-tree-encoding", "text", "eol"] as const;
 
 function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals, forceGroup = false): void {
   if (!forceGroup && (proc.exitCode !== null || proc.signalCode !== null)) return;
@@ -171,7 +200,7 @@ function terminateChildBounded(proc: ChildProcess, onForceSettled?: () => void):
   proc.once("close", () => clearTimeout(force));
 }
 
-export function createGitRunner(gitBinary = "git"): GitRunner {
+function createGitRawRunner(gitBinary = "git"): GitRawRunner {
   return (gitDir, args, options) => {
     if (options?.signal?.aborted) return Promise.resolve(undefined);
     const timeout = Math.max(1, Math.min(TIMEOUT_MS, options?.timeoutMs ?? TIMEOUT_MS));
@@ -185,7 +214,7 @@ export function createGitRunner(gitBinary = "git"): GitRunner {
     }
     const gitArgs = [...safeArgs, `--git-dir=${gitDir}`, ...args];
 
-    return new Promise<string | undefined>((resolvePromise) => {
+    return new Promise<Buffer | undefined>((resolvePromise) => {
       let settled = false;
       let timedOutOrAborted = false;
       let stdoutBytes = 0;
@@ -208,7 +237,7 @@ export function createGitRunner(gitBinary = "git"): GitRunner {
         options?.signal?.removeEventListener("abort", onCancel);
       };
 
-      const finish = (value: string | undefined) => {
+      const finish = (value: Buffer | undefined) => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -258,9 +287,17 @@ export function createGitRunner(gitBinary = "git"): GitRunner {
           finish(undefined);
           return;
         }
-        finish(Buffer.concat(chunks).toString("utf8"));
+        finish(Buffer.concat(chunks));
       });
     });
+  };
+}
+
+export function createGitRunner(gitBinary = "git"): GitRunner {
+  const raw = createGitRawRunner(gitBinary);
+  return async (gitDir, args, options) => {
+    const out = await raw(gitDir, args, options);
+    return out === undefined ? undefined : out.toString("utf8");
   };
 }
 
@@ -565,77 +602,347 @@ function sameIndexIdentity(a: IndexIdentity, b: IndexIdentity): boolean {
   );
 }
 
+type TrackedEntryStatus =
+  | { kind: "mismatch" }
+  | { kind: "strong"; stat: BigIntStats }
+  | { kind: "weak"; stat: BigIntStats; segments: string[]; absPath: string };
+
+interface WeakTrackedEntry {
+  entry: GitIndexEntry;
+  segments: string[];
+  absPath: string;
+  beforeStat: BigIntStats;
+}
+
+interface PathEolAttrs {
+  text: string;
+  eol: string;
+}
+
+type EolMode = "none" | "text" | "auto";
+
+function defaultStatEntry(path: string): BigIntStats {
+  return lstatSync(path, { bigint: true });
+}
+
+function sameFileIdentityStat(a: BigIntStats, b: BigIntStats, platform: NodeJS.Platform): boolean {
+  if (a.size !== b.size || a.mtimeNs !== b.mtimeNs || a.ctimeNs !== b.ctimeNs) {
+    return false;
+  }
+  if (a.mode !== b.mode) return false;
+  if (platform !== "win32") {
+    return a.dev === b.dev && a.ino === b.ino && a.uid === b.uid && a.gid === b.gid;
+  }
+  if (a.dev !== 0n && b.dev !== 0n && a.dev !== b.dev) return false;
+  if (a.ino !== 0n && b.ino !== 0n && a.ino !== b.ino) return false;
+  return true;
+}
+
 /**
- * Read-only index stat verification for a single tracked entry.
- * Any stat mismatch, gitlink/submodule, suppressing flag, or racily-clean
- * entry (same-second mtime vs index mtime) fails closed to `false`.
- * Raw blob hashing is intentionally absent: unprovable entries stay unknown.
+ * Read-only index stat classification for a single tracked entry.
+ * - Returns `"mismatch"` on any hard mismatch, gitlink/submodule, suppressing
+ *   flag, or racily-clean entry (same-second mtime vs index mtime, or within
+ *   2 seconds when cached mtime nanoseconds are 0).
+ * - Returns `"strong"` ONLY on POSIX when cached mtime ns is non-zero and
+ *   matches, cached ctime sec+ns are non-zero and match, uid/gid match,
+ *   ino/dev match (when cached non-zero), size/mode/mtime sec match, and the
+ *   entry is not racy.
+ * - Returns `"weak"` on Windows (always) or whenever stat metadata alone cannot
+ *   prove the working bytes equal the index blob (e.g. 0-nsec coarse clocks,
+ *   missing ctime, or uid/gid difference). Weak entries require content proof.
  */
-function verifyTrackedEntry(
+function classifyTrackedEntry(
   realRoot: string,
   entry: GitIndexEntry,
   indexStat: BigIntStats,
-): boolean {
+  platform: NodeJS.Platform,
+  statEntry: (path: string) => BigIntStats,
+): TrackedEntryStatus {
   // Reject non-zero merge stage, assume-unchanged, and any extended flags
   // (skip-worktree, intent-to-add, etc.).
   const stage = (entry.flags >> 12) & 0x3;
   if (stage !== 0 || (entry.flags & 0x8000) !== 0 || entry.extFlags !== 0) {
-    return false;
+    return { kind: "mismatch" };
   }
 
   const segments = splitSafeRefSegments(entry.path);
-  if (!segments) return false;
+  if (!segments) return { kind: "mismatch" };
 
   const fileType = entry.mode & 0o170000;
   // Reject gitlinks / submodules (0o160000) and any non-file/non-symlink type.
   if (fileType !== 0o100000 && fileType !== 0o120000) {
-    return false;
+    return { kind: "mismatch" };
   }
 
   const absPath = join(realRoot, ...segments);
   let stat: BigIntStats;
   try {
-    stat = lstatSync(absPath, { bigint: true });
+    stat = statEntry(absPath);
   } catch {
-    return false;
+    return { kind: "mismatch" };
   }
 
   if (fileType === 0o120000) {
-    if (!stat.isSymbolicLink()) return false;
+    if (!stat.isSymbolicLink()) return { kind: "mismatch" };
   } else {
     // Regular file (`0o100644` or `0o100755`).
-    if (!stat.isFile() || stat.isSymbolicLink()) return false;
-    if (process.platform !== "win32") {
+    if (!stat.isFile() || stat.isSymbolicLink()) return { kind: "mismatch" };
+    if (platform !== "win32") {
       const indexExec = (entry.mode & 0o100) !== 0;
       const diskExec = (Number(stat.mode) & 0o100) !== 0;
-      if (indexExec !== diskExec) return false;
+      if (indexExec !== diskExec) return { kind: "mismatch" };
     }
   }
 
-  if (stat.size > 0xffffffffn || stat.size !== BigInt(entry.size)) return false;
+  if (stat.size > 0xffffffffn || stat.size !== BigInt(entry.size)) {
+    return { kind: "mismatch" };
+  }
+  if (stat.mtimeNs < 0n || stat.ctimeNs < 0n || indexStat.mtimeNs < 0n) {
+    return { kind: "mismatch" };
+  }
 
   const mtimeSec = Number((stat.mtimeNs / 1_000_000_000n) & 0xffffffffn);
   const mtimeNsec = Number(stat.mtimeNs % 1_000_000_000n);
   const ctimeSec = Number((stat.ctimeNs / 1_000_000_000n) & 0xffffffffn);
   const ctimeNsec = Number(stat.ctimeNs % 1_000_000_000n);
 
-  if (entry.mtimeSec === 0 || mtimeSec !== entry.mtimeSec) return false;
-
-  // Racily-clean check (matching Git's `is_racy_timestamp`): any entry whose
-  // mtime is in the same second as or newer than the index mtime cannot be
-  // proven clean by stat alone.
-  const indexMtimeSec = Number((indexStat.mtimeNs / 1_000_000_000n) & 0xffffffffn);
-  if (entry.mtimeSec >= indexMtimeSec) return false;
-
-  if (process.platform !== "win32") {
-    if (entry.mtimeNsec !== 0 && mtimeNsec !== entry.mtimeNsec) return false;
-    if (entry.ino !== 0 && Number(stat.ino & 0xffffffffn) !== entry.ino) return false;
-    if (entry.dev !== 0 && Number(stat.dev & 0xffffffffn) !== entry.dev) return false;
-    if (entry.ctimeSec !== 0 && ctimeSec !== entry.ctimeSec) return false;
-    if (entry.ctimeNsec !== 0 && ctimeNsec !== entry.ctimeNsec) return false;
+  if (entry.mtimeSec === 0 || mtimeSec !== entry.mtimeSec) {
+    return { kind: "mismatch" };
   }
 
+  // Racily-clean check: any entry whose mtime is in the same second as or
+  // newer than the index mtime is racy. When cached mtime nanoseconds are 0
+  // (coarse 1s/2s filesystem clocks like FAT/exFAT/HFS+), require the entry
+  // to be strictly older than a 2-second bucket before the index mtime.
+  const indexMtimeSec = Number((indexStat.mtimeNs / 1_000_000_000n) & 0xffffffffn);
+  if (entry.mtimeSec >= indexMtimeSec) {
+    return { kind: "mismatch" };
+  }
+  if (entry.mtimeNsec === 0 && entry.mtimeSec + 2 >= indexMtimeSec) {
+    return { kind: "mismatch" };
+  }
+
+  // On Windows, stat is never strong proof: ctime is creation time, POSIX
+  // inode/device/uid/gid metadata is not reliable, and `touch -r`-style mtime
+  // restores pass stat comparisons. Always verify content on Windows.
+  if (platform === "win32") {
+    return { kind: "weak", stat, segments, absPath };
+  }
+
+  // On POSIX, reject explicit mismatches on cached non-zero stat fields.
+  if (entry.mtimeNsec !== 0 && mtimeNsec !== entry.mtimeNsec) return { kind: "mismatch" };
+  if (entry.ino !== 0 && Number(stat.ino & 0xffffffffn) !== entry.ino) return { kind: "mismatch" };
+  if (entry.dev !== 0 && Number(stat.dev & 0xffffffffn) !== entry.dev) return { kind: "mismatch" };
+  if (entry.ctimeSec !== 0 && ctimeSec !== entry.ctimeSec) return { kind: "mismatch" };
+  if (entry.ctimeNsec !== 0 && ctimeNsec !== entry.ctimeNsec) return { kind: "mismatch" };
+
+  const hasStrongMtime = entry.mtimeNsec !== 0 && mtimeNsec === entry.mtimeNsec;
+  const hasStrongCtime =
+    entry.ctimeSec !== 0 &&
+    entry.ctimeNsec !== 0 &&
+    ctimeSec === entry.ctimeSec &&
+    ctimeNsec === entry.ctimeNsec;
+  const uidMatches = Number(stat.uid & 0xffffffffn) === entry.uid;
+  const gidMatches = Number(stat.gid & 0xffffffffn) === entry.gid;
+
+  if (hasStrongMtime && hasStrongCtime && uidMatches && gidMatches) {
+    return { kind: "strong", stat };
+  }
+
+  return { kind: "weak", stat, segments, absPath };
+}
+
+function verifyParentDirsNotSymlinks(
+  realRoot: string,
+  segments: readonly string[],
+  verifiedDirs: Set<string>,
+): boolean {
+  let current = realRoot;
+  for (let i = 0; i < segments.length - 1; i++) {
+    current = join(current, segments[i]!);
+    if (verifiedDirs.has(current)) continue;
+    try {
+      const st = lstatSync(current);
+      if (st.isSymbolicLink() || !st.isDirectory()) return false;
+      verifiedDirs.add(current);
+    } catch {
+      return false;
+    }
+  }
   return true;
+}
+
+function readRegularWorkingFile(
+  absPath: string,
+  expectedSize: number,
+  maxBytes: number,
+  beforeStat: BigIntStats,
+  platform: NodeJS.Platform,
+  statEntry: (path: string) => BigIntStats,
+  hasCustomStatEntry: boolean,
+): Buffer | undefined {
+  if (expectedSize < 0 || expectedSize > maxBytes) return undefined;
+  let fd: number | undefined;
+  try {
+    const flags =
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0);
+    fd = openSync(absPath, flags);
+    const fdStat = fstatSync(fd, { bigint: true });
+    if (
+      !fdStat.isFile() ||
+      fdStat.size !== BigInt(expectedSize) ||
+      fdStat.size > BigInt(maxBytes)
+    ) {
+      return undefined;
+    }
+    if (!hasCustomStatEntry && !sameFileIdentityStat(beforeStat, fdStat, platform)) {
+      return undefined;
+    }
+
+    const buffer = Buffer.allocUnsafe(expectedSize);
+    let total = 0;
+    while (total < expectedSize) {
+      const n = readSync(fd, buffer, total, expectedSize - total, null);
+      if (n === 0) return undefined;
+      total += n;
+    }
+    const probe = Buffer.allocUnsafe(1);
+    if (readSync(fd, probe, 0, 1, null) !== 0) return undefined;
+
+    const afterFdStat = fstatSync(fd, { bigint: true });
+    if (!sameFileIdentityStat(fdStat, afterFdStat, platform)) return undefined;
+
+    closeSync(fd);
+    fd = undefined;
+
+    const afterLstat = statEntry(absPath);
+    if (!afterLstat.isFile() || afterLstat.isSymbolicLink()) return undefined;
+    if (!sameFileIdentityStat(beforeStat, afterLstat, platform)) return undefined;
+
+    return buffer;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Ignore close errors on read-only descriptors.
+      }
+    }
+  }
+}
+
+function readSymlinkWorkingTarget(
+  absPath: string,
+  expectedSize: number,
+  maxBytes: number,
+  beforeStat: BigIntStats,
+  platform: NodeJS.Platform,
+  statEntry: (path: string) => BigIntStats,
+): Buffer | undefined {
+  if (expectedSize < 0 || expectedSize > maxBytes) return undefined;
+  try {
+    const target = readlinkSync(absPath, { encoding: "buffer" });
+    if (target.length !== expectedSize || target.length > maxBytes) return undefined;
+    const afterLstat = statEntry(absPath);
+    if (!afterLstat.isSymbolicLink()) return undefined;
+    if (!sameFileIdentityStat(beforeStat, afterLstat, platform)) return undefined;
+    return target;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Zero-allocation comparison: true iff `work` with every CRLF normalized to LF equals `blob`. */
+function equalsAfterCrlfToLf(work: Buffer, blob: Buffer): boolean {
+  if (work.length <= blob.length) return false;
+  let wi = 0;
+  let bi = 0;
+  const wLen = work.length;
+  const bLen = blob.length;
+  while (wi < wLen) {
+    const wb = work[wi]!;
+    if (wb === 0x0d && wi + 1 < wLen && work[wi + 1] === 0x0a) {
+      wi += 1;
+      continue;
+    }
+    if (bi >= bLen || blob[bi] !== wb) return false;
+    wi += 1;
+    bi += 1;
+  }
+  return bi === bLen;
+}
+
+function effectiveEolMode(attrs: PathEolAttrs, config: ReadonlyMap<string, string>): EolMode {
+  if (attrs.text === "unset") return "none";
+  if (attrs.text === "auto") return "auto";
+  if (attrs.text === "set") return "text";
+  if (attrs.eol === "crlf" || attrs.eol === "lf") return "text";
+  if (attrs.text !== "unspecified") return "none";
+  if (attrs.eol !== "unspecified" && attrs.eol !== "unset") return "none";
+
+  const autocrlf = (config.get("core.autocrlf") ?? "false").trim().toLowerCase();
+  if (
+    autocrlf === "true" ||
+    autocrlf === "yes" ||
+    autocrlf === "on" ||
+    autocrlf === "1" ||
+    autocrlf === "input"
+  ) {
+    return "auto";
+  }
+  return "none";
+}
+
+function parseCatFileBatchOutput(
+  buf: Buffer,
+  expectedOids: readonly string[],
+  maxFileBytes: number,
+  maxBatchTotalBytes: number,
+): Map<string, Buffer> | undefined {
+  const blobs = new Map<string, Buffer>();
+  let offset = 0;
+  let totalBlobBytes = 0;
+
+  for (let i = 0; i < expectedOids.length; i++) {
+    const expectedOid = expectedOids[i]!;
+    const nl = buf.indexOf(0x0a, offset);
+    if (nl < 0) return undefined;
+    const header = buf.subarray(offset, nl).toString("ascii");
+    offset = nl + 1;
+
+    const firstSpace = header.indexOf(" ");
+    if (firstSpace < 0) return undefined;
+    const secondSpace = header.indexOf(" ", firstSpace + 1);
+    if (secondSpace < 0 || header.indexOf(" ", secondSpace + 1) >= 0) return undefined;
+
+    const oid = header.slice(0, firstSpace);
+    const type = header.slice(firstSpace + 1, secondSpace);
+    const sizeStr = header.slice(secondSpace + 1);
+
+    if (oid !== expectedOid || type !== "blob" || !/^\d+$/.test(sizeStr)) {
+      return undefined;
+    }
+
+    const size = Number(sizeStr);
+    if (!Number.isSafeInteger(size) || size < 0 || size > maxFileBytes) {
+      return undefined;
+    }
+    totalBlobBytes += size;
+    if (totalBlobBytes > maxBatchTotalBytes) {
+      return undefined;
+    }
+
+    if (offset + size + 1 > buf.length) return undefined;
+    if (buf[offset + size] !== 0x0a) return undefined;
+
+    blobs.set(oid, buf.subarray(offset, offset + size));
+    offset += size + 1;
+  }
+
+  if (offset !== buf.length) return undefined;
+  return blobs;
 }
 
 /** Parse `git config --list --null` into a last-value-wins map (keys already lowercased by Git). */
@@ -657,17 +964,42 @@ function parseGitConfigNull(stdout: string): Map<string, string> {
   return entries;
 }
 
-function checkAttrOutputIsClean(stdout: string, expectedPaths: number): boolean {
+function parseCheckAttrOutput(
+  stdout: string,
+  slice: readonly GitIndexEntry[],
+  attrs: readonly string[],
+  collectEol: Map<string, PathEolAttrs> | undefined,
+): boolean {
   const fields = stdout.split("\0");
   // `check-attr -z` terminates every triplet with NUL, leaving one trailing empty element.
   if (fields.length === 0 || fields[fields.length - 1] !== "") return false;
   const count = fields.length - 1;
-  const expectedFields = expectedPaths * UNSAFE_CONVERSION_ATTRS.length * 3;
+  const expectedFields = slice.length * attrs.length * 3;
   if (count !== expectedFields) return false;
-  for (let i = 2; i < count; i += 3) {
-    const value = fields[i];
-    if (value !== "unspecified" && value !== "unset") {
-      return false;
+
+  let idx = 0;
+  for (let p = 0; p < slice.length; p++) {
+    const path = slice[p]!.path;
+    let text = "unspecified";
+    let eol = "unspecified";
+    for (let a = 0; a < attrs.length; a++) {
+      const outPath = fields[idx]!;
+      const attrName = fields[idx + 1]!;
+      const value = fields[idx + 2]!;
+      idx += 3;
+      if (outPath !== path || attrName !== attrs[a]) return false;
+      if (attrName === "filter" || attrName === "working-tree-encoding") {
+        if (value !== "unspecified" && value !== "unset") {
+          return false;
+        }
+      } else if (attrName === "text") {
+        text = value;
+      } else if (attrName === "eol") {
+        eol = value;
+      }
+    }
+    if (collectEol) {
+      collectEol.set(path, { text, eol });
     }
   }
   return true;
@@ -677,16 +1009,48 @@ export class WorktreeIndex {
   private readonly projects = new Map<string, Promise<WorktreeInfo | undefined>>();
   private readonly repos = new Map<string, Promise<RepoBranches | undefined>>();
   private readonly git: GitRunner;
+  private readonly rawGit: GitRawRunner;
   private readonly now: () => number;
   private readonly deadlineMs: number;
   private readonly signal: AbortSignal | undefined;
+  private readonly platform: NodeJS.Platform;
+  private readonly statEntry: (path: string) => BigIntStats;
+  private readonly hasCustomStatEntry: boolean;
+  private readonly maxContentTotalBytes: number;
+  private readonly maxContentFileBytes: number;
+  private readonly maxContentFiles: number;
 
   constructor(git?: GitRunner, options: WorktreeIndexOptions = {}) {
-    this.git = git ?? createGitRunner(options.gitBinary);
+    if (git) {
+      this.git = git;
+      this.rawGit = async (gitDir, args, runOptions) => {
+        const out = await git(gitDir, args, runOptions);
+        return out === undefined ? undefined : Buffer.from(out, "utf8");
+      };
+    } else {
+      const raw = createGitRawRunner(options.gitBinary);
+      this.rawGit = raw;
+      this.git = async (gitDir, args, runOptions) => {
+        const out = await raw(gitDir, args, runOptions);
+        return out === undefined ? undefined : out.toString("utf8");
+      };
+    }
     this.now = options.now ?? (() => performance.now());
     const budgetMs = Math.max(0, options.budgetMs ?? DEFAULT_WORKTREE_BUDGET_MS);
     this.deadlineMs = this.now() + budgetMs;
     this.signal = options.signal;
+    this.platform = options.platform ?? process.platform;
+    this.hasCustomStatEntry = options.statEntry !== undefined;
+    this.statEntry = options.statEntry ?? defaultStatEntry;
+    this.maxContentTotalBytes = Math.max(
+      0,
+      options.maxContentTotalBytes ?? DEFAULT_MAX_CONTENT_TOTAL_BYTES,
+    );
+    this.maxContentFileBytes = Math.max(
+      0,
+      options.maxContentFileBytes ?? DEFAULT_MAX_CONTENT_FILE_BYTES,
+    );
+    this.maxContentFiles = Math.max(0, options.maxContentFiles ?? DEFAULT_MAX_CONTENT_FILES);
   }
 
   /** Worktree facts for a project root; undefined when it is not a linked worktree. */
@@ -717,6 +1081,23 @@ export class WorktreeIndex {
     if (remaining <= 0) return undefined;
     const timeoutMs = Math.min(TIMEOUT_MS, remaining);
     const out = await this.git(gitDir, args, {
+      timeoutMs,
+      ...(this.signal ? { signal: this.signal } : {}),
+      ...extra,
+    });
+    if (this.isExpired()) return undefined;
+    return out;
+  }
+
+  private async runBoundedGitRaw(
+    gitDir: string,
+    args: readonly string[],
+    extra?: Pick<GitRunOptions, "stdin" | "maxStdoutBytes">,
+  ): Promise<Buffer | undefined> {
+    const remaining = this.remainingBudgetMs();
+    if (remaining <= 0) return undefined;
+    const timeoutMs = Math.min(TIMEOUT_MS, remaining);
+    const out = await this.rawGit(gitDir, args, {
       timeoutMs,
       ...(this.signal ? { signal: this.signal } : {}),
       ...extra,
@@ -799,19 +1180,22 @@ export class WorktreeIndex {
    * Conservative cleanliness check:
    * 1. Rejects in-progress git operations (`MERGE_HEAD`, locks, rebase, etc.).
    * 2. Records index identity (dev, ino, size, mtime, ctime, trailing checksum)
-   *    before all checks and verifies every tracked entry by `lstat` (rejecting
-   *    split/sparse/unknown-extension indexes, gitlinks, suppressing flags,
-   *    stat mismatches, and racily-clean same-second entries).
+   *    before all checks and classifies every tracked entry by `lstat`
+   *    (rejecting split/sparse/unknown-extension indexes, gitlinks, suppressing
+   *    flags, stat mismatches, and racily-clean entries).
    * 3. Checks effective unsafe conversion attributes (`git check-attr --stdin -z
-   *    filter working-tree-encoding`), failing closed if any `filter` or
-   *    `working-tree-encoding` attribute is enabled. Pure EOL conversions
-   *    (`text`, `eol`, `core.autocrlf`, `core.eol`) rely on step 2's non-racy
-   *    exact stat-match fast path.
+   *    filter working-tree-encoding`, plus `text`/`eol` when weak entries exist),
+   *    failing closed if any `filter` or `working-tree-encoding` attribute is
+   *    enabled.
    * 4. Checks staged changes via `git diff-index --cached --quiet <tipOid>`.
    * 5. Checks untracked non-ignored files via bounded
    *    `git ls-files --others --exclude-standard -z`.
-   * 6. Re-verifies deadline, in-progress markers, index file identity, and
-   *    tracked entry stats after all awaits.
+   * 6. For any weak-stat entries (and all entries on Windows), proves content
+   *    equality against raw index blobs via `git cat-file --batch` (no filters,
+   *    bounded bytes/files) and bounded no-follow working reads (with CRLF->LF
+   *    normalization only when effective EOL conversion applies to that path).
+   * 7. Re-verifies deadline, in-progress markers, index file identity, and
+   *    tracked entry stats (including weak-entry stability) after all awaits.
    */
   private async isWorktreeClean(
     gitDir: string,
@@ -871,18 +1255,39 @@ export class WorktreeIndex {
       }
     }
 
-    // Fast read-only unstaged stat check before spawning any subprocesses.
+    // Fast read-only unstaged stat classification before spawning subprocesses.
+    const weakEntries: WeakTrackedEntry[] = [];
+    const weakByPath = new Map<string, WeakTrackedEntry>();
     for (let i = 0; i < indexEntries.length; i++) {
       if ((i & 0x3f) === 0 && this.isExpired()) return false;
-      if (!indexStat || !verifyTrackedEntry(realRoot, indexEntries[i]!, indexStat)) {
-        return false;
+      if (!indexStat) return false;
+      const entry = indexEntries[i]!;
+      const status = classifyTrackedEntry(
+        realRoot,
+        entry,
+        indexStat,
+        this.platform,
+        this.statEntry,
+      );
+      if (status.kind === "mismatch") return false;
+      if (status.kind === "weak") {
+        const weak: WeakTrackedEntry = {
+          entry,
+          segments: status.segments,
+          absPath: status.absPath,
+          beforeStat: status.stat,
+        };
+        weakEntries.push(weak);
+        weakByPath.set(entry.path, weak);
       }
     }
 
     // Check unsafe conversion attributes (`filter`, `working-tree-encoding`) for
-    // all tracked paths without running filters. Pure line-ending conversions
-    // (`text`, `eol`, `core.autocrlf`, `core.eol`) are covered by the non-racy
-    // exact stat-match check above (matching Git's `git status` fast path).
+    // all tracked paths without running filters. When weak entries need content
+    // proof, also query `text` and `eol` in the same pass.
+    const needsContentProof = weakEntries.length > 0;
+    const checkAttrs = needsContentProof ? WEAK_CONVERSION_ATTRS : UNSAFE_CONVERSION_ATTRS;
+    const eolAttrsByPath = needsContentProof ? new Map<string, PathEolAttrs>() : undefined;
     if (indexEntries.length > 0) {
       for (let start = 0; start < indexEntries.length; start += CHECK_ATTR_CHUNK_PATHS) {
         if (this.isExpired()) return false;
@@ -890,18 +1295,13 @@ export class WorktreeIndex {
         const stdin = `${slice.map((entry) => entry.path).join("\0")}\0`;
         const attrOut = await this.runBoundedGit(
           gitDir,
-          [
-            `--work-tree=${realRoot}`,
-            "-C",
-            realRoot,
-            "check-attr",
-            "--stdin",
-            "-z",
-            ...UNSAFE_CONVERSION_ATTRS,
-          ],
+          [`--work-tree=${realRoot}`, "-C", realRoot, "check-attr", "--stdin", "-z", ...checkAttrs],
           { stdin },
         );
-        if (attrOut === undefined || !checkAttrOutputIsClean(attrOut, slice.length)) {
+        if (
+          attrOut === undefined ||
+          !parseCheckAttrOutput(attrOut, slice, checkAttrs, eolAttrsByPath)
+        ) {
           return false;
         }
       }
@@ -936,6 +1336,18 @@ export class WorktreeIndex {
       { maxStdoutBytes: MAX_UNTRACKED_STDOUT },
     );
     if (untracked === undefined || untracked.length > 0) return false;
+
+    // Content proof for every weak-stat entry (and all entries on Windows),
+    // running no filters and strictly enforcing byte/file/deadline bounds.
+    if (needsContentProof) {
+      const proven = await this.verifyWeakEntriesContent(
+        gitDir,
+        realRoot,
+        weakEntries,
+        eolAttrsByPath!,
+      );
+      if (!proven) return false;
+    }
 
     // Post-check stability: reject if deadline expired, in-progress markers
     // appeared, the index file identity/checksum changed, or any tracked file
@@ -980,8 +1392,151 @@ export class WorktreeIndex {
 
     for (let i = 0; i < indexEntries.length; i++) {
       if ((i & 0x3f) === 0 && this.isExpired()) return false;
-      if (!indexStat || !verifyTrackedEntry(realRoot, indexEntries[i]!, indexStat)) {
+      if (!indexStat) return false;
+      const entry = indexEntries[i]!;
+      const status = classifyTrackedEntry(
+        realRoot,
+        entry,
+        indexStat,
+        this.platform,
+        this.statEntry,
+      );
+      if (status.kind === "mismatch") return false;
+      const weak = weakByPath.get(entry.path);
+      if (weak && !sameFileIdentityStat(weak.beforeStat, status.stat, this.platform)) {
         return false;
+      }
+    }
+
+    return true;
+  }
+
+  private async verifyWeakEntriesContent(
+    gitDir: string,
+    realRoot: string,
+    weakEntries: readonly WeakTrackedEntry[],
+    eolAttrsByPath: ReadonlyMap<string, PathEolAttrs>,
+  ): Promise<boolean> {
+    if (this.isExpired()) return false;
+    if (weakEntries.length > this.maxContentFiles) return false;
+
+    // Pre-check per-file and total byte caps before spawning git or reading files.
+    let plannedBytes = 0;
+    for (let i = 0; i < weakEntries.length; i++) {
+      const size = weakEntries[i]!.entry.size;
+      if (size > this.maxContentFileBytes) return false;
+      plannedBytes += size;
+      if (plannedBytes > this.maxContentTotalBytes) return false;
+    }
+
+    // Read effective worktree config (`core.autocrlf`, `core.eol`) once.
+    const worktreeConfigOut = await this.runBoundedGit(gitDir, [
+      `--work-tree=${realRoot}`,
+      "-C",
+      realRoot,
+      "config",
+      "--list",
+      "--null",
+    ]);
+    if (worktreeConfigOut === undefined) return false;
+    const worktreeConfig = parseGitConfigNull(worktreeConfigOut);
+
+    const verifiedDirs = new Set<string>();
+    let comparedBlobBytes = 0;
+    let comparedWorkBytes = 0;
+    let cursor = 0;
+
+    while (cursor < weakEntries.length) {
+      if (this.isExpired()) return false;
+
+      const batch: WeakTrackedEntry[] = [];
+      const batchOids: string[] = [];
+      const seenOids = new Set<string>();
+      let batchEstimatedBytes = 0;
+
+      while (cursor < weakEntries.length && batch.length < CAT_FILE_BATCH_MAX_ENTRIES) {
+        const item = weakEntries[cursor]!;
+        if (batch.length > 0 && batchEstimatedBytes + item.entry.size > CAT_FILE_BATCH_MAX_BYTES) {
+          break;
+        }
+        batch.push(item);
+        batchEstimatedBytes += item.entry.size;
+        if (!seenOids.has(item.entry.oidHex)) {
+          seenOids.add(item.entry.oidHex);
+          batchOids.push(item.entry.oidHex);
+        }
+        cursor += 1;
+      }
+
+      const remainingBlobBytes = this.maxContentTotalBytes - comparedBlobBytes;
+      if (remainingBlobBytes < 0) return false;
+      const maxStdoutBytes = remainingBlobBytes + batchOids.length * CAT_FILE_HEADER_OVERHEAD_BYTES;
+      const rawBatch = await this.runBoundedGitRaw(gitDir, ["cat-file", "--batch"], {
+        stdin: `${batchOids.join("\n")}\n`,
+        maxStdoutBytes,
+      });
+      if (rawBatch === undefined) return false;
+
+      const blobs = parseCatFileBatchOutput(
+        rawBatch,
+        batchOids,
+        this.maxContentFileBytes,
+        remainingBlobBytes,
+      );
+      if (!blobs) return false;
+      for (const blob of blobs.values()) {
+        comparedBlobBytes += blob.length;
+      }
+      if (comparedBlobBytes > this.maxContentTotalBytes) return false;
+
+      for (let i = 0; i < batch.length; i++) {
+        if ((i & 0x1f) === 0 && this.isExpired()) return false;
+        const { entry, segments, absPath, beforeStat } = batch[i]!;
+        const blob = blobs.get(entry.oidHex);
+        if (!blob) return false;
+
+        if (!verifyParentDirsNotSymlinks(realRoot, segments, verifiedDirs)) {
+          return false;
+        }
+
+        const remainingWorkBytes = this.maxContentTotalBytes - comparedWorkBytes;
+        const entryMaxBytes = Math.min(this.maxContentFileBytes, remainingWorkBytes);
+        const fileType = entry.mode & 0o170000;
+        const workBytes =
+          fileType === 0o120000
+            ? readSymlinkWorkingTarget(
+                absPath,
+                entry.size,
+                entryMaxBytes,
+                beforeStat,
+                this.platform,
+                this.statEntry,
+              )
+            : readRegularWorkingFile(
+                absPath,
+                entry.size,
+                entryMaxBytes,
+                beforeStat,
+                this.platform,
+                this.statEntry,
+                this.hasCustomStatEntry,
+              );
+        if (!workBytes) return false;
+
+        comparedWorkBytes += workBytes.length;
+        if (comparedWorkBytes > this.maxContentTotalBytes) return false;
+
+        if (workBytes.equals(blob)) continue;
+
+        if (fileType !== 0o100000) return false;
+        const attrs = eolAttrsByPath.get(entry.path);
+        if (!attrs) return false;
+        const eolMode = effectiveEolMode(attrs, worktreeConfig);
+        if (eolMode === "none") return false;
+        if (eolMode === "auto" && (workBytes.includes(0) || blob.includes(0))) {
+          return false;
+        }
+        if (!equalsAfterCrlfToLf(workBytes, blob)) return false;
       }
     }
 

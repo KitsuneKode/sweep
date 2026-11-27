@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -13,6 +14,7 @@ import {
   symlinkSync,
   utimesSync,
   writeFileSync,
+  type BigIntStats,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -90,6 +92,50 @@ function settleWorktree(wt: string): void {
     }
   }
   git(wt, "update-index", "--refresh");
+}
+
+/**
+ * Rewrite cached stat timestamps for `targetPath` inside a SHA-1 v2/v3
+ * `.git/index` and recompute its trailing SHA-1 checksum (simulating a
+ * coarse-clock filesystem index entry without requiring FUSE).
+ */
+function patchIndexEntryStat(
+  indexPath: string,
+  targetPath: string,
+  patch: { mtimeSec?: number; mtimeNsec?: number; ctimeSec?: number; ctimeNsec?: number },
+): void {
+  const buf = Buffer.from(readFileSync(indexPath));
+  const version = buf.readUInt32BE(4);
+  if (version !== 2 && version !== 3) {
+    throw new Error(`unexpected index version ${version}`);
+  }
+  const count = buf.readUInt32BE(8);
+  let at = 12;
+  let found = false;
+  for (let i = 0; i < count; i++) {
+    const start = at;
+    const flags = buf.readUInt16BE(start + 60);
+    const extended = (flags & 0x4000) !== 0;
+    const nameStart = start + 62 + (extended ? 2 : 0);
+    const nul = buf.indexOf(0, nameStart);
+    if (nul < 0) throw new Error("unterminated index path");
+    const entryPath = buf.subarray(nameStart, nul).toString("utf8");
+    if (entryPath === targetPath) {
+      if (patch.ctimeSec !== undefined) buf.writeUInt32BE(patch.ctimeSec >>> 0, start);
+      if (patch.ctimeNsec !== undefined) buf.writeUInt32BE(patch.ctimeNsec >>> 0, start + 4);
+      if (patch.mtimeSec !== undefined) buf.writeUInt32BE(patch.mtimeSec >>> 0, start + 8);
+      if (patch.mtimeNsec !== undefined) buf.writeUInt32BE(patch.mtimeNsec >>> 0, start + 12);
+      found = true;
+    }
+    const fixed = nameStart - start;
+    const nameLen = nul - nameStart;
+    at = start + ((fixed + nameLen + 8) & ~7);
+  }
+  if (!found) throw new Error(`entry ${targetPath} not found in ${indexPath}`);
+  const payloadEnd = buf.length - 20;
+  const sha1 = createHash("sha1").update(buf.subarray(0, payloadEnd)).digest();
+  sha1.copy(buf, payloadEnd);
+  writeFileSync(indexPath, buf);
 }
 
 beforeEach(() => {
@@ -630,16 +676,16 @@ describe.skipIf(!hasGit)("worktree info", () => {
         clock += 50;
         return result.status === 0 ? result.stdout : undefined;
       },
-      { budgetMs: 450, now: () => clock },
+      { budgetMs: 600, now: () => clock },
     );
 
     expect(await index.forProject(wt1)).toEqual({ of: repo, branch: "wt1", state: "merged" });
     // Advance past deadline before checking repo2 so filesystem and git work stop immediately.
-    clock = 500;
+    clock = 700;
     expect(await index.forProject(wt2)).toEqual({ of: repo2, branch: "wt2" });
     expect(callsForRepo2).toBe(0);
     expect(timeouts.length).toBeGreaterThan(0);
-    expect(timeouts.every((t) => t <= 450)).toBe(true);
+    expect(timeouts.every((t) => t <= 600)).toBe(true);
   });
 
   test.skipIf(process.platform === "win32")(
@@ -1024,4 +1070,334 @@ describe.skipIf(!hasGit)("worktree info", () => {
     expect(await expired.forProject(wt)).toEqual({ of: repo, branch: "wt-deadline-fs" });
     expect(gitCalls).toBe(0);
   });
+
+  test("coarse timestamps (0-nsec index/stat) reject same-size mtime-restored edits, reject 2s racy buckets, and prove untouched files via content", async () => {
+    const wtCoarseEdited = join(root, "wt-coarse-edited");
+    const wtCoarseClean = join(root, "wt-coarse-clean");
+    const wtCoarseRacy2s = join(root, "wt-coarse-racy-2s");
+
+    for (const [name, dir] of [
+      ["wt-coarse-edited", wtCoarseEdited],
+      ["wt-coarse-clean", wtCoarseClean],
+      ["wt-coarse-racy-2s", wtCoarseRacy2s],
+    ] as const) {
+      git(repo, "worktree", "add", "-q", "-b", name, dir);
+      commit(dir, `${name}.txt`, "hello world\n");
+      settleWorktree(dir);
+      git(repo, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", `m-${name}`, name);
+    }
+
+    // 1. Coarse-timestamp index (mtime ns = 0, ctime sec/ns = 0) + same-size edit + utimes restore -> unknown.
+    const editedNote = join(wtCoarseEdited, "wt-coarse-edited.txt");
+    const evenPastSec = Math.floor((Date.now() - 10_000) / 2000) * 2;
+    const evenPastDate = new Date(evenPastSec * 1000);
+    utimesSync(editedNote, evenPastDate, evenPastDate);
+    git(wtCoarseEdited, "update-index", "--refresh");
+    const editedIndexPath = join(git(wtCoarseEdited, "rev-parse", "--git-dir"), "index");
+    patchIndexEntryStat(editedIndexPath, "wt-coarse-edited.txt", {
+      mtimeSec: evenPastSec,
+      mtimeNsec: 0,
+      ctimeSec: 0,
+      ctimeNsec: 0,
+    });
+    writeFileSync(editedNote, "hello WORLD\n");
+    utimesSync(editedNote, evenPastDate, evenPastDate);
+
+    // 2. Same coarse-timestamp index with content unchanged -> merged via content proof.
+    const cleanNote = join(wtCoarseClean, "wt-coarse-clean.txt");
+    utimesSync(cleanNote, evenPastDate, evenPastDate);
+    git(wtCoarseClean, "update-index", "--refresh");
+    const cleanIndexPath = join(git(wtCoarseClean, "rev-parse", "--git-dir"), "index");
+    patchIndexEntryStat(cleanIndexPath, "wt-coarse-clean.txt", {
+      mtimeSec: evenPastSec,
+      mtimeNsec: 0,
+      ctimeSec: 0,
+      ctimeNsec: 0,
+    });
+
+    // 3. 2-second FAT/exFAT bucket racy case: entry mtime is oddIndexSec - 1 with mtimeNsec = 0.
+    const racyNote = join(wtCoarseRacy2s, "wt-coarse-racy-2s.txt");
+    const racyIndexPath = join(git(wtCoarseRacy2s, "rev-parse", "--git-dir"), "index");
+    const idxStat = lstatSync(racyIndexPath, { bigint: true });
+    const idxSec = Number((idxStat.mtimeNs / 1_000_000_000n) & 0xffffffffn);
+    const bucketSec = idxSec - 1;
+    const bucketDate = new Date(bucketSec * 1000);
+    utimesSync(racyNote, bucketDate, bucketDate);
+    git(wtCoarseRacy2s, "update-index", "--refresh");
+    patchIndexEntryStat(racyIndexPath, "wt-coarse-racy-2s.txt", {
+      mtimeSec: bucketSec,
+      mtimeNsec: 0,
+      ctimeSec: 0,
+      ctimeNsec: 0,
+    });
+    utimesSync(racyIndexPath, new Date(idxSec * 1000 + 6), new Date(idxSec * 1000 + 6));
+
+    const index = new WorktreeIndex();
+    expect(await index.forProject(wtCoarseEdited)).toEqual({
+      of: repo,
+      branch: "wt-coarse-edited",
+    });
+    expect(await index.forProject(wtCoarseClean)).toEqual({
+      of: repo,
+      branch: "wt-coarse-clean",
+      state: "merged",
+    });
+    expect(await index.forProject(wtCoarseRacy2s)).toEqual({
+      of: repo,
+      branch: "wt-coarse-racy-2s",
+    });
+
+    // 4. Also simulate a 2s coarse filesystem via injected `statEntry` where BOTH
+    //    mtime and ctime stay truncated to the exact same even second after an edit.
+    const truncate2s = (ns: bigint): bigint => (ns / 2_000_000_000n) * 2_000_000_000n;
+    const makeCoarseStat = (p: string): BigIntStats => {
+      const real = lstatSync(p, { bigint: true });
+      if (p !== editedNote && p !== cleanNote) return real;
+      const truncated = truncate2s(real.mtimeNs);
+      return Object.assign(Object.create(Object.getPrototypeOf(real)), real, {
+        mtimeNs: truncated,
+        ctimeNs: truncated,
+      }) as BigIntStats;
+    };
+    patchIndexEntryStat(editedIndexPath, "wt-coarse-edited.txt", {
+      mtimeSec: evenPastSec,
+      mtimeNsec: 0,
+      ctimeSec: evenPastSec,
+      ctimeNsec: 0,
+    });
+    patchIndexEntryStat(cleanIndexPath, "wt-coarse-clean.txt", {
+      mtimeSec: evenPastSec,
+      mtimeNsec: 0,
+      ctimeSec: evenPastSec,
+      ctimeNsec: 0,
+    });
+    const coarseStatIndex = new WorktreeIndex(undefined, { statEntry: makeCoarseStat });
+    expect(await coarseStatIndex.forProject(wtCoarseEdited)).toEqual({
+      of: repo,
+      branch: "wt-coarse-edited",
+    });
+    expect(await coarseStatIndex.forProject(wtCoarseClean)).toEqual({
+      of: repo,
+      branch: "wt-coarse-clean",
+      state: "merged",
+    });
+  });
+
+  test("ext4/POSIX touch -r same-size edit with restored mtime is rejected", async () => {
+    const wt = join(root, "wt-touch-r");
+    git(repo, "worktree", "add", "-q", "-b", "wt-touch-r", wt);
+    commit(wt, "note.txt", "hello world\n");
+    settleWorktree(wt);
+    git(repo, "merge", "-q", "--ff-only", "wt-touch-r");
+
+    const filePath = join(wt, "note.txt");
+    const before = lstatSync(filePath);
+    writeFileSync(filePath, "hello WORLD\n");
+    utimesSync(filePath, before.atime, before.mtime);
+
+    expect(await new WorktreeIndex().forProject(wt)).toEqual({ of: repo, branch: "wt-touch-r" });
+  });
+
+  test("Windows stat-always-weak path rejects mtime-restored edits and proves untouched CRLF and binary files via content", async () => {
+    const winRepo = join(root, "app-win-sim");
+    mkdirSync(winRepo);
+    git(winRepo, "init", "-q", "-b", "main");
+    git(winRepo, "config", "core.autocrlf", "true");
+    commit(winRepo, "init.txt", "init\r\n");
+
+    // 1. Untouched CRLF checkout + raw binary bytes (non-UTF-8 + NUL) -> merged via content proof.
+    const wtWinClean = join(root, "wt-win-clean");
+    git(winRepo, "worktree", "add", "-q", "-b", "wt-win-clean", wtWinClean);
+    writeFileSync(join(wtWinClean, "text.txt"), "line1\r\nline2\r\n");
+    const binaryPayload = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff, 0xfe, 0x0d, 0x0a, 0x00]);
+    writeFileSync(join(wtWinClean, "blob.bin"), binaryPayload);
+    git(wtWinClean, "add", "text.txt", "blob.bin");
+    git(wtWinClean, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "clean");
+    settleWorktree(wtWinClean);
+    git(winRepo, "merge", "-q", "--ff-only", "wt-win-clean");
+
+    // 2. Same-size edit with restored mtime (simulating Windows `touch -r`) -> unknown.
+    const wtWinEdited = join(root, "wt-win-edited");
+    git(winRepo, "worktree", "add", "-q", "-b", "wt-win-edited", wtWinEdited);
+    commit(wtWinEdited, "note.txt", "hello world\r\n");
+    settleWorktree(wtWinEdited);
+    git(winRepo, "merge", "-q", "--ff-only", "wt-win-edited");
+    const editedPath = join(wtWinEdited, "note.txt");
+    const before = lstatSync(editedPath);
+    writeFileSync(editedPath, "hello WORLD\r\n");
+    utimesSync(editedPath, before.atime, before.mtime);
+
+    // 3. Binary file with NUL bytes edited (same size, mtime restored) -> unknown.
+    const wtWinBinEdited = join(root, "wt-win-bin-edited");
+    git(winRepo, "worktree", "add", "-q", "-b", "wt-win-bin-edited", wtWinBinEdited);
+    writeFileSync(join(wtWinBinEdited, "data.bin"), Buffer.from([0x00, 0x01, 0x02, 0x03]));
+    git(wtWinBinEdited, "add", "data.bin");
+    git(wtWinBinEdited, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "bin");
+    settleWorktree(wtWinBinEdited);
+    git(winRepo, "merge", "-q", "--ff-only", "wt-win-bin-edited");
+    const binPath = join(wtWinBinEdited, "data.bin");
+    const beforeBin = lstatSync(binPath);
+    writeFileSync(binPath, Buffer.from([0x00, 0x01, 0x02, 0x04]));
+    utimesSync(binPath, beforeBin.atime, beforeBin.mtime);
+
+    // 4. `-text` / `binary` attribute with core.autocrlf=true: exact match -> merged, CRLF edit -> unknown.
+    const wtWinNoEol = join(root, "wt-win-no-eol");
+    git(winRepo, "worktree", "add", "-q", "-b", "wt-win-no-eol", wtWinNoEol);
+    commit(wtWinNoEol, ".gitattributes", "*.raw -text\n");
+    commit(wtWinNoEol, "exact.raw", "ab\n");
+    settleWorktree(wtWinNoEol);
+    git(winRepo, "merge", "-q", "--ff-only", "wt-win-no-eol");
+
+    const winIndex = new WorktreeIndex(undefined, { platform: "win32" });
+    expect(await winIndex.forProject(wtWinClean)).toEqual({
+      of: winRepo,
+      branch: "wt-win-clean",
+      state: "merged",
+    });
+    expect(await winIndex.forProject(wtWinEdited)).toEqual({
+      of: winRepo,
+      branch: "wt-win-edited",
+    });
+    expect(await winIndex.forProject(wtWinBinEdited)).toEqual({
+      of: winRepo,
+      branch: "wt-win-bin-edited",
+    });
+    expect(await winIndex.forProject(wtWinNoEol)).toEqual({
+      of: winRepo,
+      branch: "wt-win-no-eol",
+      state: "merged",
+    });
+
+    // Mutate `exact.raw` (same size, mtime restored) -> unknown under `-text`.
+    const rawPath = join(wtWinNoEol, "exact.raw");
+    const beforeRaw = lstatSync(rawPath);
+    writeFileSync(rawPath, "a\r\n");
+    utimesSync(rawPath, beforeRaw.atime, beforeRaw.mtime);
+    expect(
+      await new WorktreeIndex(undefined, { platform: "win32" }).forProject(wtWinNoEol),
+    ).toEqual({ of: winRepo, branch: "wt-win-no-eol" });
+  });
+
+  test("weak-stat content proof enforces byte, per-file, file-count, and post-read stat stability bounds", async () => {
+    const wt = join(root, "wt-bounds");
+    git(repo, "worktree", "add", "-q", "-b", "wt-bounds", wt);
+    writeFileSync(join(wt, "a.txt"), "a".repeat(256));
+    writeFileSync(join(wt, "b.txt"), "b".repeat(256));
+    git(wt, "add", "a.txt", "b.txt");
+    git(wt, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "bounds");
+    settleWorktree(wt);
+    git(repo, "merge", "-q", "--ff-only", "wt-bounds");
+
+    // Fits comfortably inside generous bounds on Windows content path -> merged.
+    expect(
+      await new WorktreeIndex(undefined, {
+        platform: "win32",
+        maxContentTotalBytes: 2048,
+        maxContentFileBytes: 1024,
+        maxContentFiles: 10,
+      }).forProject(wt),
+    ).toEqual({ of: repo, branch: "wt-bounds", state: "merged" });
+
+    // Exceeds total content bytes cap -> unknown.
+    expect(
+      await new WorktreeIndex(undefined, {
+        platform: "win32",
+        maxContentTotalBytes: 400,
+      }).forProject(wt),
+    ).toEqual({ of: repo, branch: "wt-bounds" });
+
+    // Exceeds per-file content bytes cap -> unknown.
+    expect(
+      await new WorktreeIndex(undefined, {
+        platform: "win32",
+        maxContentFileBytes: 128,
+      }).forProject(wt),
+    ).toEqual({ of: repo, branch: "wt-bounds" });
+
+    // Exceeds weak file count cap -> unknown.
+    expect(
+      await new WorktreeIndex(undefined, {
+        platform: "win32",
+        maxContentFiles: 2,
+      }).forProject(wt),
+    ).toEqual({ of: repo, branch: "wt-bounds" });
+
+    // Post-read stat change (simulating concurrent write during content read) -> unknown.
+    let aStatCalls = 0;
+    const targetA = join(wt, "a.txt");
+    const racingStatIndex = new WorktreeIndex(undefined, {
+      platform: "win32",
+      statEntry: (p) => {
+        const real = lstatSync(p, { bigint: true });
+        if (p === targetA) {
+          aStatCalls += 1;
+          if (aStatCalls === 2) {
+            return Object.assign(Object.create(Object.getPrototypeOf(real)), real, {
+              mtimeNs: real.mtimeNs + 1_000_000n,
+            }) as BigIntStats;
+          }
+        }
+        return real;
+      },
+    });
+    expect(await racingStatIndex.forProject(wt)).toEqual({ of: repo, branch: "wt-bounds" });
+    expect(aStatCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "POSIX strong-stat path does not invoke cat-file while weak/Windows path proves content",
+    async () => {
+      const wt = join(root, "wt-strong-fastpath");
+      git(repo, "worktree", "add", "-q", "-b", "wt-strong-fastpath", wt);
+      commit(wt, "fast.txt", "strong-stat\n");
+      settleWorktree(wt);
+      git(repo, "merge", "-q", "--ff-only", "wt-strong-fastpath");
+
+      const invokedCommands: string[] = [];
+      const spyRunner = (
+        gitDir: string,
+        args: readonly string[],
+        opts?: { stdin?: string | Buffer },
+      ) => {
+        const cmd = args.find((a) => !a.startsWith("-") && a !== wt);
+        if (cmd) invokedCommands.push(cmd);
+        const res = spawnSync("git", [`--git-dir=${gitDir}`, ...args], {
+          encoding: "utf8",
+          env: GIT_ENV,
+          ...(opts?.stdin !== undefined ? { input: opts.stdin } : {}),
+        });
+        return res.status === 0 ? res.stdout : undefined;
+      };
+
+      expect(await new WorktreeIndex(spyRunner).forProject(wt)).toEqual({
+        of: repo,
+        branch: "wt-strong-fastpath",
+        state: "merged",
+      });
+      expect(invokedCommands).not.toContain("cat-file");
+
+      const winCommands: string[] = [];
+      const winSpy = (
+        gitDir: string,
+        args: readonly string[],
+        opts?: { stdin?: string | Buffer },
+      ) => {
+        const cmd = args.find((a) => !a.startsWith("-") && a !== wt);
+        if (cmd) winCommands.push(cmd);
+        const res = spawnSync("git", [`--git-dir=${gitDir}`, ...args], {
+          encoding: "utf8",
+          env: GIT_ENV,
+          ...(opts?.stdin !== undefined ? { input: opts.stdin } : {}),
+        });
+        return res.status === 0 ? res.stdout : undefined;
+      };
+
+      expect(await new WorktreeIndex(winSpy, { platform: "win32" }).forProject(wt)).toEqual({
+        of: repo,
+        branch: "wt-strong-fastpath",
+        state: "merged",
+      });
+      expect(winCommands).toContain("cat-file");
+    },
+  );
 });
