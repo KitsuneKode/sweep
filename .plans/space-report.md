@@ -1,7 +1,7 @@
 Status: planned
 Scope: product, protocol, engine, core, cli, ui, docs
 Created: 2026-11-27
-Updated: 2026-11-27 (rev 3)
+Updated: 2026-11-27 (rev 4)
 Commit: uncommitted
 
 # Space report (`sweep space`): "Where your space goes"
@@ -14,9 +14,10 @@ contract.
 Adapted to Sweep's cross-platform CLI, TUI, and website architecture,
 olive-chartreuse visual system, and explicit review-before-removal invariants
 ([.docs/ux-principles.md](../.docs/ux-principles.md)). Satisfies ledger item
-**L3** (`sweep report`), builds on **S3** (per-item protection before reading
-`~`) and **G3** (platform handle-relative destructive containment), and
-integrates **L4** (cached instant start with visible staleness) from
+**L3** (`sweep report`), delivers the read-only `~` reporting step anticipated
+by **S3** before anything destructive, builds on **G3** (platform
+handle-relative destructive containment), and integrates **L4** (cached instant
+start with visible staleness) from
 [.plans/remaining-work.md](remaining-work.md).
 
 ---
@@ -60,11 +61,17 @@ estimates are tracked as separate quantities (Section 3.6).
      unconditionally.
    - **Core planner (JS) and Rust engine:** Both `guardrails.ts` and
      `crates/sweep-engine/src/guardrails.rs` keep `assertSafeCwd` unchanged for
-     destructive commands (`scan`, `clean`, `plan`, `apply`). A separate
-     read-only guard (`assertSafeReadOnlyRoot`) permits `~` and volume roots
-     **only** for `sweep space`. Classification, UI review, and both apply
-     engines enforce the single authoritative category-overlap table in
-     Section 3.1 so the classifier and apply boundary always agree: protected
+     destructive and project-scan commands (`scan`, `clean`, `plan`, `apply`,
+     `sweep -y ~`, `sweep ui --view projects ~`, `sweep ui --view full ~`, and
+     every non-interactive destructive command on `~`). A separate read-only
+     guard (`assertSafeReadOnlyRoot`) permits `~` and volume roots **only** for
+     read-only space reporting (`sweep space`, `sweep ui --view space`, and
+     `sweep ui ~` / `sweep ui` with no path when the current directory is `~`,
+     which opens the read-only Space overview first instead of refusing; ledger
+     **S3** already sequences read-only reports on `~` before anything else, and
+     this is the read-only step S3 anticipates). Classification, UI review, and
+     both apply engines enforce the single authoritative category-overlap table
+     in Section 3.1 so the classifier and apply boundary always agree: protected
      personal roots (including redirected XDG / Known-Folder roots) and sealed
      bundles strictly win over catalog matching, cache matching, and recursive
      ancestor selection.
@@ -83,9 +90,15 @@ estimates are tracked as separate quantities (Section 3.6).
      reviewed instances matched to compiled allowlist templates and re-verified
      at apply time), or `TrashEmptyRequest` (verified user, volume identity,
      and confirmed item snapshot). A forged JSON report or plan cannot smuggle
-     a personal path through any lane.
+     a personal path through any lane. In addition, both JS and Rust apply
+     engines verify target mount types and unconditionally refuse every Space
+     apply lane (`space_handoff`, cache apply, and Trash apply) with
+     `EXIT.GUARDRAIL` (2) on network, FUSE, `virtiofs`, and `drvfs` mounts
+     (`nfs`, `nfs4`, `smb`, `cifs`, `9p`, `fuse` including `sshfs`, `virtiofs`,
+     and `drvfs`), even on filesystems such as NFS where `openat2` path walks
+     might succeed (Section 3.3).
 
-2. **Three and only three action classes exist:**
+2. **Three and only three action classes exist (disabled unconditionally on network, FUSE, `virtiofs`, and `drvfs` roots):**
    - **Class A: Developer artifacts (independent project scan, `space_handoff` policy, G3 containment).**
      The report never passes serialized paths (`targetRoots` or subgroup
      `path` values) into a cleanup scan or `ScanPlan`. `spaceAction` carries
@@ -97,7 +110,9 @@ estimates are tracked as separate quantities (Section 3.6).
      **fresh `ProjectsView` scan** with an **empty queue** under explicit
      additive policy mode **`policyProfile: "space_handoff"`** (stored on
      `ScanPlan`, `ScanOptions`, and `ApplyRequest` under `protocolVersion: "1"`,
-     default `"standard"` for existing commands).
+     default `"standard"` for existing commands; `"space_handoff"` is added to
+     the accepted schema enum only in Phase 4a alongside the fail-closed apply
+     check, while Phase 1 accepts `"standard"` only).
      All existing protections apply verbatim (`assertSafeCwd`, S1 context
      checks, VCS and git-tracked file blocks, filesystem-identity pinning,
      `maxSizeGB`, and committed confirmation). In addition, because S1 alone
@@ -359,10 +374,12 @@ Under `## UI direction`:
 - Future UI stays cleanup-first.
 - Search, filtering, grouping, risk review, and selection ergonomics matter.
 - The UI may include a read-only "Where your space goes" overview (`sweep ui
-  --view space`) that shows category totals and routes users into safe review
-  (developer artifacts, allowlisted regenerable caches, or Trash), but must
-  never turn into a generic file manager or arbitrary-file deleter. Personal
-  file categories remain strictly information-only.
+  --view space`, and opened first by `sweep ui ~` or `sweep ui` with no path
+  when the current directory is `~`) that shows category totals and routes users
+  into safe review (developer artifacts via the per-project flow with an empty
+  queue, allowlisted regenerable caches, or Trash), but must never turn into a
+  generic file manager or arbitrary-file deleter. Personal file categories
+  remain strictly information-only.
 - Search should be fast over structured candidate fields and selection should
   feel immediate.
 ```
@@ -378,14 +395,25 @@ Append to [.docs/decision-log.md](../.docs/decision-log.md) in Phase 0b
 The owner approved expanding `sweep` with a read-only "Where your space goes"
 report across 11 categories (`Apps`, `Developer`, `Photos`, `Videos`, `Music`,
 `Documents`, `Downloads`, `System data`, `Caches`, `Trash`, `Other`), reachable
-via `sweep space [path]` and `sweep ui --view space`:
+via `sweep space [path]`, `sweep ui --view space`, and `sweep ui ~` (or
+`sweep ui` with no path when the current directory is `~`):
 
-- **Read-only home/volume access is decoupled from destructive guardrails.**
+- **Read-only home/volume access is decoupled from destructive guardrails (Q1 decided by owner; S3 read-only step).**
   `assertSafeCwd` continues to refuse `~`, `/`, drive roots, and OS system
-  subtrees for `scan`, `clean`, `plan`, and `apply`, and `sweep ui ~` remains
-  refused. `sweep space` uses a separate `assertSafeReadOnlyRoot` policy that
-  permits `~` and volume roots strictly for read-only aggregation and never
-  produces an executable `ScanPlan` or passes report paths into cleanup scans.
+  subtrees for `scan`, `clean`, `plan`, `apply`, `sweep -y ~`, `sweep ui --view
+  projects ~`, `sweep ui --view full ~`, and every non-interactive destructive
+  command. `sweep space` and `sweep ui --view space` use a separate
+  `assertSafeReadOnlyRoot` policy that permits `~` and volume roots strictly for
+  read-only aggregation and never produces an executable `ScanPlan` or passes
+  report paths into cleanup scans. Per owner decision on Q1 (delivering the
+  read-only step on `~` that ledger S3 already anticipates), `sweep ui ~` (and
+  `sweep ui` with no path when the current directory is `~`) opens the read-only
+  "Where your space goes" view first instead of refusing; nothing on that screen
+  can delete directly, cleaning developer artifacts hands off to the existing
+  per-project flow with an empty queue and all per-item guardrails, and caches
+  and Trash keep their own review and confirmation. Network, FUSE, `virtiofs`,
+  and `drvfs` roots may be measured read-only where supported, but never open
+  review or permit apply.
 - **Personal files are permanently information-only.** Photos, Videos, Music,
   Documents, Downloads, Apps, System data, and Other cannot be queued, planned,
   or removed in either engine or the TUI. Protected personal folders (including
@@ -476,13 +504,29 @@ Options:
 (`357.8 GiB` + dim `of 512 GiB used`), a dim free-space line (with qualified
 estimated purgeable suffix on macOS when available), one segmented dot bar, a
 3-column category legend, and one sentence with the exact next command (such as
-`Run: sweep ui --view space` or `sweep ui ~/Projects`).
+`Run: sweep ui ~` or `sweep ui --view space` or `sweep ui ~/Projects`).
 
 #### TUI integration (`sweep ui`)
 
-- **`sweep ui ~` remains refused** by `assertSafeCwd` (with a clear hint
-  pointing to `sweep space` or `sweep ui --view space ~`). Bare `sweep ui
-  <path>` continues to mean project cleanup review only.
+- **`sweep ui ~` (and `sweep ui` with no path when the current directory is `~`)
+  opens the read-only "Where your space goes" view (`SpaceView`) first**,
+  instead of refusing (owner decision on Q1; ledger **S3** already sequences
+  read-only reports on `~` before anything else, and this is the read-only step
+  S3 anticipates). The target is validated through `assertSafeReadOnlyRoot`
+  (plus invoking-user account isolation), and nothing on that screen can delete
+  directly or construct a `ScanPlan` on `~`:
+  - Cleaning developer artifacts (`c` on `Developer`) hands off through the
+    independent project picker to the existing per-project flow (`ProjectsView`)
+    with an **empty queue** and all per-item guardrails (`policyProfile:
+    "space_handoff"`).
+  - Caches and Trash keep their own separate review and confirmation overlays.
+  - **`sweep clean ~`, `sweep -y ~`, `sweep scan ~`, `sweep plan ~`,
+    `sweep apply` on `~`, explicit `sweep ui --view projects ~` / `--view full
+    ~`, and every non-interactive destructive command on the home folder stay
+    refused by `assertSafeCwd` exactly as today (`EXIT.GUARDRAIL`, exit 2).**
+  - Bare `sweep ui <project-path>` on any non-home directory continues to mean
+    project cleanup review guarded by `assertSafeCwd`; `sweep ui /` and other
+    volume or OS roots without `--view space` remain refused by `assertSafeCwd`.
 - **`sweep ui --view space [path]`** extends `--view <projects|full|space>` in
   `apps/cli/src/cli.ts`. When `--view space` is selected (defaulting `[path]`
   to `~`), the target is validated through `assertSafeReadOnlyRoot` (and
@@ -491,13 +535,18 @@ estimated purgeable suffix on macOS when available), one segmented dot bar, a
   - Press **`w`** ("Where space goes") in Projects or Full view, or choose
     `Space overview` from the **`Ctrl+K` / `F2`** Actions palette. (`s` remains
     bound to "Queue safe items" inside Projects/Full view with zero conflict.)
+    When `SpaceView` was launched directly on `~` (via `sweep ui ~`, `sweep ui`
+    in `~`, or `sweep ui --view space ~`) with no prior `ProjectsView` session,
+    `w` never opens `ProjectsView` on `~` (it is omitted or opens the
+    independent project picker, never bypassing `assertSafeCwd`).
   - Per UX Principle 2 (**Esc walks back, it never quits**), `Esc` inside
     `SpaceView` unwinds one layer per press: open modal (Cache review or Trash
     confirm) -> focused category detail drawer -> back to `ProjectsView` (when
     entered from `ProjectsView`), or cancels an active space scan and returns
-    to the previous view. When launched directly via `sweep ui --view space ~`
-    at the top layer, `Esc` flashes `nothing to unwind - q or ctrl-c quits`.
-    Quitting is always explicit `q` or `Ctrl-C`.
+    to the previous view. When launched directly into `SpaceView` (via
+    `sweep ui ~`, `sweep ui` in `~`, or `sweep ui --view space ~`) at the top
+    layer, `Esc` flashes `nothing to unwind - q or ctrl-c quits`. Quitting is
+    always explicit `q` or `Ctrl-C`.
 - **Key bindings on the Space overview:**
   - `↑↓←→` moves category focus across the 3-column legend (instant highlight,
     no transition delay).
@@ -521,16 +570,23 @@ estimated purgeable suffix on macOS when available), one segmented dot bar, a
       Windows while Windows Trash remains reporting-only).
   - On the Space overview itself, `Space`, `a`, `s`, `x`, and `d` do nothing
     and show a one-line notice (matching UX Principle 7).
-  - **Fail-closed action gating (incomplete coverage vs scope exclusions):**
-    Review (`c`) is disabled whenever `report.cached` is `true`,
-    `report.coverage.complete` is `false` (any `coverage.incompleteReasons`
-    present), `report.redacted` is `true`, or the focused actionable category
-    has `bytesKnown: false`. Normal deliberate `coverage.scopeExclusions` (such
-    as ordinary iCloud/OneDrive placeholders in personal folders or an external
-    drive on another mount) do **not** set `coverage.complete: false` and do
-    **not** block independently validated local review actions, because each
-    review lane independently re-validates its own local, non-placeholder,
-    same-user targets.
+  - **Fail-closed action gating (incomplete coverage, non-local roots, vs scope exclusions):**
+    Review (`c`) is disabled and `SpaceReport.actions` is empty (`[]`) whenever
+    `report.cached` is `true`, `report.coverage.complete` is `false` (any
+    `coverage.incompleteReasons` present), `report.redacted` is `true`, the
+    focused actionable category has `bytesKnown: false`, **or the target root
+    sits on a network, FUSE, `virtiofs`, or `drvfs` mount** (`nfs`, `nfs4`,
+    `smb`, `cifs`, `9p`, `fuse` including `sshfs`, `virtiofs`, or `drvfs`,
+    flagged via `non_local_filesystem` in `coverage.accountingCaveats` and
+    enforced from live mount verification in the UI and both apply engines).
+    The non-local measurement-only rule applies unconditionally regardless of
+    whether `st_blocks` is reported or non-zero. Normal deliberate
+    `coverage.scopeExclusions` on a local filesystem (such as ordinary
+    iCloud/OneDrive placeholders in personal folders, a same-mount XDG folder
+    outside `$HOME`, or an external drive on another mount) do **not** set
+    `coverage.complete: false` and do **not** block independently validated
+    local review actions, because each review lane independently re-validates
+    its own local, non-placeholder, same-user targets.
 
 ### 2.2 Additive, versioned protocol and JSON Schema additions
 
@@ -542,7 +598,9 @@ All additions live in `packages/protocol/` and `crates/sweep-types/` under
 {
   "protocolVersion": "1",
   "schemas": {
-    "scanPlan": { "...": "unchanged (plus optional policyProfile: standard | space_handoff)" },
+    "scanPlan": {
+      "...": "unchanged (optional policyProfile: \"standard\" in Phase 1; \"space_handoff\" added in Phase 4a with fail-closed apply)"
+    },
     "scanEvent": { "...": "unchanged" },
     "applyReport": { "...": "unchanged" },
     "shared": { "...": "unchanged" },
@@ -679,6 +737,7 @@ mismatched action/category pairs are unrepresentable in Draft 2020-12.
             "enum": [
               "cloud_placeholders_excluded",
               "other_volumes_excluded",
+              "outside_home_scope_excluded",
               "wsl_windows_drives_excluded",
               "snapshot_trees_excluded",
               "virtual_or_autofs_excluded",
@@ -695,7 +754,8 @@ mismatched action/category pairs are unrepresentable in Draft 2020-12.
               "clone_or_compression_overlap",
               "allocated_unavailable",
               "placeholder_allocation_unknown",
-              "cow_unproved_domain"
+              "cow_unproved_domain",
+              "non_local_filesystem"
             ]
           }
         }
@@ -712,7 +772,97 @@ mismatched action/category pairs are unrepresentable in Draft 2020-12.
       "type": "array",
       "minItems": 11,
       "maxItems": 11,
-      "items": { "$ref": "#/$defs/spaceCategory" }
+      "items": { "$ref": "#/$defs/spaceCategory" },
+      "allOf": [
+        {
+          "contains": {
+            "properties": { "id": { "const": "apps" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "developer" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "photos" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "videos" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "music" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "documents" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "downloads" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "system_data" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "caches" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "trash" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": { "id": { "const": "other" } },
+            "required": ["id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
     },
     "actions": {
       "type": "array",
@@ -720,6 +870,42 @@ mismatched action/category pairs are unrepresentable in Draft 2020-12.
       "items": { "$ref": "#/$defs/spaceAction" }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "coverage": {
+            "properties": {
+              "accountingCaveats": {
+                "contains": { "const": "non_local_filesystem" }
+              }
+            },
+            "required": ["accountingCaveats"]
+          }
+        },
+        "required": ["coverage"]
+      },
+      "then": {
+        "properties": {
+          "actions": { "maxItems": 0 },
+          "categories": {
+            "items": {
+              "properties": {
+                "actionability": { "const": "info_only" },
+                "subgroups": {
+                  "items": {
+                    "properties": {
+                      "actionability": { "const": "info_only" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "nonNegInt": {
       "type": "integer",
@@ -848,6 +1034,7 @@ mismatched action/category pairs are unrepresentable in Draft 2020-12.
               "unknownReason": {
                 "enum": [
                   "tcc_or_permission",
+                  "hardlink_dedup_cap",
                   "incomparable_domain",
                   "invalid_residual",
                   "not_applicable_for_scope"
@@ -1135,21 +1322,30 @@ Key structural invariants enforced by this schema:
    on `developer_review`, and rejects any action targeting a personal category.
    No `targetRoots`, subgroup `path`, or executable `ownerCommand` field exists
    anywhere in the schema.
-3. **Personal categories are locked to `info_only`:** `spaceCategory` uses
-   `oneOf` so `apps`, `photos`, `videos`, `music`, `documents`, `downloads`,
-   `system_data`, and `other` require `actionability: "info_only"` on both the
-   category and every subgroup.
+3. **Personal categories are locked to `info_only` and all 11 IDs appear
+   exactly once:** `spaceCategory` uses `oneOf` so `apps`, `photos`, `videos`,
+   `music`, `documents`, `downloads`, `system_data`, and `other` require
+   `actionability: "info_only"` on both the category and every subgroup.
+   `categories` combines `minItems: 11` / `maxItems: 11` with eleven
+   `contains` (`minContains: 1`, `maxContains: 1`) clauses so every one of the
+   11 category IDs must appear exactly once (rejecting duplicates such as eleven
+   `photos` objects).
 4. **Honest unknown byte representation:** When `bytesKnown` is `false` on a
-   category (for example, an unread macOS TCC folder, an unproved CoW or
-   invalid `system_data` residual, or a partially resident placeholder whose
-   local allocation is unknown), `allocatedBytes` is omitted and
-   `unknownReason` is required (and `apparentBytes` is also omitted when unread
-   or incomparable, while retained when directory metadata is known for cloud
-   placeholders). On `spaceSubgroup`, `allocatedKnown: false` omits
-   `allocatedBytes` rather than fabricating `0`.
-5. **Completeness separated from scope exclusions:** `coverage.complete` is
-   strictly coupled to `coverage.incompleteReasons` being empty, separate from
-   `coverage.scopeExclusions` and `coverage.accountingCaveats`.
+   category (for example, an unread macOS TCC folder, a `hardlink_dedup_cap`
+   overflow, an unproved CoW or invalid `system_data` residual, or a partially
+   resident placeholder whose local allocation is unknown), `allocatedBytes` is
+   omitted and `unknownReason` is required (and `apparentBytes` is also omitted
+   when unread, capped, or incomparable, while retained when directory metadata
+   is known for cloud placeholders). On `spaceSubgroup`, `allocatedKnown: false`
+   omits `allocatedBytes` rather than fabricating `0`.
+5. **Completeness separated from scope exclusions; non-local roots are
+   measurement-only:** `coverage.complete` is strictly coupled to
+   `coverage.incompleteReasons` being empty, separate from
+   `coverage.scopeExclusions` (including `outside_home_scope_excluded` for
+   same-mount XDG folders outside `$HOME`) and `coverage.accountingCaveats`.
+   When `non_local_filesystem` is present in `coverage.accountingCaveats`
+   (network, FUSE, `virtiofs`, or `drvfs` root), the schema requires
+   `actions: []` and `actionability: "info_only"` on every category.
 6. **Personal subgroups never keep filenames**, including before `--redact`.
    Subgroups under `photos`, `videos`, `music`, `documents`, `downloads`,
    `apps`, `system_data`, and `other` are strictly type or bucket totals (such
@@ -1166,7 +1362,7 @@ NDJSON events emitted by `sweep space --json-stream` and consumed by the TUI:
   aggregate-only `SpaceCacheSnapshot` exists, with `cacheAgeMs` so the TUI
   paints an explicitly labeled stale view while scanning and keeps every action
   disabled)
-- `space_progress`: `{ type, scannedDirs, scannedFiles, skippedDirs, currentDir?, categories: [{ id, allocatedBytes?, apparentBytes, fileCount, nameCount }] }` (throttled to 80 to 120 ms cadence; `currentDir` is omitted when `--redact` is set and is never emitted for foreign or uncertain account paths)
+- `space_progress`: `{ type, scannedDirs, scannedFiles, skippedDirs, currentDir?, categories: [{ id, bytesKnown, allocatedBytes?, apparentBytes?, fileCount, nameCount }] }` (throttled to 80 to 120 ms cadence; `currentDir` is omitted when `--redact` is set and is never emitted for foreign or uncertain account paths; both `allocatedBytes` and `apparentBytes` are optional and follow the exact same omission rules as `SpaceReport` so unread TCC categories, capped totals, incomparable residuals, or partial placeholders never emit fabricated `0` values)
 - `space_warning`: `{ type, code, detail? }` (typed warning code from a fixed
   enum; `detail` is omitted under `--redact` so raw paths cannot leak)
 - `space_completed`: `{ type, report }` (the complete validated `SpaceReport`)
@@ -1201,9 +1397,13 @@ Reuses `EXIT` in [apps/cli/src/errors.ts](../apps/cli/src/errors.ts) verbatim:
     to run** (`no_recall_policy_unavailable`, exit 2) rather than risking cloud
     hydration or provider enumeration fetches.
   - On **Linux**, the JS fallback (`packages/core/src/space-scanner.ts`) may
-    run **only** on verified local non-network, non-autofs, non-FUSE mounts
-    (parsing `/proc/self/mountinfo` first) and fails closed if mount
-    verification fails.
+    run **only** on verified local non-network, non-autofs, non-FUSE,
+    non-`virtiofs`, non-`drvfs` mounts (parsing `/proc/self/mountinfo` first)
+    and fails closed (exit 2) on `nfs`, `nfs4`, `smb`, `cifs`, `9p`, `fuse`
+    (including `sshfs`), `virtiofs`, `drvfs`, `autofs`, or any mount
+    verification failure. The Rust engine may measure already-mounted
+    non-autofs network, FUSE, `virtiofs`, and `drvfs` roots read-only, with
+    every review and apply action unconditionally disabled (Section 3.3).
   - For destructive `space_handoff` apply (Phase 4a), neither host nor engine
     ever falls back silently to ordinary or older apply authority.
 - **Direct reuse of `crates/sweep-fs` primitives:**
@@ -1264,10 +1464,20 @@ classified by the **first matching rule** in this strict order:
        parent/ancestor attributes via `FindFirstFileExW` before opening or
        enumerating any root or redirected subtree, and reject/skip uncertain,
        offline, recall, or cloud-reparse paths without touching them.
-     - Reject remote, auto-mounted, or cloud-provider roots when local
-       no-recall access cannot be verified; fail closed when the JS fallback
-       lacks verified no-recall primitives.
-   - **Universal invoking-user account isolation (ALL scopes, ALL profile locations, elevated runs):**
+     - Reject auto-mounted (`autofs`) or cloud-provider roots where no-recall
+       access cannot be verified (`EXIT.GUARDRAIL`, exit 2), and fail closed
+       when the JS fallback lacks verified no-recall primitives. On macOS and
+       Windows, reject remote or cloud-provider roots when local no-recall
+       access cannot be verified. On Linux, an explicitly targeted,
+       already-mounted non-autofs network, FUSE, `virtiofs`, or `drvfs` root
+       (`nfs`, `nfs4`, `smb`, `cifs`, `9p`, `fuse` including `sshfs`,
+       `virtiofs`, `drvfs`) may be measured read-only by the Rust engine only
+       (the JS fallback refuses with exit 2), under one unconditional rule:
+       every category stays `info_only`, `actions` is empty (`[]`),
+       `non_local_filesystem` is recorded in `coverage.accountingCaveats`,
+       review (`c`) is disabled, and both JS and Rust apply engines refuse
+       apply (Section 3.3).
+   - **Universal invoking-user account isolation (ALL scopes, ALL profile locations, elevated runs, and explicit WSL `drvfs`):**
      - Resolve the invoking user identity from trusted OS state (`getuid()`, or
        `SUDO_UID` when running under `sudo` on Unix; invoking Windows token
        user SID via `GetTokenInformation(TokenUser)` on Windows). If running as
@@ -1280,6 +1490,18 @@ classified by the **first matching rule** in this strict order:
        `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList` plus
        `FOLDERID_Public` on Windows) rather than relying only on hard-coded
        `/home/*`, `/Users/*`, or `C:\Users\*` prefixes.
+     - **Explicit WSL `drvfs` paths (such as `/mnt/c` or `/mnt/c/Users/...`):**
+       Default `drvfs` mounts map Windows files to the Linux uid, so `getpwent`
+       alone cannot separate other Windows user accounts. An explicit walk of a
+       WSL `drvfs` path must therefore apply the same other-account isolation as
+       a native Windows walk (identifying the invoking Windows user profile and
+       all other profile roots from Windows `ProfileList` plus `Public`,
+       refusing foreign Windows profiles on `path`/`home` scope and excluding
+       them on `volume` scope with zero paths, zero subgroups, and zero actions)
+       or **refuse the explicit `drvfs` path with `EXIT.GUARDRAIL` (2)**
+       whenever Windows account isolation cannot be verified. Even when
+       measured, a `drvfs` root remains measurement-only with zero review or
+       apply actions.
      - **On `--scope path` (explicit path) or `--scope home`:** Before
        traversal and before emitting any `space_progress.currentDir`, verify
        the target root is owned by the invoking user and is neither inside
@@ -1316,11 +1538,12 @@ classified by the **first matching rule** in this strict order:
        mounts (identified from mount table / `AT_NO_AUTOMOUNT` without
        triggering automount), nested `tmpfs`/`proc`/`sysfs`/`overlay` mounts
        (while walking the root filesystem when the container root itself is
-       `overlay`), nested network/virtual mounts (`nfs`, `nfs4`, `smb`, `cifs`,
-       `9p`, `drvfs`), WSL `/mnt/c` and other `drvfs` Windows mounts (with a
-       visible note), and snapshot trees (ZFS `.zfs`, Snapper `.snapshots`,
-       Timeshift snapshot trees, and btrfs subvolumes with `parent_uuid` set).
-       Record these deliberate boundaries in `coverage.scopeExclusions` (not
+       `overlay`), nested network/FUSE/virtual mounts (`nfs`, `nfs4`, `smb`,
+       `cifs`, `9p`, `fuse` including `sshfs`, `virtiofs`, `drvfs`), WSL
+       `/mnt/c` and other `drvfs` Windows mounts (with a visible note), and
+       snapshot trees (ZFS `.zfs`, Snapper `.snapshots`, Timeshift snapshot
+       trees, and btrfs subvolumes with `parent_uuid` set). Record these
+       deliberate boundaries in `coverage.scopeExclusions` (not
        `incompleteReasons`).
      - Skip foreign mounts and same-device bind mounts under `$HOME`, increment
        `coverage.crossDeviceSkippedDirs`, and surface a visible `"not on this
@@ -1361,9 +1584,10 @@ classified by the **first matching rule** in this strict order:
    - `music`: OS Music directory
    - `documents`: OS Documents and Desktop directories (guarding against any
      XDG entry resolving to `$HOME` itself)
-     Everything inside a known personal folder (including redirected XDG /
-     Known-Folder roots) stays **`info_only`** and contributes **zero**
-     actionable Developer or Cache bytes, even if it contains a directory named
+     Everything inside a known personal folder (other than sealed bundles
+     already assigned to `apps` or `photos` by Rule 3, which are also
+     `info_only`) stays **`info_only`** and contributes **zero** actionable
+     Developer or Cache bytes, even if it contains a directory named
      `node_modules`, `target`, `.next`, or `.cache` alongside a project
      manifest. This rule is shared identically by the classifier and both apply
      engines under `policyProfile: "space_handoff"`.
@@ -1431,15 +1655,15 @@ This single table governs classification, Space UI review, and both JS and Rust
 apply boundaries under `policyProfile: "space_handoff"`, replacing any ad-hoc
 `isPersonalRootTarget` check:
 
-| Where the file or directory is                                                                                                                                     | Category                           | Action and apply boundary                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Video, audio, or PDF inside a recognized project root (outside personal known folders and sealed bundles)                                                          | `developer` (`info_only` subgroup) | Never queued. Extension fallback does not run inside the project.                                                                                                      |
-| Any file or directory (media, `.cache`, or catalog-named `node_modules`/`target`/`.next`) inside Pictures, Movies/Videos, Music, Documents, Downloads, or Desktop  | That known folder (longest prefix) | Never queued (`info_only`). Protected personal roots (including redirected XDG / Known-Folder roots) win over catalog and cache rules in classifier and apply engines. |
-| Eligible catalog artifact (`node_modules`, `target`, `.next`, peers) inside a project outside personal roots, sealed bundles, system prefixes, and tool homes      | `developer`                        | Eligible for Developer review (`space_handoff`) only when positive artifact eligibility holds and no protected personal subtree or sealed bundle is inside or above.   |
-| Any file or catalog artifact inside a sealed bundle (`.app`, `.framework`, `*.photoslibrary`, Flatpak, Snap, Program Files, WindowsApps), incl. scan inside bundle | The bundle (`apps` or `photos`)    | Never queued (`info_only`). Sealed bundles block catalog, cache, and extension rules (Rule 3).                                                                         |
-| Realpath equals a resolved compiled allowlist leaf (same user, neither ancestor nor descendant of a personal root or sealed bundle, not a generic temp directory)  | `caches`                           | Eligible for Cache review (`allowlisted_cache`, instance-bound) or `owner_tool_copy_only`. Copied `cacache`, `~/Documents/.cache`, or generic Temp stays `info_only`.  |
-| Resolved `XDG_CACHE_HOME`, `npm_config_cache`, `CARGO_HOME`, `PNPM_HOME`, or `GRADLE_USER_HOME` equals, is ancestor of, or is descendant of a personal folder      | That personal folder               | Never queued (`info_only`). Display-only.                                                                                                                              |
-| Anything under a verified invoking-user trash root, including a deleted video or `node_modules`                                                                    | `trash`                            | Trash confirm only (subject to platform Trash apply verification gate).                                                                                                |
+| Where the file or directory is                                                                                                                                                                                 | Category                                                                                                 | Action and apply boundary                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Video, audio, or PDF inside a recognized project root (outside personal known folders and sealed bundles)                                                                                                      | `developer` (`info_only` subgroup)                                                                       | Never queued. Extension fallback does not run inside the project.                                                                                                      |
+| Any file or directory outside a sealed bundle (media, `.cache`, or catalog-named `node_modules`/`target`/`.next`) inside Pictures, Movies/Videos, Music, Documents, Downloads, or Desktop                      | That known folder (longest prefix; sealed bundles inside a personal folder are assigned by Rule 3 first) | Never queued (`info_only`). Protected personal roots (including redirected XDG / Known-Folder roots) win over catalog and cache rules in classifier and apply engines. |
+| Eligible catalog artifact (`node_modules`, `target`, `.next`, peers) inside a project outside personal roots, sealed bundles, system prefixes, and tool homes                                                  | `developer`                                                                                              | Eligible for Developer review (`space_handoff`) only when positive artifact eligibility holds and no protected personal subtree or sealed bundle is inside or above.   |
+| Any file or catalog artifact inside a sealed bundle (`.app`, `.framework`, `*.photoslibrary`, Flatpak, Snap, Program Files, WindowsApps), incl. a downloaded `.app` inside `~/Downloads` or scan inside bundle | The bundle (`apps` or `photos`; Rule 3 wins over Rule 4 for category assignment)                         | Never queued (`info_only`). Sealed bundles block catalog, cache, and extension rules (Rule 3).                                                                         |
+| Realpath equals a resolved compiled allowlist leaf (same user, neither ancestor nor descendant of a personal root or sealed bundle, not a generic temp directory)                                              | `caches`                                                                                                 | Eligible for Cache review (`allowlisted_cache`, instance-bound) or `owner_tool_copy_only`. Copied `cacache`, `~/Documents/.cache`, or generic Temp stays `info_only`.  |
+| Resolved `XDG_CACHE_HOME`, `npm_config_cache`, `CARGO_HOME`, `PNPM_HOME`, or `GRADLE_USER_HOME` equals, is ancestor of, or is descendant of a personal folder                                                  | That personal folder                                                                                     | Never queued (`info_only`). Display-only.                                                                                                                              |
+| Anything under a verified invoking-user trash root, including a deleted video or `node_modules`                                                                                                                | `trash`                                                                                                  | Trash confirm only (subject to platform Trash apply verification gate).                                                                                                |
 
 ### 3.2 macOS specifics
 
@@ -1556,9 +1780,9 @@ apply boundaries under `policyProfile: "space_handoff"`, replacing any ad-hoc
     disk"** (`other_volumes_excluded`) and do **not** silently replace it with
     an empty `~/Downloads`.
   - If it sits on the **same mount/volume** outside `$HOME`: on `--scope home`,
-    record it as **"outside home scope"** (`other_volumes_excluded`) without
-    falsely calling it `"on another disk"` and without substituting an empty
-    `~/Downloads`; on `--scope volume`, verify invoking-user ownership and
+    record it as **"outside home scope"** (`outside_home_scope_excluded`)
+    without falsely calling it `"on another disk"` and without substituting an
+    empty `~/Downloads`; on `--scope volume`, verify invoking-user ownership and
     classify it into its personal category (protected by Rule 4).
     Fall back to `$HOME/{Pictures,Videos,Music,Documents,Downloads,Desktop}` only
     when the XDG entry is absent.
@@ -1596,24 +1820,45 @@ apply boundaries under `policyProfile: "space_handoff"`, replacing any ad-hoc
     `cgroup2`, and nested `overlay` mounts (while still walking the root
     filesystem when the container root itself is `overlay`), recording
     `virtual_or_autofs_excluded` in `coverage.scopeExclusions`.
-  - **Network and virtual filesystems (`nfs`, `nfs4`, `smb`, `cifs`, `9p`, `drvfs`), skipped vs measured:**
+  - **Network, FUSE, `virtiofs`, and `drvfs` filesystems (`nfs`, `nfs4`, `smb`, `cifs`, `9p`, `fuse` including `sshfs`, `virtiofs`, `drvfs`), skipped vs measurement-only:**
     - **Nested inside a local `home` or `volume` walk:** Always **skip** via
       mount-table / `mount_id` boundary (`other_volumes_excluded` or
       `wsl_windows_drives_excluded`). Never cross from a local walk onto a
-      network share.
-    - **Explicitly targeted root (e.g., `sweep space /mnt/nas` or a network
-      home on Linux):** Refuse `autofs` triggers with `EXIT.GUARDRAIL` (2). For
-      an already-mounted non-autofs network root, allow read-only measurement
-      only; when `st_blocks` is missing or reported as zero for non-empty
-      files, show apparent bytes, add `allocated_unavailable` to
-      `coverage.accountingCaveats`, set `accountingDomainComparable: false`
-      (`system_data.bytesKnown: false`), exempt from Section 4.2 local-SSD wall
-      targets, and disable destructive review actions (since G3 local
-      handle-relative containment does not hold on network/FUSE mounts).
-  - **WSL:** Under WSL, exclude `/mnt/c` and other `drvfs` Windows drive mounts
-    from a home or `/` report (`wsl_windows_drives_excluded` in
+      network, FUSE, `virtiofs`, or `drvfs` mount.
+    - **Explicitly targeted root (e.g., `sweep space /mnt/nas`, a network
+      home, a FUSE/`sshfs`/`virtiofs` mount, or an explicit WSL `/mnt/c` path):**
+      Refuse `autofs` triggers with `EXIT.GUARDRAIL` (2). For an
+      already-mounted non-autofs `nfs`, `nfs4`, `smb`, `cifs`, `9p`, `fuse`
+      (including `sshfs`), `virtiofs`, or `drvfs` root, allow **read-only
+      measurement only** in the Rust engine (the Linux JS fallback refuses with
+      exit 2) under **one unconditional action rule** that applies regardless
+      of whether `st_blocks` is reported or non-zero and regardless of whether
+      `openat2` would succeed on that mount:
+      - Force every category's `actionability` to `"info_only"` and emit
+        `actions: []`,
+      - Add `non_local_filesystem` to `coverage.accountingCaveats` and set
+        `accountingDomainComparable: false` (`system_data.bytesKnown: false`),
+      - Exempt from Section 4.2 local-SSD wall targets,
+      - Disable review (`c`) in the TUI and refuse every Space destructive
+        apply (`space_handoff`, cache apply, Trash apply) in both JS and Rust
+        apply engines with `EXIT.GUARDRAIL` (2).
+        Separately, when `st_blocks` is missing or reported as zero for non-empty
+        files, display apparent bytes and also add `allocated_unavailable` to
+        `coverage.accountingCaveats`.
+  - **WSL (`drvfs`):** Under WSL, exclude `/mnt/c` and other `drvfs` Windows
+    drive mounts from a home or `/` report (`wsl_windows_drives_excluded` in
     `coverage.scopeExclusions`) and show a clear note that Windows drives are
-    not included.
+    not included. For an **explicit** walk of a WSL `drvfs` path (such as
+    `sweep space /mnt/c` or `sweep space /mnt/c/Users/...`), default `drvfs`
+    uid mapping hides Windows account ownership from `getpwent`; the engine
+    must therefore apply the same other-account isolation as a native Windows
+    walk (resolving the invoking Windows user profile and all other profiles
+    from Windows `ProfileList` plus `Public`, refusing foreign Windows profiles
+    on `path`/`home` scope and excluding them on `volume` scope with zero
+    paths, zero subgroups, and zero actions) or **refuse with `EXIT.GUARDRAIL`
+    (2)** whenever Windows account isolation cannot be verified. Even when
+    measured, a `drvfs` root remains measurement-only and never opens review or
+    offers actions.
   - **Separate `/home` volume:** When `/home` is its own mounted non-CoW
     filesystem, `System data`'s sentence names other accounts, unread
     directories, and filesystem metadata; it does **not** say `"OS files"`.
@@ -1973,15 +2218,15 @@ host retention):
 
 #### Coordinated `SpaceLimits` and explicit cap behavior
 
-| Retained resource                                    | `balanced` cap (est. RAM incl. slack) | `low-memory` cap (est. RAM incl. slack) | Exact behavior when cap is reached                                                                                                                                                                  |
-| ---------------------------------------------------- | ------------------------------------: | --------------------------------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Resumable directory frames & queued path bytes       |          16,384 dirs / 4 MiB (~6 MiB) |             2,048 dirs / 1 MiB (~2 MiB) | Pause sibling fan-out via resumable directory cursors (drain depth-first); if frames still overflow, skip excess and set `queue_cap` in `incompleteReasons` (`complete: false`, disable review).    |
-| Open directory FDs across all workers                |                            64 FDs max |                              16 FDs max | Close parent cursor or serialize worker dir open; never exhaust `RLIMIT_NOFILE`.                                                                                                                    |
-| Cycle/alias table (`VisitedDirs`, dedicated)         |           131,072 dir inodes (~6 MiB) |            32,768 dir inodes (~1.5 MiB) | Never shares space with hardlinks. On cap, refuse further descent into unverified subtrees, set `cycle_cap` in `incompleteReasons` (`complete: false`), disable review.                             |
-| Hardlink dedup table (`SeenHardlinks`, dedicated)    |         262,144 file inodes (~16 MiB) |             65,536 file inodes (~4 MiB) | Remaining multi-link files count as upper bound; set `hardlink_dedup_cap` in `incompleteReasons` **only** (never `clone_or_compression_overlap`), set affected `bytesKnown: false`, disable review. |
-| Max dirents per single directory (`MAX_DIR_ENTRIES`) |                             4,000,000 |                               4,000,000 | Stop reading runaway dir; mark `unreadable_entries` in `incompleteReasons`, `complete: false`, disable review.                                                                                      |
-| Top-K heavy subgroups per category                   |                64 in-memory (16 wire) |                  32 in-memory (16 wire) | Evict smallest subgroup; totals in category accumulators stay exact.                                                                                                                                |
-| Serialized event queue & JS host retention           |           4 pending frames (~256 KiB) |             2 pending frames (~128 KiB) | Drop superseded `space_progress` frames under slow consumer; never drop `space_started` or `space_completed`.                                                                                       |
+| Retained resource                                    | `balanced` cap (est. RAM incl. slack) | `low-memory` cap (est. RAM incl. slack) | Exact behavior when cap is reached                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------: | --------------------------------------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resumable directory frames & queued path bytes       |          16,384 dirs / 4 MiB (~6 MiB) |             2,048 dirs / 1 MiB (~2 MiB) | Pause sibling fan-out via resumable directory cursors (drain depth-first); if frames still overflow, skip excess and set `queue_cap` in `incompleteReasons` (`complete: false`, disable review).                                                                                                                                                   |
+| Open directory FDs across all workers                |                            64 FDs max |                              16 FDs max | Close parent cursor or serialize worker dir open; never exhaust `RLIMIT_NOFILE`.                                                                                                                                                                                                                                                                   |
+| Cycle/alias table (`VisitedDirs`, dedicated)         |           131,072 dir inodes (~6 MiB) |            32,768 dir inodes (~1.5 MiB) | Never shares space with hardlinks. On cap, refuse further descent into unverified subtrees, set `cycle_cap` in `incompleteReasons` (`complete: false`), disable review.                                                                                                                                                                            |
+| Hardlink dedup table (`SeenHardlinks`, dedicated)    |         262,144 file inodes (~16 MiB) |             65,536 file inodes (~4 MiB) | Stop deduplicating further multi-link files; mark affected categories `bytesKnown: false` (total is unknown; `allocatedBytes` and `apparentBytes` omitted) with `unknownReason: "hardlink_dedup_cap"`, set `hardlink_dedup_cap` in `incompleteReasons` **only** (never `clone_or_compression_overlap`), set `complete: false`, and disable review. |
+| Max dirents per single directory (`MAX_DIR_ENTRIES`) |                             4,000,000 |                               4,000,000 | Stop reading runaway dir; mark `unreadable_entries` in `incompleteReasons`, `complete: false`, disable review.                                                                                                                                                                                                                                     |
+| Top-K heavy subgroups per category                   |                64 in-memory (16 wire) |                  32 in-memory (16 wire) | Evict smallest subgroup; totals in category accumulators stay exact.                                                                                                                                                                                                                                                                               |
+| Serialized event queue & JS host retention           |           4 pending frames (~256 KiB) |             2 pending frames (~128 KiB) | Drop superseded `space_progress` frames under slow consumer; never drop `space_started` or `space_completed`.                                                                                                                                                                                                                                      |
 
 ### 4.3 Streaming, cancellation, and L4 cached instant start
 
@@ -2030,10 +2275,11 @@ host retention):
     write-temp-fsync-rename, verifying parent dir ownership).
   - Any live context (target display label, subgroups, validated project roots,
     allowlist instances) is derived strictly in memory during a fresh scan.
-  - On launch, `sweep ui --view space` (and `sweep space` unless `--no-cache`)
-    paints the cached snapshot with a prominent staleness chip (`Cached 3h ago,
-    scanning fresh...`). **Every review and cleanup action stays disabled**
-    until a fresh complete scan settles.
+  - On launch, `sweep ui --view space`, `sweep ui ~` (or `sweep ui` with no
+    path when the current directory is `~`), and `sweep space` (unless
+    `--no-cache`) paint the cached snapshot with a prominent staleness chip
+    (`Cached 3h ago, scanning fresh...`). **Every review and cleanup action
+    stays disabled** until a fresh complete scan settles.
 
 ---
 
@@ -2075,15 +2321,26 @@ host retention):
    - `space_warning` and stderr/error diagnostics -> fixed typed enum codes and
      static template strings only (never raw OS error strings containing paths,
      never native-child paths or argv dumps).
-   - **Closed redacted shape for all free-text fields and IDs:** Under
-     `redacted: true`, `insight`, `reason`, `sentence`, and `buttonLabel` are
-     rendered exclusively from a closed table of compiled static templates
-     parameterized only by category ID, integer byte/count totals, and compiled
-     allowlist display names (zero user-derived folder names, mount labels, or
-     parent-folder strings). `spaceAction.id` and `spaceSubgroup.id` are
-     restricted strictly to compiled static identifiers (e.g.,
-     `action:developer_review`, `allowlist:<id>`, `bucket:build_artifacts`,
-     `type:heic`) or sequential opaque placeholders (`group-1`, `group-2`).
+   - **Closed redacted shape for all free-text fields, labels, and IDs:** Under
+     `redacted: true`:
+     - `category.label` is emitted exclusively from the compiled 11-category
+       label table (`Apps`, `Developer`, `Photos`, `Videos`, `Music`,
+       `Documents`, `Downloads`, `System data`, `Caches`, `Trash`, `Other`).
+     - `subgroup.label` is emitted exclusively from compiled allowlist display
+       names, fixed type labels (such as `"Photos Library"`, `"HEIC"`, `"MP4"`,
+       `"Not stored on this disk"`), fixed developer bucket labels (`"Build
+       artifacts"`, `"Toolchains & SDKs"`, `"Source & git history"`), or
+       sequential opaque placeholders (`"group-1"`, `"group-2"`, ...), never
+       carrying a profile name, project name, or filesystem path.
+     - `insight`, `reason`, `sentence`, and `buttonLabel` are rendered
+       exclusively from a closed table of compiled static templates
+       parameterized only by category ID, integer byte/count totals, and
+       compiled allowlist display names (zero user-derived folder names, mount
+       labels, or parent-folder strings).
+     - `spaceAction.id` and `spaceSubgroup.id` are restricted strictly to
+       compiled static identifiers (e.g., `action:developer_review`,
+       `allowlist:<id>`, `bucket:build_artifacts`, `type:heic`) or sequential
+       opaque placeholders (`group-1`, `group-2`).
    - Compiled copy-only owner commands are emitted from static allowlist
      templates (never containing usernames or paths).
    - Every review and apply action is disabled on any `redacted: true` payload
@@ -2181,6 +2438,15 @@ All layouts obey Sweep's storage-card grammar:
   `Unknown` (`bytesKnown: false`), the dim line may append a qualified
   estimate (`154.2 GiB free (~28.4 GiB est. purgeable)`), and focusing `System
   data` explains that CoW clones and snapshots can share blocks.
+- **Home-folder entry (`sweep ui ~` and `sweep ui` in `~`, owner decision Q1):**
+  `sweep ui ~` (and `sweep ui` with no path when the current directory is `~`)
+  opens this read-only "Where your space goes" view (`SpaceView`) first instead
+  of refusing. Nothing on this screen can delete directly: `c` on `Developer`
+  hands off through the independent project picker into the existing per-project
+  `ProjectsView` flow with an empty queue and all per-item guardrails
+  (`policyProfile: "space_handoff"`), while `Caches` and `Trash` keep their own
+  separate review and confirmation overlays. `w` ("projects") only returns to a
+  prior `ProjectsView` session and never opens a `ProjectsView` scan on `~`.
 - **Dataless / cloud-placeholder visibility across all three widths:** When a
   category contains cloud placeholders (`"Not stored on this disk"` subgroup),
   it is surfaced visibly on the default card at every standard width so
@@ -2191,7 +2457,14 @@ All layouts obey Sweep's storage-card grammar:
   - At **100 columns**: shown in the inline `"In <Category>:"` breakdown block
     directly beneath the 3-column legend.
   - At **80 columns**: included directly in the focused category's footer
-    sentence (e.g., `"Photos: 44.1 GiB (+18.2 GiB not stored on this disk). Personal files are info-only."`, or `"Photos: on-disk unknown (18.2 GiB cloud placeholders). Personal files are info-only."`), with full subgroup details on `Enter`.
+    sentence, matching `bytesKnown`:
+    - When `bytesKnown` is `true` (e.g. macOS `UF_DATALESS`, where dataless
+      placeholders have `allocatedBytes = 0` and the category's on-disk total
+      is known): `"Photos: 44.1 GiB (+18.2 GiB not stored on this disk). Personal files are info-only."`
+    - When `bytesKnown` is `false` with `unknownReason: "placeholder_allocation_unknown"`
+      (e.g. Windows `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, where the category's
+      on-disk total is omitted): `"Photos: on-disk unknown (18.2 GiB not stored on this disk). Personal files are info-only."`
+      Full subgroup details open on `Enter`.
 
 #### 120 columns x 30 rows (max line width <= 119 cells)
 
@@ -2277,7 +2550,7 @@ Developer: 31.4 GiB of build output (112 projects).      [ c Review Developer ]
 
 #### Focused category sentence and single action (plain copy, no em dashes)
 
-- **Actionable categories (when complete, fresh, unredacted, and `bytesKnown: true`):**
+- **Actionable categories (when complete, fresh, unredacted, `bytesKnown: true`, and on a local non-network, non-FUSE, non-`virtiofs`, non-`drvfs` filesystem):**
   - `Developer`: `"Developer has 31.4 GiB of build output across 112 projects."`
     `[ c Review Developer ]` (always quotes eligible artifact bytes strictly
     outside protected personal folders and sealed bundles).
@@ -2286,8 +2559,17 @@ Developer: 31.4 GiB of build output (112 projects).      [ c Review Developer ]
   - `Trash`: `"Trash holds up to 19.4 GiB of items in Trash. Emptying is permanent and local snapshots may still hold blocks."`
     `[ c Review Trash ]` (omits button on Windows while Windows Trash stays
     reporting-only).
+- **Network, FUSE, `virtiofs`, and `drvfs` roots (`non_local_filesystem`):**
+  Every category renders as read-only measurement only with no review button
+  (for example: `"Developer: 48.2 GiB. Read-only measurement on a non-local filesystem; review and cleanup are disabled."`).
 - **Info-only categories:**
-  - `Photos` (and other personal categories): `"Photos: 44.1 GiB. Personal files are info-only. Sweep never queues or removes them."` (No action button; appends `(+18.2 GiB not stored on this disk)` at 80 cols when cloud placeholders are present.)
+  - `Photos` (and other personal categories): when `bytesKnown` is `true`,
+    `"Photos: 44.1 GiB. Personal files are info-only. Sweep never queues or removes them."`
+    (No action button; on macOS `UF_DATALESS` where `bytesKnown` stays `true`,
+    appends `(+18.2 GiB not stored on this disk)` at 80 cols.) When `bytesKnown`
+    is `false` with `unknownReason: "placeholder_allocation_unknown"` (Windows
+    `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS`, where the category total is
+    omitted): `"Photos: on-disk unknown (18.2 GiB not stored on this disk). Personal files are info-only."`
   - Unread macOS TCC folder (e.g. `Documents` with `bytesKnown: false`):
     `"Documents was not read (permission required). Personal files are info-only."`
 - Every review button opens a **Review / Confirmation** surface and never
@@ -2349,40 +2631,49 @@ bundled with UI, docs, or schema work. Each PR passes `bun run check`,
 
 ### 7.1 PR-sized implementation phases (authority PRs strictly isolated)
 
-| Phase        | PR scope                                                   | Prerequisites                    | Deliverables                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Apply authority change?                            |
-| ------------ | ---------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| **Phase 0a** | Guardrail authority hardening (**own PR**)                 | None                             | Prefix-block `/etc`, `/sys`, `/proc`, `/dev`, `/boot`, `/bin`, `/sbin`, `/lib`, `/lib64`, and `C:\Windows` in `assertSafeCwd` (JS + Rust), keeping `/var` and `/usr` exact-match so `/var/www` and `/usr/local` stay valid; harden `SYSTEM_TOOL_DIRS`; harden Windows PATH-only executable resolution; add JS + Rust regression tests.                                                                                                                                                                                                                                                                    | **Yes, authority-only PR** (Rule 5)                |
-| **Phase 0b** | Product direction and decision log                         | Owner approval of plan           | Apply the proposed edits to `.docs/product-direction.md` and `.docs/decision-log.md` (including the cache direct-delete exception and generic Temp exclusion).                                                                                                                                                                                                                                                                                                                                                                                                                                            | None (docs only)                                   |
-| **Phase 1**  | Protocol, discriminated schemas, read-only guard, L4 cache | Phase 0a                         | Add Draft 2020-12 discriminated-union `space-report.schema.json`, `space-event.schema.json`, aggregate-only `SpaceCacheSnapshot` schema, optional additive `policyProfile: "standard" \| "space_handoff"` on `ScanPlan`, TS types (`packages/protocol`), Rust serde types (`crates/sweep-types`), `sweep schema` exports, `assertSafeReadOnlyRoot` (JS + Rust), and closed typed redaction serializer contract across all sinks.                                                                                                                                                                          | None (read-only contract + additive schema)        |
-| **Phase 2**  | Rust `sweep-engine space` and bench harness                | Phase 1                          | Single-pass LIFO space walker with resumable cursors in `crates/sweep-fs`; process-wide macOS `setiopolicy_np` BEFORE all path/L4 work + isolated cancel-aware TCC probe + APFS Data volume + qualified `estimatedPurgeableBytes`; Windows `KF_FLAG_DONT_VERIFY` + enumeration-first root/ancestor check + unknown allocation for `RECALL_ON_DATA_ACCESS` + long paths; Linux `mount_id` bind-mount + XDG mount-identity + snapshot/autofs/WSL/network boundaries; universal invoking-user isolation across all scopes; sealed bundles & personal roots winning before catalog; `scripts/bench-space.ts`. | None (read-only)                                   |
-| **Phase 3**  | JS engine parity (fail-closed), CLI `sweep space`, L4      | Phase 2                          | Linux-only fail-closed JS fallback `packages/core/src/space-scanner.ts` (refuses on macOS/Windows and unverified mounts), CLI `sweep space [path]` (`--json`, `--json-stream`, `--redact`, `--metric`, `--no-cache`, zero destructive flags, no `--si`), `packages/display` storage card renderer, path-free `space-cache.json` (L4), shell completions.                                                                                                                                                                                                                                                  | None (read-only)                                   |
-| **Phase 4a** | Developer `space_handoff` apply authority (**own PR**)     | **Phase 0a, Phase 1, G3**        | Implement full `policyProfile: "space_handoff"` authority across review, saved plans (`loadPlan` / `sweep apply --plan`), committed confirmation contract, and **both** JS and Rust apply engines with **G3** handle-relative containment, Rust capability `"spaceHandoffApply": true`, fail-closed refusal on older/unverified backends (no silent fallback), invoking-user ownership checks (even under elevation), positive artifact eligibility, and protected personal roots & sealed bundles strictly winning (both _within_ and _containing_ a protected root); full adversarial tests.            | **Yes, authority-only PR** (Rule 5, S3 + G3 gates) |
-| **Phase 4b** | TUI `SpaceView` and independent Developer handoff UI       | **Phase 3, Phase 4a** (needs G3) | Dithered dot-matrix `StackBar` v2, Direction R + `disk*` tokens in `theme.ts`, `SpaceView.tsx` at 80/100/120 cols + narrow/short fallbacks + visible `"Not stored on this disk"` at all widths, `sweep ui --view space` + `w` / `Ctrl+K` switcher, independent invoking-user project picker into fresh `ProjectsView` scan (`policyProfile: "space_handoff"`, empty queue, zero report paths passed, live trusted review state).                                                                                                                                                                          | None (UI only; reuses Phase 4a boundary)           |
-| **Phase 5a** | Cache apply authority (**own PR**)                         | **Phase 1, G3 containment**      | Compiled per-OS cache allowlist (`packages/core/src/cache-allowlist.ts` + Rust parity, excluding generic Windows Temp), instance-bound confirmation records (`allowlistId`, invoking user, canonical path, root identity, volume) including wildcard profiles, apply-time trusted-config re-derivation refusing replaced or newly discovered instances, ancestor/descendant personal-root & sealed-bundle exclusion, G3 no-follow/no-cross-mount handle removal, active-process blocking + unknown-state display-only, restart exclusion, journals, copy-only owner table, destructive fixture tests.     | **Yes, authority-only PR** (Rule 5, G3 gate)       |
-| **Phase 5b** | Cache review overlay and TUI wiring                        | Phase 4b, Phase 5a               | `CacheReviewOverlay.tsx` (`Comes back on its own` / `Check first`, `s` selects only idle safe regenerable instances, `c` opens instance-bound committed permanent-delete confirm, copy-only command display; generic Temp never selectable) wired to Phase 5a authority.                                                                                                                                                                                                                                                                                                                                  | None (UI only)                                     |
-| **Phase 6a** | Trash apply authority (**own PR**)                         | **Phase 1, G3 containment**      | Platform Trash discovery (home + external roots: macOS `.Trashes/<uid>`, Linux sticky non-symlink `.Trash/<uid>` or `.Trash-<uid>`, Windows per-drive bin), verified invoking user + pinned volume identity re-stat + confirmed entry-snapshot removal, `.trashinfo` paths excluded from journals/receipts, Windows per-item verified deletion (or reporting-only gate until verified), destructive fixture tests.                                                                                                                                                                                        | **Yes, authority-only PR** (Rule 5, G3 gate)       |
-| **Phase 6b** | Separate Trash confirm overlay and TUI wiring              | Phase 4b, Phase 6a               | Dedicated `TrashConfirmOverlay.tsx` (permanent-delete warning, `"up to N GiB"`, named volume/drive, snapshot caveat, never bundled with other queues) wired to Phase 6a authority.                                                                                                                                                                                                                                                                                                                                                                                                                        | None (UI only)                                     |
-| **Phase 7**  | Website card and user docs                                 | Phase 4b                         | Interactive `SpaceCard` on `apps/docs` landing page (single typed fixture + arithmetic unit tests, 150 ms pointer hover / 0 ms keyboard focus / reduced motion snap), `docs/users/space.md` (with binary GiB vs Finder decimal GB note), updates to `docs/users/privacy.md`, `docs/users/safety.md`, and `docs/users/commands.md`.                                                                                                                                                                                                                                                                        | None (docs and web only)                           |
+| Phase        | PR scope                                                   | Prerequisites                    | Deliverables                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Apply authority change?                            |
+| ------------ | ---------------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **Phase 0a** | Guardrail authority hardening (**own PR**)                 | None                             | Prefix-block `/etc`, `/sys`, `/proc`, `/dev`, `/boot`, `/bin`, `/sbin`, `/lib`, `/lib64`, and `C:\Windows` in `assertSafeCwd` (JS + Rust), keeping `/var` and `/usr` exact-match so `/var/www` and `/usr/local` stay valid; harden `SYSTEM_TOOL_DIRS`; harden Windows PATH-only executable resolution; add JS + Rust regression tests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | **Yes, authority-only PR** (Rule 5)                |
+| **Phase 0b** | Product direction and decision log                         | Owner approval of plan           | Apply the proposed edits to `.docs/product-direction.md` and `.docs/decision-log.md` (including Q1 owner decision on `sweep ui ~`, measurement-only non-local roots, cache direct-delete exception, and generic Temp exclusion).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | None (docs only)                                   |
+| **Phase 1**  | Protocol, discriminated schemas, read-only guard, L4 cache | Phase 0a                         | Add Draft 2020-12 discriminated-union `space-report.schema.json` (with 11 unique category IDs, `outside_home_scope_excluded`, `non_local_filesystem` zero-action rule, and `hardlink_dedup_cap` byte omission), `space-event.schema.json` (optional `allocatedBytes` and `apparentBytes` on `space_progress`), aggregate-only `SpaceCacheSnapshot` schema, optional additive `policyProfile: "standard"` on `ScanPlan` (keeping `"space_handoff"` out of the accepted enum until Phase 4a installs the fail-closed apply refusal), TS types (`packages/protocol`), Rust serde types (`crates/sweep-types`), `sweep schema` exports, `assertSafeReadOnlyRoot` (JS + Rust), and closed typed redaction serializer contract covering `category.label` and `subgroup.label` across all sinks.                                                                  | None (read-only contract + additive schema)        |
+| **Phase 2**  | Rust `sweep-engine space` and bench harness                | Phase 1                          | Single-pass LIFO space walker with resumable cursors in `crates/sweep-fs`; process-wide macOS `setiopolicy_np` BEFORE all path/L4 work + isolated cancel-aware TCC probe + APFS Data volume + qualified `estimatedPurgeableBytes`; Windows `KF_FLAG_DONT_VERIFY` + enumeration-first root/ancestor check + unknown allocation for `RECALL_ON_DATA_ACCESS` + long paths; Linux `mount_id` bind-mount + XDG mount-identity (`outside_home_scope_excluded` vs `other_volumes_excluded`) + snapshot/autofs/WSL/network/FUSE/`virtiofs`/`drvfs` boundaries (measurement-only with `actions: []` and `non_local_filesystem`; explicit WSL `drvfs` enforces Windows-equivalent other-account isolation or refuses exit 2); universal invoking-user isolation across all scopes; sealed bundles & personal roots winning before catalog; `scripts/bench-space.ts`. | None (read-only)                                   |
+| **Phase 3**  | JS engine parity (fail-closed), CLI `sweep space`, L4      | Phase 2                          | Linux-only fail-closed JS fallback `packages/core/src/space-scanner.ts` (refuses on macOS/Windows and on `nfs`/`nfs4`/`smb`/`cifs`/`9p`/`fuse`/`virtiofs`/`drvfs`/`autofs` or unverified mounts), CLI `sweep space [path]` (`--json`, `--json-stream`, `--redact`, `--metric`, `--no-cache`, zero destructive flags, no `--si`), `packages/display` storage card renderer, path-free `space-cache.json` (L4), shell completions.                                                                                                                                                                                                                                                                                                                                                                                                                           | None (read-only)                                   |
+| **Phase 4a** | Developer `space_handoff` apply authority (**own PR**)     | **Phase 0a, Phase 1, G3**        | Add `"space_handoff"` to the accepted `policyProfile` schema/enum in the same authority PR that installs full fail-closed `policyProfile: "space_handoff"` authority across review, saved plans (`loadPlan` / `sweep apply --plan`), committed confirmation contract, and **both** JS and Rust apply engines with **G3** handle-relative containment, Rust capability `"spaceHandoffApply": true`, fail-closed refusal on older/unverified backends (no silent fallback), unconditional refusal on `nfs`/`nfs4`/`smb`/`cifs`/`9p`/`fuse`/`virtiofs`/`drvfs` mounts, invoking-user ownership checks (even under elevation), positive artifact eligibility, and protected personal roots & sealed bundles strictly winning (both _within_ and _containing_ a protected root); full adversarial tests.                                                        | **Yes, authority-only PR** (Rule 5, S3 + G3 gates) |
+| **Phase 4b** | TUI `SpaceView` and independent Developer handoff UI       | **Phase 3, Phase 4a** (needs G3) | Dithered dot-matrix `StackBar` v2, Direction R + `disk*` tokens in `theme.ts`, `SpaceView.tsx` at 80/100/120 cols + narrow/short fallbacks + visible `"Not stored on this disk"` at all widths (matching `bytesKnown`), `sweep ui --view space`, Q1 routing for `sweep ui ~` and `sweep ui` from `~` into read-only `SpaceView` first (keeping `--view projects`/`--view full` on `~` and all destructive commands on `~` refused), `w` / `Ctrl+K` switcher (`w` never opens `ProjectsView` on `~`), `c` disabled on `non_local_filesystem` roots, independent invoking-user project picker into fresh `ProjectsView` scan (`policyProfile: "space_handoff"`, empty queue, zero report paths passed, live trusted review state).                                                                                                                           | None (UI only; reuses Phase 4a boundary)           |
+| **Phase 5a** | Cache apply authority (**own PR**)                         | **Phase 1, G3 containment**      | Compiled per-OS cache allowlist (`packages/core/src/cache-allowlist.ts` + Rust parity, excluding generic Windows Temp), instance-bound confirmation records (`allowlistId`, invoking user, canonical path, root identity, volume) including wildcard profiles, apply-time trusted-config re-derivation refusing replaced or newly discovered instances, ancestor/descendant personal-root & sealed-bundle exclusion, unconditional refusal on `nfs`/`nfs4`/`smb`/`cifs`/`9p`/`fuse`/`virtiofs`/`drvfs` mounts, G3 no-follow/no-cross-mount handle removal, active-process blocking + unknown-state display-only, restart exclusion, journals, copy-only owner table, destructive fixture tests.                                                                                                                                                            | **Yes, authority-only PR** (Rule 5, G3 gate)       |
+| **Phase 5b** | Cache review overlay and TUI wiring                        | Phase 4b, Phase 5a               | `CacheReviewOverlay.tsx` (`Comes back on its own` / `Check first`, `s` selects only idle safe regenerable instances, `c` opens instance-bound committed permanent-delete confirm, copy-only command display; generic Temp never selectable) wired to Phase 5a authority.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | None (UI only)                                     |
+| **Phase 6a** | Trash apply authority (**own PR**)                         | **Phase 1, G3 containment**      | Platform Trash discovery (home + external roots: macOS `.Trashes/<uid>`, Linux sticky non-symlink `.Trash/<uid>` or `.Trash-<uid>`, Windows per-drive bin), verified invoking user + pinned volume identity re-stat + confirmed entry-snapshot removal, unconditional refusal on `nfs`/`nfs4`/`smb`/`cifs`/`9p`/`fuse`/`virtiofs`/`drvfs` mounts, `.trashinfo` paths excluded from journals/receipts, Windows per-item verified deletion (or reporting-only gate until verified), destructive fixture tests.                                                                                                                                                                                                                                                                                                                                               | **Yes, authority-only PR** (Rule 5, G3 gate)       |
+| **Phase 6b** | Separate Trash confirm overlay and TUI wiring              | Phase 4b, Phase 6a               | Dedicated `TrashConfirmOverlay.tsx` (permanent-delete warning, `"up to N GiB"`, named volume/drive, snapshot caveat, never bundled with other queues) wired to Phase 6a authority.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | None (UI only)                                     |
+| **Phase 7**  | Website card and user docs                                 | Phase 4b                         | Interactive `SpaceCard` on `apps/docs` landing page (single typed fixture + arithmetic unit tests, 150 ms pointer hover / 0 ms keyboard focus / reduced motion snap), `docs/users/space.md` (with binary GiB vs Finder decimal GB note), updates to `docs/users/privacy.md`, `docs/users/safety.md`, and `docs/users/commands.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | None (docs and web only)                           |
 
 ### 7.2 Verification and test matrix
 
 1. **Per-category, per-OS synthetic fixtures (`packages/test-fixtures/`):**
    - **Linux:** custom `XDG_CONFIG_HOME/user-dirs.dirs` (localized names,
      adversarial `XDG_DESKTOP_DIR="$HOME/"`, XDG folder on another mount ->
-     `"on another disk"`, AND XDG folder outside `$HOME` on the **same mount**
-     -> `"outside home scope"` on `home` scope / classified on `volume` scope),
-     **same-device bind mount** (`mount_id` detection, not missed by `st_dev`),
-     nested vs explicit network mount (`nfs`/`smb`/`9p` skipped when nested;
-     explicit root uses `allocated_unavailable` and disables destructive
-     review), `~/.cache` with allowlisted + non-allowlisted dirs + redirected
-     `XDG_CACHE_HOME` pointing to `~/Documents`, FreeDesktop Trash (home +
-     sticky `.Trash/<uid>` + non-sticky fallback `.Trash-<uid>`), sealed
-     Flatpak/Snap trees containing `node_modules` (0 actionable bytes,
-     including when scan starts inside the bundle), `~/Projects` with eligible
-     artifacts and source/media, artifacts _inside_ `~/Documents`/`~/Downloads`
-     (0 actionable bytes), sparse `.img`, cross-category hardlink web under
-     parallel workers, snapshot trees (`.zfs`, `.snapshots`), unreadable `chmod
-     000` dir, ANSI-escape filename.
+     `"on another disk"` (`other_volumes_excluded`), AND XDG folder outside
+     `$HOME` on the **same mount** -> `"outside home scope"`
+     (`outside_home_scope_excluded`) on `home` scope / classified on `volume`
+     scope), **same-device bind mount** (`mount_id` detection, not missed by
+     `st_dev`), nested vs explicit network, FUSE, `virtiofs`, and `drvfs`
+     mounts (`nfs`/`nfs4`/`smb`/`cifs`/`9p`/`fuse`/`sshfs`/`virtiofs`/`drvfs`
+     skipped when nested; explicit non-autofs root measured read-only by Rust
+     with `non_local_filesystem`, `actions: []`, every category `info_only`,
+     `c` disabled in UI, and both JS and Rust apply engines refusing
+     `space_handoff`, cache, and Trash apply with `EXIT.GUARDRAIL` even when
+     `st_blocks` is non-zero and `openat2` would succeed; zero-`st_blocks` root
+     also adds `allocated_unavailable`; Linux JS fallback refuses with exit 2),
+     explicit WSL `drvfs` (`/mnt/c`, `/mnt/c/Users/<other>`) proving
+     Windows-equivalent other-account isolation (or exit-2 refusal when
+     isolation cannot be verified) and zero actions, `~/.cache` with
+     allowlisted + non-allowlisted dirs + redirected `XDG_CACHE_HOME` pointing
+     to `~/Documents`, FreeDesktop Trash (home + sticky `.Trash/<uid>` +
+     non-sticky fallback `.Trash-<uid>`), sealed Flatpak/Snap trees containing
+     `node_modules` (0 actionable bytes, including when scan starts inside the
+     bundle), `~/Projects` with eligible artifacts and source/media, artifacts
+     _inside_ `~/Documents`/`~/Downloads` (0 actionable bytes), sparse `.img`,
+     cross-category hardlink web under parallel workers, snapshot trees
+     (`.zfs`, `.snapshots`), unreadable `chmod 000` dir, ANSI-escape filename.
    - **macOS (unit + hosted macOS CI release gates):** `.app` and `.framework`
      bundles containing Electron `node_modules` and `.png`/`.wav` assets (0
      actionable bytes, including when scan starts inside `Foo.app/Contents/
@@ -2441,28 +2732,44 @@ bundled with UI, docs, or schema work. Each PR passes `bun run check`,
      volume.usedBytes` (other accounts never added a second time).
    - Hardlinks spanning multiple categories under parallel workers (identical
      deterministic attribution across repeated runs), `hardlink_dedup_cap`
-     (asserting `clone_or_compression_overlap` is NOT emitted), separate `/home`
-     volume wording, quota/reserved-block cases, and network FS zero `st_blocks`
-     (`allocated_unavailable`).
+     (asserting `clone_or_compression_overlap` is NOT emitted and affected
+     categories omit both `allocatedBytes` and `apparentBytes`), separate
+     `/home` volume wording, quota/reserved-block cases, and network FS zero
+     `st_blocks` (`allocated_unavailable` + `non_local_filesystem`).
    - **Scope exclusions vs incomplete coverage:** ordinary `scopeExclusions`
      (`cloud_placeholders_excluded`, `other_volumes_excluded`,
-     `privacy_containers_excluded`) keep `coverage.complete === true` and allow
-     independently validated local review actions; any `incompleteReasons`
-     (`tcc_or_permission`, `hardlink_dedup_cap`, `cycle_cap`, `queue_cap`,
-     `permission_denied`) sets `coverage.complete === false` and disables all
-     review actions.
+     `outside_home_scope_excluded`, `privacy_containers_excluded`) keep
+     `coverage.complete === true` and allow independently validated local
+     review actions; any `incompleteReasons` (`tcc_or_permission`,
+     `hardlink_dedup_cap`, `cycle_cap`, `queue_cap`, `permission_denied`) sets
+     `coverage.complete === false` and disables all review actions.
 4. **Protocol schema, guardrail, and authority tests (BOTH JS and Rust engines):**
    - Draft 2020-12 schema validation tests asserting rejection of:
+     - duplicate or missing category IDs in `categories` (e.g., eleven `photos`
+       objects rejected; all 11 unique IDs required),
      - mismatched `spaceAction` pairs (`category: "developer"` + `intent:
        "trash_review"`, `allowlistIds` on `developer_review`/`trash_review`,
        `statusLabel` on `developer_review`, any action on a personal category),
      - personal categories with non-`info_only` `actionability` or subgroups,
+     - `non_local_filesystem` in `coverage.accountingCaveats` with non-empty
+       `actions` or non-`info_only` category `actionability`,
      - `bytesKnown: false` with `allocatedBytes` present or `unknownReason`
-       missing, and `allocatedKnown: false` with `allocatedBytes` present,
-     - `complete: true` with non-empty `incompleteReasons`.
-   - Prove `assertSafeCwd` refuses `~`, `/`, `C:\`, `C:\Windows\System32`,
-     `/etc/ssh`, `/bin/sh`, `/System/Library` while allowing `/var/www/app` and
-     `/usr/local/src/app`.
+       missing, `hardlink_dedup_cap` with `apparentBytes` present, and
+       `allocatedKnown: false` with `allocatedBytes` present,
+     - `complete: true` with non-empty `incompleteReasons`,
+     - Phase 1 `ScanPlan` schema rejecting `policyProfile: "space_handoff"`
+       until Phase 4a lands the fail-closed apply refusal.
+   - **Every destructive entry point on `~` remains refused in both engines
+     (owner decision Q1):** Prove `assertSafeCwd` and every destructive entry
+     point on `~` (`sweep clean ~`, `sweep -y ~`, `sweep scan ~`, `sweep plan
+     ~`, `sweep apply` targeting `~`, `sweep ui --view projects ~`, `sweep ui
+     --view full ~`, and any non-interactive destructive command on the home
+     folder) are still refused with `EXIT.GUARDRAIL` (2) in **both** JS and
+     Rust engines, alongside `/`, `C:\`, `C:\Windows\System32`, `/etc/ssh`,
+     `/bin/sh`, and `/System/Library` (while allowing `/var/www/app` and
+     `/usr/local/src/app`). Simultaneously prove `sweep ui ~` and `sweep ui`
+     (with no path when cwd is `~`) open the read-only `SpaceView` first with
+     zero direct deletion capability and cannot construct a `ScanPlan` on `~`.
    - Prove `SpaceReport` JSON is rejected by `loadPlan` and `sweep apply --plan`.
    - Test full **report -> UI -> saved-plan -> apply** Developer `space_handoff`
      path in both engines with:
@@ -2474,28 +2781,32 @@ bundled with UI, docs, or schema work. Each PR passes `bun run check`,
        (mixed subtree),
      - a scan root started **inside** a sealed bundle or redirected personal
        root,
+     - a target on an `nfs`, `fuse`/`sshfs`, `virtiofs`, or `drvfs` mount (even
+       with non-zero `st_blocks`) refused with `EXIT.GUARDRAIL` (2),
      - a **no-silent-fallback test** proving that if the native engine lacks
        `"spaceHandoffApply": true` or G3 containment, `space_handoff` apply
        refuses (`EXIT.GUARDRAIL`) instead of falling back to ordinary/older
        apply authority.
    - Prove Cache apply rejects generic Windows `%LOCALAPPDATA%\Temp`, personal
      paths, non-allowlisted paths, redirected env conflicts, symlink swaps,
-     mount-boundary swaps, process-state transitions (idle -> active or unknown
-     process state), AND **wildcard profile swaps or newly discovered profile
-     instances** added between review and apply.
+     mount-boundary swaps, non-local/FUSE/`virtiofs`/`drvfs` mounts,
+     process-state transitions (idle -> active or unknown process state), AND
+     **wildcard profile swaps or newly discovered profile instances** added
+     between review and apply.
    - Prove Trash apply rejects drive remapping, volume device-ID drift, symlink-
-     swapped Trash roots, non-sticky `.Trash` parents, and files arriving after
-     confirmation (new arrivals remain untouched; `.trashinfo` original paths
-     never appear in journals or receipts).
+     swapped Trash roots, non-sticky `.Trash` parents, non-local/FUSE/
+     `virtiofs`/`drvfs` mounts, and files arriving after confirmation (new
+     arrivals remain untouched; `.trashinfo` original paths never appear in
+     journals or receipts).
 5. **Closed redaction and privacy tests across every dispatch sink:**
    - Run distinctive sentinel usernames, folder names, mount labels, and paths
      through `--json --redact`, `--json-stream --redact`, human stdout
      `--redact`, stderr (including cancellation and native-child fallback
      diagnostics), TUI redacted state, alternate programmatic callers, and
      `space-cache.json`, asserting zero sentinel leakage in every field
-     including `insight`, `reason`, `sentence`, `buttonLabel`, `spaceAction.id`,
-     and `spaceSubgroup.id`, and asserting actions stay disabled on redacted
-     payloads.
+     including `category.label`, `subgroup.label`, `insight`, `reason`,
+     `sentence`, `buttonLabel`, `spaceAction.id`, and `spaceSubgroup.id`, and
+     asserting actions stay disabled on redacted payloads.
 6. **Engine parity, TUI, Web, and benchmark qualification:**
    - Normalized JS-vs-Rust `SpaceReport` diff on shared Linux fixtures verifying
      identical category assignments, allocated/apparent totals, hardlink
@@ -2503,9 +2814,14 @@ bundled with UI, docs, or schema work. Each PR passes `bun run check`,
    - PTY tests at `80x24`, `100x28`, `120x30`, `70x24`, `80x16`, `NO_COLOR=1`,
      and `SWEEP_REDUCED_MOTION=1` measuring every rendered line in terminal
      cells (`<= width - 1`), verifying 3-col legend at 80/100/120, visible
-     `"Not stored on this disk"` placeholder indicator at 80/100/120, `Esc`
-     unwinding without quitting, `Space`/`a`/`s` no-op on overview, `c` review
-     disabled on incomplete/stale/redacted cards, and separate Trash confirm.
+     `"Not stored on this disk"` placeholder indicator at 80/100/120 (numeric
+     total + placeholder suffix on macOS `UF_DATALESS`; `"on-disk unknown"`
+     sentence when Windows `RECALL_ON_DATA_ACCESS` omits the category total),
+     `sweep ui ~` and `sweep ui` from `~` opening read-only `SpaceView` with
+     `w` never opening `ProjectsView` on `~`, `Esc` unwinding without quitting,
+     `Space`/`a`/`s` no-op on overview, `c` review disabled on incomplete,
+     stale, redacted, or `non_local_filesystem` cards, and separate Trash
+     confirm.
    - Web tests for `SpaceCard` arithmetic derivation, focus restore on modal
      close, 150 ms pointer hover vs 0 ms keyboard focus, reduced-motion snap,
      320 px mobile viewport, 200% zoom, and >= 3:1 swatch contrast in light and
@@ -2516,19 +2832,26 @@ bundled with UI, docs, or schema work. Each PR passes `bun run check`,
 
 ### 7.3 Open questions for the owner
 
-Reviewers converged on Questions 1, 4, and 5, and surfaced an explicit safety
-tradeoff on Questions 2 and 3. Revision 3 implements the stricter safety
-boundary by default for Questions 2 and 3 and presents the differences below
-for owner confirmation:
+Question 1 is **Decided by owner** in rev 4. Questions 2 to 5 remain recorded
+below for owner confirmation (reviewers converged on Questions 4 and 5, and
+surfaced an explicit safety tradeoff on Questions 2 and 3, where the plan
+implements the stricter safety boundary by default):
 
-1. **`sweep ui ~` invocation (reviewers converged):**
-   - **Recommended (owner to confirm):** Keep refusing `sweep ui ~`; ship
-     `sweep space` and `sweep ui --view space` as the only entrypoints. Bare
-     `sweep ui <path>` already means project cleanup review guarded by
-     `assertSafeCwd`, so keeping home-wide space walks explicit avoids merging
-     a guardrail and a full-home walk into the same command. Consider aliasing
-     later only after the space view is qualified and proven unable to
-     construct a `ScanPlan`.
+1. **`sweep ui ~` invocation (Decided by owner):**
+   - **Decided by owner:** The owner wants the home folder usable. `sweep ui ~`
+     (and `sweep ui` with no path when the current directory is the home folder)
+     opens the read-only "Where your space goes" view (`SpaceView`) first,
+     instead of refusing.
+   - Nothing on that screen can delete directly: cleaning developer artifacts
+     hands off to the existing per-project flow (`ProjectsView`) with an empty
+     queue and all per-item guardrails (`policyProfile: "space_handoff"`), and
+     caches and Trash keep their own review and confirmation.
+   - `sweep clean ~`, `sweep -y ~`, `sweep scan ~`, `sweep plan ~`,
+     `sweep apply` on `~`, `sweep ui --view projects ~`, `sweep ui --view full
+     ~`, and any non-interactive destructive command on the home folder stay
+     refused exactly as today (verified in both engines).
+   - Ledger **S3** already sequences read-only reports on `~` before anything
+     else; this is the read-only step S3 anticipates.
 2. **Developer artifacts vs protected personal folders (reviewer divergence; rev 3 enforces stricter rule):**
    - **Difference surfaced in reviews:** Review 2 suggested allowing catalog
      artifacts (`node_modules`, `target`, `.next`) found inside `Documents`,
@@ -2579,56 +2902,67 @@ for owner confirmation:
 
 ## 8. Review resolution
 
-Honest per-finding ledger across all three reviews on PR #143:
+Honest per-finding ledger across all four reviews on PR #143:
 
 - **Review 1 (Correctness, `dede206`)**: `C-B1` to `C-N1`
 - **Review 2 (Platform, `dede206`)**: `P-B1` to `P-N18`
 - **Review 3 (Re-check `6087673281`, `0dc7a7b`)**: `R-B1` to `R-N1`
+- **Review 4 (Final re-check `6088231420`, `9579b0a`)**: `N-1`, `SF-1` to `SF-4`, `NIT-1` to `NIT-5`
 
 No item is marked `Resolved` unless the specification text in this revision
 fully addresses it without contradiction. Implementation deliverables that
 cannot exist in a plan-only PR, and features deliberately scoped out of v1, are
 explicitly marked `Deferred` with their reasons below.
 
-| ID    | Review      | Severity   | Finding summary                                                                                                                                      | Status       | Plan section(s)                         | Resolution or deferral reason                                                                                                                                                                                                                                          |
-| ----- | ----------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C-B1  | Correctness | Blocker    | Keep report data out of Developer apply path; enforce positive artifact eligibility & mixed-subtree blocks                                           | **Resolved** | §§1.2, 2.1, 2.2, 3.1, 7.1 (4a/4b), 7.2  | Discriminated `spaceAction` union; independent picker; `policyProfile: "space_handoff"` through `ProjectsView`, saved plans, and both engines with G3 gate and no silent fallback; personal roots always win.                                                          |
-| C-B2  | Correctness | Blocker    | Bounded cache leaves, apply-time identity/scope/owner-activity rechecks, copy-only owner commands, no generic Temp deletion                          | **Resolved** | §§1.2, 1.3, 2.1, 7.1 (5a), 7.2          | Generic Windows Temp removed from deletion allowlist (`info_only`); confirmation bound per exact reviewed instance (incl. wildcards); apply-time re-derivation, G3 handles, active/unknown blocks.                                                                     |
-| C-B3  | Correctness | Blocker    | Bind Trash confirmation to verified user, volume identity, and confirmed item set; redesign Windows path                                             | **Resolved** | §§1.2, 3.2-3.4, 7.1 (6a), 7.2           | User, volume, and entry-snapshot binding; `.trashinfo` paths excluded from apply/journals; Windows Trash explicitly gated reporting-only until verified per-item deletion lands.                                                                                       |
-| C-B4  | Correctness | Blocker    | No-recall policy before first FS op (macOS `setiopolicy_np`, Windows enumeration); drop MIME reads in v1                                             | **Resolved** | §§2.4, 3.1, 3.2, 3.4, 3.5, 7.2          | Process-wide `setiopolicy_np` and `KF_FLAG_DONT_VERIFY` + enumeration-first ancestor check precede all path/L4 work; JS fallback fails closed; MIME dropped; native hydration + enumeration tests specified.                                                           |
-| C-B5  | Correctness | Blocker    | Path-free L4 cache; disable actions on stale/incomplete/redacted; closed redacted shape across all sinks                                             | **Resolved** | §§2.1, 2.2, 4.3, 5, 7.1 (1/3), 7.2      | Aggregate-only `SpaceCacheSnapshot`; closed static templates for `insight`/`reason`/`sentence`/`buttonLabel` and IDs under `--redact`; all dispatch sinks gated; §5 heading reconciled with live `targetDir`.                                                          |
-| C-B6  | Correctness | Blocker    | Split authority changes from UI under Rule 5; make S3 & G3 explicit prerequisites                                                                    | **Resolved** | §7.1 (0a/0b, 4a/4b, 5a/5b, 6a/6b)       | Phase 0, 4, 5, and 6 split into authority-only PRs and follow-up docs/UI PRs; G3 containment + full apply/saved-plan/consent contract explicitly required in Phase 4a before 4b UI.                                                                                    |
-| C-S1  | Correctness | Should-fix | Separate accounting domains; Unclassified volume usage residual; positive comparability rule; deterministic hardlinks                                | **Resolved** | §§1.1, 2.2, 3.6, 3.7, 7.2               | Positive comparability rule requires non-CoW proved domain; below-capacity CoW overlap fixture mandates `accountingDomainComparable: false` and `system_data` unknown; multi-user no-double-count specified.                                                           |
-| C-S2  | Correctness | Should-fix | Publish replayable fixture generator & bench command; qualify real `sweep-engine space` pipeline cross-OS                                            | **Deferred** | §§4.1, 4.2, 7.1 (Phase 2), 7.2          | **Deferred to Phase 2:** Exact proxy invocation/options are now documented in §4.1 and proxy runs are labeled honestly, but the executable `scripts/bench-space.ts` harness and real-pipeline runs ship in Phase 2 (plan-only PR edits only `.plans/space-report.md`). |
-| C-S3  | Correctness | Should-fix | Coordinated memory budget; split cycle state from hardlinks; resumable cursors; separate cancel ack/exit                                             | **Resolved** | §§2.4, 4.2, 4.3, 7.2                    | `VisitedDirs` separated from `SeenHardlinks`; coordinated caps; resumable directory cursors; cancel ack (<100 ms) tracked separately from worker exit.                                                                                                                 |
-| C-N1  | Correctness | Nit        | Cite UX §3 and §5 committed-dialog rules; change "Already deleted" to "In Trash"                                                                     | **Resolved** | §§1.2, 2.2, 6.4                         | Both UX principles cited explicitly; schema and UI use `"In Trash"`.                                                                                                                                                                                                   |
-| P-B1  | Platform    | Blocker    | Seal bundles (`.app`, `.framework`, `.photoslibrary`, Flatpak, Snap, Program Files, WindowsApps) early                                               | **Resolved** | §§1.1, 3.1 (Rule 3), 3.2-3.4, 7.2       | Rule 3 precedes personal folders, caches, catalog, and extension rules, including when the scan target starts inside a sealed bundle; zero actionable bytes tested.                                                                                                    |
-| P-B2  | Platform    | Blocker    | macOS privacy containers skipped; non-blocking TCC probe; `bytesKnown: false` (unset total) on `EPERM`                                               | **Resolved** | §§2.2, 3.1, 3.2, 3.7, 6.3, 7.2          | Privacy containers never opened; TCC probe isolated in cancel-aware worker (never blocks main thread <100 ms ack); native dismissal/cancellation/Photos/iCloud qualification test specified for Phase 2 CI.                                                            |
-| P-B3  | Platform    | Blocker    | Windows: no `GetCompressedFileSizeW` on placeholders; `FindFirstFileEx` + `FILE_FLAG_OPEN_NO_RECALL`; single-drive Trash                             | **Resolved** | §§3.4, 7.2                              | `KF_FLAG_DONT_VERIFY` + enumeration-first ancestor checks before opening; unknown allocation for `RECALL_ON_DATA_ACCESS`; native hydration + enumeration-fetch tests specified; Windows Trash report-only.                                                             |
-| P-B4  | Platform    | Blocker    | Account isolation across all scopes, nonstandard profiles, and elevated runs; refuse root without `SUDO_UID`                                         | **Resolved** | §§2.3, 3.1 (Rule 1), 3.4, 3.7, 5, 7.2   | Applies to `home`, `volume`, and explicit `path` using OS account databases (`getpwent`/Open Directory/`ProfileList`), enforced before emitting `currentDir`, in Developer picker, and in both apply engines.                                                          |
-| P-B5  | Platform    | Blocker    | APFS Data volume parity; qualified `estimatedPurgeableBytes`; no snapshot membership inference from count                                            | **Resolved** | §§2.2, 3.2, 3.7, 7.2                    | Data volume read for `/` and `~`; `estimatedPurgeableBytes` explicitly qualified as estimate or omitted; `snapshotsIncludedInPurgeable` removed; `snapshotCount` reported independently.                                                                               |
-| P-B6  | Platform    | Blocker    | Ignore `ownerCommand` on input; compiled `argv` per `allowlistId` with no shell; `pacman`/`apt`/`dnf` copy-only                                      | **Resolved** | §§1.2, 1.3, 2.2, 7.1 (Phase 5a)         | No `ownerCommand` field in schema; all v1 owner commands are copy-only; future execution strictly via compiled `argv` without shell; package managers copy-only permanently.                                                                                           |
-| P-S7  | Platform    | Should-fix | Waterfall-ordered parallel hardlink ownership; `hardlink_dedup_cap` only; drop APFS Time Machine claim; RAM budget                                   | **Resolved** | §§3.6, 4.2, 7.2                         | Winning category + tie-breaker stored on inode identity with atomic transfer; dedicated coordinated map cap; APFS Time Machine hardlink claim removed.                                                                                                                 |
-| P-S8  | Platform    | Should-fix | Authoritative category-overlap table matching apply guard; artifact-only `estimatedBytes`                                                            | **Resolved** | §§1.2, 2.2, 3.1, 7.2, 7.3               | Single conflict-free 7-row overlap table: protected personal roots and sealed bundles strictly win over catalog/cache rules in classifier and both apply engines; divergence noted in §7.3.                                                                            |
-| P-S9  | Platform    | Should-fix | Walk boundaries: mount identity (`mount_id`), snapshots, autofs, nested vs explicit network mounts, WSL, XDG mount check                             | **Resolved** | §§3.1, 3.3, 3.4, 3.6, 3.7, 7.2          | `mount_id` + `mountinfo` detects same-device bind mounts; XDG checks actual mount identity (not just "outside home"); nested network mounts skipped while explicit Linux network roots measure read-only.                                                              |
-| P-S10 | Platform    | Should-fix | External trash roots per OS/uid; volume re-stat at confirm & apply; "up to N GiB" + snapshot caveat                                                  | **Resolved** | §§1.2, 3.2-3.4, 6.3, 7.2                | External trash roots verified per OS/uid; volume identity re-statted at confirm and apply; "up to" and snapshot caveats included.                                                                                                                                      |
-| P-S11 | Platform    | Should-fix | Windows `%LOCALAPPDATA%\Temp` bulk safety                                                                                                            | **Resolved** | §§1.2, 1.3, 7.2, 7.3                    | Superseded by stricter R-B3 / C-B2 rule: generic `%LOCALAPPDATA%\Temp` is excluded from the deletion allowlist altogether and stays `info_only` (tradeoff documented in §7.3).                                                                                         |
-| P-S12 | Platform    | Should-fix | Visible `"Not stored on this disk"` subgroup across widths; unknown allocation for partially resident placeholders                                   | **Resolved** | §§2.2, 3.2, 3.4, 3.6, 6.3, 7.2          | Subgroup shown at 80, 100, and 120 columns; Windows `RECALL_ON_DATA_ACCESS` emits `allocatedKnown: false` (`placeholder_allocation_unknown`) instead of blanket `0 B`.                                                                                                 |
-| P-S13 | Platform    | Should-fix | Direction R (`costInstall`/`costCache`/`costCustom`) + `disk*` tokens; >= 3:1 on `meterTrack` incl. `other`                                          | **Resolved** | §§6.1, 7.2                              | Zero reuse of chartreuse/warning/danger/info; minimum contrast 3.67:1 dark and 4.20:1 light.                                                                                                                                                                           |
-| P-S14 | Platform    | Should-fix | Card grammar (1 number, 1 sentence, 1 action), `c` review / `Enter` details, 3-col legend, `Esc` unwind, widths <= `width - 1`                       | **Resolved** | §§1.2, 2.1, 4.3, 6.2, 6.3, 7.2          | All grammar rules met; 80/100/120 mock lines verified strictly `<= width - 1`; `NO_COLOR` clarity; no em dashes in copy.                                                                                                                                               |
-| P-S15 | Platform    | Should-fix | Label §4.1 as syscall-rate bound; binary GiB/MiB reconciliation; partial card disables review                                                        | **Resolved** | §§2.1, 4.1, 4.3, 6.3                    | Proxy runs labeled clearly; binary units only; `coverage.complete: false` disables review actions (fixed latency gates deferred to Phase 2/3 per C-S2).                                                                                                                |
-| P-S16 | Platform    | Should-fix | Make `statusLabel` optional (unset for Developer); personal subgroups are type totals with no filenames                                              | **Resolved** | §§2.2, 5, 6.3                           | `developer_review` schema variant omits `statusLabel`; personal subgroups emit type totals only.                                                                                                                                                                       |
-| P-N17 | Platform    | Nit        | Remove absent `F03`/`F07` IDs; spell OS prefix-block list (`/etc`..`C:\Windows`), keep `/var` & `/usr`                                               | **Resolved** | §§1.2, 7.1 (Phase 0a), 7.2              | Exact prefix list spelled out; absent audit IDs removed.                                                                                                                                                                                                               |
-| P-N18 | Platform    | Nit        | Website pointer hover 150 ms; keyboard focus instant (0 ms); reduced motion snaps immediately                                                        | **Resolved** | §§6.4, 7.2                              | Motion rules explicitly specified and tested.                                                                                                                                                                                                                          |
-| R-B1  | Re-check    | Blocker    | Resolve personal-folder conflict in favor of info-only boundary; test candidate within & containing protected root + inside bundle                   | **Resolved** | §§1.2, 3.1, 6.3, 7.2, 7.3               | Rule 3 (sealed bundles) and Rule 4 (protected personal roots, incl. redirected) precede caches and catalog in classifier and apply engines; tests cover within, containing, and scan-inside-bundle.                                                                    |
-| R-B2  | Re-check    | Blocker    | Discriminated `spaceAction` schema; trusted live review state; `space_handoff` through `ProjectsView`/saved plans/both engines + G3                  | **Resolved** | §§1.2, 2.1, 2.2, 2.4, 7.1 (4a/4b), 7.2  | Draft 2020-12 `oneOf` discriminated unions on `spaceAction` & `spaceCategory`; `policyProfile: "space_handoff"` + `"spaceHandoffApply": true` + G3 gate in Phase 4a; no-silent-fallback test required.                                                                 |
-| R-B3  | Re-check    | Blocker    | Remove generic Windows Temp from deletion allowlist; bind cache confirmation per exact reviewed instance (incl. wildcards)                           | **Resolved** | §§1.2, 1.3, 2.1, 7.1 (5a), 7.2, 7.3     | `%LOCALAPPDATA%\Temp` excluded from deletion allowlist (`info_only`); cache confirmation pins `(allowlistId, user, canonicalPath, rootIdentity, volume)` per concrete instance and refuses swaps/new profiles.                                                         |
-| R-B4  | Re-check    | Blocker    | Fail-closed no-recall gate before all path/L4 work, caller thread, redirected roots, JS fallback; test hydration & enumeration fetches               | **Resolved** | §§2.4, 3.1, 3.2, 3.4, 4.3, 7.1, 7.2     | Process-wide `setiopolicy_np`, `KF_FLAG_DONT_VERIFY` + enumeration-first ancestor checks precede host/L4/root work; JS fallback refuses on macOS/Windows; native hydration + enumeration-fetch tests gated.                                                            |
-| R-B5  | Re-check    | Blocker    | Universal account isolation across explicit paths, nonstandard profiles, and elevated runs before progress paths & apply                             | **Resolved** | §§2.1, 2.3, 3.1, 3.4, 5, 7.2            | OS account databases (`getpwent`/Open Directory/`ProfileList`) enforced across `home`/`volume`/`path`, before `currentDir`, in Developer picker, and in both apply engines; explicit/nonstandard/elevated tests.                                                       |
-| R-S1  | Re-check    | Should-fix | Positive comparability rule & below-capacity CoW outcome; no-double-count other accounts; qualified purgeable estimate; Windows partial placeholders | **Resolved** | §§2.2, 3.2, 3.4, 3.6, 3.7, 6.3, 7.2     | CoW volumes set `accountingDomainComparable: false` (`system_data` unknown); no-double-count rule & fixture; `estimatedPurgeableBytes` estimate; `allocatedKnown: false` for `RECALL_ON_DATA_ACCESS`.                                                                  |
-| R-S2  | Re-check    | Should-fix | Separate deliberate `scopeExclusions` from `incompleteReasons` action gating; fix "always includes both" byte-field wording                          | **Resolved** | §§2.1, 2.2, 3.2-3.4, 3.6, 4.3, 6.3, 7.2 | `coverage` split into `incompleteReasons` (sets `complete: false`, disables review), `scopeExclusions` (normal boundaries, allows validated local reviews), and `accountingCaveats`; byte-field wording fixed.                                                         |
-| R-N1  | Re-check    | Nit        | Reconcile §2.1 "never mutates the filesystem" with §4.3 L4 cache write                                                                               | **Resolved** | §2.1                                    | §2.1 now states the command leaves the scanned tree untouched and describes the `<configDir>/space-cache.json` aggregate-cache write explicitly.                                                                                                                       |
-| Q1-Q5 | All three   | Open Qs    | Present owner questions honestly without overclaiming consensus on personal-folder exceptions and generic Temp                                       | **Resolved** | §§1.5, 2.1, 3.2, 6.4, 7.3               | Q1/Q4/Q5 reflect reviewer convergence; Q2 and Q3 explicitly document reviewer differences and default to the stricter safety boundaries pending owner sign-off.                                                                                                        |
+| ID    | Review         | Severity   | Finding summary                                                                                                                                       | Status       | Plan section(s)                              | Resolution or deferral reason                                                                                                                                                                                                                                                                                                                    |
+| ----- | -------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C-B1  | Correctness    | Blocker    | Keep report data out of Developer apply path; enforce positive artifact eligibility & mixed-subtree blocks                                            | **Resolved** | §§1.2, 2.1, 2.2, 3.1, 7.1 (4a/4b), 7.2       | Discriminated `spaceAction` union; independent picker; `policyProfile: "space_handoff"` through `ProjectsView`, saved plans, and both engines with G3 gate and no silent fallback; personal roots always win.                                                                                                                                    |
+| C-B2  | Correctness    | Blocker    | Bounded cache leaves, apply-time identity/scope/owner-activity rechecks, copy-only owner commands, no generic Temp deletion                           | **Resolved** | §§1.2, 1.3, 2.1, 7.1 (5a), 7.2               | Generic Windows Temp removed from deletion allowlist (`info_only`); confirmation bound per exact reviewed instance (incl. wildcards); apply-time re-derivation, G3 handles, active/unknown blocks.                                                                                                                                               |
+| C-B3  | Correctness    | Blocker    | Bind Trash confirmation to verified user, volume identity, and confirmed item set; redesign Windows path                                              | **Resolved** | §§1.2, 3.2-3.4, 7.1 (6a), 7.2                | User, volume, and entry-snapshot binding; `.trashinfo` paths excluded from apply/journals; Windows Trash explicitly gated reporting-only until verified per-item deletion lands.                                                                                                                                                                 |
+| C-B4  | Correctness    | Blocker    | No-recall policy before first FS op (macOS `setiopolicy_np`, Windows enumeration); drop MIME reads in v1                                              | **Resolved** | §§2.4, 3.1, 3.2, 3.4, 3.5, 7.2               | Process-wide `setiopolicy_np` and `KF_FLAG_DONT_VERIFY` + enumeration-first ancestor check precede all path/L4 work; JS fallback fails closed; MIME dropped; native hydration + enumeration tests specified.                                                                                                                                     |
+| C-B5  | Correctness    | Blocker    | Path-free L4 cache; disable actions on stale/incomplete/redacted; closed redacted shape across all sinks                                              | **Resolved** | §§2.1, 2.2, 4.3, 5, 7.1 (1/3), 7.2           | Aggregate-only `SpaceCacheSnapshot`; rev 4 restores `category.label` and `subgroup.label` redaction alongside `insight`/`reason`/`sentence`/`buttonLabel` and IDs (closing the rev 3 partial gap caught by `SF-1`); all dispatch sinks gated.                                                                                                    |
+| C-B6  | Correctness    | Blocker    | Split authority changes from UI under Rule 5; make S3 & G3 explicit prerequisites                                                                     | **Resolved** | §7.1 (0a/0b, 4a/4b, 5a/5b, 6a/6b)            | Phase 0, 4, 5, and 6 split into authority-only PRs and follow-up docs/UI PRs; G3 containment + full apply/saved-plan/consent contract explicitly required in Phase 4a before 4b UI.                                                                                                                                                              |
+| C-S1  | Correctness    | Should-fix | Separate accounting domains; Unclassified volume usage residual; positive comparability rule; deterministic hardlinks                                 | **Resolved** | §§1.1, 2.2, 3.6, 3.7, 7.2                    | Positive comparability rule requires non-CoW proved domain; below-capacity CoW overlap fixture mandates `accountingDomainComparable: false` and `system_data` unknown; multi-user no-double-count specified.                                                                                                                                     |
+| C-S2  | Correctness    | Should-fix | Publish replayable fixture generator & bench command; qualify real `sweep-engine space` pipeline cross-OS                                             | **Deferred** | §§4.1, 4.2, 7.1 (Phase 2), 7.2               | **Deferred to Phase 2:** Exact proxy invocation/options are now documented in §4.1 and proxy runs are labeled honestly, but the executable `scripts/bench-space.ts` harness and real-pipeline runs ship in Phase 2 (plan-only PR edits only `.plans/space-report.md`).                                                                           |
+| C-S3  | Correctness    | Should-fix | Coordinated memory budget; split cycle state from hardlinks; resumable cursors; separate cancel ack/exit                                              | **Resolved** | §§2.4, 4.2, 4.3, 7.2                         | `VisitedDirs` separated from `SeenHardlinks`; coordinated caps; resumable directory cursors; cancel ack (<100 ms) tracked separately from worker exit.                                                                                                                                                                                           |
+| C-N1  | Correctness    | Nit        | Cite UX §3 and §5 committed-dialog rules; change "Already deleted" to "In Trash"                                                                      | **Resolved** | §§1.2, 2.2, 6.4                              | Both UX principles cited explicitly; schema and UI use `"In Trash"`.                                                                                                                                                                                                                                                                             |
+| P-B1  | Platform       | Blocker    | Seal bundles (`.app`, `.framework`, `.photoslibrary`, Flatpak, Snap, Program Files, WindowsApps) early                                                | **Resolved** | §§1.1, 3.1 (Rule 3), 3.2-3.4, 7.2            | Rule 3 precedes personal folders, caches, catalog, and extension rules, including when the scan target starts inside a sealed bundle; zero actionable bytes tested.                                                                                                                                                                              |
+| P-B2  | Platform       | Blocker    | macOS privacy containers skipped; non-blocking TCC probe; `bytesKnown: false` (unset total) on `EPERM`                                                | **Resolved** | §§2.2, 3.1, 3.2, 3.7, 6.3, 7.2               | Privacy containers never opened; TCC probe isolated in cancel-aware worker (never blocks main thread <100 ms ack); native dismissal/cancellation/Photos/iCloud qualification test specified for Phase 2 CI.                                                                                                                                      |
+| P-B3  | Platform       | Blocker    | Windows: no `GetCompressedFileSizeW` on placeholders; `FindFirstFileEx` + `FILE_FLAG_OPEN_NO_RECALL`; single-drive Trash                              | **Resolved** | §§3.4, 7.2                                   | `KF_FLAG_DONT_VERIFY` + enumeration-first ancestor checks before opening; unknown allocation for `RECALL_ON_DATA_ACCESS`; native hydration + enumeration-fetch tests specified; Windows Trash report-only.                                                                                                                                       |
+| P-B4  | Platform       | Blocker    | Account isolation across all scopes, nonstandard profiles, and elevated runs; refuse root without `SUDO_UID`                                          | **Resolved** | §§2.3, 3.1 (Rule 1), 3.4, 3.7, 5, 7.2        | Applies to `home`, `volume`, and explicit `path` using OS account databases (`getpwent`/Open Directory/`ProfileList`), enforced before emitting `currentDir`, in Developer picker, and in both apply engines.                                                                                                                                    |
+| P-B5  | Platform       | Blocker    | APFS Data volume parity; qualified `estimatedPurgeableBytes`; no snapshot membership inference from count                                             | **Resolved** | §§2.2, 3.2, 3.7, 7.2                         | Data volume read for `/` and `~`; `estimatedPurgeableBytes` explicitly qualified as estimate or omitted; `snapshotsIncludedInPurgeable` removed; `snapshotCount` reported independently.                                                                                                                                                         |
+| P-B6  | Platform       | Blocker    | Ignore `ownerCommand` on input; compiled `argv` per `allowlistId` with no shell; `pacman`/`apt`/`dnf` copy-only                                       | **Resolved** | §§1.2, 1.3, 2.2, 7.1 (Phase 5a)              | No `ownerCommand` field in schema; all v1 owner commands are copy-only; future execution strictly via compiled `argv` without shell; package managers copy-only permanently.                                                                                                                                                                     |
+| P-S7  | Platform       | Should-fix | Waterfall-ordered parallel hardlink ownership; `hardlink_dedup_cap` only; drop APFS Time Machine claim; RAM budget                                    | **Resolved** | §§3.6, 4.2, 7.2                              | Winning category + tie-breaker stored on inode identity with atomic transfer; dedicated coordinated map cap; APFS Time Machine hardlink claim removed.                                                                                                                                                                                           |
+| P-S8  | Platform       | Should-fix | Authoritative category-overlap table matching apply guard; artifact-only `estimatedBytes`                                                             | **Resolved** | §§1.2, 2.2, 3.1, 7.2, 7.3                    | Single conflict-free 7-row overlap table: protected personal roots and sealed bundles strictly win over catalog/cache rules in classifier and both apply engines; divergence noted in §7.3.                                                                                                                                                      |
+| P-S9  | Platform       | Should-fix | Walk boundaries: mount identity (`mount_id`), snapshots, autofs, nested vs explicit network mounts, WSL, XDG mount check                              | **Resolved** | §§3.1, 3.3, 3.4, 3.6, 3.7, 7.2               | `mount_id` + `mountinfo` detects same-device bind mounts; XDG checks actual mount identity (not just "outside home"); nested network mounts skipped while explicit Linux network roots measure read-only.                                                                                                                                        |
+| P-S10 | Platform       | Should-fix | External trash roots per OS/uid; volume re-stat at confirm & apply; "up to N GiB" + snapshot caveat                                                   | **Resolved** | §§1.2, 3.2-3.4, 6.3, 7.2                     | External trash roots verified per OS/uid; volume identity re-statted at confirm and apply; "up to" and snapshot caveats included.                                                                                                                                                                                                                |
+| P-S11 | Platform       | Should-fix | Windows `%LOCALAPPDATA%\Temp` bulk safety                                                                                                             | **Resolved** | §§1.2, 1.3, 7.2, 7.3                         | Superseded by stricter R-B3 / C-B2 rule: generic `%LOCALAPPDATA%\Temp` is excluded from the deletion allowlist altogether and stays `info_only` (tradeoff documented in §7.3).                                                                                                                                                                   |
+| P-S12 | Platform       | Should-fix | Visible `"Not stored on this disk"` subgroup across widths; unknown allocation for partially resident placeholders                                    | **Resolved** | §§2.2, 3.2, 3.4, 3.6, 6.3, 7.2               | Subgroup shown at 80, 100, and 120 columns; Windows `RECALL_ON_DATA_ACCESS` emits `allocatedKnown: false` (`placeholder_allocation_unknown`) instead of blanket `0 B`.                                                                                                                                                                           |
+| P-S13 | Platform       | Should-fix | Direction R (`costInstall`/`costCache`/`costCustom`) + `disk*` tokens; >= 3:1 on `meterTrack` incl. `other`                                           | **Resolved** | §§6.1, 7.2                                   | Zero reuse of chartreuse/warning/danger/info; minimum contrast 3.67:1 dark and 4.20:1 light.                                                                                                                                                                                                                                                     |
+| P-S14 | Platform       | Should-fix | Card grammar (1 number, 1 sentence, 1 action), `c` review / `Enter` details, 3-col legend, `Esc` unwind, widths <= `width - 1`                        | **Resolved** | §§1.2, 2.1, 4.3, 6.2, 6.3, 7.2               | All grammar rules met; 80/100/120 mock lines verified strictly `<= width - 1`; `NO_COLOR` clarity; no em dashes in copy.                                                                                                                                                                                                                         |
+| P-S15 | Platform       | Should-fix | Label §4.1 as syscall-rate bound; binary GiB/MiB reconciliation; partial card disables review                                                         | **Resolved** | §§2.1, 4.1, 4.3, 6.3                         | Proxy runs labeled clearly; binary units only; `coverage.complete: false` disables review actions (fixed latency gates deferred to Phase 2/3 per C-S2).                                                                                                                                                                                          |
+| P-S16 | Platform       | Should-fix | Make `statusLabel` optional (unset for Developer); personal subgroups are type totals with no filenames                                               | **Resolved** | §§2.2, 5, 6.3                                | `developer_review` schema variant omits `statusLabel`; personal subgroups emit type totals only.                                                                                                                                                                                                                                                 |
+| P-N17 | Platform       | Nit        | Remove absent `F03`/`F07` IDs; spell OS prefix-block list (`/etc`..`C:\Windows`), keep `/var` & `/usr`                                                | **Resolved** | §§1.2, 7.1 (Phase 0a), 7.2                   | Exact prefix list spelled out; absent audit IDs removed.                                                                                                                                                                                                                                                                                         |
+| P-N18 | Platform       | Nit        | Website pointer hover 150 ms; keyboard focus instant (0 ms); reduced motion snaps immediately                                                         | **Resolved** | §§6.4, 7.2                                   | Motion rules explicitly specified and tested.                                                                                                                                                                                                                                                                                                    |
+| R-B1  | Re-check       | Blocker    | Resolve personal-folder conflict in favor of info-only boundary; test candidate within & containing protected root + inside bundle                    | **Resolved** | §§1.2, 3.1, 6.3, 7.2, 7.3                    | Rule 3 (sealed bundles) and Rule 4 (protected personal roots, incl. redirected) precede caches and catalog in classifier and apply engines; tests cover within, containing, and scan-inside-bundle.                                                                                                                                              |
+| R-B2  | Re-check       | Blocker    | Discriminated `spaceAction` schema; trusted live review state; `space_handoff` through `ProjectsView`/saved plans/both engines + G3                   | **Resolved** | §§1.2, 2.1, 2.2, 2.4, 7.1 (4a/4b), 7.2       | Draft 2020-12 `oneOf` discriminated unions on `spaceAction` & `spaceCategory`; `policyProfile: "space_handoff"` + `"spaceHandoffApply": true` + G3 gate in Phase 4a; no-silent-fallback test required.                                                                                                                                           |
+| R-B3  | Re-check       | Blocker    | Remove generic Windows Temp from deletion allowlist; bind cache confirmation per exact reviewed instance (incl. wildcards)                            | **Resolved** | §§1.2, 1.3, 2.1, 7.1 (5a), 7.2, 7.3          | `%LOCALAPPDATA%\Temp` excluded from deletion allowlist (`info_only`); cache confirmation pins `(allowlistId, user, canonicalPath, rootIdentity, volume)` per concrete instance and refuses swaps/new profiles.                                                                                                                                   |
+| R-B4  | Re-check       | Blocker    | Fail-closed no-recall gate before all path/L4 work, caller thread, redirected roots, JS fallback; test hydration & enumeration fetches                | **Resolved** | §§2.4, 3.1, 3.2, 3.4, 4.3, 7.1, 7.2          | Process-wide `setiopolicy_np`, `KF_FLAG_DONT_VERIFY` + enumeration-first ancestor checks precede host/L4/root work; JS fallback refuses on macOS/Windows; native hydration + enumeration-fetch tests gated.                                                                                                                                      |
+| R-B5  | Re-check       | Blocker    | Universal account isolation across explicit paths, nonstandard profiles, and elevated runs before progress paths & apply                              | **Resolved** | §§2.1, 2.3, 3.1, 3.4, 5, 7.2                 | OS account databases (`getpwent`/Open Directory/`ProfileList`) enforced across `home`/`volume`/`path`, before `currentDir`, in Developer picker, and in both apply engines; explicit/nonstandard/elevated tests.                                                                                                                                 |
+| R-S1  | Re-check       | Should-fix | Positive comparability rule & below-capacity CoW outcome; no-double-count other accounts; qualified purgeable estimate; Windows partial placeholders  | **Resolved** | §§2.2, 3.2, 3.4, 3.6, 3.7, 6.3, 7.2          | CoW volumes set `accountingDomainComparable: false` (`system_data` unknown); no-double-count rule & fixture; `estimatedPurgeableBytes` estimate; `allocatedKnown: false` for `RECALL_ON_DATA_ACCESS`.                                                                                                                                            |
+| R-S2  | Re-check       | Should-fix | Separate deliberate `scopeExclusions` from `incompleteReasons` action gating; fix "always includes both" byte-field wording                           | **Resolved** | §§2.1, 2.2, 3.2-3.4, 3.6, 4.3, 6.3, 7.2      | `coverage` split into `incompleteReasons` (sets `complete: false`, disables review), `scopeExclusions` (normal boundaries, allows validated local reviews), and `accountingCaveats`; byte-field wording fixed.                                                                                                                                   |
+| R-N1  | Re-check       | Nit        | Reconcile §2.1 "never mutates the filesystem" with §4.3 L4 cache write                                                                                | **Resolved** | §2.1                                         | §2.1 now states the command leaves the scanned tree untouched and describes the `<configDir>/space-cache.json` aggregate-cache write explicitly.                                                                                                                                                                                                 |
+| Q1-Q5 | All four       | Open Qs    | Present owner questions honestly without overclaiming consensus; record owner decision on Q1                                                          | **Resolved** | §§1.2, 1.4, 1.5, 2.1, 6.3, 7.1-7.3           | Q1 is **Decided by owner** in rev 4 (`sweep ui ~` and `sweep ui` in `~` open read-only `SpaceView` first as the S3 read-only step; all destructive commands on `~` remain refused); Q2-Q5 remain recorded for owner confirmation.                                                                                                                |
+| N-1   | Final re-check | Blocker    | One action rule for network, FUSE, `virtiofs`, and `drvfs` roots; WSL `/mnt/c` Windows account isolation                                              | **Resolved** | §§1.2, 2.1, 2.2, 2.4, 3.1, 3.3, 6.3, 7.1-7.2 | Unified measurement-only rule across `nfs`/`nfs4`/`smb`/`cifs`/`9p`/`fuse` (incl. `sshfs`)/`virtiofs`/`drvfs` regardless of `st_blocks` or `openat2` (`non_local_filesystem`, `actions: []`, `info_only`, `c` disabled, both apply engines refuse exit 2); explicit WSL `drvfs` requires Windows-equivalent account isolation or refuses exit 2. |
+| SF-1  | Final re-check | Should-fix | Put `category.label` and `subgroup.label` back under `--redact` and name `label` in §7.2 sentinel list                                                | **Resolved** | §§5, 7.1 (Phase 1), 7.2                      | Rev 4 restores closed compiled/placeholder rules for `category.label` and `subgroup.label` under `--redact` across every sink and adds both fields to the §7.2 sentinel test list (closing C-B5 partial).                                                                                                                                        |
+| SF-2  | Final re-check | Should-fix | Distinct `scopeExclusions` value for same-mount XDG folders outside `$HOME`                                                                           | **Resolved** | §§2.1, 2.2, 3.3, 7.1 (1/2), 7.2              | Added `outside_home_scope_excluded` to `coverage.scopeExclusions` and wired it into §3.3 Linux XDG rules and §7.2 fixtures.                                                                                                                                                                                                                      |
+| SF-3  | Final re-check | Should-fix | Keep Phase 1 `policyProfile` at `"standard"` only; add `"space_handoff"` in Phase 4a alongside fail-closed apply refusal                              | **Resolved** | §§1.2, 2.2, 7.1 (1/4a), 7.2                  | Phase 1 accepts `policyProfile: "standard"` only; Phase 4a adds `"space_handoff"` in the same authority PR that installs the fail-closed check across review, saved plans, and both engines; Phase 1 rejection tested in §7.2.                                                                                                                   |
+| SF-4  | Final re-check | Should-fix | Make both `allocatedBytes` and `apparentBytes` optional on `space_progress` with `SpaceReport` omission rules                                         | **Resolved** | §§2.2, 7.1 (Phase 1)                         | Updated `space_progress` category items to `{ id, bytesKnown, allocatedBytes?, apparentBytes?, fileCount, nameCount }` obeying `SpaceReport` omission rules so unknown totals never emit `0`.                                                                                                                                                    |
+| NIT-1 | Final re-check | Nit        | Clarify Rule 3 wins over Rule 4 for sealed bundles inside personal folders in §3.1 overlap table                                                      | **Resolved** | §3.1 (Rule 4 & overlap table)                | Overlap table rows 2 and 4 and Rule 4 now explicitly state that sealed bundles (e.g. `~/Downloads/Foo.app`) are assigned by Rule 3 first (`apps`/`photos`), and both remain `info_only`.                                                                                                                                                         |
+| NIT-2 | Final re-check | Nit        | On `hardlink_dedup_cap`, state attributed total is unknown (omitted) instead of "upper bound"                                                         | **Resolved** | §§2.2, 4.2, 7.2                              | Removed "upper bound" wording in §4.2; `hardlink_dedup_cap` sets `bytesKnown: false` and omits both `allocatedBytes` and `apparentBytes` (enforced in `categoryByteIntegrity` and tested in §7.2).                                                                                                                                               |
+| NIT-3 | Final re-check | Nit        | Reconcile §8 ledger honestly with C-B5 partial closure and final re-check items                                                                       | **Resolved** | §8                                           | Updated §8 with Review 4 (`6088231420`) rows (`N-1`, `SF-1`-`SF-4`, `NIT-1`-`NIT-5`), C-B5 rev 4 closure note, and Q1 owner decision.                                                                                                                                                                                                            |
+| NIT-4 | Final re-check | Nit        | Require one category object per each of the 11 IDs in `categories` schema                                                                             | **Resolved** | §§2.2, 7.1 (Phase 1), 7.2                    | Added eleven Draft 2020-12 `contains` (`minContains: 1`, `maxContains: 1`) clauses on `categories` (alongside `minItems: 11`/`maxItems: 11`) and added a duplicate-ID rejection test in §7.2.                                                                                                                                                    |
+| NIT-5 | Final re-check | Nit        | Keep numeric + placeholder 80-col sentence for macOS `UF_DATALESS`; use `"on-disk unknown"` when Windows `RECALL_ON_DATA_ACCESS` omits category total | **Resolved** | §§6.3, 7.2                                   | Distinguished `bytesKnown: true` (macOS `UF_DATALESS`) from `bytesKnown: false` (Windows `RECALL_ON_DATA_ACCESS`) in §6.3 80-col layout and footer copy and added PTY test coverage in §7.2.                                                                                                                                                     |
 
 ### Explicitly deferred items (tracked with rationale)
 
