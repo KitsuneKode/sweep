@@ -239,11 +239,30 @@ test(
     mkdirSync(parent, { recursive: true });
     const owned = mkdtempSync(join(parent, "preflight-timeout-child-"));
     try {
-      const result = await runCommand([process.execPath, "-e", "setInterval(() => {}, 1000)"], {
-        cwd: owned,
-        timeoutMs: 200,
-      });
+      const pidFile = join(owned, "child.pid");
+      const result = await runCommand(
+        [
+          process.execPath,
+          "-e",
+          `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`,
+        ],
+        {
+          cwd: owned,
+          timeoutMs: 400,
+        },
+      );
       expect(result.timedOut).toBe(true);
+      if (existsSync(pidFile)) {
+        const childPid = Number(require("node:fs").readFileSync(pidFile, "utf8").trim());
+        expect(Number.isInteger(childPid) && childPid > 0).toBe(true);
+        let alive = true;
+        try {
+          process.kill(childPid, 0);
+        } catch {
+          alive = false;
+        }
+        expect(alive).toBe(false);
+      }
       rmSync(owned, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
       expect(existsSync(owned)).toBe(false);
     } finally {

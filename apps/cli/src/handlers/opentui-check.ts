@@ -81,6 +81,26 @@ interface PrimitiveComparator {
   explicitPrerelease: boolean;
 }
 
+interface PartialSemver {
+  major: number;
+  minor?: number;
+  patch?: number;
+  prerelease: string[];
+}
+
+function parsePartialSemver(raw: string): PartialSemver | null {
+  const match = /^v?(\d+)(?:\.(\d+)(?:\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?)?)?$/.exec(
+    raw.trim(),
+  );
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    ...(match[2] !== undefined ? { minor: Number(match[2]) } : {}),
+    ...(match[3] !== undefined ? { patch: Number(match[3]) } : {}),
+    prerelease: match[4] ? match[4].split(".") : [],
+  };
+}
+
 function expandComparator(raw: string): PrimitiveComparator[] | null {
   const token = raw.trim();
   if (!token || token === "*" || token === "x" || token === "X") {
@@ -88,14 +108,20 @@ function expandComparator(raw: string): PrimitiveComparator[] | null {
   }
 
   if (token.startsWith("^")) {
-    const base = parseSemver(token.slice(1));
-    if (!base) return null;
+    const partial = parsePartialSemver(token.slice(1));
+    if (!partial) return null;
+    const base: ParsedSemver = {
+      major: partial.major,
+      minor: partial.minor ?? 0,
+      patch: partial.patch ?? 0,
+      prerelease: partial.prerelease,
+    };
     const upper: ParsedSemver =
-      base.major > 0
-        ? { major: base.major + 1, minor: 0, patch: 0, prerelease: ["0"] }
-        : base.minor > 0
-          ? { major: 0, minor: base.minor + 1, patch: 0, prerelease: ["0"] }
-          : { major: 0, minor: 0, patch: base.patch + 1, prerelease: ["0"] };
+      partial.major > 0 || partial.minor === undefined
+        ? { major: partial.major + 1, minor: 0, patch: 0, prerelease: ["0"] }
+        : partial.minor > 0 || partial.patch === undefined
+          ? { major: 0, minor: partial.minor + 1, patch: 0, prerelease: ["0"] }
+          : { major: 0, minor: 0, patch: partial.patch + 1, prerelease: ["0"] };
     return [
       { op: ">=", version: base, explicitPrerelease: base.prerelease.length > 0 },
       { op: "<", version: upper, explicitPrerelease: false },
@@ -103,14 +129,18 @@ function expandComparator(raw: string): PrimitiveComparator[] | null {
   }
 
   if (token.startsWith("~")) {
-    const base = parseSemver(token.slice(1));
-    if (!base) return null;
-    const upper: ParsedSemver = {
-      major: base.major,
-      minor: base.minor + 1,
-      patch: 0,
-      prerelease: ["0"],
+    const partial = parsePartialSemver(token.slice(1));
+    if (!partial) return null;
+    const base: ParsedSemver = {
+      major: partial.major,
+      minor: partial.minor ?? 0,
+      patch: partial.patch ?? 0,
+      prerelease: partial.prerelease,
     };
+    const upper: ParsedSemver =
+      partial.minor === undefined
+        ? { major: partial.major + 1, minor: 0, patch: 0, prerelease: ["0"] }
+        : { major: partial.major, minor: partial.minor + 1, patch: 0, prerelease: ["0"] };
     return [
       { op: ">=", version: base, explicitPrerelease: base.prerelease.length > 0 },
       { op: "<", version: upper, explicitPrerelease: false },
@@ -279,13 +309,14 @@ export function collectStaticModuleExports(entryPath: string): Set<string> | nul
  */
 export function defaultOpenTuiResolvers(): readonly (() => string)[] {
   const fromDir = dirname(fileURLToPath(import.meta.url));
+  const resolveSync = bunModuleResolver()?.resolveSync;
+  if (resolveSync) {
+    // Under Bun, match `import("@opentui/core")` ESM resolution directly so a
+    // `require`-only package entry is never falsely accepted by the UI guard.
+    return [() => resolveSync(OPEN_TUI, fromDir)];
+  }
   const siblingUiUrl = new URL("./sweep-ui.js", import.meta.url);
   return [
-    () => {
-      const resolveSync = bunModuleResolver()?.resolveSync;
-      if (!resolveSync) throw new Error("bun resolver unavailable");
-      return resolveSync(OPEN_TUI, fromDir);
-    },
     () => createRequire(siblingUiUrl).resolve(OPEN_TUI),
     () => createRequire(import.meta.url).resolve(OPEN_TUI),
   ];
@@ -466,15 +497,30 @@ export async function verifyOpenTuiAvailable(
   options: OpenTuiInspectOptions = {},
 ): Promise<OpenTuiInspection> {
   const staticResult = inspectOpenTui(options);
-  if (!staticResult.ok) return staticResult;
-
   const requiredRange = options.requiredRange ?? OPENTUI_REQUIRED_RANGE;
   const requiredExports = options.requiredExports ?? OPENTUI_REQUIRED_EXPORTS;
+
+  // Keep missing/version_mismatch failures blocking, but allow Bun's live
+  // module namespace to authoritatively verify exports if static scanning
+  // could not see every export declaration (e.g. comma-separated `export const`).
+  const candidatePath = staticResult.resolvedPath;
+  const canConfirmExportsLive =
+    !staticResult.ok &&
+    staticResult.reason === "missing_exports" &&
+    typeof candidatePath === "string" &&
+    (options.loadModule !== undefined ||
+      (typeof process.versions.bun === "string" && existsSync(candidatePath)));
+
+  if (!staticResult.ok && !canConfirmExportsLive) return staticResult;
+  if (typeof candidatePath !== "string") return staticResult;
+
+  const resolvedPath = candidatePath;
+  const version = staticResult.version ?? null;
   const shouldLoadRuntime =
     options.loadModule !== undefined ||
     (typeof process.versions.bun === "string" &&
       requiredExports.length > 0 &&
-      existsSync(staticResult.resolvedPath));
+      existsSync(resolvedPath));
 
   if (!shouldLoadRuntime) return staticResult;
 
@@ -484,38 +530,43 @@ export async function verifyOpenTuiAvailable(
       (await import(pathToFileURL(entryPath).href)) as Record<string, unknown>);
 
   try {
-    const mod = await loadModule(staticResult.resolvedPath);
+    const mod = await loadModule(resolvedPath);
     const missingExports = requiredExports.filter((name) => !(name in mod));
     if (missingExports.length > 0) {
       return {
         ok: false,
         reason: "missing_exports",
-        resolvedPath: staticResult.resolvedPath,
-        version: staticResult.version,
+        resolvedPath,
+        version,
         requiredRange,
         missingExports,
-        detail: `missing exports (${missingExports.slice(0, 4).join(", ")}${missingExports.length > 4 ? ` (+${missingExports.length - 4})` : ""}) in ${staticResult.version ?? "unknown"} at ${staticResult.resolvedPath}`,
+        detail: `missing exports (${missingExports.slice(0, 4).join(", ")}${missingExports.length > 4 ? ` (+${missingExports.length - 4})` : ""}) in ${version ?? "unknown"} at ${resolvedPath}`,
         message: openTuiMismatchMessage({
-          resolvedPath: staticResult.resolvedPath,
-          version: staticResult.version,
+          resolvedPath,
+          version,
           requiredRange,
           missingExports,
         }),
       };
     }
-    return staticResult;
+    return {
+      ok: true,
+      resolvedPath,
+      version,
+      detail: version ? `${version} (${resolvedPath})` : resolvedPath,
+    };
   } catch (error) {
     const loadError = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
       reason: "load_error",
-      resolvedPath: staticResult.resolvedPath,
-      version: staticResult.version,
+      resolvedPath,
+      version,
       requiredRange,
-      detail: `failed to load ${staticResult.version ?? "unknown"} at ${staticResult.resolvedPath}: ${loadError}`,
+      detail: `failed to load ${version ?? "unknown"} at ${resolvedPath}: ${loadError}`,
       message: openTuiMismatchMessage({
-        resolvedPath: staticResult.resolvedPath,
-        version: staticResult.version,
+        resolvedPath,
+        version,
         requiredRange,
         loadError,
       }),

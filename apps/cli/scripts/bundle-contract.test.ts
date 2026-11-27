@@ -166,6 +166,35 @@ describe("bundle-contract", () => {
   test("negative fixture: rejects declared package with nonexistent subpath under real runtime conditions", () => {
     const dir = mkdtempSync(join(tmpdir(), "sweep-dist-bad-subpath-"));
     roots.push(dir);
+    const pkgDir = join(dir, "node_modules", "@opentui", "core");
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(
+      join(pkgDir, "package.json"),
+      JSON.stringify({
+        name: "@opentui/core",
+        version: "0.6.8",
+        type: "module",
+        exports: {
+          ".": "./index.js",
+          "./valid-subpath": "./valid.js",
+        },
+      }),
+    );
+    writeFileSync(join(pkgDir, "index.js"), "export const ok = 1;\n");
+    writeFileSync(join(pkgDir, "valid.js"), "export const valid = 1;\n");
+
+    writeFileSync(
+      join(dir, "sweep-ui.js"),
+      'import { valid } from "@opentui/core/valid-subpath";\nvoid valid;\n',
+    );
+    const validRes = verifyDistAgainstManifest({
+      distDir: dir,
+      packedManifest: {
+        optionalDependencies: { "@opentui/core": "^0.6.8" },
+      },
+    });
+    expect(validRes.errors).toEqual([]);
+
     writeFileSync(
       join(dir, "sweep-ui.js"),
       'import { nope } from "@opentui/core/does-not-exist-subpath";\nvoid nope;\n',
@@ -263,5 +292,67 @@ describe("bundle-contract", () => {
       packedManifest: { dependencies: { "local-only-pkg": "^1.0.0" } },
     });
     expect(okRes.errors).toEqual([]);
+  });
+
+  test("extractNamedImportsFromPackage ignores commented-out imports", () => {
+    const source = [
+      '/* import { Imaginary } from "@opentui/core"; */',
+      '// import { AlsoFake } from "@opentui/core";',
+      'import { BoxRenderable, TextRenderable as T } from "@opentui/core";',
+    ].join("\n");
+    expect(extractNamedImportsFromPackage(source, "@opentui/core")).toEqual([
+      "BoxRenderable",
+      "TextRenderable",
+    ]);
+  });
+
+  test("verifyDistAgainstManifest handles query params on relative imports, wildcard #imports, optionalDependencies precedence, and nested computed imports in new URL", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sweep-dist-minor-edges-"));
+    roots.push(dir);
+    writeFileSync(join(dir, "chunk.js"), "export const x = 1;\n");
+    writeFileSync(
+      join(dir, "sweep.js"),
+      '#!/usr/bin/env node\nimport "./chunk.js?mode=fast";\nimport "#internal/chunk";\n',
+    );
+    const okRes = verifyDistAgainstManifest({
+      distDir: dir,
+      packedManifest: {
+        imports: { "#internal/*": "./dist/*.js" },
+      },
+      tarballEntries: new Set(["dist/sweep.js", "dist/chunk.js"]),
+    });
+    expect(okRes.errors).toEqual([]);
+
+    const missingTarget = verifyDistAgainstManifest({
+      distDir: dir,
+      packedManifest: {
+        imports: { "#internal/*": "./dist/missing-*.js" },
+      },
+      tarballEntries: new Set(["dist/sweep.js", "dist/chunk.js"]),
+    });
+    expect(missingTarget.errors.some((e) => e.includes("#internal/chunk"))).toBe(true);
+
+    writeFileSync(
+      join(dir, "sweep.js"),
+      "#!/usr/bin/env node\nconst u = new URL(String(import(target)), import.meta.url);\nvoid u;\n",
+    );
+    const computedInUrl = verifyDistAgainstManifest({
+      distDir: dir,
+      packedManifest: {},
+    });
+    expect(computedInUrl.errors.some((e) => e.includes("uncovered computed import(target)"))).toBe(
+      true,
+    );
+
+    writeFileSync(join(dir, "sweep.js"), '#!/usr/bin/env node\nimport "pkg-a";\n');
+    const prec = verifyDistAgainstManifest({
+      distDir: dir,
+      packedManifest: {
+        dependencies: { "pkg-a": "^1.0.0" },
+        optionalDependencies: { "pkg-a": "^2.0.0" },
+      },
+      resolveInstalled: () => ({ entryPath: "/fake/pkg-a/index.js", version: "2.3.0" }),
+    });
+    expect(prec.errors).toEqual([]);
   });
 });

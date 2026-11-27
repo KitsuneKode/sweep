@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 // Bun exposes some npm-package polyfills (e.g. "ws", "undici") in `builtinModules`
@@ -314,6 +315,7 @@ export function scanRuntimeLoadExpressions(source: string): {
                     urlSiblings.add(target);
                   }
                 }
+                scanRange(parenPos + 1, call.end - 1);
                 i = call.end;
                 continue;
               }
@@ -415,6 +417,38 @@ export function extractBarePackageImports(source: string): string[] {
   return scanBundleRuntimeReferences(source).barePackages;
 }
 
+/** Strip JS line and block comments while keeping string and template literals intact. */
+function stripJsComments(code: string): string {
+  let out = "";
+  let i = 0;
+  while (i < code.length) {
+    const ch = code[i]!;
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const end = skipStringOrTemplate(code, i);
+      out += code.slice(i, end);
+      i = end;
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "/") {
+      const nl = code.indexOf("\n", i + 2);
+      if (nl < 0) break;
+      out += "\n";
+      i = nl + 1;
+      continue;
+    }
+    if (ch === "/" && code[i + 1] === "*") {
+      const end = code.indexOf("*/", i + 2);
+      if (end < 0) break;
+      out += " ";
+      i = end + 2;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 /**
  * Extract every named import identifier (exported name, before any `as` alias)
  * taken from `packageName` in an ESM bundle.
@@ -426,7 +460,7 @@ export function extractNamedImportsFromPackage(source: string, packageName: stri
     "g",
   );
   const names = new Set<string>();
-  const clean = stripShebang(source);
+  const clean = stripJsComments(stripShebang(source));
   for (const match of clean.matchAll(pattern)) {
     const clause = match[1] ?? "";
     for (const part of clause.split(",")) {
@@ -704,10 +738,77 @@ function runtimeForBundle(file: string, pkgName: string): TargetRuntime {
   return "node";
 }
 
+function resolveRelativeImportPath(distDir: string, fromFile: string, target: string): string {
+  const baseUrl = pathToFileURL(join(distDir, fromFile));
+  const resolvedUrl = new URL(target, baseUrl);
+  return fileURLToPath(resolvedUrl);
+}
+
 function normalizeDistRelative(distDir: string, fromFile: string, target: string): string {
-  const resolved = resolve(dirname(join(distDir, fromFile)), target);
+  const resolved = resolveRelativeImportPath(distDir, fromFile, target);
   const relFromDist = relative(distDir, resolved).replace(/\\/g, "/");
   return posix.normalize(`dist/${relFromDist}`);
+}
+
+function resolveManifestSubpathTargets(
+  subpath: string,
+  manifestImports: Record<string, unknown>,
+  runtime: TargetRuntime,
+): { matched: boolean; targets: string[] } {
+  const conditions = new Set(
+    runtime === "bun" ? ["bun", "import", "node", "default"] : ["node", "import", "default"],
+  );
+  let entry: unknown;
+  let wildcardMatch: string | undefined;
+  let matched = false;
+
+  if (Object.hasOwn(manifestImports, subpath)) {
+    entry = manifestImports[subpath];
+    matched = true;
+  } else {
+    let bestPrefixLen = -1;
+    for (const [pattern, target] of Object.entries(manifestImports)) {
+      const star = pattern.indexOf("*");
+      if (star < 0 || pattern.indexOf("*", star + 1) >= 0) continue;
+      const prefix = pattern.slice(0, star);
+      const suffix = pattern.slice(star + 1);
+      if (
+        subpath.startsWith(prefix) &&
+        subpath.endsWith(suffix) &&
+        subpath.length >= prefix.length + suffix.length &&
+        prefix.length > bestPrefixLen
+      ) {
+        bestPrefixLen = prefix.length;
+        wildcardMatch = subpath.slice(prefix.length, subpath.length - suffix.length);
+        entry = target;
+        matched = true;
+      }
+    }
+  }
+
+  if (!matched) return { matched: false, targets: [] };
+
+  const targets: string[] = [];
+  const collectTarget = (value: unknown): void => {
+    if (typeof value === "string") {
+      targets.push(wildcardMatch !== undefined ? value.replaceAll("*", wildcardMatch) : value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) collectTarget(item);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [cond, nested] of Object.entries(value as Record<string, unknown>)) {
+        if (conditions.has(cond)) {
+          collectTarget(nested);
+          if (targets.length > 0) return;
+        }
+      }
+    }
+  };
+  collectTarget(entry);
+  return { matched: true, targets };
 }
 
 /**
@@ -765,7 +866,8 @@ export function verifyDistAgainstManifest(options: {
   const deps = (packedManifest.dependencies as Record<string, string> | undefined) ?? {};
   const optionalDeps =
     (packedManifest.optionalDependencies as Record<string, string> | undefined) ?? {};
-  const declared: Record<string, string> = { ...optionalDeps, ...deps };
+  // npm gives optionalDependencies precedence over dependencies when both declare the same package.
+  const declared: Record<string, string> = { ...deps, ...optionalDeps };
   const manifestImports = (packedManifest.imports as Record<string, unknown> | undefined) ?? {};
 
   const files = readdirSync(distDir)
@@ -815,16 +917,43 @@ export function verifyDistAgainstManifest(options: {
     }
 
     for (const sub of refs.subpathImports) {
-      if (!(sub in manifestImports)) {
+      const runtime = file === "sweep-ui.js" ? "bun" : "node";
+      const resolvedSub = resolveManifestSubpathTargets(sub, manifestImports, runtime);
+      if (!resolvedSub.matched) {
         errors.push(
           `dist/${file} uses package subpath import "${sub}", which is not declared in packed manifest "imports"`,
         );
+        continue;
+      }
+      if (resolvedSub.targets.length === 0) {
+        errors.push(
+          `dist/${file} uses package subpath import "${sub}", which has no matching target under ${runtime} conditions in packed manifest "imports"`,
+        );
+        continue;
+      }
+      const pkgRoot = dirname(distDir);
+      for (const target of resolvedSub.targets) {
+        if (!target.startsWith("./")) continue;
+        const normalizedTarget = posix.normalize(target.slice(2).replace(/\\/g, "/"));
+        const onDisk = normalizedTarget.startsWith("dist/")
+          ? join(distDir, normalizedTarget.slice("dist/".length))
+          : resolve(pkgRoot, normalizedTarget);
+        if (!existsSync(onDisk)) {
+          errors.push(
+            `dist/${file} subpath import "${sub}" resolves to missing target "${target}" (expected at ${onDisk})`,
+          );
+        }
+        if (tarballEntries && !tarballEntries.has(normalizedTarget)) {
+          errors.push(
+            `dist/${file} subpath import "${sub}" resolves to "${normalizedTarget}", which is missing from packed tarball`,
+          );
+        }
       }
     }
 
     // Validate all relative imports and `new URL("./...", import.meta.url)` sibling targets.
     for (const relTarget of [...refs.relativeImports, ...refs.urlSiblings]) {
-      const resolvedOnDisk = resolve(dirname(join(distDir, file)), relTarget);
+      const resolvedOnDisk = resolveRelativeImportPath(distDir, file, relTarget);
       if (!existsSync(resolvedOnDisk)) {
         errors.push(
           `dist/${file} references missing sibling target "${relTarget}" (expected at ${resolvedOnDisk})`,

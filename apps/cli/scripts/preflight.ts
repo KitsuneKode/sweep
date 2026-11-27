@@ -4,7 +4,10 @@
  */
 
 import {
+  copyFileSync,
+  cpSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -22,7 +25,7 @@ import {
   readPackedTarball,
   verifyDistAgainstManifest,
 } from "./bundle-contract.js";
-import { preparePublishManifest, readCatalogs } from "./prepack.js";
+import { assertPublishable, preparePublishManifest, readCatalogs } from "./prepack.js";
 import { releasePolicy } from "./release-policy.js";
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -77,16 +80,17 @@ export class CommandError extends Error {
   }
 }
 
-async function drainTimedOutStreams(
+async function drainProcessStreams(
   stdoutPromise: Promise<string>,
   stderrPromise: Promise<string>,
+  maxMs: number,
 ): Promise<[string, string]> {
   let drainTimer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       Promise.all([stdoutPromise, stderrPromise]),
       new Promise<[string, string]>((resolveTimeout) => {
-        drainTimer = setTimeout(() => resolveTimeout(["", ""]), 1000);
+        drainTimer = setTimeout(() => resolveTimeout(["", ""]), maxMs);
       }),
     ]);
   } finally {
@@ -124,9 +128,11 @@ export async function runCommand(
 
   try {
     const exitCode = await proc.exited;
-    const [stdout, stderr] = timedOut
-      ? await drainTimedOutStreams(stdoutPromise, stderrPromise)
-      : await Promise.all([stdoutPromise, stderrPromise]);
+    const [stdout, stderr] = await drainProcessStreams(
+      stdoutPromise,
+      stderrPromise,
+      timedOut ? 1_000 : 5_000,
+    );
     return { exitCode, stdout, stderr, timedOut };
   } catch (err) {
     if (proc.exitCode === null) {
@@ -177,12 +183,17 @@ export async function removeTempDir(path: string): Promise<void> {
 }
 
 let failed = false;
+let signalExitCode: number | null = null;
+const activePackDirs = new Set<string>();
 
 async function check(label: string, fn: () => void | Promise<void>): Promise<void> {
+  if (signalExitCode !== null) return;
   try {
     await fn();
+    if (signalExitCode !== null) return;
     console.log(`  ✓  ${label}`);
   } catch (err) {
+    if (signalExitCode !== null) return;
     const base = err instanceof Error ? err.message : String(err);
     const stderr =
       err && typeof err === "object" && "stderr" in err && typeof err.stderr === "string"
@@ -258,11 +269,32 @@ export function parseNpmPackJson(stdout: string): string[] {
   return filenames;
 }
 
+function stageCliForPack(packDir: string): string {
+  const stageRepo = join(packDir, "stage");
+  const stageCli = join(stageRepo, "apps", "cli");
+  mkdirSync(stageCli, { recursive: true });
+  for (const rootFile of ["package.json", "README.md", "LICENSE"] as const) {
+    const src = join(REPO_ROOT, rootFile);
+    if (existsSync(src)) copyFileSync(src, join(stageRepo, rootFile));
+  }
+  linkNodeModules(join(REPO_ROOT, "node_modules"), join(stageRepo, "node_modules"));
+  for (const entry of readdirSync(CLI_ROOT)) {
+    if (entry === "node_modules" || entry === "package.json.prepack-backup") continue;
+    cpSync(join(CLI_ROOT, entry), join(stageCli, entry), { recursive: true });
+  }
+  linkNodeModules(join(CLI_ROOT, "node_modules"), join(stageCli, "node_modules"));
+  return stageCli;
+}
+
 async function packAndExtractTarball(): Promise<ExtractedTarball> {
   const packDir = mkdtempSync(join(tmpdir(), "sweep-preflight-pack-"));
+  activePackDirs.add(packDir);
   try {
+    // Pack from an isolated staging copy so an interrupted or timed-out `npm pack`
+    // can never leave the checkout's `apps/cli/package.json` rewritten.
+    const stageCli = stageCliForPack(packDir);
     const out = await execCommand(["npm", "pack", "--json", "--pack-destination", packDir], {
-      cwd: CLI_ROOT,
+      cwd: stageCli,
       timeoutMs: 60_000,
     });
     const packedFiles = parseNpmPackJson(out);
@@ -287,6 +319,7 @@ async function packAndExtractTarball(): Promise<ExtractedTarball> {
       manifest,
     };
   } catch (err) {
+    activePackDirs.delete(packDir);
     await removeTempDir(packDir);
     throw err;
   }
@@ -306,11 +339,8 @@ async function main(): Promise<void> {
   console.log("\npreflight checks\n");
 
   const onSignal = (signal: NodeJS.Signals) => {
-    const children = [...activeChildren];
-    for (const proc of children) terminateProcessTree(proc);
-    void Promise.allSettled(children.map((proc) => proc.exited)).finally(() => {
-      process.exit(signal === "SIGINT" ? 130 : 143);
-    });
+    signalExitCode = signal === "SIGINT" ? 130 : 143;
+    for (const proc of activeChildren) terminateProcessTree(proc);
   };
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
@@ -368,6 +398,13 @@ async function main(): Promise<void> {
         assert(existsSync(distDir), "dist/ not found. Run: bun run build");
         extractedTarball = await packAndExtractTarball();
         const { entries, manifest, distDir: packedDistDir } = extractedTarball;
+
+        assert(
+          !("devDependencies" in manifest),
+          "packed tarball manifest must not include devDependencies",
+        );
+        assert(!("scripts" in manifest), "packed tarball manifest must not include scripts");
+        assertPublishable(manifest);
 
         const entryTargets = collectManifestEntryTargets(manifest);
         assert(entryTargets.length > 0, "packed manifest has no exports/bin targets");
@@ -570,8 +607,19 @@ async function main(): Promise<void> {
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
+    const children = [...activeChildren];
+    for (const proc of children) terminateProcessTree(proc);
+    await Promise.allSettled(children.map((proc) => proc.exited));
     const tar = extractedTarball as ExtractedTarball | null;
-    if (tar) await removeTempDir(tar.packDir);
+    if (tar) activePackDirs.add(tar.packDir);
+    for (const dir of activePackDirs) {
+      activePackDirs.delete(dir);
+      await removeTempDir(dir).catch(() => {});
+    }
+  }
+
+  if (signalExitCode !== null) {
+    process.exit(signalExitCode);
   }
 
   console.log();

@@ -65,6 +65,8 @@ describe("generated completions", () => {
 
     expect(zsh).toContain("--view[sweep option]:value:(projects full)");
     expect(zsh).toContain("--theme[sweep option]:value:(auto dark light)");
+    expect(zsh).toMatch(/root_options=\([\s\S]*--allow-dangerous[\s\S]*\)/);
+    expect(zsh).toContain("_arguments $root_options");
     expect(zsh).toMatch(/clean\).*--allow-dangerous/);
     expect(zsh).toMatch(/apply\).*--allow-dangerous/);
     expect(zsh).not.toMatch(/stats\).*--allow-dangerous/);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,9 +48,29 @@ function walkMdFiles(dir: string, results: string[] = []): string[] {
  * owned directories + root Markdown files when running from a source archive.
  */
 export function collectOwnedDocFiles(repoRoot: string = REPO_ROOT): string[] {
+  const cleanEnv: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !/^git_/i.test(key)) cleanEnv[key] = value;
+  }
   try {
+    const toplevel = execFileSync("git", ["-C", repoRoot, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      env: cleanEnv,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).replace(/[\r\n]+$/, "");
+    const expectedReal = realpathSync(repoRoot);
+    const reportedReal = realpathSync(toplevel);
+    const sameRoot =
+      process.platform === "win32"
+        ? expectedReal.replaceAll("/", "\\").toLowerCase() ===
+          reportedReal.replaceAll("/", "\\").toLowerCase()
+        : expectedReal === reportedReal;
+    if (!sameRoot) {
+      throw new Error("git toplevel does not match repoRoot");
+    }
     const stdout = execFileSync("git", ["-C", repoRoot, "ls-files", "-z", "--", "*.md", "*.mdx"], {
       encoding: "utf8",
+      env: cleanEnv,
       stdio: ["ignore", "pipe", "ignore"],
     });
     const files: string[] = [];

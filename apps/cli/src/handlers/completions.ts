@@ -125,7 +125,7 @@ function zshScript(model: CompletionModel): string {
   const commandEntries = model.commands
     .map((command) => `    '${command}:sweep ${command}'`)
     .join("\n");
-  const flagEntries = model.globalFlags.map((flag) => `    '${optionSpec(flag)}'`).join("\n");
+  const rootFlagEntries = model.rootFlags.map((flag) => `    '${optionSpec(flag)}'`).join("\n");
   const cases = model.commands
     .map((command) => {
       const flags = flagsFor(model, command)
@@ -143,13 +143,13 @@ _sweep() {
   commands=(
 ${commandEntries}
   )
-  local -a shared_options
-  shared_options=(
-${flagEntries}
+  local -a root_options
+  root_options=(
+${rootFlagEntries}
   )
   if (( CURRENT == 2 )); then
     _describe 'command' commands
-    _arguments $shared_options
+    _arguments $root_options
     return
   fi
   case "$words[2]" in
