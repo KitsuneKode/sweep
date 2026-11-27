@@ -5,7 +5,7 @@ description: Install Sweep and complete your first read-only review.
 
 ## Install
 
-For command-line scans and cleanup, use Node.js 20.3 or newer:
+For command-line scans and cleanup, use Node.js 22.12 or newer:
 
 ```sh
 npm install -g @kitsunekode/sweep
@@ -23,10 +23,16 @@ The npm package includes bundled JavaScript and selects a matching optional Rust
 engine package for supported platforms. Keep optional dependencies enabled if you
 want the native engine. [Platforms](platforms.md) explains fallback requirements.
 
-The full-screen UI runs on Bun. `@opentui/core` is a dependency of the package,
-so `bun add -g` and `bunx @kitsunekode/sweep ui` install it with sweep. If you
-only need scans and saved plans, Node is enough. A qualified standalone release
-embeds the UI; see the release's checksum and platform instructions.
+The full-screen UI runs on Bun. `@opentui/core` is an optional dependency of
+`@kitsunekode/sweep`: Bun (`bun add -g @kitsunekode/sweep`,
+`bunx @kitsunekode/sweep ui .`) and Yarn 4 install it automatically. On Node
+older than 26.4, pnpm and Yarn 1 skip linking it (Yarn 1 prints an engine
+warning), and npm leaves `@opentui/core` unmet and may still extract a
+`@opentui/core-<platform>` package unless `--omit=optional` is passed. In every
+case, `sweep` installs and runs CLI commands (`sweep`, `sweep scan`,
+`sweep clean`, `sweep plan`, `sweep apply`) on Node.js 22.12+. A qualified
+standalone release embeds the UI with no Node or Bun required; see the release's
+checksum and platform instructions.
 
 ## Scan one project
 

@@ -25,11 +25,13 @@ import {
   CATALOG,
   CATALOG_NAMES,
   ERROR_CODES,
+  IDLE_REPORT,
   INSTALL,
   KEY_GROUPS,
   PHASES,
   RACE,
   STREAM_EVENTS,
+  formatBinaryBytes,
   type Phase,
 } from "./content";
 import { QueueDemo } from "./queue-demo";
@@ -203,12 +205,20 @@ function Hero() {
               {copied ? "Prompt copied" : "Copy prompt for your coding agent"}
             </button>
           </div>
-          <InputCopy
-            data-ui
-            className="sw-hero-cmd"
-            value="npx @kitsunekode/sweep ui ."
-            label="Or run it without installing"
-          />
+          <div className="sw-hero-cmds">
+            <InputCopy
+              data-ui
+              className="sw-hero-cmd"
+              value="bunx @kitsunekode/sweep ui ."
+              label="Try the terminal UI (Bun)"
+            />
+            <InputCopy
+              data-ui
+              className="sw-hero-cmd"
+              value="npx @kitsunekode/sweep --dry-run ."
+              label="Or preview a cleanup on Node"
+            />
+          </div>
         </div>
         <div className="sw-hero-demo">
           <div className="sw-window" data-ui>
@@ -256,14 +266,6 @@ function CatalogStrip() {
 
 /* ── Idle projects: what a disk analyser cannot know ────────────────── */
 
-/** An illustrative `sweep --dry-run` report: the shape the CLI prints. */
-const REPORT_ROWS: { path: string; size: string; idle: string; picked: boolean }[] = [
-  { path: "thesis-site/node_modules", size: "612 MiB", idle: "8mo", picked: true },
-  { path: "old-api/target", size: "2.4 GiB", idle: "5mo", picked: true },
-  { path: "game-jam/.next", size: "318 MiB", idle: "3mo", picked: true },
-  { path: "shop/node_modules", size: "1.1 GiB", idle: "2h", picked: false },
-];
-
 const IDLE_FACTS: { term: string; detail: ReactNode }[] = [
   {
     term: "When you last worked on it",
@@ -302,19 +304,28 @@ function Idle() {
         <figure className="sw-report" data-ui data-reveal>
           <span className="sw-panel-tab">sweep --dry-run · illustrative</span>
           <p className="sw-report-head">
-            <strong>4.4 GiB</strong> to reclaim · 3 of 4 selected
+            <strong>{formatBinaryBytes(IDLE_REPORT.selectedBytes)}</strong> selected of{" "}
+            {formatBinaryBytes(IDLE_REPORT.foundBytes)} found · {IDLE_REPORT.selectedCount} of{" "}
+            {IDLE_REPORT.rows.length} selected
           </p>
-          <p className="sw-report-dim">disk 9.6 GiB free of 256 GiB → up to 14.0 GiB free</p>
-          <p className="sw-report-warn">! 1.1 GiB is in a project worked on today (shop)</p>
+          <p className="sw-report-dim">
+            disk {formatBinaryBytes(IDLE_REPORT.diskFreeBytes)} free of{" "}
+            {formatBinaryBytes(IDLE_REPORT.diskTotalBytes)} → up to{" "}
+            {formatBinaryBytes(IDLE_REPORT.projectedFreeBytes)} free
+          </p>
+          <p className="sw-report-warn">
+            ! {formatBinaryBytes(IDLE_REPORT.todayBytes)} is in a project worked on today (shop)
+          </p>
           <p className="sw-report-tip">
-            → 3.3 GiB is in projects idle 30+ days: <span>sweep --idle 30d</span>
+            → {formatBinaryBytes(IDLE_REPORT.idleBytes)} is in projects idle 30+ days:{" "}
+            <span>sweep --idle 30d</span>
           </p>
           <ul>
-            {REPORT_ROWS.map((row) => (
+            {IDLE_REPORT.rows.map((row) => (
               <li key={row.path} data-picked={row.picked}>
                 <span aria-hidden="true">{row.picked ? "●" : "○"}</span>
                 <span>{row.path}</span>
-                <span>{row.size}</span>
+                <span>{formatBinaryBytes(row.bytes)}</span>
                 <span>idle {row.idle}</span>
               </li>
             ))}
@@ -452,7 +463,7 @@ function Refuses() {
               </div>
               <div className="sw-paper-total">
                 <dt>Freed</dt>
-                <dd>3.2 GB</dd>
+                <dd>3.2 GiB</dd>
               </div>
             </dl>
           </div>
@@ -501,7 +512,7 @@ function Refuses() {
             <p className="sw-tree-hl">└ .sweep-trash-1761400000/</p>
             <p className="sw-tree-in">├ engine/target</p>
             <p className="sw-tree-in">└ web/node_modules</p>
-            <p className="sw-tree-note">3.2 GB · still on disk</p>
+            <p className="sw-tree-note">3.2 GiB · still on disk</p>
           </div>
         </Panel>
       </div>
@@ -720,14 +731,14 @@ function Keys() {
           <span className="sw-panel-tab">statusline</span>
           <p className="sw-statusline-row">
             <span className="sw-statusline-mode">FILTER</span>
-            <span>/kind:node_modules &gt;100MB !path:web</span>
+            <span>/kind:node_modules &gt;100MiB !path:web</span>
             <span className="sw-statusline-end">1 of 8</span>
           </p>
           <ul className="sw-statusline-rows">
             <li>
               <span className="sw-statusline-box" aria-hidden="true" />
               <span>api/node_modules</span>
-              <span>412 MB</span>
+              <span>412 MiB</span>
               <span className="sw-statusline-safe">safe</span>
             </li>
           </ul>

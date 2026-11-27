@@ -460,8 +460,24 @@ body:has(.sw) {
   flex-wrap: wrap;
   gap: 0.6rem;
 }
+.sw-hero-cmds {
+  display: grid;
+  gap: 0.5rem;
+}
 .sw-hero-cmd {
   max-inline-size: 26rem;
+}
+/* At narrow viewports (e.g. 320px), wrap hero commands instead of truncating them,
+   while keeping single-line layout at desktop widths where they already fit. */
+.sw-hero-cmd button {
+  align-items: flex-start;
+}
+.sw-hero-cmd .truncate {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: break-word;
+  line-height: 1.35;
 }
 
 /* The demo window. */

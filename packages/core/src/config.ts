@@ -161,6 +161,16 @@ function readJsonConfig(filePath: string, requireOwned = false): Partial<SweepCo
   }
 }
 
+let projectConfigStopDirForTest: string | undefined;
+
+/**
+ * @internal Test seam: stop ancestor `.sweeprc` discovery at `dir` so tests
+ * under a temporary directory do not inherit an unrelated `.sweeprc` above TMPDIR.
+ */
+export function setProjectConfigStopDirForTest(dir?: string): void {
+  projectConfigStopDirForTest = dir ? resolve(dir) : undefined;
+}
+
 /**
  * Walk up from startDir, looking for .sweeprc (JSON format, no extension).
  * Returns the first one found (closest to CWD wins), or null.
@@ -174,7 +184,9 @@ export function findProjectConfigPath(startDir: string): string | null {
     if (existsSync(candidate)) {
       return candidate;
     }
-    if (dir === fsRoot) break;
+    if (dir === fsRoot || (projectConfigStopDirForTest && dir === projectConfigStopDirForTest)) {
+      break;
+    }
     const parent = dirname(dir);
     if (parent === dir) break; // safety: already at root
     dir = parent;

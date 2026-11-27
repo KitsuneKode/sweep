@@ -4,6 +4,7 @@ import { bold, fg, t, type MouseEvent, type StyledText } from "@opentui/core";
 import { dirname } from "node:path";
 import { type ReactNode, useRef } from "react";
 import { formatAge, RECENT_WINDOW_MS } from "./age.js";
+import { filterAdvice } from "./filter-query.js";
 import { Meter, ScanMeter, StackBar, useCountUp } from "./Meter.js";
 import type { StackSegment } from "./meter-draw.js";
 import type { CostShare, RebuildCost } from "./project-details.js";
@@ -230,11 +231,12 @@ export function ProjectsView(props: ProjectsViewProps) {
   const focusRow = rows[cursor];
   const focusProject = focusRow && "project" in focusRow ? focusRow.project : null;
   const showSearch = searchFocused || filter.length > 0;
-  // Header (brand, blank, answer, meter), search, the list, blank, footer.
+  const advice = showSearch ? filterAdvice(filter) : null;
+  // Header (brand, blank, answer, meter), search (+ optional advice), the list, blank, footer.
   // The cost legend under the bar is the first thing to go when height is short.
   const byCost = props.byCost ?? [];
   const showLegend = !scanning && byCost.length > 0 && height >= 20;
-  const chrome = 4 + (showSearch ? 2 : 0) + 2 + (showLegend ? 1 : 0);
+  const chrome = 4 + (showSearch ? (advice ? 3 : 2) : 0) + 2 + (showLegend ? 1 : 0);
   const room = Math.max(3, height - chrome);
 
   // Keep the cursor in view without jumping the page on every move.
@@ -560,7 +562,7 @@ export function ProjectsView(props: ProjectsViewProps) {
                 focused={searchFocused}
                 value={filter}
                 maxLength={512}
-                placeholder="project, kind:target, >100MiB, idle:30d"
+                placeholder="project, kind:target, >100MiB, older:30d"
                 backgroundColor={tokens.bg}
                 focusedBackgroundColor={tokens.bg}
                 textColor={tokens.text}
@@ -571,6 +573,9 @@ export function ProjectsView(props: ProjectsViewProps) {
               />
             </box>
           </box>
+          {advice ? (
+            <text content={sanitizeTerminalText(advice)} fg={tokens.warning} wrapMode="none" />
+          ) : null}
           <text content="" />
         </>
       ) : null}

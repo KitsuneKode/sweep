@@ -3,7 +3,7 @@ title: Contributing
 description: Build and verify a local change without publishing it.
 ---
 
-Use Bun 1.4.2, Node.js 20.3+ and a Rust toolchain with rustfmt and Clippy.
+Use Bun 1.4.2, Node.js 22.12+ and a Rust toolchain with rustfmt and Clippy.
 Turbo's Cargo workspace discovery needs Cargo even for JavaScript tasks.
 
 ```sh

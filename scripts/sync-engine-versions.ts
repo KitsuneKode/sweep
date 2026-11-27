@@ -17,7 +17,7 @@ const cliPkg = JSON.parse(readFileSync(CLI_PKG_PATH, "utf8")) as {
 };
 
 const version = cliPkg.version;
-const optionalDependencies: Record<string, string> = {};
+const optionalDependencies: Record<string, string> = { ...cliPkg.optionalDependencies };
 
 for (const platform of NATIVE_PLATFORMS) {
   optionalDependencies[platform.npmName] = version;

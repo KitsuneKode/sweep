@@ -5,6 +5,8 @@ import { gitTrackedPaths } from "./git-tracked.js";
 import { ProjectActivityIndex } from "./project-activity.js";
 
 export const GIT_TRACKED_REASON = "git-tracked";
+export const TRACKED_STATUS_UNKNOWN_REASON = "tracked-status-unknown";
+export const CONTAINS_GIT_REPOSITORY_REASON = "contains-git-repository";
 import type {
   PathFailure,
   RiskTier,
@@ -129,25 +131,41 @@ export function restrictSelectionToIdle(
 }
 
 /**
- * Anything git tracks is authored, not built: block it whatever its name.
- * Blocked and symlink rows are skipped - the first is final, and a link's
- * tracked state says nothing about what it points at.
+ * Anything git tracks is authored, not built: block it whatever its name,
+ * including committed symlinks matching an artifact name.
+ * When tracked status cannot be checked for a repository candidate, escalate it
+ * to at least `dangerous` with `tracked-status-unknown` so it is never
+ * pre-selected. Any directory candidate containing a `.git` entry becomes at
+ * least `dangerous` with `contains-git-repository` and is never pre-selected.
+ * Already-blocked rows are skipped because blocked is final.
  */
 function blockGitTracked(candidates: ScanCandidate[]): ScanCandidate[] {
-  const checkable = candidates.filter(
-    (candidate) => candidate.riskTier !== "blocked" && !candidate.isSymlink,
+  const checkable = candidates.filter((candidate) => candidate.riskTier !== "blocked");
+  const { tracked, unknown, containsGitRepo } = gitTrackedPaths(
+    checkable.map((candidate) => candidate.path),
   );
-  const tracked = gitTrackedPaths(checkable.map((candidate) => candidate.path));
-  if (tracked.size === 0) return candidates;
-  return candidates.map((candidate) =>
-    tracked.has(candidate.path)
-      ? {
-          ...candidate,
-          riskTier: "blocked" as const,
-          reasons: [...candidate.reasons, GIT_TRACKED_REASON],
-        }
-      : candidate,
-  );
+  if (tracked.size === 0 && unknown.size === 0 && containsGitRepo.size === 0) return candidates;
+  const addReason = (reasons: string[], reason: string): string[] =>
+    reasons.includes(reason) ? reasons : [...reasons, reason];
+  return candidates.map((candidate) => {
+    if (candidate.riskTier === "blocked") return candidate;
+    const isTracked = tracked.has(candidate.path);
+    const isUnknown = unknown.has(candidate.path);
+    const hasNestedRepo = containsGitRepo.has(candidate.path);
+    if (!isTracked && !isUnknown && !hasNestedRepo) return candidate;
+
+    let reasons = candidate.reasons;
+    if (isTracked) reasons = addReason(reasons, GIT_TRACKED_REASON);
+    else if (isUnknown) reasons = addReason(reasons, TRACKED_STATUS_UNKNOWN_REASON);
+    if (hasNestedRepo) reasons = addReason(reasons, CONTAINS_GIT_REPOSITORY_REASON);
+
+    const riskTier = isTracked ? ("blocked" as const) : ("dangerous" as const);
+    return {
+      ...candidate,
+      riskTier,
+      reasons,
+    };
+  });
 }
 
 function normalizeSelectionDefaults(candidates: ScanCandidate[]): ScanCandidate[] {

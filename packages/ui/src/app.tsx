@@ -1747,7 +1747,7 @@ export function SweepApp({
   };
 
   const runInSessionApply = useCallback(
-    (scopedPlan: ScanPlan, name: string) => {
+    (scopedPlan: ScanPlan, name: string, explicitSingleSelection = false) => {
       // This ref closes the scheduling gate synchronously, before another key
       // in this stdin drain can confirm, quit, rescan or mutate the queue.
       if (applyAbortRef.current || operations.closing) return;
@@ -1760,6 +1760,7 @@ export function SweepApp({
           plan: scopedPlan,
           trash: requestedTrash,
           ...(requestedSizeOverride ? { overrideSizeLimit: true } : {}),
+          ...(explicitSingleSelection ? { explicitSingleSelection: true } : {}),
         });
         return;
       }
@@ -1785,6 +1786,7 @@ export function SweepApp({
               plan: scopedPlan,
               trash: requestedTrash,
               ...(requestedSizeOverride ? { overrideSizeLimit: true } : {}),
+              ...(explicitSingleSelection ? { explicitSingleSelection: true } : {}),
               signal: controller.signal,
               onProgress: (progress) => {
                 if (applyAbortRef.current !== controller) return;
@@ -1976,7 +1978,7 @@ export function SweepApp({
       relativePath(singlePlan.targetDir, singlePlan.candidates[0]!.path) ||
         singlePlan.candidates[0]!.name,
     );
-    runInSessionApply(singlePlan, name);
+    runInSessionApply(singlePlan, name, true);
   }, [runInSessionApply]);
 
   const confirmReviewedApply = () => {

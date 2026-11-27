@@ -7,7 +7,8 @@ import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { hasCanonicalPathSpelling, isPathWithinRoot } from "./guardrails.js";
 import { validatePlan, validateScanEvent } from "./plan.js";
 import { checkedBytes } from "./resource-budget.js";
-import { resolveRustEngineBinary } from "./rust-engine.js";
+import { lookupExecutable } from "./executable-lookup.js";
+import { resolveRustEngineExecutable } from "./rust-engine.js";
 
 const MAX_FRAME = 1024 * 1024;
 const MAX_SNAPSHOT = 64 * 1024 * 1024;
@@ -383,8 +384,31 @@ export class DiscoveryIndexSession {
       throw new DiscoveryIndexError("discovery_refused", "Unknown initial selected ID");
     const { candidates: _, selectedCandidateIds: __, ...header } = snapshot;
     const generation = randomUUID();
-    const command = options.command ?? [resolveRustEngineBinary()];
-    const child = spawn(command[0], [...command.slice(1), "index"], { stdio: "pipe" });
+    let executable: string;
+    let extraArgs: readonly string[];
+    if (options.command) {
+      const lookup = lookupExecutable(options.command[0]);
+      const resolved = lookup.resolvedPath ?? lookup.nonExecutablePath;
+      if (!resolved) {
+        throw new DiscoveryIndexError(
+          "discovery_protocol",
+          `Discovery engine executable was not found: ${options.command[0]}.`,
+        );
+      }
+      executable = resolved;
+      extraArgs = options.command.slice(1);
+    } else {
+      const resolved = resolveRustEngineExecutable();
+      if (!resolved.executable) {
+        throw new DiscoveryIndexError(
+          "discovery_protocol",
+          "Native Rust engine binary was not found.",
+        );
+      }
+      executable = resolved.executable;
+      extraArgs = [];
+    }
+    const child = spawn(executable, [...extraArgs, "index"], { stdio: "pipe" });
     const session = new DiscoveryIndexSession(
       child,
       generation,
