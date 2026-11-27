@@ -59,11 +59,16 @@ bun add -g @kitsunekode/sweep          # commands and the terminal UI
 bunx @kitsunekode/sweep ui ~/Projects  # try the UI without a global install
 ```
 
-Homebrew and the install script fetch one self-contained binary with the
+Homebrew, `install.sh`, and the GitHub Releases assets (including
+`sweep-win-x64.exe` on Windows) provide one self-contained binary with the
 terminal UI built in (no Node or Bun needed, checksums verified). From npm,
 scan and cleanup run on Node.js 20.3+. `sweep ui` runs on Bun; `@opentui/core`
-is an optional dependency installed automatically under Bun (`bun add -g` or
-`bunx`) and skipped when unused on older Node.
+is an optional dependency installed automatically by Bun (`bun add -g`, `bunx`,
+including `bun install --production`) and Yarn 4. On Node older than 26.4, pnpm
+and Yarn 1 skip linking `@opentui/core` (Yarn 1 prints an engine warning), and
+npm leaves `@opentui/core` unmet and may still extract
+`@opentui/core-<platform>` unless `--omit=optional` is passed; in every case,
+`sweep` itself installs and runs CLI commands.
 Linux (x64, arm64), macOS (x64, arm64) and Windows (x64) are supported.
 
 For coding agents: `npx skills add KitsuneKode/sweep`.

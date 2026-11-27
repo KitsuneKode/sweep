@@ -463,7 +463,7 @@ function Refuses() {
               </div>
               <div className="sw-paper-total">
                 <dt>Freed</dt>
-                <dd>3.2 GB</dd>
+                <dd>3.2 GiB</dd>
               </div>
             </dl>
           </div>
@@ -512,7 +512,7 @@ function Refuses() {
             <p className="sw-tree-hl">└ .sweep-trash-1761400000/</p>
             <p className="sw-tree-in">├ engine/target</p>
             <p className="sw-tree-in">└ web/node_modules</p>
-            <p className="sw-tree-note">3.2 GB · still on disk</p>
+            <p className="sw-tree-note">3.2 GiB · still on disk</p>
           </div>
         </Panel>
       </div>
@@ -731,14 +731,14 @@ function Keys() {
           <span className="sw-panel-tab">statusline</span>
           <p className="sw-statusline-row">
             <span className="sw-statusline-mode">FILTER</span>
-            <span>/kind:node_modules &gt;100MB !path:web</span>
+            <span>/kind:node_modules &gt;100MiB !path:web</span>
             <span className="sw-statusline-end">1 of 8</span>
           </p>
           <ul className="sw-statusline-rows">
             <li>
               <span className="sw-statusline-box" aria-hidden="true" />
               <span>api/node_modules</span>
-              <span>412 MB</span>
+              <span>412 MiB</span>
               <span className="sw-statusline-safe">safe</span>
             </li>
           </ul>

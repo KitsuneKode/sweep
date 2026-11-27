@@ -77,15 +77,21 @@ const steps: Step[] = [
       engineBin()?.includes("release") ? false : "no release engine for native package install",
   },
   {
-    name: "installed UI smoke",
+    name: "installed UI smoke (Linux-only tmux PTY)",
     cmd: ["bun", "run", "scripts/smoke-installed-ui.ts"],
     release: true,
+    // Intentionally Linux-only: requires tmux, sh, and a Unix domain socket under /tmp.
     unless: () =>
       process.platform !== "linux"
-        ? "Linux tmux PTY smoke only"
+        ? `Linux-only tmux PTY smoke (not run on ${process.platform})`
         : !Bun.which("tmux")
-          ? "tmux not installed"
+          ? "Linux-only tmux PTY smoke (tmux not installed)"
           : false,
+  },
+  {
+    name: "min-Node installed tarball smoke",
+    cmd: ["bun", "run", "scripts/smoke-min-node.ts"],
+    release: true,
   },
   { name: "pack:preview", cmd: ["bun", "run", "pack:preview"], release: true },
   {

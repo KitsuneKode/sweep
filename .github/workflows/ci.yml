@@ -79,6 +79,13 @@ jobs:
       - name: Check, build, and preflight
         run: bunx turbo run check build preflight --filter "@kitsunekode/*" --continue
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "20.3.0"
+
+      - name: Verify installed tarball on declared minimum Node (20.3.0, optional deps omitted)
+        run: bun run scripts/smoke-min-node.ts --expect-version 20.3.0
+
   docs:
     name: documentation foundation
     runs-on: ubuntu-latest
@@ -179,7 +186,9 @@ jobs:
       - name: Install local tarballs and verify owned scan-save-apply
         run: bun run scripts/smoke-package.ts --online
 
-      - name: Install packed CLI globally over old @opentui/core and verify UI in tmux PTY
+      # Intentionally Linux-only: scripts/smoke-installed-ui.ts uses tmux, sh,
+      # and a Unix domain socket under /tmp, so macOS/Windows runners do not run it.
+      - name: Install packed CLI globally over old @opentui/core and verify UI in tmux PTY (Linux-only)
         run: bun run scripts/smoke-installed-ui.ts
 
       - name: Qualify nested bind mounts in a private namespace
@@ -233,8 +242,10 @@ jobs:
 
       # Typecheck + pure-TS tests on every OS. The TUI itself needs a TTY and
       # OpenTUI native FFI (Bun), so it is smoke-checked via unit render tests
-      # only here. Linux also has an owned-fixture PTY test in the Rust job;
-      # physical terminal and non-Linux PTY qualification remain separate.
+      # only here. The installed-UI tmux PTY smoke (scripts/smoke-installed-ui.ts)
+      # is intentionally Linux-only and runs in the Linux `rust` job; macOS and
+      # Windows runners do not run it. Physical terminal and non-Linux PTY
+      # qualification remain separate.
       - name: Typecheck CLI workspaces
         run: bunx turbo run typecheck --filter "@kitsunekode/*"
 

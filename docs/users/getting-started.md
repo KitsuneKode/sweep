@@ -24,12 +24,15 @@ engine package for supported platforms. Keep optional dependencies enabled if yo
 want the native engine. [Platforms](platforms.md) explains fallback requirements.
 
 The full-screen UI runs on Bun. `@opentui/core` is an optional dependency of
-`@kitsunekode/sweep`, so `bun add -g @kitsunekode/sweep` and
-`bunx @kitsunekode/sweep ui .` install it automatically on Bun while Node.js
-20.3+ installs can skip it and still run all CLI commands (`sweep`, `sweep scan`,
-`sweep clean`, `sweep plan`, `sweep apply`). A qualified standalone release
-embeds the UI with no Node or Bun required; see the release's checksum and
-platform instructions.
+`@kitsunekode/sweep`: Bun (`bun add -g @kitsunekode/sweep`,
+`bunx @kitsunekode/sweep ui .`) and Yarn 4 install it automatically. On Node
+older than 26.4, pnpm and Yarn 1 skip linking it (Yarn 1 prints an engine
+warning), and npm leaves `@opentui/core` unmet and may still extract a
+`@opentui/core-<platform>` package unless `--omit=optional` is passed. In every
+case, `sweep` installs and runs CLI commands (`sweep`, `sweep scan`,
+`sweep clean`, `sweep plan`, `sweep apply`) on Node.js 20.3+. A qualified
+standalone release embeds the UI with no Node or Bun required; see the release's
+checksum and platform instructions.
 
 ## Scan one project
 
