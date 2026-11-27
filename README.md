@@ -61,7 +61,9 @@ bunx @kitsunekode/sweep ui ~/Projects  # try the UI without a global install
 
 Homebrew, `install.sh`, and the GitHub Releases assets (including
 `sweep-win-x64.exe` on Windows) provide one self-contained binary with the
-terminal UI built in (no Node or Bun needed, checksums verified). From npm,
+terminal UI built in (no Node or Bun needed). Homebrew and `install.sh` verify
+checksums automatically; direct GitHub Releases downloads include checksum files
+you can verify yourself. From npm,
 scan and cleanup run on Node.js 22.12+. `sweep ui` runs on Bun; `@opentui/core`
 is an optional dependency installed automatically by Bun (`bun add -g`, `bunx`,
 including `bun install --production`) and Yarn 4. On Node older than 26.4, pnpm

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,6 +7,7 @@ import {
   extractBarePackageImports,
   extractNamedImportsFromPackage,
   findReactDevMarkers,
+  resolveExternalSpecifier,
   scanBundleRuntimeReferences,
   verifyDistAgainstManifest,
 } from "./bundle-contract.js";
@@ -203,5 +204,64 @@ describe("bundle-contract", () => {
       packedManifest: { imports: { "#internal": "./dist/sweep.js" } },
     });
     expect(declared.errors).toEqual([]);
+  });
+
+  test("Node resolver anchors at supplied parent dir and rejects exported subpaths whose target file is absent", () => {
+    const pkgRoot = mkdtempSync(join(tmpdir(), "sweep-node-resolve-"));
+    roots.push(pkgRoot);
+    const distDir = join(pkgRoot, "dist");
+    const depDir = join(pkgRoot, "node_modules", "local-only-pkg");
+    mkdirSync(distDir, { recursive: true });
+    mkdirSync(depDir, { recursive: true });
+    writeFileSync(
+      join(depDir, "package.json"),
+      JSON.stringify({
+        name: "local-only-pkg",
+        version: "1.2.3",
+        type: "module",
+        exports: {
+          ".": "./index.mjs",
+          "./sub": "./sub.mjs",
+          "./missing": "./does-not-exist.mjs",
+        },
+      }),
+    );
+    writeFileSync(join(depDir, "index.mjs"), "export const ok = 1;\n");
+    writeFileSync(join(depDir, "sub.mjs"), "export const sub = 2;\n");
+
+    // Valid targets visible only from pkgRoot/dist must resolve under Node.
+    const resolvedRoot = resolveExternalSpecifier("local-only-pkg", distDir, "node");
+    expect(resolvedRoot).not.toBeNull();
+    expect(realpathSync(resolvedRoot!)).toBe(realpathSync(join(depDir, "index.mjs")));
+    const resolvedSub = resolveExternalSpecifier("local-only-pkg/sub", distDir, "node");
+    expect(resolvedSub).not.toBeNull();
+    expect(realpathSync(resolvedSub!)).toBe(realpathSync(join(depDir, "sub.mjs")));
+    // Declared export pointing to an absent file must not resolve.
+    expect(resolveExternalSpecifier("local-only-pkg/missing", distDir, "node")).toBeNull();
+
+    // End-to-end contract check: absent subpath fails, existing subpath passes.
+    writeFileSync(
+      join(distDir, "sweep.js"),
+      '#!/usr/bin/env node\nimport { nope } from "local-only-pkg/missing";\nvoid nope;\n',
+    );
+    const missingRes = verifyDistAgainstManifest({
+      distDir,
+      packedManifest: { dependencies: { "local-only-pkg": "^1.0.0" } },
+    });
+    expect(
+      missingRes.errors.some(
+        (e) => e.includes("local-only-pkg/missing") && e.includes("node conditions"),
+      ),
+    ).toBe(true);
+
+    writeFileSync(
+      join(distDir, "sweep.js"),
+      '#!/usr/bin/env node\nimport { sub } from "local-only-pkg/sub";\nvoid sub;\n',
+    );
+    const okRes = verifyDistAgainstManifest({
+      distDir,
+      packedManifest: { dependencies: { "local-only-pkg": "^1.0.0" } },
+    });
+    expect(okRes.errors).toEqual([]);
   });
 });

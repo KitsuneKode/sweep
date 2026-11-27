@@ -5,10 +5,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { builtinModules } from "node:module";
-import { dirname, join, posix, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 
 // Bun exposes some npm-package polyfills (e.g. "ws", "undici") in `builtinModules`
@@ -509,10 +508,20 @@ export function collectBunModuleExports(entryPath: string): Set<string> {
   return exports;
 }
 
+function isExistingFile(filePath: string): boolean {
+  try {
+    return statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve a complete external ESM specifier using the target runtime's conditions:
  * - `"bun"`: `Bun.resolveSync` (Bun export conditions)
  * - `"node"`: Node's native `import.meta.resolve` anchored at `fromDir` (Node ESM conditions)
+ *
+ * Returns `null` unless the resolved target exists as a real file on disk.
  */
 export function resolveExternalSpecifier(
   specifier: string,
@@ -522,23 +531,28 @@ export function resolveExternalSpecifier(
 ): string | null {
   if (runtime === "bun") {
     try {
-      return Bun.resolveSync(specifier, fromDir);
+      const resolved = Bun.resolveSync(specifier, fromDir);
+      return resolved && isExistingFile(resolved) ? resolved : null;
     } catch {
       return null;
     }
   }
   try {
-    const parentUrl = pathToFileURL(join(resolve(fromDir), "__preflight_resolve__.mjs")).href;
     const out = execFileSync(
       nodeBin,
       [
         "--input-type=module",
         "-e",
-        `import { fileURLToPath } from "node:url"; console.log(fileURLToPath(import.meta.resolve(${JSON.stringify(specifier)}, ${JSON.stringify(parentUrl)})));`,
+        `import { fileURLToPath } from "node:url"; console.log(fileURLToPath(import.meta.resolve(${JSON.stringify(specifier)})));`,
       ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 5000 },
+      {
+        cwd: resolve(fromDir),
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 5000,
+      },
     ).trim();
-    return out.length > 0 ? out : null;
+    return out.length > 0 && isExistingFile(out) ? out : null;
   } catch {
     return null;
   }
@@ -625,16 +639,22 @@ export function collectManifestEntryTargets(manifest: Record<string, unknown>): 
 }
 
 /**
- * Pure-JS reader for gzipped npm tarballs (`.tgz`) so preflight can inspect the
- * exact packed file list and `package/package.json` across Linux, macOS, and Windows.
+ * Pure-JS reader for gzipped npm tarballs (`.tgz`) so preflight can inspect or
+ * extract the exact packed files and `package/package.json` across Linux,
+ * macOS, and Windows.
  */
-export function readPackedTarball(tgzPath: string): {
+export function readPackedTarball(
+  tgzPath: string,
+  extractToDir?: string,
+): {
   entries: Set<string>;
   manifest: Record<string, unknown> | null;
 } {
   const tar = gunzipSync(readFileSync(tgzPath));
   const entries = new Set<string>();
   let manifest: Record<string, unknown> | null = null;
+  const extractRoot = extractToDir ? resolve(extractToDir) : null;
+  if (extractRoot) mkdirSync(extractRoot, { recursive: true });
   let offset = 0;
 
   while (offset + 512 <= tar.length) {
@@ -653,11 +673,18 @@ export function readPackedTarball(tgzPath: string): {
     if (fullName && (typeFlag === 0 || typeFlag === 48) /* '0' */) {
       const normalized = fullName.replace(/^\.\//, "").replace(/^package\//, "");
       entries.add(normalized);
+      const payload = tar.subarray(dataStart, dataStart + size);
       if (normalized === "package.json") {
-        manifest = JSON.parse(tar.subarray(dataStart, dataStart + size).toString("utf8")) as Record<
-          string,
-          unknown
-        >;
+        manifest = JSON.parse(payload.toString("utf8")) as Record<string, unknown>;
+      }
+      if (extractRoot) {
+        const outPath = resolve(extractRoot, normalized);
+        const rel = relative(extractRoot, outPath);
+        if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+          throw new Error(`tarball entry escapes extraction root: ${fullName}`);
+        }
+        mkdirSync(dirname(outPath), { recursive: true });
+        writeFileSync(outPath, payload);
       }
     }
 
