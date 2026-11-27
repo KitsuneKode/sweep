@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -314,6 +324,46 @@ describe("CLI scan/apply", () => {
     expect(again.exitCode).toBe(2);
     expect(again.stderr).toContain("already exists");
   });
+
+  test.skipIf(process.platform === "win32")(
+    "init under umask 002 produces a config that scan and doctor load cleanly, and refuses symlink/FIFO",
+    () => {
+      const umaskProject = dir("umask-002-project");
+      mkdirSync(join(umaskProject, "node_modules", "pkg"), { recursive: true });
+      const prevUmask = process.umask(0o002);
+      try {
+        const initRes = runCli(["init", umaskProject]);
+        expect(initRes.exitCode).toBe(0);
+      } finally {
+        process.umask(prevUmask);
+      }
+      expect(statSync(join(umaskProject, ".sweeprc")).mode & 0o777).toBe(0o644);
+
+      const scanRes = runCli(["scan", umaskProject, "--json"]);
+      expect(scanRes.exitCode).toBe(0);
+
+      const doctorRes = runCli(["doctor", umaskProject, "--json"]);
+      const doctorDoc = JSON.parse(doctorRes.stdout) as {
+        checks: Array<{ name: string; status: string; detail: string }>;
+      };
+      expect(doctorDoc.checks.find((c) => c.name === "config")?.status).toBe("ok");
+
+      // Symlink and FIFO targets are refused for both init and init --force.
+      const linkProject = dir("symlink-init-project");
+      mkdirSync(linkProject, { recursive: true });
+      writeFileSync(dir("keep.txt"), "safe");
+      symlinkSync(dir("keep.txt"), join(linkProject, ".sweeprc"));
+      expect(runCli(["init", linkProject]).exitCode).toBe(3);
+      expect(runCli(["init", linkProject, "--force"]).exitCode).toBe(3);
+      expect(readFileSync(dir("keep.txt"), "utf8")).toBe("safe");
+
+      const fifoProject = dir("fifo-init-project");
+      mkdirSync(fifoProject, { recursive: true });
+      execFileSync("mkfifo", [join(fifoProject, ".sweeprc")]);
+      expect(runCli(["init", fifoProject]).exitCode).toBe(3);
+      expect(runCli(["init", fifoProject, "--force"]).exitCode).toBe(3);
+    },
+  );
 
   test("an unattended run removes dangerous items only with --allow-dangerous", () => {
     mkdirSync(dir("custom-cache"));

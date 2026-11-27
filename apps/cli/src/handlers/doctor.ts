@@ -69,7 +69,8 @@ export async function collectDoctorChecks(
   opts: CliOptions & { trash?: boolean },
 ): Promise<DoctorCheck[]> {
   // Report the config file loadConfig would actually find - ancestors count.
-  const configPath = findProjectConfigPath(targetDir);
+  const explicitConfigPath = opts.config ? resolve(opts.config) : null;
+  const configPath = explicitConfigPath ?? findProjectConfigPath(targetDir);
   const rustProbe = probeRustEngine();
   const rustOk = rustProbe.available;
   const rustExecutable = rustProbe.resolvedPath ?? rustProbe.binary;
@@ -94,7 +95,9 @@ export async function collectDoctorChecks(
   const openTui = embeddedUi ? null : await verifyOpenTuiAvailable();
   const hasConfigFile = configPath !== null;
   const configValidity = hasConfigFile
-    ? validateProjectConfigFile(configPath, targetDir)
+    ? validateProjectConfigFile(configPath, targetDir, {
+        requireOwned: explicitConfigPath === null,
+      })
     : { ok: true as const, path: configPath ?? "" };
 
   // The dry scan runs the config a real run would use - CLI flags included -

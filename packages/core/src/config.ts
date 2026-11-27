@@ -10,7 +10,8 @@ import {
   readSync,
   renameSync,
   unlinkSync,
-  writeFileSync,
+  writeSync,
+  type Stats,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse, relative, resolve } from "node:path";
@@ -102,6 +103,41 @@ function assertReadableConfigFile(filePath: string): void {
   }
 }
 
+export type PosixTrustIssue = "other_user" | "world_writable" | "group_writable";
+
+/**
+ * Check POSIX ownership and write-permission bits for auto-discovered config
+ * files and the sweep config directory. Windows is unchanged (returns null).
+ *
+ * - Always refuse entries owned by another user.
+ * - Always refuse world-writable (o+w) entries.
+ * - Allow group-writable (g+w) only when gid matches the user's primary
+ *   group (process.getgid()), supporting user-private groups (umask 002).
+ */
+export function checkPosixTrust(
+  stat: { uid: number; gid: number; mode: number },
+  uid = process.getuid?.(),
+  gid = process.getgid?.(),
+): PosixTrustIssue | null {
+  if (process.platform === "win32") return null;
+  if (uid !== undefined && stat.uid !== uid) return "other_user";
+  if ((stat.mode & 0o002) !== 0) return "world_writable";
+  if ((stat.mode & 0o020) !== 0 && (gid === undefined || stat.gid !== gid)) {
+    return "group_writable";
+  }
+  return null;
+}
+
+function configTrustErrorMessage(filePath: string, issue: PosixTrustIssue): string {
+  if (issue === "other_user") {
+    return `Automatically discovered config at ${filePath} is owned by another user; review it and use --config explicitly if trusted`;
+  }
+  if (issue === "world_writable") {
+    return `Automatically discovered config at ${filePath} is world-writable; run \`chmod go-w\` (or \`chmod o-w\`) on it, or review it and use --config explicitly if trusted`;
+  }
+  return `Automatically discovered config at ${filePath} is group-writable by another group; run \`chmod g-w\` on it, or review it and use --config explicitly if trusted`;
+}
+
 /** Pin the opened regular file and bound reads even if it grows after fstat. */
 function readConfigText(filePath: string, requireOwned = false): string {
   assertReadableConfigFile(filePath);
@@ -109,20 +145,11 @@ function readConfigText(filePath: string, requireOwned = false): string {
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile()) throw new ConfigParseError(`Config at ${filePath} is not a regular file`);
-    if (
-      requireOwned &&
-      process.platform !== "win32" &&
-      process.getuid &&
-      stat.uid !== process.getuid()
-    ) {
-      throw new ConfigParseError(
-        `Automatically discovered config at ${filePath} is owned by another user; review it and use --config explicitly if trusted`,
-      );
-    }
-    if (requireOwned && process.platform !== "win32" && (stat.mode & 0o022) !== 0) {
-      throw new ConfigParseError(
-        `Automatically discovered config at ${filePath} is writable by the group or others; review it and use --config explicitly if trusted`,
-      );
+    if (requireOwned) {
+      const trustIssue = checkPosixTrust(stat);
+      if (trustIssue !== null) {
+        throw new ConfigParseError(configTrustErrorMessage(filePath, trustIssue));
+      }
     }
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -156,6 +183,7 @@ function readJsonConfig(filePath: string, requireOwned = false): Partial<SweepCo
     }
     return parsed as Partial<SweepConfig>;
   } catch (err) {
+    if (err instanceof ConfigParseError) throw err;
     const msg = err instanceof Error ? err.message : String(err);
     throw new ConfigParseError(`Failed to parse config at ${filePath}: ${msg}`, { cause: err });
   }
@@ -208,14 +236,26 @@ export type ConfigValidationResult =
  * Validate a `.sweeprc` file without applying CLI overrides.
  * Checks JSON shape, known fields, and pattern safety via loadConfig.
  */
-export function validateProjectConfigFile(configPath: string, cwd: string): ConfigValidationResult {
+export function validateProjectConfigFile(
+  configPath: string,
+  cwd: string,
+  { requireOwned = true }: { requireOwned?: boolean } = {},
+): ConfigValidationResult {
   if (!existsSync(configPath)) {
     return { ok: false, path: configPath, detail: "file not found" };
   }
 
+  let text: string;
+  try {
+    text = readConfigText(configPath, requireOwned);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, path: configPath, detail: msg };
+  }
+
   let raw: unknown;
   try {
-    raw = JSON.parse(readConfigText(configPath));
+    raw = JSON.parse(text);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, path: configPath, detail: `invalid JSON: ${msg}` };
@@ -259,13 +299,16 @@ export function validateProjectConfigFile(configPath: string, cwd: string): Conf
   return { ok: true, path: configPath };
 }
 
-export function writeInitSweeprc(
+const INIT_SWEEPRC_MODE = 0o644;
+
+type WritableConfigTarget = { existed: false } | { existed: true; stat: Stats };
+
+function inspectWritableConfigTarget(
   configPath: string,
-  force = false,
-  contents: InitSweeprc = { ...INIT_SWEEPRC_TEMPLATE, patterns: [], ignore: [] },
-): "created" | "exists" {
-  // lstat before existsSync: a symlinked .sweeprc (possibly dangling) would
-  // make writeFileSync follow the link and overwrite whatever it points at.
+  requireOwned = false,
+): WritableConfigTarget {
+  // lstat before writing: a symlinked .sweeprc (possibly dangling) or a FIFO
+  // must be refused before any open or rename touches it.
   try {
     const stat = lstatSync(configPath);
     if (stat.isSymbolicLink()) {
@@ -273,14 +316,126 @@ export function writeInitSweeprc(
         `${configPath} is a symlink - refusing to write through it. Remove it first.`,
       );
     }
-    if (!force) return "exists";
+    if (!stat.isFile()) {
+      throw new ConfigParseError(`${configPath} is not a regular file`);
+    }
+    if (
+      requireOwned &&
+      process.platform !== "win32" &&
+      process.getuid &&
+      stat.uid !== process.getuid()
+    ) {
+      throw new ConfigParseError(`Refusing to overwrite ${configPath}: owned by another user`);
+    }
+    return { existed: true, stat };
   } catch (err) {
     if (err instanceof ConfigParseError) throw err;
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    // ENOENT - nothing there, safe to create.
+    return { existed: false };
+  }
+}
+
+/**
+ * Pre-scan check for `sweep init`: refuses symlinks, non-regular files, and
+ * unowned overwrite targets before waiting on a scan.
+ */
+export function checkInitSweeprcTarget(
+  configPath: string,
+  force = false,
+): "missing" | "exists" | "overwrite" {
+  const target = inspectWritableConfigTarget(configPath, force);
+  if (!target.existed) return "missing";
+  return force ? "overwrite" : "exists";
+}
+
+function writeExclusiveFile(filePath: string, payload: string, mode: number): void {
+  const fd = openSync(
+    filePath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+    mode,
+  );
+  let writtenOk = false;
+  try {
+    const data = Buffer.from(payload, "utf8");
+    let offset = 0;
+    while (offset < data.length) {
+      const count = writeSync(fd, data, offset, data.length - offset);
+      if (count === 0) {
+        throw new ConfigParseError(`Short write while saving config at ${filePath}`);
+      }
+      offset += count;
+    }
+    writtenOk = true;
+  } finally {
+    closeSync(fd);
+    if (!writtenOk) {
+      try {
+        unlinkSync(filePath);
+      } catch {
+        // Best-effort cleanup of a partial newly created file.
+      }
+    }
+  }
+}
+
+// O_EXCL + O_NOFOLLOW on the temp path: a planted `.sweeprc.tmp-*` symlink
+// fails EEXIST instead of being written through. Retried suffixes keep a stray
+// leftover tmp file from wedging the write.
+function writeExclusiveTempFile(configPath: string, payload: string, mode: number): string {
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const candidatePath = `${configPath}.tmp-${process.pid}-${attempt}`;
+    try {
+      writeExclusiveFile(candidatePath, payload, mode);
+      return candidatePath;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+  }
+  throw new ConfigParseError(`could not create a temp file next to ${configPath}`);
+}
+
+function replaceConfigViaTemp(
+  configPath: string,
+  payload: string,
+  mode: number,
+  beforeRename?: () => void,
+): void {
+  const tmpPath = writeExclusiveTempFile(configPath, payload, mode);
+  try {
+    beforeRename?.();
+    renameSync(tmpPath, configPath);
+  } finally {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      // Already renamed - nothing to clean.
+    }
+  }
+}
+
+export function writeInitSweeprc(
+  configPath: string,
+  force = false,
+  contents: InitSweeprc = { ...INIT_SWEEPRC_TEMPLATE, patterns: [], ignore: [] },
+): "created" | "exists" {
+  const target = inspectWritableConfigTarget(configPath, force);
+  if (target.existed && !force) return "exists";
+
+  const payload = `${JSON.stringify(contents, null, 2)}\n`;
+  if (!target.existed) {
+    try {
+      writeExclusiveFile(configPath, payload, INIT_SWEEPRC_MODE);
+      return "created";
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      inspectWritableConfigTarget(configPath, force);
+      if (!force) return "exists";
+    }
   }
 
-  writeFileSync(configPath, `${JSON.stringify(contents, null, 2)}\n`, "utf-8");
+  replaceConfigViaTemp(configPath, payload, INIT_SWEEPRC_MODE, () => {
+    inspectWritableConfigTarget(configPath, true);
+  });
   return "created";
 }
 
@@ -329,24 +484,10 @@ export function writeProjectSweeprc(
   force = false,
   expectedRevision?: string,
 ): "created" | "exists" | "updated" {
-  let existed = false;
-  let mode = 0o600;
-  try {
-    const stat = lstatSync(configPath);
-    if (stat.isSymbolicLink()) {
-      throw new ConfigParseError(
-        `${configPath} is a symlink - refusing to write through it. Remove it first.`,
-      );
-    }
-    if (!stat.isFile()) throw new ConfigParseError(`${configPath} is not a regular file`);
-    existed = true;
-    mode = stat.mode & 0o777;
-    if (!force) return "exists";
-  } catch (err) {
-    if (err instanceof ConfigParseError) throw err;
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-    // ENOENT - nothing there, safe to create.
-  }
+  const target = inspectWritableConfigTarget(configPath, force);
+  const existed = target.existed;
+  const mode = target.existed ? target.stat.mode & 0o777 : 0o600;
+  if (existed && !force) return "exists";
 
   // Start from whatever the existing file holds so overwrite only ever
   // replaces the two fields the pattern editor owns.
@@ -397,53 +538,38 @@ export function writeProjectSweeprc(
     delete doc.disabledPatterns;
   }
 
-  // O_EXCL ("wx") on the temp path: a planted `.sweeprc.tmp-*` symlink fails
-  // EEXIST instead of being written through. Retried suffixes keep a stray
-  // leftover tmp file from wedging the write.
-  let tmpPath = "";
-  for (let attempt = 0; attempt < 16; attempt++) {
-    const candidatePath = `${configPath}.tmp-${process.pid}-${attempt}`;
-    try {
-      writeFileSync(candidatePath, `${JSON.stringify(doc, null, 2)}\n`, {
-        encoding: "utf-8",
-        flag: "wx",
-        mode,
-      });
-      tmpPath = candidatePath;
-      break;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    }
-  }
-  if (!tmpPath) {
-    throw new ConfigParseError(`could not create a temp file next to ${configPath}`);
-  }
-  try {
-    if (existed) {
-      if (projectSweeprcRevision(configPath) !== originalRevision)
+  const payload = `${JSON.stringify(doc, null, 2)}\n`;
+  if (existed) {
+    replaceConfigViaTemp(configPath, payload, mode, () => {
+      inspectWritableConfigTarget(configPath, true);
+      if (projectSweeprcRevision(configPath) !== originalRevision) {
         throw new ConfigParseError(".sweeprc changed while saving. Review the pattern save again.");
-      renameSync(tmpPath, configPath);
-    } else {
-      // Installing a complete file must not replace one created since the
-      // initial existence check. Hard-link publication is atomic and exclusive.
-      try {
-        linkSync(tmpPath, configPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "EEXIST") return "exists";
-        throw new ConfigParseError(
-          "Cannot create .sweeprc exclusively on this filesystem. Create an empty .sweeprc in your editor, then save patterns again.",
-          { cause: error },
-        );
       }
+    });
+    return "updated";
+  }
+
+  const tmpPath = writeExclusiveTempFile(configPath, payload, mode);
+  try {
+    // Installing a complete file must not replace one created since the
+    // initial existence check. Hard-link publication is atomic and exclusive.
+    try {
+      linkSync(tmpPath, configPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") return "exists";
+      throw new ConfigParseError(
+        "Cannot create .sweeprc exclusively on this filesystem. Create an empty .sweeprc in your editor, then save patterns again.",
+        { cause: error },
+      );
     }
   } finally {
     try {
       unlinkSync(tmpPath);
     } catch {
-      // Already renamed - nothing to clean.
+      // Already cleaned.
     }
   }
-  return existed ? "updated" : "created";
+  return "created";
 }
 
 /**

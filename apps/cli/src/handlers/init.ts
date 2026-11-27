@@ -1,8 +1,11 @@
-import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { CliOptions, ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { PATTERN_CATALOG } from "@kitsunekode/sweep-core/catalog";
-import { DEFAULT_CONFIG, writeInitSweeprc } from "@kitsunekode/sweep-core/config";
+import {
+  checkInitSweeprcTarget,
+  DEFAULT_CONFIG,
+  writeInitSweeprc,
+} from "@kitsunekode/sweep-core/config";
 import { globMatch } from "@kitsunekode/sweep-core/glob-match";
 import { assertSafeCwd, assertTargetDirectory } from "@kitsunekode/sweep-core/guardrails";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
@@ -45,7 +48,7 @@ export async function handleInit(opts: InitHandlerOptions): Promise<void> {
     assertSafeCwd(targetDir);
     assertTargetDirectory(targetDir);
     // Refuse before scanning: nobody should wait to be told no.
-    if (!opts.force && !opts.dryRun && existsSync(configPath)) {
+    if (!opts.dryRun && checkInitSweeprcTarget(configPath, opts.force) === "exists") {
       console.error(
         `error: ${sanitizeTerminalText(configPath)} already exists (use --force to overwrite)`,
       );

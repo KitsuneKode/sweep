@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import {
   chmodSync,
+  chownSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -194,7 +196,7 @@ describe("writeInitSweeprc", () => {
     expect(loadConfig(dir("project")).maxSizeGB).toBe(1);
   });
 
-  test("refuses to write through a symlinked .sweeprc - even with force", () => {
+  test("refuses to write through a symlinked .sweeprc - for both init and force", () => {
     // A hostile checkout can ship .sweeprc -> ~/.ssh/config; writeFileSync
     // would follow the link and truncate the target. Refuse instead.
     if (process.platform === "win32") return; // symlink perms vary
@@ -202,8 +204,102 @@ describe("writeInitSweeprc", () => {
     writeFileSync(dir("outside.txt"), "keep me");
     symlinkSync(dir("outside.txt"), dir("project", ".sweeprc"));
 
+    expect(() => writeInitSweeprc(dir("project", ".sweeprc"), false)).toThrow(ConfigParseError);
     expect(() => writeInitSweeprc(dir("project", ".sweeprc"), true)).toThrow(ConfigParseError);
     expect(readFileSync(dir("outside.txt"), "utf-8")).toBe("keep me");
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "refuses a dangling symlink and a FIFO target for both init and force",
+    () => {
+      mkdirSync(dir("dangling"), { recursive: true });
+      symlinkSync(dir("does-not-exist"), dir("dangling", ".sweeprc"));
+      expect(() => writeInitSweeprc(dir("dangling", ".sweeprc"), false)).toThrow(ConfigParseError);
+      expect(() => writeInitSweeprc(dir("dangling", ".sweeprc"), true)).toThrow(ConfigParseError);
+
+      mkdirSync(dir("fifo"), { recursive: true });
+      const fifoPath = dir("fifo", ".sweeprc");
+      execFileSync("mkfifo", [fifoPath]);
+      expect(() => writeInitSweeprc(fifoPath, false)).toThrow(ConfigParseError);
+      expect(() => writeInitSweeprc(fifoPath, true)).toThrow(ConfigParseError);
+    },
+  );
+
+  test("refuses a directory target for both init and force", () => {
+    mkdirSync(dir("dir-target", ".sweeprc"), { recursive: true });
+    expect(() => writeInitSweeprc(dir("dir-target", ".sweeprc"), false)).toThrow(ConfigParseError);
+    expect(() => writeInitSweeprc(dir("dir-target", ".sweeprc"), true)).toThrow(ConfigParseError);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "writes 0644 under umask 002 so subsequent loadConfig and validateProjectConfigFile succeed",
+    () => {
+      mkdirSync(dir("umask-project"), { recursive: true });
+      const configPath = dir("umask-project", ".sweeprc");
+      const prevUmask = process.umask(0o002);
+      try {
+        expect(
+          writeInitSweeprc(configPath, false, {
+            patterns: ["dist"],
+            ignore: [],
+            maxSizeGB: null,
+          }),
+        ).toBe("created");
+        expect(statSync(configPath).mode & 0o777).toBe(0o644);
+        expect(loadConfig(dir("umask-project")).patterns).toContain("dist");
+        expect(validateProjectConfigFile(configPath, dir("umask-project")).ok).toBe(true);
+
+        // --force replaces atomically with 0644 even if the existing file was 0664.
+        chmodSync(configPath, 0o664);
+        expect(
+          writeInitSweeprc(configPath, true, {
+            patterns: ["build"],
+            ignore: [],
+            maxSizeGB: null,
+          }),
+        ).toBe("created");
+        expect(statSync(configPath).mode & 0o777).toBe(0o644);
+        expect(loadConfig(dir("umask-project")).patterns).toContain("build");
+        expect(fs.readdirSync(dir("umask-project"))).toEqual([".sweeprc"]);
+      } finally {
+        process.umask(prevUmask);
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "force replacement refuses to overwrite a config owned by another user",
+    () => {
+      mkdirSync(dir("other-owner"), { recursive: true });
+      const configPath = dir("other-owner", ".sweeprc");
+      const original = '{"maxSizeGB": 2}\n';
+      writeFileSync(configPath, original);
+      const actualUid = process.getuid!();
+      const uidSpy = spyOn(process, "getuid").mockReturnValue(actualUid + 1);
+      try {
+        expect(() => writeInitSweeprc(configPath, true)).toThrow(ConfigParseError);
+        expect(readFileSync(configPath, "utf8")).toBe(original);
+      } finally {
+        uidSpy.mockRestore();
+      }
+    },
+  );
+
+  test("exclusive creation preserves a config installed after the existence check", () => {
+    mkdirSync(dir("race-init"), { recursive: true });
+    const configPath = dir("race-init", ".sweeprc");
+    const newer = '{"ignore":["keep"]}\n';
+    const realOpen = fs.openSync;
+    const openSpy = spyOn(fs, "openSync").mockImplementation((path, flags, mode) => {
+      if (path === configPath) writeFileSync(configPath, newer);
+      return realOpen(path, flags, mode);
+    });
+    try {
+      expect(writeInitSweeprc(configPath, false)).toBe("exists");
+      expect(readFileSync(configPath, "utf8")).toBe(newer);
+    } finally {
+      openSpy.mockRestore();
+    }
   });
 });
 
@@ -547,14 +643,100 @@ describe("config hardening", () => {
   });
 
   test.skipIf(process.platform === "win32")(
-    "refuses a group-writable discovered config and still allows an explicit --config",
+    "allows group-writable discovered config when gid matches user primary group",
     () => {
-      const project = dir("shared-config");
+      const project = dir("upg-config");
       mkdirSync(project, { recursive: true });
       writeConfig(project, { patterns: ["custom-cache"] });
-      chmodSync(join(project, ".sweeprc"), 0o666);
-      expect(() => loadConfig(project)).toThrow(/writable by the group or others/);
-      expect(loadConfig(project, join(project, ".sweeprc")).patterns).toContain("custom-cache");
+      const configPath = join(project, ".sweeprc");
+      chmodSync(configPath, 0o664);
+      expect(loadConfig(project).patterns).toContain("custom-cache");
+      expect(validateProjectConfigFile(configPath, project).ok).toBe(true);
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "refuses world-writable discovered config in both loadConfig and validateProjectConfigFile",
+    () => {
+      const project = dir("world-writable-config");
+      mkdirSync(project, { recursive: true });
+      writeConfig(project, { patterns: ["custom-cache"] });
+      const configPath = join(project, ".sweeprc");
+      for (const mode of [0o666, 0o646]) {
+        chmodSync(configPath, mode);
+        expect(() => loadConfig(project)).toThrow(/world-writable/);
+        const validated = validateProjectConfigFile(configPath, project);
+        expect(validated.ok).toBe(false);
+        if (!validated.ok) {
+          expect(validated.detail).toMatch(/chmod/);
+          expect(validated.detail).toContain("--config explicitly");
+        }
+        // Explicit --config remains allowed for reviewed shared files.
+        expect(loadConfig(project, configPath).patterns).toContain("custom-cache");
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "refuses group-writable discovered config for another group in both loadConfig and validateProjectConfigFile",
+    () => {
+      const project = dir("other-group-config");
+      mkdirSync(project, { recursive: true });
+      writeConfig(project, { patterns: ["custom-cache"] });
+      const configPath = join(project, ".sweeprc");
+      chmodSync(configPath, 0o664);
+
+      const primaryGid = process.getgid!();
+      const otherGid = process.getgroups?.().find((gid) => gid !== primaryGid);
+      if (otherGid !== undefined) {
+        chownSync(configPath, process.getuid!(), otherGid);
+        expect(() => loadConfig(project)).toThrow(/chmod g-w/);
+        const validated = validateProjectConfigFile(configPath, project);
+        expect(validated.ok).toBe(false);
+        if (!validated.ok) {
+          expect(validated.detail).toContain("chmod g-w");
+          expect(validated.detail).toContain("--config explicitly");
+        }
+        expect(loadConfig(project, configPath).patterns).toContain("custom-cache");
+      } else {
+        const gidSpy = spyOn(process, "getgid").mockReturnValue(primaryGid + 1);
+        try {
+          expect(() => loadConfig(project)).toThrow(/chmod g-w/);
+          const validated = validateProjectConfigFile(configPath, project);
+          expect(validated.ok).toBe(false);
+          if (!validated.ok) {
+            expect(validated.detail).toContain("chmod g-w");
+            expect(validated.detail).toContain("--config explicitly");
+          }
+          expect(loadConfig(project, configPath).patterns).toContain("custom-cache");
+        } finally {
+          gidSpy.mockRestore();
+        }
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "refuses discovered config owned by another user in both loadConfig and validateProjectConfigFile",
+    () => {
+      const project = dir("other-user-config");
+      mkdirSync(project, { recursive: true });
+      writeConfig(project, { patterns: ["custom-cache"] });
+      const configPath = join(project, ".sweeprc");
+      chmodSync(configPath, 0o644);
+      const uidSpy = spyOn(process, "getuid").mockReturnValue(process.getuid!() + 1);
+      try {
+        expect(() => loadConfig(project)).toThrow(/owned by another user/);
+        const validated = validateProjectConfigFile(configPath, project);
+        expect(validated.ok).toBe(false);
+        if (!validated.ok) {
+          expect(validated.detail).toContain("owned by another user");
+          expect(validated.detail).toContain("--config explicitly");
+        }
+        expect(loadConfig(project, configPath).patterns).toContain("custom-cache");
+      } finally {
+        uidSpy.mockRestore();
+      }
     },
   );
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -178,4 +178,72 @@ console.log(JSON.stringify(checks.find((c) => c.name === "rust_engine")));
     expect(rustCheck.reasonKind).toBe("not_installed");
     expect(rustCheck.reason).toBe("Native Rust engine binary was not found.");
   });
+});
+
+describe("collectDoctorChecks config permission parity", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sweep-doctor-test-"));
+    roots.push(tmpDir);
+    process.env.SWEEP_CONFIG_DIR = join(tmpDir, "sweep-config");
+  });
+
+  test("validates a regular .sweeprc and rejects an invalid one consistently", async () => {
+    const project = join(tmpDir, "basic-project");
+    mkdirSync(project, { recursive: true });
+    const configPath = join(project, ".sweeprc");
+    writeFileSync(configPath, JSON.stringify({ patterns: ["custom-cache"] }));
+
+    const okChecks = await collectDoctorChecks(project, baseCliOpts({ engine: "js" }));
+    expect(okChecks.find((c) => c.name === "config")?.ok).toBe(true);
+
+    writeFileSync(configPath, "{ invalid json");
+    const badChecks = await collectDoctorChecks(project, baseCliOpts({ engine: "js" }));
+    expect(badChecks.find((c) => c.name === "config")?.ok).toBe(false);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "allows 0664 .sweeprc owned by primary group and warns on other-group or world-writable with fix guidance",
+    async () => {
+      const project = join(tmpDir, "project");
+      mkdirSync(project, { recursive: true });
+      const configPath = join(project, ".sweeprc");
+      writeFileSync(configPath, JSON.stringify({ patterns: ["custom-cache"] }));
+
+      // Own primary group + g+w is allowed.
+      chmodSync(configPath, 0o664);
+      const allowedChecks = await collectDoctorChecks(project, baseCliOpts({ engine: "js" }));
+      const allowedConfig = allowedChecks.find((c) => c.name === "config");
+      expect(allowedConfig?.ok).toBe(true);
+
+      // Other-group writable is refused with chmod g-w / --config explicitly guidance.
+      const gidSpy = spyOn(process, "getgid").mockReturnValue(process.getgid!() + 1);
+      try {
+        const otherGroupChecks = await collectDoctorChecks(project, baseCliOpts({ engine: "js" }));
+        const otherGroupConfig = otherGroupChecks.find((c) => c.name === "config");
+        expect(otherGroupConfig?.ok).toBe(false);
+        expect(otherGroupConfig?.detail).toContain("chmod g-w");
+        expect(otherGroupConfig?.detail).toContain("--config explicitly");
+
+        // Passing --config explicitly validates and allows the same file.
+        const explicitChecks = await collectDoctorChecks(
+          project,
+          baseCliOpts({ engine: "js", config: configPath }),
+        );
+        const explicitConfig = explicitChecks.find((c) => c.name === "config");
+        expect(explicitConfig?.ok).toBe(true);
+      } finally {
+        gidSpy.mockRestore();
+      }
+
+      // World-writable is always refused even when gid matches.
+      chmodSync(configPath, 0o666);
+      const worldChecks = await collectDoctorChecks(project, baseCliOpts({ engine: "js" }));
+      const worldConfig = worldChecks.find((c) => c.name === "config");
+      expect(worldConfig?.ok).toBe(false);
+      expect(worldConfig?.detail).toMatch(/chmod/);
+      expect(worldConfig?.detail).toContain("--config explicitly");
+    },
+  );
 });

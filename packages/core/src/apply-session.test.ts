@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -143,3 +143,27 @@ test("lock diagnostics report the live owner without releasing or replaying it",
   }
   expect(readApplyLockStatus().held).toBe(false);
 });
+
+test.skipIf(process.platform === "win32")(
+  "allows an existing 0775 config dir owned by user primary group, refuses other-group and world-writable",
+  async () => {
+    const plan = await fixture();
+    const configDir = process.env.SWEEP_CONFIG_DIR!;
+    mkdirSync(configDir, { recursive: true });
+    chmodSync(configDir, 0o775);
+
+    const session = beginApplySession(plan, "js");
+    session.close();
+
+    const gidSpy = spyOn(process, "getgid").mockReturnValue(process.getgid!() + 1);
+    try {
+      expect(() => beginApplySession(plan, "js")).toThrow(/chmod 700/);
+    } finally {
+      gidSpy.mockRestore();
+    }
+
+    chmodSync(configDir, 0o777);
+    expect(() => beginApplySession(plan, "js")).toThrow(/chmod 700/);
+    chmodSync(configDir, 0o700);
+  },
+);
