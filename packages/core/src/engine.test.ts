@@ -908,7 +908,12 @@ process.stdin.on("data", (chunk) => {
   const nl = buf.indexOf("\\n");
   if (nl < 0) return;
   const req = JSON.parse(buf.slice(0, nl));
-  for (const c of req.plan.candidates) {
+  const candidates = req.plan?.candidates;
+  if (!Array.isArray(candidates) || candidates.length !== 1 || candidates[0]?.id !== ${JSON.stringify(plan.candidates[0]!.id)}) {
+    process.stderr.write("unexpected candidate payload\\n");
+    process.exit(4);
+  }
+  for (const c of candidates) {
     if ("worktreeOf" in c || "worktreeState" in c) {
       process.stderr.write("unknown field \`worktreeOf\`\\n");
       process.exit(3);

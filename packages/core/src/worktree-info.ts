@@ -1,12 +1,10 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   closeSync,
   constants as fsConstants,
   fstatSync,
   lstatSync,
   openSync,
-  readdirSync,
   readlinkSync,
   readSync,
   type BigIntStats,
@@ -15,6 +13,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import type { WorktreeState } from "@kitsunekode/sweep-protocol";
 import {
   canonicalPath,
+  parseGitdirPointer,
   parseGitIndex,
   readSmallFile,
   readSmallText,
@@ -32,28 +31,35 @@ import { gitEnv, gitSafeArgs } from "./git-tracked.js";
  * Finished is a triage hint, never a safety boundary. What it points at is
  * build output, which sweep may already remove in any project. Unknown is
  * never finished: a failed, dirty, unverified, or slow check leaves the
- * state absent.
+ * state absent (D5: Finished only on proof; anything unprovable is unknown).
  *
  * Trust & cleanliness design:
- * - Enrichment never runs `git status`, never runs repository-configured
- *   programs (fsmonitor, hooks, external diff, filters), never touches the
- *   network, and never writes to the repository.
- * - Cleanliness is determined data-only: we parse `.git/index` directly,
- *   reject unsupported layouts (split/sparse/unknown extensions/versions),
- *   reject gitlinks/submodules, reject suppressing flags (assume-unchanged,
- *   skip-worktree, intent-to-add, merge conflicts), reject in-progress git
- *   operations (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`,
- *   `rebase-merge`, `rebase-apply`, `BISECT_LOG`, `sequencer`, locks),
- *   compare every tracked entry's stat data against `lstat` (with bounded
- *   blob-hash verification for racily-clean same-second entries), compare
- *   index entries against `git ls-tree -r -z <tipOid>` to catch staged
- *   changes, and perform a bounded untracked-file walk honoring `.gitignore`
- *   and `<common>/info/exclude` (any non-ignored untracked file or walk-limit
- *   overflow fails closed to unknown).
- * - Remaining read-only object/ref queries (`for-each-ref`, `rev-list`,
- *   `ls-tree`, `merge-base`) run asynchronously with a sanitized environment
- *   (dropping inherited `GIT_*` overrides), hardened CLI flags, a shared
- *   monotonic deadline, and bounded `SIGTERM` -> `SIGKILL` termination.
+ * - Never runs `git status`, never runs repository-configured programs
+ *   (fsmonitor, hooks, external diff, textconv, content filters), never
+ *   touches the network (protocol.allow=never plus per-protocol never
+ *   overrides), and never writes to the repository.
+ * - Delegates Git semantics to hardened read-only Git plumbing where Git
+ *   answers without running repo-configured programs:
+ *   - Remotes & base: `git remote`, `git config --list --null`,
+ *     `git symbolic-ref refs/remotes/origin/HEAD`, `git for-each-ref`.
+ *   - Content conversion guard: `git config --list --null` (`core.autocrlf`,
+ *     `core.eol`) and `git check-attr --stdin -z filter text eol
+ *     working-tree-encoding`. Any enabled conversion makes the worktree unknown.
+ *   - Staged changes: `git diff-index --cached --quiet --no-ext-diff
+ *     --no-textconv --ignore-submodules=none <tipOid> --`.
+ *   - Untracked non-ignored files: `git ls-files --others --exclude-standard -z`
+ *     with `-c core.untrackedCache=false -c core.fsmonitor=false` and bounded
+ *     output size and time.
+ * - Unstaged changes use read-only `.git/index` parsing (with trailing
+ *   checksum verification, bounded path/entry limits, rejection of split/sparse
+ *   indexes, unknown extensions, gitlinks/submodules, and suppressing flags)
+ *   plus `lstat` comparison; any stat mismatch or racily-clean entry
+ *   (same-second mtime vs index mtime) makes the worktree unknown.
+ * - Index identity (dev, ino, size, mtime, ctime, trailing checksum) plus
+ *   in-progress markers, HEAD branch, branch tip OID, and base ref OID are
+ *   verified before and after all checks; any change makes the state unknown.
+ * - Merge proof requires branch-specific reflog evidence; missing reflogs or
+ *   disabled reflogs leave the state unknown.
  */
 
 export interface WorktreeInfo {
@@ -90,6 +96,8 @@ interface RepoBranches {
 export interface GitRunOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  stdin?: string | Buffer;
+  maxStdoutBytes?: number;
 }
 
 export type GitRunner = (
@@ -101,21 +109,18 @@ export type GitRunner = (
 const TIMEOUT_MS = 5_000;
 const KILL_GRACE_MS = 150;
 const MAX_GIT_STDOUT = 16 * 1024 * 1024;
+const MAX_UNTRACKED_STDOUT = 64 * 1024;
 export const DEFAULT_WORKTREE_BUDGET_MS = 2_000;
 const POINTER_MAX_BYTES = 4096;
-const CONFIG_MAX_BYTES = 64 * 1024;
 const REFLOG_MAX_BYTES = 256 * 1024;
 const PACKED_REFS_MAX_BYTES = 8 * 1024 * 1024;
-const IGNORE_MAX_BYTES = 64 * 1024;
 const CLEAN_INDEX_MAX_BYTES = 32 * 1024 * 1024;
 const CLEAN_INDEX_MAX_ENTRIES = 100_000;
-const MAX_HASH_FILE_BYTES = 1024 * 1024;
-const MAX_HASH_WORKTREE_BYTES = 8 * 1024 * 1024;
-const MAX_UNTRACKED_WALK_ENTRIES = 10_000;
-const MAX_UNTRACKED_WALK_DEPTH = 64;
-const FIRST_PARENT_MAX_COMMITS = 5_000;
+const CLEAN_INDEX_MAX_PATH_BYTES = 16 * 1024 * 1024;
+const CHECK_ATTR_CHUNK_PATHS = 4_000;
 
 const HEADS = "refs/heads/";
+const ORIGIN_REMOTES = "refs/remotes/origin/";
 const ZERO_OID = /^0+$/;
 const HEX_OID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const OWN_COMMIT_REFLOG = /^(?:commit(?::|\s*\()|cherry-pick:|revert:)/;
@@ -134,8 +139,10 @@ const IN_PROGRESS_MARKERS = [
   "index.lock",
 ] as const;
 
-function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
-  if (proc.exitCode !== null || proc.signalCode !== null) return;
+const CONVERSION_ATTRS = ["filter", "text", "eol", "working-tree-encoding"] as const;
+
+function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals, forceGroup = false): void {
+  if (!forceGroup && (proc.exitCode !== null || proc.signalCode !== null)) return;
   if (process.platform !== "win32" && proc.pid !== undefined) {
     try {
       process.kill(-proc.pid, signal);
@@ -144,6 +151,7 @@ function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
       // Fall through to direct child kill.
     }
   }
+  if (proc.exitCode !== null || proc.signalCode !== null) return;
   try {
     proc.kill(signal);
   } catch {
@@ -151,11 +159,11 @@ function killProcessTree(proc: ChildProcess, signal: NodeJS.Signals): void {
   }
 }
 
-function terminateChildBounded(proc: ChildProcess): void {
-  if (proc.exitCode !== null || proc.signalCode !== null) return;
-  killProcessTree(proc, "SIGTERM");
+function terminateChildBounded(proc: ChildProcess, onForceSettled?: () => void): void {
+  killProcessTree(proc, "SIGTERM", true);
   const force = setTimeout(() => {
-    killProcessTree(proc, "SIGKILL");
+    killProcessTree(proc, "SIGKILL", true);
+    onForceSettled?.();
   }, KILL_GRACE_MS);
   force.unref();
   proc.once("close", () => clearTimeout(force));
@@ -165,7 +173,15 @@ export function createGitRunner(gitBinary = "git"): GitRunner {
   return (gitDir, args, options) => {
     if (options?.signal?.aborted) return Promise.resolve(undefined);
     const timeout = Math.max(1, Math.min(TIMEOUT_MS, options?.timeoutMs ?? TIMEOUT_MS));
-    const gitArgs = [...gitSafeArgs(), `--git-dir=${gitDir}`, ...args];
+    const maxStdout = options?.maxStdoutBytes ?? MAX_GIT_STDOUT;
+
+    let safeArgs: string[];
+    try {
+      safeArgs = gitSafeArgs();
+    } catch {
+      return Promise.resolve(undefined);
+    }
+    const gitArgs = [...safeArgs, `--git-dir=${gitDir}`, ...args];
 
     return new Promise<string | undefined>((resolvePromise) => {
       let settled = false;
@@ -177,7 +193,7 @@ export function createGitRunner(gitBinary = "git"): GitRunner {
       try {
         proc = spawn(gitBinary, gitArgs, {
           env: gitEnv(),
-          stdio: ["ignore", "pipe", "ignore"],
+          stdio: [options?.stdin !== undefined ? "pipe" : "ignore", "pipe", "ignore"],
           detached: process.platform !== "win32",
         });
       } catch {
@@ -198,8 +214,11 @@ export function createGitRunner(gitBinary = "git"): GitRunner {
       };
 
       const onCancel = () => {
+        if (timedOutOrAborted) return;
         timedOutOrAborted = true;
-        terminateChildBounded(proc);
+        proc.stdin?.destroy();
+        proc.stdout?.destroy();
+        terminateChildBounded(proc, () => finish(undefined));
       };
 
       const timer = setTimeout(onCancel, timeout);
@@ -207,20 +226,25 @@ export function createGitRunner(gitBinary = "git"): GitRunner {
       options?.signal?.addEventListener("abort", onCancel, { once: true });
       if (options?.signal?.aborted) onCancel();
 
+      if (options?.stdin !== undefined && proc.stdin) {
+        proc.stdin.on("error", () => {
+          // Ignore EPIPE when git exits before consuming stdin.
+        });
+        proc.stdin.end(options.stdin);
+      }
+
       proc.stdout?.on("data", (chunk: Buffer) => {
         if (settled || timedOutOrAborted) return;
         stdoutBytes += chunk.length;
-        if (stdoutBytes > MAX_GIT_STDOUT) {
-          timedOutOrAborted = true;
-          terminateChildBounded(proc);
+        if (stdoutBytes > maxStdout) {
+          onCancel();
           return;
         }
         chunks.push(chunk);
       });
 
       proc.stdout?.on("error", () => {
-        timedOutOrAborted = true;
-        terminateChildBounded(proc);
+        onCancel();
       });
 
       proc.on("error", () => {
@@ -246,15 +270,15 @@ function linkedGitDir(
   if (!realRoot) return undefined;
   const pointer = readSmallText(resolve(realRoot, ".git"), POINTER_MAX_BYTES);
   if (pointer === undefined) return undefined;
-  const line = pointer.split(/\r?\n/, 1)[0] ?? "";
-  if (!line.startsWith("gitdir:")) return undefined;
-  const target = line.slice(7).trim();
+  const target = parseGitdirPointer(pointer);
   if (!target) return undefined;
   const rawGitDir = isAbsolute(target) ? target : resolve(realRoot, target);
   const gitDir = canonicalPath(rawGitDir);
   if (!gitDir) return undefined;
   // Only a linked worktree has `commondir`; a submodule's git dir does not.
-  const commondir = readSmallText(resolve(gitDir, "commondir"), POINTER_MAX_BYTES)?.trim();
+  const commondirRaw = readSmallText(resolve(gitDir, "commondir"), POINTER_MAX_BYTES);
+  if (commondirRaw === undefined) return undefined;
+  const commondir = (commondirRaw.split(/\r?\n/, 1)[0] ?? "").trim();
   if (!commondir) return undefined;
   const rawCommon = isAbsolute(commondir) ? commondir : resolve(gitDir, commondir);
   const common = canonicalPath(rawCommon);
@@ -404,35 +428,38 @@ function readContainedGitMetaFile(
 }
 
 /**
- * Read the current commit OID of `refs/heads/<branch>` directly from the loose
- * ref or `packed-refs` (no git spawn, never stale).
+ * Read the current commit OID of any full `refs/...` ref directly from loose
+ * refs or `packed-refs` (no git spawn, never stale).
  */
-function readBranchTipOid(common: string, branch: string): string | undefined {
-  const segments = splitSafeRefSegments(branch);
+function readFullRefOid(common: string, fullRef: string): string | undefined {
+  if (!fullRef.startsWith("refs/")) return undefined;
+  const segments = splitSafeRefSegments(fullRef.slice(5));
   if (!segments) return undefined;
 
-  const loose = readContainedGitMetaFile(common, ["refs", "heads"], segments, POINTER_MAX_BYTES);
+  const loose = readContainedGitMetaFile(common, ["refs"], segments, POINTER_MAX_BYTES);
   if (loose.status === "ok") {
     const val = loose.text.trim();
     return HEX_OID.test(val) ? val : undefined;
   }
   if (loose.status === "rejected") return undefined;
 
-  // Loose ref missing; check `<common>/packed-refs`.
   const packed = readSmallText(resolve(common, "packed-refs"), PACKED_REFS_MAX_BYTES);
   if (!packed) return undefined;
-  const targetRef = `${HEADS}${branch}`;
   for (const line of packed.split(/\r?\n/)) {
     if (!line || line.startsWith("#") || line.startsWith("^")) continue;
     const space = line.indexOf(" ");
     if (space < 40) continue;
     const oid = line.slice(0, space);
     const ref = line.slice(space + 1).trim();
-    if (ref === targetRef) {
+    if (ref === fullRef) {
       return HEX_OID.test(oid) ? oid : undefined;
     }
   }
   return undefined;
+}
+
+function readBranchTipOid(common: string, branch: string): string | undefined {
+  return readFullRefOid(common, `${HEADS}${branch}`);
 }
 
 type ReflogEvidence =
@@ -444,9 +471,8 @@ type ReflogEvidence =
  * Inspect `<common>/logs/refs/heads/<branch>` for affirmative branch-specific
  * evidence of a commit authored on this branch reaching `tipOid`.
  *
- * - Returns `missing` only when the reflog file genuinely does not exist.
- * - Returns `disproven` when a reflog exists (or fails path validation) and
- *   shows no surviving own commit at `tipOid` (e.g. creation-only or reset).
+ * Without a valid reflog proving an authored commit on this branch, merge
+ * proof is absent and the worktree stays unknown.
  */
 function checkBranchReflog(common: string, branch: string, tipOid: string): ReflogEvidence {
   const segments = splitSafeRefSegments(branch);
@@ -503,20 +529,6 @@ function checkBranchReflog(common: string, branch: string, tipOid: string): Refl
   return { kind: "proven", ownCommitOid };
 }
 
-function hasConfiguredOriginRemote(common: string): boolean {
-  const configPath = resolve(common, "config");
-  try {
-    const meta = lstatSync(configPath);
-    if (meta.isSymbolicLink() || !meta.isFile()) return true; // fail closed
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
-    return true;
-  }
-  const text = readSmallText(configPath, CONFIG_MAX_BYTES);
-  if (text === undefined) return true; // oversized/unreadable -> fail closed
-  return /^\s*\[remote\s+"origin"\]/m.test(text);
-}
-
 function hasInProgressOperation(gitDir: string): boolean {
   for (const marker of IN_PROGRESS_MARKERS) {
     try {
@@ -529,17 +541,38 @@ function hasInProgressOperation(gitDir: string): boolean {
   return false;
 }
 
-function gitBlobOidHex(content: Buffer, hashLen: 20 | 32): string {
-  const alg = hashLen === 20 ? "sha1" : "sha256";
-  return createHash(alg).update(`blob ${content.length}\0`).update(content).digest("hex");
+interface IndexIdentity {
+  exists: boolean;
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+  checksumHex: string;
 }
 
+function sameIndexIdentity(a: IndexIdentity, b: IndexIdentity): boolean {
+  return (
+    a.exists === b.exists &&
+    a.dev === b.dev &&
+    a.ino === b.ino &&
+    a.size === b.size &&
+    a.mtimeNs === b.mtimeNs &&
+    a.ctimeNs === b.ctimeNs &&
+    a.checksumHex === b.checksumHex
+  );
+}
+
+/**
+ * Read-only index stat verification for a single tracked entry.
+ * Any stat mismatch, gitlink/submodule, suppressing flag, or racily-clean
+ * entry (same-second mtime vs index mtime) fails closed to `false`.
+ * Raw blob hashing is intentionally absent: unprovable entries stay unknown.
+ */
 function verifyTrackedEntry(
   realRoot: string,
   entry: GitIndexEntry,
   indexStat: BigIntStats,
-  hashLen: 20 | 32,
-  hashBudget: { remainingBytes: number },
 ): boolean {
   // Reject non-zero merge stage, assume-unchanged, and any extended flags
   // (skip-worktree, intent-to-add, etc.).
@@ -548,7 +581,6 @@ function verifyTrackedEntry(
     return false;
   }
 
-  // Validate relative path safety.
   const segments = splitSafeRefSegments(entry.path);
   if (!segments) return false;
 
@@ -568,21 +600,16 @@ function verifyTrackedEntry(
 
   if (fileType === 0o120000) {
     if (!stat.isSymbolicLink()) return false;
-    try {
-      const target = readlinkSync(absPath, "buffer");
-      return gitBlobOidHex(target, hashLen) === entry.oidHex;
-    } catch {
-      return false;
+  } else {
+    // Regular file (`0o100644` or `0o100755`).
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    if (process.platform !== "win32") {
+      const indexExec = (entry.mode & 0o100) !== 0;
+      const diskExec = (Number(stat.mode) & 0o100) !== 0;
+      if (indexExec !== diskExec) return false;
     }
   }
 
-  // Regular file (`0o100644` or `0o100755`).
-  if (!stat.isFile() || stat.isSymbolicLink()) return false;
-  if (process.platform !== "win32") {
-    const indexExec = (entry.mode & 0o100) !== 0;
-    const diskExec = (Number(stat.mode) & 0o100) !== 0;
-    if (indexExec !== diskExec) return false;
-  }
   if (stat.size > 0xffffffffn || stat.size !== BigInt(entry.size)) return false;
 
   const mtimeSec = Number((stat.mtimeNs / 1_000_000_000n) & 0xffffffffn);
@@ -591,6 +618,13 @@ function verifyTrackedEntry(
   const ctimeNsec = Number(stat.ctimeNs % 1_000_000_000n);
 
   if (entry.mtimeSec === 0 || mtimeSec !== entry.mtimeSec) return false;
+
+  // Racily-clean check (matching Git's `is_racy_timestamp`): any entry whose
+  // mtime is in the same second as or newer than the index mtime cannot be
+  // proven clean by stat alone.
+  const indexMtimeSec = Number((indexStat.mtimeNs / 1_000_000_000n) & 0xffffffffn);
+  if (entry.mtimeSec >= indexMtimeSec) return false;
+
   if (process.platform !== "win32") {
     if (entry.mtimeNsec !== 0 && mtimeNsec !== entry.mtimeNsec) return false;
     if (entry.ino !== 0 && Number(stat.ino & 0xffffffffn) !== entry.ino) return false;
@@ -599,198 +633,49 @@ function verifyTrackedEntry(
     if (entry.ctimeNsec !== 0 && ctimeNsec !== entry.ctimeNsec) return false;
   }
 
-  const indexMtimeSec = Number((indexStat.mtimeNs / 1_000_000_000n) & 0xffffffffn);
-  const indexMtimeNsec = Number(indexStat.mtimeNs % 1_000_000_000n);
-  const isRacy =
-    entry.mtimeSec > indexMtimeSec ||
-    (entry.mtimeSec === indexMtimeSec &&
-      (entry.mtimeNsec === 0 || entry.mtimeNsec >= indexMtimeNsec));
-  const needsHashCheck =
-    isRacy ||
-    (process.platform === "win32" && entry.mtimeNsec !== 0 && mtimeNsec !== entry.mtimeNsec);
-
-  if (!needsHashCheck) return true;
-
-  // Racily-clean (same second as index) or Windows sub-second rounding: verify
-  // exact blob OID up to bounded limits.
-  const fileSize = Number(stat.size);
-  if (fileSize > MAX_HASH_FILE_BYTES || fileSize > hashBudget.remainingBytes) return false;
-  const content = readSmallFile(absPath, MAX_HASH_FILE_BYTES);
-  if (!content || content.bytes.length !== fileSize) return false;
-  hashBudget.remainingBytes -= fileSize;
-  return gitBlobOidHex(content.bytes, hashLen) === entry.oidHex;
+  return true;
 }
 
-// ── Bounded `.gitignore` / `info/exclude` matcher ─────────────────────────────
-
-interface IgnoreRule {
-  baseDir: string; // "" for repo root, or "a/b" (no leading/trailing slash)
-  negated: boolean;
-  dirOnly: boolean;
-  anchored: boolean;
-  regex: RegExp;
-}
-
-function globToRegexSource(pattern: string): string {
-  let out = "";
-  let i = 0;
-  while (i < pattern.length) {
-    const ch = pattern[i]!;
-    if (ch === "\\" && i + 1 < pattern.length) {
-      out += escapeRegExpChar(pattern[i + 1]!);
-      i += 2;
-      continue;
-    }
-    if (ch === "*") {
-      if (pattern[i + 1] === "*") {
-        // `/**/` or `**/` or `/**` or `**`
-        if (pattern[i + 2] === "/") {
-          out += "(?:.*/)?";
-          i += 3;
-          continue;
-        }
-        out += ".*";
-        i += 2;
-        continue;
-      }
-      out += "[^/]*";
-      i += 1;
-      continue;
-    }
-    if (ch === "?") {
-      out += "[^/]";
-      i += 1;
-      continue;
-    }
-    if (ch === "[") {
-      const close = pattern.indexOf("]", i + 1);
-      if (close > i + 1) {
-        let body = pattern.slice(i + 1, close);
-        if (body.startsWith("!")) body = `^${body.slice(1)}`;
-        out += `[${body.replace(/\\/g, "\\\\")}]`;
-        i = close + 1;
-        continue;
-      }
-    }
-    out += escapeRegExpChar(ch);
-    i += 1;
-  }
-  return out;
-}
-
-function escapeRegExpChar(ch: string): string {
-  return /[.+^${}()|[\]\\]/.test(ch) ? `\\${ch}` : ch;
-}
-
-function parseIgnoreFile(text: string, baseDir: string): IgnoreRule[] {
-  const rules: IgnoreRule[] = [];
-  for (const rawLine of text.split(/\r?\n/)) {
-    // Strip unescaped trailing spaces.
-    let line = rawLine;
-    while (line.endsWith(" ") && !line.endsWith("\\ ")) {
-      line = line.slice(0, -1);
-    }
-    if (!line || line.startsWith("#")) continue;
-
-    let negated = false;
-    if (line.startsWith("!")) {
-      negated = true;
-      line = line.slice(1);
-    } else if (line.startsWith("\\#") || line.startsWith("\\!")) {
-      line = line.slice(1);
-    }
-    if (!line) continue;
-
-    let dirOnly = false;
-    if (line.endsWith("/")) {
-      dirOnly = true;
-      line = line.slice(0, -1);
-    }
-    if (!line) continue;
-
-    let anchored = false;
-    if (line.startsWith("/")) {
-      anchored = true;
-      line = line.slice(1);
-    } else if (line.includes("/")) {
-      anchored = true;
-    }
-    if (!line) continue;
-
-    const src = globToRegexSource(line);
-    const regex = anchored ? new RegExp(`^${src}$`) : new RegExp(`(?:^|/)${src}$`);
-    rules.push({ baseDir, negated, dirOnly, anchored, regex });
-  }
-  return rules;
-}
-
-function loadIgnoreRules(filePath: string, baseDir: string): IgnoreRule[] | null {
-  try {
-    const meta = lstatSync(filePath);
-    if (meta.isSymbolicLink() || !meta.isFile()) return null; // fail closed
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    return null;
-  }
-  const text = readSmallText(filePath, IGNORE_MAX_BYTES);
-  if (text === undefined) return null;
-  return parseIgnoreFile(text, baseDir);
-}
-
-function isPathIgnored(relPath: string, isDir: boolean, rules: readonly IgnoreRule[]): boolean {
-  let ignored = false;
-  for (const rule of rules) {
-    if (rule.dirOnly && !isDir) continue;
-    let subject: string;
-    if (rule.baseDir === "") {
-      subject = relPath;
-    } else if (relPath.startsWith(`${rule.baseDir}/`)) {
-      subject = relPath.slice(rule.baseDir.length + 1);
-    } else {
-      continue;
-    }
-    if (rule.regex.test(subject)) {
-      ignored = !rule.negated;
-    }
-  }
-  return ignored;
-}
-
-interface TreeEntry {
-  mode: number;
-  oidHex: string;
-  path: string;
-}
-
-function parseLsTreeOutput(stdout: string): TreeEntry[] | null {
-  const entries: TreeEntry[] = [];
+/** Parse `git config --list --null` into a last-value-wins map (keys already lowercased by Git). */
+function parseGitConfigNull(stdout: string): Map<string, string> {
+  const entries = new Map<string, string>();
   if (stdout.length === 0) return entries;
   const records = stdout.split("\0");
+  // Trailing empty string after final NUL is expected.
   for (const record of records) {
     if (!record) continue;
-    const tab = record.indexOf("\t");
-    if (tab < 0) return null;
-    const meta = record.slice(0, tab).split(" ");
-    const path = record.slice(tab + 1);
-    if (meta.length !== 3 || !path) return null;
-    const [modeStr = "", type = "", oidHex = ""] = meta;
-    // Reject submodules / gitlinks (`160000 commit ...`).
-    if (type !== "blob" || !HEX_OID.test(oidHex)) return null;
-    const mode = Number.parseInt(modeStr, 8);
-    if (!Number.isFinite(mode)) return null;
-    entries.push({ mode, oidHex, path });
+    const nl = record.indexOf("\n");
+    if (nl < 0) {
+      // Valueless boolean key in git config (e.g. `[core]\n\tautocrlf`) means `"true"`.
+      entries.set(record, "true");
+    } else {
+      entries.set(record.slice(0, nl), record.slice(nl + 1));
+    }
   }
   return entries;
 }
 
-function indexMatchesTree(entries: readonly GitIndexEntry[], tree: readonly TreeEntry[]): boolean {
-  if (entries.length !== tree.length) return false;
-  const byPath = new Map<string, TreeEntry>();
-  for (const t of tree) byPath.set(t.path, t);
-  if (byPath.size !== tree.length) return false;
-  for (const entry of entries) {
-    const match = byPath.get(entry.path);
-    if (!match || match.mode !== entry.mode || match.oidHex !== entry.oidHex) {
+function configEnablesContentConversion(config: ReadonlyMap<string, string>): boolean {
+  const autocrlf = config.get("core.autocrlf");
+  if (autocrlf !== undefined && autocrlf.trim().toLowerCase() !== "false") {
+    return true;
+  }
+  if (config.has("core.eol")) {
+    return true;
+  }
+  return false;
+}
+
+function checkAttrOutputIsClean(stdout: string, expectedPaths: number): boolean {
+  const fields = stdout.split("\0");
+  // `check-attr -z` terminates every triplet with NUL, leaving one trailing empty element.
+  if (fields.length === 0 || fields[fields.length - 1] !== "") return false;
+  const count = fields.length - 1;
+  const expectedFields = expectedPaths * CONVERSION_ATTRS.length * 3;
+  if (count !== expectedFields) return false;
+  for (let i = 2; i < count; i += 3) {
+    const value = fields[i];
+    if (value !== "unspecified" && value !== "unset") {
       return false;
     }
   }
@@ -800,7 +685,6 @@ function indexMatchesTree(entries: readonly GitIndexEntry[], tree: readonly Tree
 export class WorktreeIndex {
   private readonly projects = new Map<string, Promise<WorktreeInfo | undefined>>();
   private readonly repos = new Map<string, Promise<RepoBranches | undefined>>();
-  private readonly trees = new Map<string, Promise<TreeEntry[] | null>>();
   private readonly git: GitRunner;
   private readonly now: () => number;
   private readonly deadlineMs: number;
@@ -829,18 +713,25 @@ export class WorktreeIndex {
     return Math.max(0, this.deadlineMs - this.now());
   }
 
+  private isExpired(): boolean {
+    return this.remainingBudgetMs() <= 0;
+  }
+
   private async runBoundedGit(
     gitDir: string,
     args: readonly string[],
+    extra?: Pick<GitRunOptions, "stdin" | "maxStdoutBytes">,
   ): Promise<string | undefined> {
     const remaining = this.remainingBudgetMs();
     if (remaining <= 0) return undefined;
     const timeoutMs = Math.min(TIMEOUT_MS, remaining);
-    return await this.git(
-      gitDir,
-      args,
-      this.signal ? { timeoutMs, signal: this.signal } : { timeoutMs },
-    );
+    const out = await this.git(gitDir, args, {
+      timeoutMs,
+      ...(this.signal ? { signal: this.signal } : {}),
+      ...extra,
+    });
+    if (this.isExpired()) return undefined;
+    return out;
   }
 
   private async read(root: string): Promise<WorktreeInfo | undefined> {
@@ -850,8 +741,10 @@ export class WorktreeIndex {
     const branch = readCheckedOutBranch(gitDir);
     if (!branch) return { of };
 
+    if (this.isExpired()) return { of, branch };
+
     const repo = await this.branches(common);
-    if (!repo || branch === repo.base) return { of, branch };
+    if (!repo || branch === repo.base || this.isExpired()) return { of, branch };
 
     // Evaluate `upstream_gone` before merge classification (D5): a branch whose
     // tracking ref is missing never reads as finished.
@@ -860,11 +753,11 @@ export class WorktreeIndex {
     }
 
     const tipOid = repo.merged.get(branch);
-    if (tipOid === undefined) return { of, branch };
+    if (tipOid === undefined || !repo.baseRef || !repo.baseOid) return { of, branch };
 
     // Pin branch tip before proof and cleanliness checks so a cached ref scan
     // cannot pair with a newer unmerged commit.
-    if (readBranchTipOid(common, branch) !== tipOid) {
+    if (this.isExpired() || readBranchTipOid(common, branch) !== tipOid) {
       return { of, branch };
     }
 
@@ -872,13 +765,18 @@ export class WorktreeIndex {
       return { of, branch };
     }
 
-    if (!(await this.isWorktreeClean(common, gitDir, realRoot, tipOid))) {
+    if (!(await this.isWorktreeClean(gitDir, realRoot, tipOid))) {
       return { of, branch };
     }
 
-    // Re-verify HEAD branch and tip OID after cleanliness check to close
-    // concurrent commit/switch races.
-    if (readCheckedOutBranch(gitDir) !== branch || readBranchTipOid(common, branch) !== tipOid) {
+    // Re-verify budget, HEAD branch, branch tip OID, and base ref OID after
+    // cleanliness checks to close concurrent commit/switch/base-move races.
+    if (
+      this.isExpired() ||
+      readCheckedOutBranch(gitDir) !== branch ||
+      readBranchTipOid(common, branch) !== tipOid ||
+      readFullRefOid(common, repo.baseRef) !== repo.baseOid
+    ) {
       return { of, branch };
     }
 
@@ -891,87 +789,43 @@ export class WorktreeIndex {
     tipOid: string,
     repo: RepoBranches,
   ): Promise<boolean> {
-    if (!repo.baseRef || !repo.baseOid) return false;
+    if (this.isExpired() || !repo.baseRef || !repo.baseOid) return false;
     const reflog = checkBranchReflog(common, branch, tipOid);
-    if (reflog.kind === "disproven") return false;
-    if (reflog.kind === "proven") {
-      if (reflog.ownCommitOid === tipOid) return true;
-      // Branch moved after its own commit: verify the authored commit is still
-      // reachable from `tipOid`.
-      const out = await this.runBoundedGit(common, [
-        "merge-base",
-        "--is-ancestor",
-        reflog.ownCommitOid,
-        tipOid,
-      ]);
-      return out !== undefined;
-    }
-
-    // Reflog file is genuinely absent (`missing`): only a merge commit whose
-    // non-first parent brought `tipOid` into `baseOid` can serve as DAG proof,
-    // and never when `tipOid === baseOid`.
-    if (tipOid === repo.baseOid) return false;
-    return await this.isMergedOutsideFirstParent(common, tipOid, repo.baseOid);
-  }
-
-  private async isMergedOutsideFirstParent(
-    common: string,
-    tipOid: string,
-    baseOid: string,
-  ): Promise<boolean> {
+    if (reflog.kind !== "proven") return false;
+    if (reflog.ownCommitOid === tipOid) return true;
+    // Branch moved after its own commit: verify the authored commit is still
+    // reachable from `tipOid`.
     const out = await this.runBoundedGit(common, [
-      "rev-list",
-      "--first-parent",
-      "--parents",
-      `--max-count=${FIRST_PARENT_MAX_COMMITS}`,
-      `${tipOid}..${baseOid}`,
+      "merge-base",
+      "--is-ancestor",
+      reflog.ownCommitOid,
+      tipOid,
     ]);
-    if (out === undefined) return false;
-    const lines = out.split("\n").filter((line) => line.length > 0);
-    // Empty or truncated history cannot prove the branch is off first-parent.
-    if (lines.length === 0 || lines.length >= FIRST_PARENT_MAX_COMMITS) return false;
-    const oldest = lines[lines.length - 1] ?? "";
-    const firstParent = oldest.split(" ")[1];
-    return firstParent !== tipOid;
-  }
-
-  private treeEntries(common: string, tipOid: string): Promise<TreeEntry[] | null> {
-    const key = `${common}\0${tipOid}`;
-    const cached = this.trees.get(key);
-    if (cached !== undefined) return cached;
-    const pending = this.readTreeEntries(common, tipOid);
-    this.trees.set(key, pending);
-    return pending;
-  }
-
-  private async readTreeEntries(common: string, tipOid: string): Promise<TreeEntry[] | null> {
-    const out = await this.runBoundedGit(common, ["ls-tree", "-r", "-z", tipOid]);
-    if (out === undefined) return null;
-    return parseLsTreeOutput(out);
+    return out !== undefined;
   }
 
   /**
-   * Data-only cleanliness check (no `git status` spawn):
-   * 1. Rejects any in-progress git operation markers in `gitDir`.
-   * 2. Parses `<gitDir>/index` directly and rejects unsupported layouts
-   *    (split/sparse/unknown extensions/versions), gitlinks/submodules, and
-   *    suppressing flags (`assume-unchanged`, `skip-worktree`, `intent-to-add`,
-   *    unmerged stages).
-   * 3. Verifies every tracked entry against `lstat` (plus bounded blob-hash
-   *    check for racily-clean entries).
-   * 4. Compares parsed index entries against `ls-tree -r -z <tipOid>` to catch
-   *    staged changes without reading repo config or touching the worktree.
-   * 5. Walks the worktree boundedly, honoring `.gitignore` and
-   *    `<common>/info/exclude`; any non-ignored untracked file or walk-limit
-   *    overflow fails closed (returns `false`).
+   * Conservative cleanliness check:
+   * 1. Rejects in-progress git operations (`MERGE_HEAD`, locks, rebase, etc.).
+   * 2. Records index identity (dev, ino, size, mtime, ctime, trailing checksum)
+   *    before all checks and verifies every tracked entry by `lstat` (rejecting
+   *    split/sparse/unknown-extension indexes, gitlinks, suppressing flags,
+   *    stat mismatches, and racily-clean same-second entries).
+   * 3. Checks effective conversion config (`git config --list --null`) and
+   *    attributes (`git check-attr --stdin -z filter text eol
+   *    working-tree-encoding`), failing closed if any conversion is enabled.
+   * 4. Checks staged changes via `git diff-index --cached --quiet <tipOid>`.
+   * 5. Checks untracked non-ignored files via bounded
+   *    `git ls-files --others --exclude-standard -z`.
+   * 6. Re-verifies deadline, in-progress markers, index file identity, and
+   *    tracked entry stats after all awaits.
    */
   private async isWorktreeClean(
-    common: string,
     gitDir: string,
     realRoot: string,
     tipOid: string,
   ): Promise<boolean> {
-    if (this.remainingBudgetMs() <= 0) return false;
+    if (this.isExpired()) return false;
     if (hasInProgressOperation(gitDir)) return false;
 
     const hashLen: 20 | 32 | undefined =
@@ -981,117 +835,175 @@ export class WorktreeIndex {
     const indexPath = join(gitDir, "index");
     let indexEntries: GitIndexEntry[];
     let indexStat: BigIntStats | undefined;
+    let beforeIdentity: IndexIdentity;
+    let beforeBytes: Buffer | undefined;
 
     try {
       lstatSync(indexPath);
       const indexFile = readSmallFile(indexPath, CLEAN_INDEX_MAX_BYTES);
-      if (!indexFile) return false;
+      if (!indexFile || this.isExpired()) return false;
       indexStat = indexFile.stat;
+      beforeBytes = indexFile.bytes;
       const parsed = parseGitIndex(indexFile.bytes, hashLen, {
         allowSplitIndex: false,
         maxEntries: CLEAN_INDEX_MAX_ENTRIES,
+        maxTotalPathBytes: CLEAN_INDEX_MAX_PATH_BYTES,
+        isExpired: () => this.isExpired(),
       });
       if (!parsed.ok) return false;
       indexEntries = parsed.entries;
+      beforeIdentity = {
+        exists: true,
+        dev: indexFile.stat.dev,
+        ino: indexFile.stat.ino,
+        size: indexFile.stat.size,
+        mtimeNs: indexFile.stat.mtimeNs,
+        ctimeNs: indexFile.stat.ctimeNs,
+        checksumHex: parsed.checksumHex,
+      };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         indexEntries = [];
+        beforeIdentity = {
+          exists: false,
+          dev: 0n,
+          ino: 0n,
+          size: 0n,
+          mtimeNs: 0n,
+          ctimeNs: 0n,
+          checksumHex: "",
+        };
       } else {
         return false;
       }
     }
 
-    const trackedPaths = new Set<string>();
-    const trackedDirs = new Set<string>();
-    const hashBudget = { remainingBytes: MAX_HASH_WORKTREE_BYTES };
-
-    for (const entry of indexEntries) {
-      if (this.remainingBudgetMs() <= 0) return false;
-      if (!indexStat || !verifyTrackedEntry(realRoot, entry, indexStat, hashLen, hashBudget)) {
+    // Fast read-only unstaged stat check before spawning any subprocesses.
+    for (let i = 0; i < indexEntries.length; i++) {
+      if ((i & 0x3f) === 0 && this.isExpired()) return false;
+      if (!indexStat || !verifyTrackedEntry(realRoot, indexEntries[i]!, indexStat)) {
         return false;
-      }
-      trackedPaths.add(entry.path);
-      let slash = entry.path.indexOf("/");
-      while (slash >= 0) {
-        trackedDirs.add(entry.path.slice(0, slash));
-        slash = entry.path.indexOf("/", slash + 1);
       }
     }
 
-    // Bounded untracked-file walk honoring `<common>/info/exclude` and `.gitignore`.
-    if (!this.hasNoUntrackedFiles(realRoot, common, trackedPaths, trackedDirs)) {
+    // Check effective worktree config for content conversion (`core.autocrlf`, `core.eol`).
+    const worktreeConfigOut = await this.runBoundedGit(gitDir, [
+      `--work-tree=${realRoot}`,
+      "-C",
+      realRoot,
+      "config",
+      "--list",
+      "--null",
+    ]);
+    if (worktreeConfigOut === undefined) return false;
+    if (configEnablesContentConversion(parseGitConfigNull(worktreeConfigOut))) {
       return false;
     }
 
-    // Verify staged state matches `tipOid` tree exactly.
-    const tree = await this.treeEntries(common, tipOid);
-    if (!tree || !indexMatchesTree(indexEntries, tree)) return false;
-
-    return true;
-  }
-
-  private hasNoUntrackedFiles(
-    realRoot: string,
-    common: string,
-    trackedPaths: ReadonlySet<string>,
-    trackedDirs: ReadonlySet<string>,
-  ): boolean {
-    const excludeRules = loadIgnoreRules(join(common, "info", "exclude"), "");
-    if (excludeRules === null) return false;
-
-    let seenEntries = 0;
-
-    const walk = (
-      absDir: string,
-      relDir: string,
-      depth: number,
-      inheritedRules: IgnoreRule[],
-    ): boolean => {
-      if (depth > MAX_UNTRACKED_WALK_DEPTH || this.remainingBudgetMs() <= 0) return false;
-
-      const localIgnore = loadIgnoreRules(join(absDir, ".gitignore"), relDir);
-      if (localIgnore === null) return false;
-      const rules = localIgnore.length > 0 ? [...inheritedRules, ...localIgnore] : inheritedRules;
-
-      let dirents;
-      try {
-        dirents = readdirSync(absDir, { withFileTypes: true });
-      } catch {
-        return false;
-      }
-
-      for (const entry of dirents) {
-        seenEntries += 1;
-        if (seenEntries > MAX_UNTRACKED_WALK_ENTRIES) return false;
-        if (seenEntries % 256 === 0 && this.remainingBudgetMs() <= 0) return false;
-
-        const name = entry.name;
-        if (relDir === "" && name === ".git") continue;
-        const rel = relDir ? `${relDir}/${name}` : name;
-
-        if (entry.isDirectory()) {
-          // A nested git repo inside the worktree counts as untracked unless ignored.
-          if (isPathIgnored(rel, true, rules) && !trackedDirs.has(rel)) {
-            continue;
-          }
-          if (name === ".git") return false;
-          if (!walk(join(absDir, name), rel, depth + 1, rules)) return false;
-          continue;
-        }
-
-        if (entry.isFile() || entry.isSymbolicLink()) {
-          if (trackedPaths.has(rel)) continue;
-          if (isPathIgnored(rel, false, rules)) continue;
+    // Check effective conversion attributes for all tracked paths without running filters.
+    if (indexEntries.length > 0) {
+      for (let start = 0; start < indexEntries.length; start += CHECK_ATTR_CHUNK_PATHS) {
+        if (this.isExpired()) return false;
+        const slice = indexEntries.slice(start, start + CHECK_ATTR_CHUNK_PATHS);
+        const stdin = `${slice.map((entry) => entry.path).join("\0")}\0`;
+        const attrOut = await this.runBoundedGit(
+          gitDir,
+          [
+            `--work-tree=${realRoot}`,
+            "-C",
+            realRoot,
+            "check-attr",
+            "--stdin",
+            "-z",
+            ...CONVERSION_ATTRS,
+          ],
+          { stdin },
+        );
+        if (attrOut === undefined || !checkAttrOutputIsClean(attrOut, slice.length)) {
           return false;
         }
+      }
+    }
 
-        // Any special file (FIFO, socket, device) fails closed.
+    // Check staged changes (index vs tipOid tree, no worktree reads, no filters).
+    const diffCached = await this.runBoundedGit(gitDir, [
+      "diff-index",
+      "--cached",
+      "--quiet",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--ignore-submodules=none",
+      tipOid,
+      "--",
+    ]);
+    if (diffCached === undefined) return false;
+
+    // Check untracked non-ignored files with Git itself (`core.untrackedCache=false`
+    // and `core.fsmonitor=false` are already set by `gitSafeArgs()`).
+    const untracked = await this.runBoundedGit(
+      gitDir,
+      [
+        `--work-tree=${realRoot}`,
+        "-C",
+        realRoot,
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+        "-z",
+      ],
+      { maxStdoutBytes: MAX_UNTRACKED_STDOUT },
+    );
+    if (untracked === undefined || untracked.length > 0) return false;
+
+    // Post-check stability: reject if deadline expired, in-progress markers
+    // appeared, the index file identity/checksum changed, or any tracked file
+    // changed on disk during the awaited git calls.
+    if (this.isExpired() || hasInProgressOperation(gitDir)) return false;
+
+    let afterIdentity: IndexIdentity;
+    let afterBytes: Buffer | undefined;
+    try {
+      lstatSync(indexPath);
+      const afterFile = readSmallFile(indexPath, CLEAN_INDEX_MAX_BYTES);
+      if (!afterFile || afterFile.bytes.length < hashLen) return false;
+      afterBytes = afterFile.bytes;
+      const trailerHex = afterFile.bytes.subarray(afterFile.bytes.length - hashLen).toString("hex");
+      afterIdentity = {
+        exists: true,
+        dev: afterFile.stat.dev,
+        ino: afterFile.stat.ino,
+        size: afterFile.stat.size,
+        mtimeNs: afterFile.stat.mtimeNs,
+        ctimeNs: afterFile.stat.ctimeNs,
+        checksumHex: trailerHex,
+      };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        afterIdentity = {
+          exists: false,
+          dev: 0n,
+          ino: 0n,
+          size: 0n,
+          mtimeNs: 0n,
+          ctimeNs: 0n,
+          checksumHex: "",
+        };
+      } else {
         return false;
       }
-      return true;
-    };
+    }
 
-    return walk(realRoot, "", 0, excludeRules);
+    if (!sameIndexIdentity(beforeIdentity, afterIdentity)) return false;
+    if (beforeBytes && (!afterBytes || !beforeBytes.equals(afterBytes))) return false;
+
+    for (let i = 0; i < indexEntries.length; i++) {
+      if ((i & 0x3f) === 0 && this.isExpired()) return false;
+      if (!indexStat || !verifyTrackedEntry(realRoot, indexEntries[i]!, indexStat)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private branches(common: string): Promise<RepoBranches | undefined> {
@@ -1112,22 +1024,16 @@ export class WorktreeIndex {
     if (listing === undefined) return undefined;
 
     const localOids = new Map<string, string>();
+    const remoteOids = new Map<string, string>();
     const gone = new Set<string>();
-    let originHead: string | undefined;
-    let originHeadOid: string | undefined;
     let hasOriginRefs = false;
 
     for (const line of listing.split("\n")) {
       if (!line) continue;
-      const [ref = "", oid = "", track = "", symref = ""] = line.split("\0");
-      if (ref === "refs/remotes/origin/HEAD") {
+      const [ref = "", oid = "", track = ""] = line.split("\0");
+      if (ref === "refs/remotes/origin/HEAD" || ref.startsWith(ORIGIN_REMOTES)) {
         hasOriginRefs = true;
-        if (symref && oid && HEX_OID.test(oid)) {
-          originHead = symref;
-          originHeadOid = oid;
-        }
-      } else if (ref.startsWith("refs/remotes/origin/")) {
-        hasOriginRefs = true;
+        if (oid && HEX_OID.test(oid)) remoteOids.set(ref, oid);
       } else if (ref.startsWith(HEADS)) {
         const name = ref.slice(HEADS.length);
         if (oid && HEX_OID.test(oid)) localOids.set(name, oid);
@@ -1135,25 +1041,61 @@ export class WorktreeIndex {
       }
     }
 
+    // Resolve remotes and config with Git itself so `[include]`, `[includeIf]`,
+    // and case-insensitive section names (e.g. `[REMOTE "origin"]`) work
+    // identically to Git. Any failure to read config or remotes fails closed.
+    const remotesOut = await this.runBoundedGit(common, ["remote"]);
+    if (remotesOut === undefined) return undefined;
+    const remotes = new Set(
+      remotesOut
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0),
+    );
+
+    const repoConfigOut = await this.runBoundedGit(common, ["config", "--list", "--null"]);
+    if (repoConfigOut === undefined) return undefined;
+    const repoConfig = parseGitConfigNull(repoConfigOut);
+    let hasOriginConfig = false;
+    for (const key of repoConfig.keys()) {
+      if (key.startsWith("remote.origin.")) {
+        hasOriginConfig = true;
+        break;
+      }
+    }
+
+    const hasOrigin = remotes.has("origin") || hasOriginConfig || hasOriginRefs;
+
     // Verified base selection:
-    // 1. `refs/remotes/origin/HEAD` when present.
-    // 2. If an `origin` remote is configured without `origin/HEAD`, leave base
-    //    unknown rather than guessing a local branch.
-    // 3. Otherwise (local-only repository), use the branch checked out in the
-    //    main worktree (`<common>/HEAD`), never a guessed local `main`/`master`.
+    // 1. When `origin` exists: resolve `refs/remotes/origin/HEAD` via Git. If
+    //    it cannot be resolved locally to a valid commit OID, base is unknown.
+    // 2. Otherwise (confirmed local-only repo): use the branch checked out in
+    //    the main worktree (`<common>/HEAD`), never a guessed `main`/`master`.
     let baseRef: string | undefined;
     let baseOid: string | undefined;
     let base: string | undefined;
 
-    if (originHead && originHeadOid) {
-      baseRef = originHead;
-      baseOid = originHeadOid;
-      base = originHead.startsWith("refs/remotes/origin/")
-        ? originHead.slice("refs/remotes/origin/".length)
-        : originHead.startsWith(HEADS)
-          ? originHead.slice(HEADS.length)
-          : undefined;
-    } else if (!hasOriginRefs && !hasConfiguredOriginRemote(common)) {
+    if (hasOrigin) {
+      const symrefOut = await this.runBoundedGit(common, [
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+      ]);
+      const targetRef = symrefOut?.trim();
+      if (targetRef) {
+        const targetOid =
+          remoteOids.get(targetRef) ??
+          (targetRef.startsWith(HEADS) ? localOids.get(targetRef.slice(HEADS.length)) : undefined);
+        if (targetOid && HEX_OID.test(targetOid)) {
+          baseRef = targetRef;
+          baseOid = targetOid;
+          base = targetRef.startsWith(ORIGIN_REMOTES)
+            ? targetRef.slice(ORIGIN_REMOTES.length)
+            : targetRef.startsWith(HEADS)
+              ? targetRef.slice(HEADS.length)
+              : undefined;
+        }
+      }
+    } else {
       const mainBranch = readCheckedOutBranch(common);
       const mainOid = mainBranch ? localOids.get(mainBranch) : undefined;
       if (mainBranch && mainOid) {
@@ -1174,8 +1116,11 @@ export class WorktreeIndex {
       "--format=%(refname)%00%(objectname)",
       "refs/heads",
     ]);
+    if (mergedOut === undefined) {
+      return { base: undefined, baseRef: undefined, baseOid: undefined, merged: new Map(), gone };
+    }
     const merged = new Map<string, string>();
-    for (const line of mergedOut?.split("\n") ?? []) {
+    for (const line of mergedOut.split("\n")) {
       if (!line) continue;
       const [ref = "", oid = ""] = line.split("\0");
       if (ref.startsWith(HEADS) && oid && HEX_OID.test(oid)) {

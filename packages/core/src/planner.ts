@@ -115,9 +115,18 @@ async function withProjectActivity(
   const activity = candidates.map((candidate) => index.forArtifact(candidate.path));
   const uniqueRoots = [...new Set(activity.map((entry) => entry.root))];
   const worktreeByRoot = new Map<string, WorktreeInfo | undefined>();
-  await mapPool(uniqueRoots, 8, async (root) => {
-    worktreeByRoot.set(root, await worktrees.forProject(root));
-  });
+  await mapPool(
+    uniqueRoots,
+    8,
+    async (root) => {
+      try {
+        worktreeByRoot.set(root, await worktrees.forProject(root));
+      } catch {
+        worktreeByRoot.set(root, undefined);
+      }
+    },
+    () => signal?.aborted === true,
+  );
 
   return candidates.map((candidate, idx) => {
     const { root, activeMs } = activity[idx]!;

@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readdirSync,
@@ -455,11 +456,26 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
         stdio: ["ignore", "pipe", "pipe"],
       });
       if (res.status !== 0) throw new Error(`git ${args.join(" ")}: ${res.stderr}`);
+      return res.stdout.trim();
     };
     const commit = (cwd: string, file: string, content = `${file}\n`) => {
       writeFileSync(join(cwd, file), content);
       git(cwd, "add", file);
       git(cwd, "-c", "commit.gpgsign=false", "commit", "-q", "-m", file);
+    };
+    const settle = (wt: string) => {
+      const past = new Date(Date.now() - 5_000);
+      for (const rel of git(wt, "ls-files")
+        .split(/\r?\n/)
+        .filter((line) => line.length > 0)) {
+        const abs = join(wt, rel);
+        try {
+          if (!lstatSync(abs).isSymbolicLink()) utimesSync(abs, past, past);
+        } catch {
+          // Ignore missing entries.
+        }
+      }
+      git(wt, "update-index", "--refresh");
     };
     const seedModules = (dir: string) => {
       mkdirSync(join(dir, "node_modules", "pkg"), { recursive: true });
@@ -472,15 +488,17 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       mkdirSync(app);
       git(root, "init", "-q", "--bare", remote);
       git(app, "init", "-q", "-b", "main");
+      git(app, "config", "core.autocrlf", "false");
       commit(app, ".gitignore", "node_modules/\n");
       git(app, "remote", "add", "origin", remote);
       git(app, "push", "-q", "-u", "origin", "main");
       git(app, "remote", "set-head", "origin", "main");
 
-      // 1. Clean merged worktree -> merged
+      // 1. Clean settled merged worktree -> merged
       const merged = join(root, "wt-merged");
       git(app, "worktree", "add", "-q", "-b", "wt-merged", merged);
       commit(merged, "merged.txt");
+      settle(merged);
       git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "m", "wt-merged");
       git(app, "push", "-q", "origin", "main");
 
@@ -488,11 +506,13 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       const open = join(root, "wt-open");
       git(app, "worktree", "add", "-q", "-b", "wt-open", open);
       commit(open, "wip.txt");
+      settle(open);
 
       // 3. Merged branch whose upstream was deleted & pruned -> upstream_gone (never merged)
       const mergedGone = join(root, "wt-merged-gone");
       git(app, "worktree", "add", "-q", "-b", "wt-merged-gone", mergedGone);
       commit(mergedGone, "mg.txt");
+      settle(mergedGone);
       git(mergedGone, "push", "-q", "-u", "origin", "wt-merged-gone");
       git(
         app,
@@ -513,6 +533,7 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       const dirty = join(root, "wt-dirty");
       git(app, "worktree", "add", "-q", "-b", "wt-dirty", dirty);
       commit(dirty, "dirty.txt");
+      settle(dirty);
       git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "md", "wt-dirty");
       git(app, "push", "-q", "origin", "main");
       writeFileSync(join(dirty, "untracked.txt"), "wip\n");
@@ -520,8 +541,142 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       // 5. Zero-commit branch forked from merged side branch -> undefined
       const zeroOnSide = join(root, "wt-zero-on-side");
       git(app, "worktree", "add", "-q", "-b", "wt-zero-on-side", zeroOnSide, "wt-merged");
+      settle(zeroOnSide);
 
-      for (const dir of [app, merged, open, mergedGone, dirty, zeroOnSide]) {
+      // 6. Reviewer ignore-edge fixtures (embedded **, escaped wildcard, unclosed class, reversed range)
+      const wtDoubleStar = join(root, "wt-double-star");
+      git(app, "worktree", "add", "-q", "-b", "wt-double-star", wtDoubleStar);
+      commit(wtDoubleStar, ".gitignore", "node_modules/\nout/file**.log\n");
+      settle(wtDoubleStar);
+      git(
+        app,
+        "-c",
+        "commit.gpgsign=false",
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "ds",
+        "wt-double-star",
+      );
+      git(app, "push", "-q", "origin", "main");
+      mkdirSync(join(wtDoubleStar, "out", "files"), { recursive: true });
+      writeFileSync(join(wtDoubleStar, "out", "files", "debug.log"), "dirty\n");
+
+      const wtEscaped = join(root, "wt-escaped");
+      git(app, "worktree", "add", "-q", "-b", "wt-escaped", wtEscaped);
+      commit(wtEscaped, ".gitignore", "node_modules/\nliteral\\*.txt\n");
+      settle(wtEscaped);
+      git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "ew", "wt-escaped");
+      git(app, "push", "-q", "origin", "main");
+      writeFileSync(join(wtEscaped, "literal.txt"), "dirty\n");
+
+      const wtUnclosed = join(root, "wt-unclosed");
+      git(app, "worktree", "add", "-q", "-b", "wt-unclosed", wtUnclosed);
+      commit(wtUnclosed, ".gitignore", "node_modules/\n[abc\n");
+      settle(wtUnclosed);
+      git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "uc", "wt-unclosed");
+      git(app, "push", "-q", "origin", "main");
+      writeFileSync(join(wtUnclosed, "[abc"), "dirty\n");
+
+      const wtReversed = join(root, "wt-reversed");
+      git(app, "worktree", "add", "-q", "-b", "wt-reversed", wtReversed);
+      commit(wtReversed, ".gitignore", "node_modules/\n[z-a]\n");
+      settle(wtReversed);
+      git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "rr", "wt-reversed");
+      git(app, "push", "-q", "origin", "main");
+      writeFileSync(join(wtReversed, "extra.txt"), "dirty\n");
+
+      // 7. Racily-clean (same-second) entry -> undefined
+      const wtRacy = join(root, "wt-racy");
+      git(app, "worktree", "add", "-q", "-b", "wt-racy", wtRacy);
+      commit(wtRacy, "racy.txt");
+      git(app, "-c", "commit.gpgsign=false", "merge", "-q", "--no-ff", "-m", "racy", "wt-racy");
+      git(app, "push", "-q", "origin", "main");
+
+      // 8. Included origin config (separate repo, no origin/HEAD) -> undefined
+      const incApp = join(root, "app-inc");
+      mkdirSync(incApp);
+      git(incApp, "init", "-q", "-b", "main");
+      git(incApp, "config", "core.autocrlf", "false");
+      commit(incApp, ".gitignore", "node_modules/\n");
+      const incCfg = join(root, "inc-origin.gitconfig");
+      writeFileSync(incCfg, '[REMOTE "origin"]\n\turl = /nonexistent/remote.git\n');
+      git(incApp, "config", "include.path", incCfg);
+      const wtInc = join(root, "wt-inc");
+      git(incApp, "worktree", "add", "-q", "-b", "wt-inc", wtInc);
+      commit(wtInc, "inc.txt");
+      settle(wtInc);
+      git(incApp, "merge", "-q", "--ff-only", "wt-inc");
+
+      // 9. Reflogs disabled repo -> undefined
+      const noReflogApp = join(root, "app-noreflog");
+      mkdirSync(noReflogApp);
+      git(noReflogApp, "init", "-q", "-b", "main");
+      git(noReflogApp, "config", "core.autocrlf", "false");
+      git(noReflogApp, "config", "core.logAllRefUpdates", "false");
+      commit(noReflogApp, ".gitignore", "node_modules/\n");
+      const wtNoReflog = join(root, "wt-noreflog");
+      git(noReflogApp, "worktree", "add", "-q", "-b", "wt-noreflog", wtNoReflog);
+      commit(wtNoReflog, "nr.txt");
+      settle(wtNoReflog);
+      git(
+        noReflogApp,
+        "-c",
+        "commit.gpgsign=false",
+        "merge",
+        "-q",
+        "--no-ff",
+        "-m",
+        "nr",
+        "wt-noreflog",
+      );
+
+      // 10. CRLF with core.autocrlf=true -> undefined
+      const crlfApp = join(root, "app-crlf");
+      mkdirSync(crlfApp);
+      git(crlfApp, "init", "-q", "-b", "main");
+      git(crlfApp, "config", "core.autocrlf", "true");
+      commit(crlfApp, ".gitignore", "node_modules/\n");
+      const wtCrlf = join(root, "wt-crlf");
+      git(crlfApp, "worktree", "add", "-q", "-b", "wt-crlf", wtCrlf);
+      commit(wtCrlf, "crlf.txt", "a\r\nb\r\n");
+      settle(wtCrlf);
+      git(crlfApp, "merge", "-q", "--ff-only", "wt-crlf");
+
+      // 11. Required clean filter (never executes!) -> undefined
+      const filterMarker = join(root, "CONTRACT_FILTER_RAN");
+      const filterApp = join(root, "app-filter");
+      mkdirSync(filterApp);
+      git(filterApp, "init", "-q", "-b", "main");
+      git(filterApp, "config", "core.autocrlf", "false");
+      commit(filterApp, ".gitignore", "node_modules/\n");
+      const wtFilter = join(root, "wt-filter");
+      git(filterApp, "worktree", "add", "-q", "-b", "wt-filter", wtFilter);
+      commit(wtFilter, ".gitattributes", "*.dat filter=reqclean\n");
+      commit(wtFilter, "item.dat", "raw\n");
+      settle(wtFilter);
+      git(filterApp, "merge", "-q", "--ff-only", "wt-filter");
+      git(filterApp, "config", "filter.reqclean.required", "true");
+      git(filterApp, "config", "filter.reqclean.clean", `touch ${filterMarker}`);
+
+      for (const dir of [
+        app,
+        merged,
+        open,
+        mergedGone,
+        dirty,
+        zeroOnSide,
+        wtDoubleStar,
+        wtEscaped,
+        wtUnclosed,
+        wtReversed,
+        wtRacy,
+        wtInc,
+        wtNoReflog,
+        wtCrlf,
+        wtFilter,
+      ]) {
         seedModules(dir);
       }
 
@@ -543,6 +698,7 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
       const rustMap = byWorktree(rustPlan);
       expect(rustMap.size).toBe(jsMap.size);
       expect(rustMap).toEqual(jsMap);
+      expect(existsSync(filterMarker)).toBe(false);
 
       expect(jsMap.get(canonical(join(app, "node_modules")))).toEqual({
         worktreeOf: undefined,
@@ -560,12 +716,34 @@ test.skipIf(!NATIVE_AVAILABLE || spawnSync("git", ["--version"], { stdio: "ignor
         worktreeOf: app,
         worktreeState: "upstream_gone",
       });
-      expect(jsMap.get(canonical(join(dirty, "node_modules")))).toEqual({
-        worktreeOf: app,
+      for (const unknownWt of [
+        dirty,
+        zeroOnSide,
+        wtDoubleStar,
+        wtEscaped,
+        wtUnclosed,
+        wtReversed,
+        wtRacy,
+      ]) {
+        expect(jsMap.get(canonical(join(unknownWt, "node_modules")))).toEqual({
+          worktreeOf: app,
+          worktreeState: undefined,
+        });
+      }
+      expect(jsMap.get(canonical(join(wtInc, "node_modules")))).toEqual({
+        worktreeOf: incApp,
         worktreeState: undefined,
       });
-      expect(jsMap.get(canonical(join(zeroOnSide, "node_modules")))).toEqual({
-        worktreeOf: app,
+      expect(jsMap.get(canonical(join(wtNoReflog, "node_modules")))).toEqual({
+        worktreeOf: noReflogApp,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(wtCrlf, "node_modules")))).toEqual({
+        worktreeOf: crlfApp,
+        worktreeState: undefined,
+      });
+      expect(jsMap.get(canonical(join(wtFilter, "node_modules")))).toEqual({
+        worktreeOf: filterApp,
         worktreeState: undefined,
       });
     } finally {

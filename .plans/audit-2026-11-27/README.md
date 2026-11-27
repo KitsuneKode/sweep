@@ -50,11 +50,15 @@ recorded in this public repository):
   for clean, proven-merged worktrees against a verified base (`origin/HEAD`,
   else main worktree branch when no `origin` remote is configured, never a
   guessed local `main`/`master`).
-- Determine worktree cleanliness data-only (parse `.git/index`, verify stat
-  data and `ls-tree`, reject unsupported index layouts/flags/submodules and
-  in-progress operations, bounded `.gitignore`/`info/exclude` untracked walk)
-  with no `git status` spawn; sanitize environment and flags across all JS and
-  Rust git invocations; keep split-index reads read-only.
+- Determine worktree cleanliness without `git status` or repo-configured
+  programs: delegate ignore matching (`ls-files --others --exclude-standard -z`),
+  staged diff (`diff-index --cached --quiet`), conversion guards (`config` and
+  `check-attr`), and remote/base resolution to hardened read-only Git plumbing;
+  verify unstaged tracked files via bounded read-only `.git/index` stat checks
+  (rejecting unsupported index layouts, gitlinks, suppressing flags, racily-clean
+  entries, content conversions, and index identity changes); require reflog merge
+  proof; sanitize environment and protocol/hooks flags across all JS and Rust
+  git invocations; keep split-index reads read-only.
 - Canonicalize worktree roots and `worktreeOf` paths across platforms; verify
   opened reflog real paths stay under `logs/refs/heads`.
 - Sanitize git-derived terminal strings (`ProjectDetails.tsx`) and harden
