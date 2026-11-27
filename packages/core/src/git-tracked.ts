@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
-import { isRustEngineAvailable, resolveRustEngineBinary } from "./rust-engine.js";
+import { probeRustEngine } from "./rust-engine.js";
 
 /**
  * Build output is never committed. A candidate that contains (or is) a file
@@ -70,8 +70,9 @@ export function gitTrackedPaths(paths: readonly string[]): Set<string> {
 
 /** Null when the engine is unavailable or did not answer cleanly. */
 export function gitTrackedPathsViaEngine(paths: readonly string[]): Set<string> | null {
-  if (!isRustEngineAvailable()) return null;
-  const result = spawnSync(resolveRustEngineBinary(), ["tracked"], {
+  const probe = probeRustEngine();
+  if (!probe.available) return null;
+  const result = spawnSync(probe.resolvedPath ?? probe.binary, ["tracked"], {
     input: `${paths.join("\0")}\0`,
     encoding: "utf8",
     timeout: 60_000,

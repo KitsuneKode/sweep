@@ -1,6 +1,19 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { opendir } from "node:fs/promises";
+import { GuardrailError } from "./guardrails.js";
 import { ResourceBudget, ResourceLimitError } from "./resource-budget.js";
+
+/**
+ * Raised when Bun's incremental JS directory reader cannot launch or keep its
+ * Node worker running. Distinct from `ResourceLimitError` so users are told to
+ * install Node or use the Rust engine rather than scanning a smaller tree.
+ */
+export class DirectoryReaderRuntimeError extends GuardrailError {
+  constructor(message: string) {
+    super(message, 2);
+    this.name = "DirectoryReaderRuntimeError";
+  }
+}
 
 // Bun 1.4's fs.Dir.read/readSync materialize readdir arrays and ignore the
 // bufferSize bound. Node's libuv directory handle is genuinely incremental.
@@ -78,21 +91,23 @@ class DirectoryWorker {
       this.fail(error);
     };
     signal?.addEventListener("abort", this.abort, { once: true });
-    this.proc.on("error", () =>
+    this.proc.on("error", (err: NodeJS.ErrnoException) =>
       this.fail(
-        new ResourceLimitError(
-          "incremental directory reader unavailable; install Node or use the Rust engine",
+        new DirectoryReaderRuntimeError(
+          `Node.js runtime unavailable for Bun's incremental directory reader (${err.code ?? err.message}); install Node or use the Rust engine`,
         ),
       ),
     );
     this.proc.on("close", (code, signal) => {
       this.signal?.removeEventListener("abort", this.abort);
-      if (!this.failure)
+      if (!this.failure) {
+        const stderrText = this.stderr.toString("utf8").trim();
         this.fail(
-          new ResourceLimitError(
-            `incremental directory reader stopped (${signal ?? code ?? "unknown status"}); ${this.stderr.toString("utf8").trim() || "install Node or use the Rust engine"}`,
+          new DirectoryReaderRuntimeError(
+            `incremental directory reader stopped (${signal ?? code ?? "unknown status"}); ${stderrText || "install Node or use the Rust engine"}`,
           ),
         );
+      }
     });
     this.proc.stdout.setEncoding("utf8");
     this.proc.stdout.on("data", (chunk: string) => {
@@ -134,9 +149,13 @@ class DirectoryWorker {
     // EPIPE or malformed JSON as an ordinary per-directory I/O error lets
     // discovery silently skip its unread tail and finalize a partial plan.
     this.failure ??=
-      error instanceof ResourceLimitError || error.name === "AbortError"
+      error instanceof ResourceLimitError ||
+      error instanceof DirectoryReaderRuntimeError ||
+      error.name === "AbortError"
         ? error
-        : new ResourceLimitError("incremental directory reader failed");
+        : new DirectoryReaderRuntimeError(
+            `incremental directory reader failed (${error.message}); install Node or use the Rust engine`,
+          );
     clearTimeout(this.idle);
     for (const waiting of this.pending.values()) waiting.reject(this.failure);
     this.pending.clear();

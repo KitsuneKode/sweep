@@ -77,8 +77,8 @@ test.skipIf(process.platform !== "linux")(
   },
 );
 
-test("Bun fails explicitly when its incremental Node reader is unavailable", async () => {
-  const source = `import {scan} from ${JSON.stringify(join(import.meta.dir, "scanner.ts"))}; import {DEFAULT_CONFIG} from ${JSON.stringify(join(import.meta.dir, "config.ts"))}; try { await scan(${JSON.stringify(owned)}, DEFAULT_CONFIG); process.exit(9); } catch (error) { console.error(error.message); process.exit(2); }`;
+test("Bun reports a runtime-missing error (not a resource budget error) when Node is unavailable", async () => {
+  const source = `import {scan} from ${JSON.stringify(join(import.meta.dir, "scanner.ts"))}; import {DEFAULT_CONFIG} from ${JSON.stringify(join(import.meta.dir, "config.ts"))}; try { await scan(${JSON.stringify(owned)}, DEFAULT_CONFIG); process.exit(9); } catch (error) { console.error(error.name + ": " + error.message); process.exit(2); }`;
   const proc = Bun.spawn([process.execPath, "-e", source], {
     env: { ...process.env, PATH: join(owned, "no-runtime") },
     stdout: "ignore",
@@ -86,7 +86,10 @@ test("Bun fails explicitly when its incremental Node reader is unavailable", asy
   });
   const [code, error] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
   expect(code).toBe(2);
+  expect(error).toContain("DirectoryReaderRuntimeError");
   expect(error).toContain("install Node or use the Rust engine");
+  expect(error.toLowerCase()).not.toContain("resource limit");
+  expect(error.toLowerCase()).not.toContain("smaller subtree");
 });
 
 test.skipIf(process.platform === "win32")(

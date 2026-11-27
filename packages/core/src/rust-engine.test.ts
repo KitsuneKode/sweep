@@ -3,7 +3,12 @@ import { DEFAULT_CONFIG } from "./config.js";
 import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isRustEngineAvailable, rustScanBlockedReason, scanToPlanViaRust } from "./rust-engine.js";
+import {
+  isRustEngineAvailable,
+  probeRustEngine,
+  rustScanBlockedReason,
+  scanToPlanViaRust,
+} from "./rust-engine.js";
 
 test("failed embedded extraction still tries the installed resolution chain", async () => {
   const source = `import {registerEmbeddedEngine, resolveRustEngineBinary} from ${JSON.stringify(join(import.meta.dir, "rust-engine.ts"))}; delete process.env.SWEEP_ENGINE_PATH; const expected=resolveRustEngineBinary(); registerEmbeddedEngine(()=>{throw new Error("extraction unavailable")}); if(resolveRustEngineBinary()!==expected) throw new Error("fallback changed"); process.exit(0);`;
@@ -139,21 +144,48 @@ describe("rustScanBlockedReason", () => {
 });
 
 test.skipIf(process.platform === "win32")(
-  "native probe is bounded and invalidates on binary replacement",
+  "native probe is bounded, keeps failure reasons, and invalidates on binary replacement",
   () => {
     const root = mkdtempSync(join(tmpdir(), "sweep-probe-"));
     const previous = process.env.SWEEP_ENGINE_PATH;
     const binary = join(root, "engine");
     try {
+      process.env.SWEEP_ENGINE_PATH = join(root, "missing-engine");
+      const missing = probeRustEngine();
+      expect(missing.available).toBe(false);
+      expect(missing.reasonKind).toBe("not_installed");
+
       process.env.SWEEP_ENGINE_PATH = binary;
       writeFileSync(binary, "#!/bin/sh\nexit 0\n");
       chmodSync(binary, 0o700);
       expect(isRustEngineAvailable()).toBe(true);
-      writeFileSync(binary, "#!/bin/sh\nexit 3\n");
-      expect(isRustEngineAvailable()).toBe(false);
+      expect(probeRustEngine().resolvedPath).toBe(binary);
+
+      writeFileSync(
+        binary,
+        "#!/bin/sh\necho \"/lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found\" >&2\nexit 127\n",
+      );
+      const loaderErr = probeRustEngine();
+      expect(loaderErr.available).toBe(false);
+      expect(loaderErr.reasonKind).toBe("probe_failed");
+      expect(loaderErr.exitCode).toBe(127);
+      expect(loaderErr.stderrFirstLine).toContain("GLIBC_2.39");
+      expect(loaderErr.reason).toContain("127");
+      expect(loaderErr.reason).toContain("GLIBC_2.39");
+
+      writeFileSync(binary, "#!/bin/sh\nkill -TERM $$\n");
+      const signaled = probeRustEngine();
+      expect(signaled.available).toBe(false);
+      expect(signaled.reasonKind).toBe("probe_failed");
+      expect(signaled.signal).toBe("SIGTERM");
+      expect(signaled.reason).toContain("SIGTERM");
+
       writeFileSync(binary, "#!/bin/sh\nexec sleep 30\n");
       const start = performance.now();
-      expect(isRustEngineAvailable()).toBe(false);
+      const timedOut = probeRustEngine();
+      expect(timedOut.available).toBe(false);
+      expect(timedOut.reasonKind).toBe("timeout");
+      expect(timedOut.reason).toContain("timed out");
       expect(performance.now() - start).toBeLessThan(3000);
     } finally {
       if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
