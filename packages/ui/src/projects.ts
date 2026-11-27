@@ -83,6 +83,12 @@ export const ARTIFACT_PREVIEW = 6;
 
 const WORKTREE_STATE_LABEL: Record<WorktreeState, string> = {
   merged: "merged",
+  upstream_gone: "branch missing",
+};
+
+/** Full worktree state sentence shown in the details margin. */
+export const WORKTREE_STATE_DETAIL: Record<WorktreeState, string> = {
+  merged: "Merged into default branch · clean",
   upstream_gone: "Tracking branch missing · check git",
 };
 

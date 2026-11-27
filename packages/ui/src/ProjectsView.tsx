@@ -429,16 +429,20 @@ export function ProjectsView(props: ProjectsViewProps) {
       // (dangerous items stay out of a project-level queue) and needs a look.
       const risk = riskLabel(p);
       const where = p.parent ? sanitizeTerminalText(p.parent) : "";
+      // Worktree labels lead with the repository name ("app · branch missing"),
+      // so clip from the end to keep the repo name visible at narrow widths.
+      const clipWhere = (maxW: number) =>
+        p.worktreeOf !== undefined ? clipCells(where, maxW, true) : clipStart(where, maxW);
       // With the details margin open, what a project holds is said there.
       const detail =
         restW <= 0
           ? ""
           : panelW > 0
             ? restW >= 16
-              ? clipStart(where, restW)
+              ? clipWhere(restW)
               : ""
             : whereW >= 8 && restW > whereW + 6
-              ? `${padCells(clipStart(where, whereW), whereW)}  ${kindSummary(p, restW - whereW - 2)}`
+              ? `${padCells(clipWhere(whereW), whereW)}  ${kindSummary(p, restW - whereW - 2)}`
               : kindSummary(p, restW);
       return {
         lead: t`${pointer} ${mark}  ${name}  ${fg(tokens.textSecondary)(size)}  `,

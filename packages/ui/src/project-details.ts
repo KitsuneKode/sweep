@@ -6,6 +6,7 @@ import {
   lstatSync,
   openSync,
   readSync,
+  realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { catalogEntryFor } from "@kitsunekode/sweep-core/catalog";
@@ -120,7 +121,8 @@ function readSmallNoFollow(filePath: string, maxBytes = GIT_META_MAX_BYTES): str
 /** The branch a work tree has checked out, read from HEAD; never runs git. */
 export function gitBranch(root: string): string | null {
   try {
-    let gitDir = join(root, ".git");
+    const realRoot = realpathSync(root);
+    let gitDir = join(realRoot, ".git");
     const meta = lstatSync(gitDir);
     if (meta.isSymbolicLink()) return null;
     // A linked worktree or submodule keeps a file pointing at its git dir.
@@ -131,7 +133,7 @@ export function gitBranch(root: string): string | null {
       const pointer = /^gitdir:\s*(.+)$/.exec(firstLine);
       const target = pointer?.[1]?.trim();
       if (!target) return null;
-      gitDir = isAbsolute(target) ? target : resolve(root, target);
+      gitDir = isAbsolute(target) ? target : resolve(realRoot, target);
     } else if (!meta.isDirectory()) {
       return null;
     }

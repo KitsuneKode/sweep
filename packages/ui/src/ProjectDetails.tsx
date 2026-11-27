@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import { formatBytes } from "@kitsunekode/sweep-display";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, fg, type StyledText, t } from "@opentui/core";
@@ -6,7 +6,7 @@ import { concatStyled } from "./presentation.js";
 import { describeAge } from "./age.js";
 import { Meter, StackBar } from "./Meter.js";
 import { projectFacts, type RebuildCost } from "./project-details.js";
-import type { Project } from "./projects.js";
+import { WORKTREE_STATE_DETAIL, type Project } from "./projects.js";
 import { cellWidth, clipCells, clipStart } from "./text-cells.js";
 import { mixHex, type ThemeTokens } from "./theme.js";
 
@@ -75,8 +75,14 @@ export function ProjectDetails({
       : project.caution > 0
         ? `! ${project.caution} caution: enter on one says why`
         : "";
+  const worktreeRepo =
+    project.worktreeOf !== undefined
+      ? sanitizeTerminalText(basename(project.worktreeOf) || project.worktreeOf)
+      : undefined;
+  const worktreeNote =
+    project.worktreeState !== undefined ? WORKTREE_STATE_DETAIL[project.worktreeState] : undefined;
   // The stack bar, its key and a breath after it add three lines.
-  const fixed = 11 + (risk ? 2 : 0);
+  const fixed = 11 + (worktreeRepo ? 1 : 0) + (worktreeNote ? 1 : 0) + (risk ? 2 : 0);
   const fit = Math.max(1, Math.floor((height - fixed) / 2));
   const groups = facts.groups.slice(0, fit);
   // Cheapest to bring back first, so the left of the bar is the easy win.
@@ -116,6 +122,15 @@ export function ProjectDetails({
             "branch",
             t`${fg(tokens.text)(clipCells(sanitizeTerminalText(facts.branch) || "linked work tree", inner - LABEL_W, true))}`,
           )}
+      {worktreeRepo
+        ? field("worktree", t`${fg(tokens.text)(clipCells(worktreeRepo, inner - LABEL_W, true))}`)
+        : null}
+      {worktreeNote ? (
+        <text
+          content={t`${fg(project.worktreeState === "upstream_gone" ? tokens.warning : tokens.positive)(clipCells(worktreeNote, inner, true))}`}
+          wrapMode="none"
+        />
+      ) : null}
       {field(
         "queued",
         queuedCount > 0

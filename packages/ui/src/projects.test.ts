@@ -186,7 +186,7 @@ describe("finished worktrees", () => {
 
   test("a worktree names its repository and branch state, not the .worktrees folder", () => {
     expect(byName.get("merged")?.parent).toBe("app · merged");
-    expect(byName.get("squashed")?.parent).toBe("app · Tracking branch missing · check git");
+    expect(byName.get("squashed")?.parent).toBe("app · branch missing");
     expect(byName.get("open")?.parent).toBe("app · worktree");
   });
 
