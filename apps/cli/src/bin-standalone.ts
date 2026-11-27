@@ -10,7 +10,7 @@ import { makeProgram } from "./cli.js";
 import { installGlobalErrorHandlers } from "./global-errors.js";
 import { registerUiModule } from "./handlers/ui.js";
 import { registerEmbeddedEngine } from "@kitsunekode/sweep-core/rust-engine";
-import { mkdtempSync, writeFileSync, rmSync, chmodSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, chmodSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // The UI package's entry is a .tsx module and the CLI compiles without JSX
@@ -29,36 +29,40 @@ if (process.argv.includes("--ui-probe")) {
   process.exit(0);
 }
 
-if (import.meta.main) {
-  installGlobalErrorHandlers();
-  let nativePath: string | undefined;
-  registerEmbeddedEngine(() => {
-    if (nativePath) return nativePath;
-    const name = `sweep-engine${process.platform === "win32" ? ".exe" : ""}`;
-    // Bun 1.4.2 exposes this individual --asset at its basename in $bunfs.
-    const source = join(import.meta.dir, name);
-    const bytes = readFileSync(source);
-    if (bytes.length === 0 || bytes.length > 16 * 1024 * 1024) {
-      throw new Error("Invalid embedded Rust engine asset");
-    }
-    const owned = mkdtempSync(join(tmpdir(), "sweep-native-"));
+// Standalone entrypoint is never imported as a library; run unconditionally
+// because Bun.build({ compile, bytecode: true }) on Windows can leave
+// `import.meta.main` false for the embedded entrypoint.
+installGlobalErrorHandlers();
+let nativePath: string | undefined;
+registerEmbeddedEngine(() => {
+  if (nativePath) return nativePath;
+  const name = `sweep-engine${process.platform === "win32" ? ".exe" : ""}`;
+  // Bun 1.4.2 exposes this individual --asset at its basename in $bunfs.
+  const directSource = join(import.meta.dir, name);
+  const source = existsSync(directSource)
+    ? directSource
+    : join(import.meta.dir, "target", "release", name);
+  const bytes = readFileSync(source);
+  if (bytes.length === 0 || bytes.length > 16 * 1024 * 1024) {
+    throw new Error("Invalid embedded Rust engine asset");
+  }
+  const owned = mkdtempSync(join(tmpdir(), "sweep-native-"));
+  try {
+    chmodSync(owned, 0o700);
+    const destination = join(owned, name);
+    writeFileSync(destination, bytes, { flag: "wx", mode: 0o700 });
+    nativePath = destination;
+  } catch (error) {
+    rmSync(owned, { recursive: true, force: true });
+    throw error;
+  }
+  process.once("exit", () => {
     try {
-      chmodSync(owned, 0o700);
-      const destination = join(owned, name);
-      writeFileSync(destination, bytes, { flag: "wx", mode: 0o700 });
-      nativePath = destination;
-    } catch (error) {
       rmSync(owned, { recursive: true, force: true });
-      throw error;
+    } catch {
+      /* OS may still hold a Windows executable. */
     }
-    process.once("exit", () => {
-      try {
-        rmSync(owned, { recursive: true, force: true });
-      } catch {
-        /* OS may still hold a Windows executable. */
-      }
-    });
-    return nativePath;
   });
-  makeProgram().parse();
-}
+  return nativePath;
+});
+makeProgram().parse();

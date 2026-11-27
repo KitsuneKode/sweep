@@ -318,6 +318,26 @@ describe("lookupExecutable & cross-platform probe semantics", () => {
           cwd: dir2,
         });
         expect(trailingEmpty.resolvedPath).toBe(realEngine);
+
+        // PATH="" searches cwd like POSIX execvp, while PATH=" " searches literal "./ ".
+        const emptyPath = lookupExecutable("sweep-engine", {
+          platform: "linux",
+          pathEnv: "",
+          cwd: dir2,
+        });
+        expect(emptyPath.resolvedPath).toBe(realEngine);
+
+        const singleSpaceDir = join(root, " ");
+        mkdirSync(singleSpaceDir);
+        const singleSpaceEngine = join(singleSpaceDir, "sweep-engine");
+        copyFileSync(process.execPath, singleSpaceEngine);
+        chmodSync(singleSpaceEngine, 0o755);
+        const whitespaceOnlyPath = lookupExecutable("sweep-engine", {
+          platform: "linux",
+          pathEnv: " ",
+          cwd: root,
+        });
+        expect(whitespaceOnlyPath.resolvedPath).toBe(singleSpaceEngine);
       }
     } finally {
       if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;

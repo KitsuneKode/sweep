@@ -140,8 +140,13 @@ createRoot(renderer).render(React.createElement(Explode));
       new Response(check.stdout).text(),
       new Response(check.stderr).text(),
     ]);
-    if (code !== 0 || !out.includes(BOUNDARY_SENTINEL) || !out.includes("ok: outer boundary")) {
-      throw new Error(`Standalone outer ErrorBoundary probe failed (${code}): ${out}${err}`);
+    const visible = stripVTControlCharacters(out);
+    if (
+      code !== 0 ||
+      !visible.includes(BOUNDARY_SENTINEL) ||
+      !visible.includes("ok: outer boundary")
+    ) {
+      throw new Error(`Standalone outer ErrorBoundary probe failed (${code}): ${visible}${err}`);
     }
     console.log("ok: standalone OpenTUI outer ErrorBoundary verified without jsxDEV crash");
   }

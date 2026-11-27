@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { NATIVE_PLATFORM_NPM_NAMES } from "@kitsunekode/sweep-core/native-platforms";
 import {
   collectManifestEntryTargets,
@@ -256,11 +256,24 @@ check("sweep-lib.js imports without running the CLI", () => {
     NODE,
     [
       "-e",
-      `import("${lib.replaceAll("\\", "/")}").then(m => { if (typeof m.makeProgram !== "function") process.exit(2); })`,
+      `import(${JSON.stringify(pathToFileURL(lib).href)}).then(m => { if (typeof m.makeProgram !== "function") process.exit(2); })`,
     ],
     { encoding: "utf8", timeout: 5000, stdio: "pipe" },
   );
   void out;
+});
+
+check("sweep-ui.js loads under Bun runtime", () => {
+  const ui = join(CLI_ROOT, "dist/sweep-ui.js");
+  assert(existsSync(ui), "dist/sweep-ui.js is missing. Run: bun run build");
+  execFileSync(
+    process.execPath,
+    [
+      "-e",
+      `import(${JSON.stringify(pathToFileURL(ui).href)}).then(m => { if (typeof m.runSweepUiStreaming !== "function") process.exit(2); })`,
+    ],
+    { encoding: "utf8", timeout: 10_000, stdio: "pipe" },
+  );
 });
 
 check("files array includes dist, README.md, and LICENSE", () => {
