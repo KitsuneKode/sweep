@@ -308,14 +308,23 @@ function parseGitBool(raw: string | undefined): boolean | null {
   return null;
 }
 
-function normalizeWinCanonical(path: string): string {
-  let stripped = path;
-  if (stripped.startsWith("\\\\?\\UNC\\")) stripped = `\\\\${stripped.slice(8)}`;
-  else if (stripped.startsWith("\\\\?\\")) stripped = stripped.slice(4);
-  return stripped.replaceAll("/", "\\").toLowerCase();
+const nativeRealpath = realpathSync.native ?? realpathSync;
+
+export function normalizeWinCanonical(path: string): string {
+  let stripped = path.replaceAll("/", "\\");
+  const upper = stripped.toUpperCase();
+  if (upper.startsWith("\\\\?\\UNC\\")) {
+    stripped = `\\\\${stripped.slice(8)}`;
+  } else if (stripped.startsWith("\\\\?\\")) {
+    stripped = stripped.slice(4);
+  }
+  if (stripped.length > 3 && stripped.endsWith("\\")) {
+    stripped = stripped.replace(/\\+$/, "");
+  }
+  return stripped.toLowerCase();
 }
 
-function sameRepoRoot(expected: string, reported: string): boolean {
+export function sameRepoRoot(expected: string, reported: string): boolean {
   if (!IS_WINDOWS) {
     try {
       const a = statSync(expected, { bigint: true });
@@ -328,8 +337,8 @@ function sameRepoRoot(expected: string, reported: string): boolean {
     }
   }
   try {
-    const a = realpathSync(expected);
-    const b = realpathSync(reported);
+    const a = nativeRealpath(expected);
+    const b = nativeRealpath(reported);
     return IS_WINDOWS ? normalizeWinCanonical(a) === normalizeWinCanonical(b) : a === b;
   } catch {
     return false;

@@ -58,12 +58,20 @@ export function collectOwnedDocFiles(repoRoot: string = REPO_ROOT): string[] {
       env: cleanEnv,
       stdio: ["ignore", "pipe", "ignore"],
     }).replace(/[\r\n]+$/, "");
-    const expectedReal = realpathSync(repoRoot);
-    const reportedReal = realpathSync(toplevel);
+    const nativeRealpath = realpathSync.native ?? realpathSync;
+    const expectedReal = nativeRealpath(repoRoot);
+    const reportedReal = nativeRealpath(toplevel);
+    const normalizeWin = (p: string): string => {
+      let stripped = p.replaceAll("/", "\\");
+      const upper = stripped.toUpperCase();
+      if (upper.startsWith("\\\\?\\UNC\\")) stripped = `\\\\${stripped.slice(8)}`;
+      else if (stripped.startsWith("\\\\?\\")) stripped = stripped.slice(4);
+      if (stripped.length > 3 && stripped.endsWith("\\")) stripped = stripped.replace(/\\+$/, "");
+      return stripped.toLowerCase();
+    };
     const sameRoot =
       process.platform === "win32"
-        ? expectedReal.replaceAll("/", "\\").toLowerCase() ===
-          reportedReal.replaceAll("/", "\\").toLowerCase()
+        ? normalizeWin(expectedReal) === normalizeWin(reportedReal)
         : expectedReal === reportedReal;
     if (!sameRoot) {
       throw new Error("git toplevel does not match repoRoot");

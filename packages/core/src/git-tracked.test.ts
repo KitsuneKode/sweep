@@ -20,6 +20,8 @@ import {
   gitTrackedPaths,
   gitTrackedPathsViaEngine,
   gitTrackedPathsViaGit,
+  normalizeWinCanonical,
+  sameRepoRoot,
   scanCandidateForDotGit,
 } from "./git-tracked.js";
 import { isRustEngineAvailable } from "./rust-engine.js";
@@ -810,5 +812,136 @@ describe.skipIf(!hasGit)("round 5 & round 6 git-tracked invariants (both engines
     expect(scanCandidateForDotGit(cand, { maxDirs: 100, maxEntries: 100, maxDepth: 10 })).toBe(
       "found",
     );
+  });
+
+  test("normalizeWinCanonical normalizes verbatim prefixes, UNC paths, slashes, and case", () => {
+    expect(normalizeWinCanonical("\\\\?\\C:\\Users\\RunnerAdmin\\AppData\\Local\\Temp\\repo")).toBe(
+      normalizeWinCanonical("c:/users/runneradmin/appdata/local/temp/repo/"),
+    );
+    expect(normalizeWinCanonical("\\\\?\\UNC\\Server\\Share\\Repo\\")).toBe(
+      "\\\\server\\share\\repo",
+    );
+    expect(normalizeWinCanonical("\\\\?\\unc\\SERVER\\share\\repo")).toBe(
+      "\\\\server\\share\\repo",
+    );
+    expect(normalizeWinCanonical("\\\\?\\C:\\")).toBe("c:\\");
+    expect(normalizeWinCanonical("C:/")).toBe("c:\\");
+    expect(normalizeWinCanonical("\\\\?\\C:\\repo-a")).not.toBe(
+      normalizeWinCanonical("C:\\repo-b"),
+    );
+  });
+
+  test("repo root identity matches git rev-parse --show-toplevel across aliased spellings and rejects distinct dirs", () => {
+    write("dist/vendor.js");
+    write("node_modules/pkg/index.js");
+    git("add", "dist/vendor.js");
+    git("commit", "-qm", "init");
+
+    const toplevelRes = spawnSync("git", ["-C", root, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      env: gitEnv(),
+    });
+    expect(toplevelRes.status).toBe(0);
+    const toplevel = toplevelRes.stdout.replace(/[\r\n]+$/, "");
+    expect(sameRepoRoot(root, toplevel)).toBe(true);
+
+    const other = mkdtempSync(join(tmpdir(), "sweep-distinct-root-"));
+    try {
+      expect(sameRepoRoot(root, other)).toBe(false);
+
+      if (process.platform !== "win32") {
+        const aliasParent = join(other, "link-parent");
+        const repoAlias = join(other, "repo-alias");
+        symlinkSync(dirname(root), aliasParent);
+        symlinkSync(root, repoAlias);
+
+        const viaParentAlias = join(aliasParent, basename(root));
+        expect(sameRepoRoot(viaParentAlias, toplevel)).toBe(true);
+        expect(sameRepoRoot(repoAlias, toplevel)).toBe(true);
+
+        for (const aliasedRoot of [viaParentAlias, repoAlias]) {
+          const aliasedDist = join(aliasedRoot, "dist");
+          const aliasedModules = join(aliasedRoot, "node_modules");
+          const expected = {
+            tracked: new Set([aliasedDist]),
+            unknown: new Set<string>(),
+            containsGitRepo: new Set<string>(),
+          };
+          expect(gitTrackedPathsViaGit([aliasedDist, aliasedModules])).toEqual(expected);
+          if (isRustEngineAvailable()) {
+            expect(gitTrackedPathsViaEngine([aliasedDist, aliasedModules])).toEqual(expected);
+          }
+        }
+
+        // A genuinely different toplevel (broken inner .git inside the aliased repo) still fails closed.
+        const brokenInner = join(repoAlias, "broken-inner");
+        const brokenCand = join(brokenInner, "node_modules");
+        mkdirSync(join(brokenInner, ".git"), { recursive: true });
+        mkdirSync(brokenCand, { recursive: true });
+        const expectedUnknown = {
+          tracked: new Set<string>(),
+          unknown: new Set([brokenCand]),
+          containsGitRepo: new Set<string>(),
+        };
+        expect(gitTrackedPathsViaGit([brokenCand])).toEqual(expectedUnknown);
+        if (isRustEngineAvailable()) {
+          expect(gitTrackedPathsViaEngine([brokenCand])).toEqual(expectedUnknown);
+        }
+      } else {
+        // On Windows runners, tmpdir() carries an 8.3 short-name segment (e.g. RUNNER~1)
+        // while git reports forward-slash long names. Verify both engines agree on both spellings.
+        const forwardRoot = root.replaceAll("\\", "/");
+        expect(sameRepoRoot(forwardRoot, toplevel)).toBe(true);
+        expect(sameRepoRoot(root.toLowerCase(), toplevel.toUpperCase())).toBe(true);
+        const dist = join(root, "dist");
+        const modules = join(root, "node_modules");
+        const expected = {
+          tracked: new Set([dist]),
+          unknown: new Set<string>(),
+          containsGitRepo: new Set<string>(),
+        };
+        expect(gitTrackedPathsViaGit([dist, modules])).toEqual(expected);
+        if (isRustEngineAvailable()) {
+          expect(gitTrackedPathsViaEngine([dist, modules])).toEqual(expected);
+        }
+      }
+    } finally {
+      rmSync(other, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  test("core.worktree pointing elsewhere marks unknown in both engines with and without git", () => {
+    const altWorktree = mkdtempSync(join(tmpdir(), "sweep-alt-worktree-"));
+    const previousPath = process.env.PATH;
+    try {
+      write("node_modules/pkg/index.js", "module.exports = 1;\n");
+      git("add", "node_modules/pkg/index.js");
+      git("commit", "-qm", "init");
+      git("config", "core.worktree", altWorktree.replaceAll("\\", "/"));
+
+      const nmPath = join(root, "node_modules");
+      const expectedUnknown = {
+        tracked: new Set<string>(),
+        unknown: new Set([nmPath]),
+        containsGitRepo: new Set<string>(),
+      };
+      // With git on PATH: rev-parse --show-toplevel disagrees with discovered root.
+      expect(gitTrackedPathsViaGit([nmPath])).toEqual(expectedUnknown);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([nmPath])).toEqual(expectedUnknown);
+      }
+
+      // Without git on PATH: both JS and Rust native fallback fail closed as unknown.
+      process.env.PATH =
+        process.platform === "win32" ? "C:\\nonexistent-sweep-no-git" : "/nonexistent-sweep-no-git";
+      expect(gitTrackedPathsViaGit([nmPath])).toEqual(expectedUnknown);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([nmPath])).toEqual(expectedUnknown);
+      }
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(altWorktree, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
   });
 });

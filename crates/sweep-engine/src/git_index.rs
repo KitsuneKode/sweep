@@ -738,6 +738,9 @@ fn parse_config_file(
             ("core", "precomposeunicode") => {
                 *precompose_unicode = Some(parse_git_bool(val_raw.as_deref())?);
             }
+            ("core", "worktree") => {
+                return Err(IndexError::Unsupported);
+            }
             ("extensions", "objectformat") => {
                 let val = val_raw
                     .as_deref()
@@ -1086,17 +1089,26 @@ impl<'a> Reader<'a> {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, test))]
 fn normalize_win_canonical(path: &Path) -> String {
-    let raw = path.to_string_lossy();
-    let stripped = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
+    let raw = path.to_string_lossy().replace('/', "\\");
+    let stripped = if raw
+        .as_bytes()
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(br"\\?\UNC\"))
+    {
+        format!(r"\\{}", &raw[8..])
     } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
         rest.to_owned()
     } else {
-        raw.into_owned()
+        raw
     };
-    stripped.replace('/', "\\").to_lowercase()
+    let trimmed = if stripped.len() > 3 && stripped.ends_with('\\') {
+        stripped.trim_end_matches('\\')
+    } else {
+        stripped.as_str()
+    };
+    trimmed.to_lowercase()
 }
 
 fn same_repo_root(expected: &Path, reported: &Path) -> bool {
@@ -2298,6 +2310,151 @@ mod tests {
         );
         assert!(without_git_nfd.tracked.contains(&nfd_candidate));
         assert!(without_git_nfd.unknown.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn normalize_win_canonical_handles_verbatim_unc_slashes_and_case() {
+        assert_eq!(
+            normalize_win_canonical(Path::new(
+                r"\\?\C:\Users\RunnerAdmin\AppData\Local\Temp\repo"
+            )),
+            normalize_win_canonical(Path::new("c:/users/runneradmin/appdata/local/temp/repo/"))
+        );
+        assert_eq!(
+            normalize_win_canonical(Path::new(r"\\?\UNC\Server\Share\Repo\")),
+            r"\\server\share\repo"
+        );
+        assert_eq!(
+            normalize_win_canonical(Path::new(r"\\?\unc\SERVER\share\repo")),
+            r"\\server\share\repo"
+        );
+        assert_eq!(normalize_win_canonical(Path::new(r"\\?\C:\")), r"c:\");
+        assert_eq!(normalize_win_canonical(Path::new("C:/")), r"c:\");
+        assert_ne!(
+            normalize_win_canonical(Path::new(r"\\?\C:\repo-a")),
+            normalize_win_canonical(Path::new(r"C:\repo-b"))
+        );
+    }
+
+    #[test]
+    fn aliased_repo_root_matches_git_toplevel_and_distinct_root_does_not() -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let other = dir.path().join("other");
+        let dist = repo.join("dist");
+        let nm = repo.join("node_modules");
+        std::fs::create_dir_all(&dist)?;
+        std::fs::create_dir_all(&nm)?;
+        std::fs::create_dir_all(&other)?;
+        std::fs::write(dist.join("vendor.js"), b"1\n")?;
+        std::fs::write(nm.join("a.js"), b"2\n")?;
+
+        assert!(run_git(&repo, &["init", "-q"]));
+        assert!(run_git(&repo, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&repo, &["config", "user.name", "t"]));
+        assert!(run_git(&repo, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&repo, &["add", "dist/vendor.js"]));
+        assert!(run_git(&repo, &["commit", "-qm", "init"]));
+
+        assert!(same_repo_root(&repo, &repo));
+        assert!(!same_repo_root(&repo, &other));
+
+        #[cfg(unix)]
+        {
+            let alias = dir.path().join("repo-alias");
+            std::os::unix::fs::symlink(&repo, &alias)?;
+            assert!(same_repo_root(&alias, &repo));
+
+            let aliased_dist = alias.join("dist");
+            let aliased_nm = alias.join("node_modules");
+            let result = tracked_paths(&[aliased_dist.clone(), aliased_nm.clone()]);
+            assert!(result.tracked.contains(&aliased_dist));
+            assert!(!result.tracked.contains(&aliased_nm));
+            assert!(result.unknown.is_empty());
+
+            // A broken inner .git inside the aliased outer repo must still fail closed.
+            let broken_inner = alias.join("broken-inner");
+            let broken_cand = broken_inner.join("node_modules");
+            std::fs::create_dir_all(broken_inner.join(".git"))?;
+            std::fs::create_dir_all(&broken_cand)?;
+            let broken_result = tracked_paths(std::slice::from_ref(&broken_cand));
+            assert!(broken_result.tracked.is_empty());
+            assert!(broken_result.unknown.contains(&broken_cand));
+        }
+
+        #[cfg(windows)]
+        {
+            let forward = PathBuf::from(repo.to_string_lossy().replace('\\', "/"));
+            assert!(same_repo_root(&repo, &forward));
+            let result = tracked_paths(&[dist.clone(), nm.clone()]);
+            assert!(result.tracked.contains(&dist));
+            assert!(!result.tracked.contains(&nm));
+            assert!(result.unknown.is_empty());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn core_worktree_in_config_or_worktree_config_marks_unknown_without_git() -> std::io::Result<()>
+    {
+        let dir = tempfile::tempdir()?;
+        let alt_wt = dir.path().join("alt-worktree");
+        std::fs::create_dir_all(&alt_wt)?;
+
+        // Case 1: core.worktree in .git/config.
+        let repo1 = dir.path().join("repo-main");
+        let cand1 = repo1.join("node_modules");
+        std::fs::create_dir_all(repo1.join(".git"))?;
+        std::fs::create_dir_all(&cand1)?;
+        std::fs::write(repo1.join(".git").join("HEAD"), b"ref: refs/heads/main\n")?;
+        std::fs::write(
+            repo1.join(".git").join("config"),
+            format!(
+                "[core]\n\trepositoryformatversion = 0\n\tworktree = {}\n",
+                alt_wt.to_string_lossy().replace('\\', "/")
+            ),
+        )?;
+        std::fs::write(
+            repo1.join(".git").join("index"),
+            index(2, &[b"node_modules/pkg/index.js"], &[]),
+        )?;
+        assert_eq!(read_index_native(&repo1), Err(IndexError::Unsupported));
+        let res1 =
+            tracked_paths_with_path(std::slice::from_ref(&cand1), Some(OsStr::new("")), None);
+        assert!(res1.tracked.is_empty());
+        assert!(res1.unknown.contains(&cand1));
+
+        // Case 2: core.worktree in .git/config.worktree with extensions.worktreeConfig = true.
+        let repo2 = dir.path().join("repo-wt");
+        let cand2 = repo2.join("node_modules");
+        std::fs::create_dir_all(repo2.join(".git"))?;
+        std::fs::create_dir_all(&cand2)?;
+        std::fs::write(repo2.join(".git").join("HEAD"), b"ref: refs/heads/main\n")?;
+        std::fs::write(
+            repo2.join(".git").join("config"),
+            b"[core]\n\trepositoryformatversion = 1\n[extensions]\n\tworktreeconfig = true\n",
+        )?;
+        std::fs::write(
+            repo2.join(".git").join("config.worktree"),
+            format!(
+                "[core]\n\tworktree = {}\n",
+                alt_wt.to_string_lossy().replace('\\', "/")
+            ),
+        )?;
+        std::fs::write(
+            repo2.join(".git").join("index"),
+            index(2, &[b"node_modules/pkg/index.js"], &[]),
+        )?;
+        assert_eq!(read_index_native(&repo2), Err(IndexError::Unsupported));
+        let res2 =
+            tracked_paths_with_path(std::slice::from_ref(&cand2), Some(OsStr::new("")), None);
+        assert!(res2.tracked.is_empty());
+        assert!(res2.unknown.contains(&cand2));
         Ok(())
     }
 }
