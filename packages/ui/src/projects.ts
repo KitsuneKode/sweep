@@ -1,5 +1,10 @@
 import { basename, dirname } from "node:path";
-import { IDLE_WINDOW_DAYS, IDLE_WINDOW_MS, type ScanCandidate } from "@kitsunekode/sweep-protocol";
+import {
+  IDLE_WINDOW_DAYS,
+  IDLE_WINDOW_MS,
+  type ScanCandidate,
+  type WorktreeState,
+} from "@kitsunekode/sweep-protocol";
 import { lastActiveMs } from "./age.js";
 import { formatBytes } from "@kitsunekode/sweep-display";
 
@@ -12,9 +17,16 @@ import { formatBytes } from "@kitsunekode/sweep-display";
 
 export const IDLE_SECTION_MS = IDLE_WINDOW_MS;
 
-export type ProjectSection = "idle" | "recent" | "unknown";
+export type ProjectSection = "finished" | "idle" | "recent" | "unknown";
+
+/**
+ * A finished worktree touched within this window stays where its activity
+ * puts it: a branch merged an hour ago may still have someone in it.
+ */
+export const FINISHED_QUIET_MS = 86_400_000;
 
 export const SECTION_TITLE: Record<ProjectSection, string> = {
+  finished: "Finished worktrees",
   idle: `Idle ${IDLE_WINDOW_DAYS}+ days`,
   recent: "Worked on recently",
   unknown: "No activity found",
@@ -44,6 +56,9 @@ export interface Project {
   /** Items that need a look before removal; shown on the row, not only inside. */
   caution: number;
   dangerous: number;
+  /** The repository a linked worktree belongs to. */
+  worktreeOf?: string;
+  worktreeState?: WorktreeState;
 }
 
 export type ProjectRow =
@@ -65,6 +80,32 @@ export type ProjectRow =
 export const SECTION_PREVIEW = 8;
 /** Artifacts an opened project lists before the small rest folds away. */
 export const ARTIFACT_PREVIEW = 6;
+
+const WORKTREE_STATE_LABEL: Record<WorktreeState, string> = {
+  merged: "merged",
+  upstream_gone: "branch missing",
+};
+
+/** Full worktree state sentence shown in the details margin. */
+export const WORKTREE_STATE_DETAIL: Record<WorktreeState, string> = {
+  merged: "Merged into default branch · clean",
+  upstream_gone: "Tracking branch missing · check git",
+};
+
+/**
+ * Where a project sits. A linked worktree names its repository and branch
+ * state ("kitsunesnipe · merged"), not the `.worktrees` folder it lives in.
+ */
+function projectWhere(
+  key: string,
+  targetDir: string,
+  worktreeOf: string | undefined,
+  state: WorktreeState | undefined,
+): string {
+  if (worktreeOf === undefined) return relativeParent(key, targetDir);
+  const repo = basename(worktreeOf) || worktreeOf;
+  return `${repo} · ${state ? WORKTREE_STATE_LABEL[state] : "worktree"}`;
+}
 
 /** The folder a project sits in, relative to the scan target: "agency/.worktrees". */
 function relativeParent(key: string, targetDir: string): string {
@@ -103,12 +144,16 @@ export function buildProjects(
       return active === undefined ? newest : Math.max(newest ?? 0, active);
     }, undefined);
     const known = artifacts.some((candidate) => candidate.projectActiveMs !== undefined);
+    const worktreeOf = artifacts.find((candidate) => candidate.worktreeOf)?.worktreeOf;
+    const worktreeState = artifacts.find((candidate) => candidate.worktreeState)?.worktreeState;
     const section: ProjectSection =
       activeMs === undefined || !known
         ? "unknown"
-        : now - activeMs >= IDLE_SECTION_MS
-          ? "idle"
-          : "recent";
+        : worktreeState === "merged" && now - activeMs >= FINISHED_QUIET_MS
+          ? "finished"
+          : now - activeMs >= IDLE_SECTION_MS
+            ? "idle"
+            : "recent";
     const queueable = artifacts
       .filter((c) => c.riskTier === "safe" || c.riskTier === "caution")
       .map((c) => c.id);
@@ -116,7 +161,7 @@ export function buildProjects(
     projects.push({
       key,
       name,
-      parent: relativeParent(key, targetDir),
+      parent: projectWhere(key, targetDir, worktreeOf, worktreeState),
       section,
       activeMs,
       bytes: artifacts.reduce((sum, c) => sum + c.estimatedBytes, 0),
@@ -133,13 +178,16 @@ export function buildProjects(
       kinds: [...new Set(artifacts.map((c) => c.name))],
       caution: artifacts.filter((c) => c.riskTier === "caution").length,
       dangerous: artifacts.filter((c) => c.riskTier === "dangerous").length,
+      ...(worktreeOf === undefined ? {} : { worktreeOf }),
+      ...(worktreeState === undefined ? {} : { worktreeState }),
     });
   }
   // Largest reclaimable first: the order matches the size on the row.
   return projects.sort((a, b) => b.queueableBytes - a.queueableBytes || b.bytes - a.bytes);
 }
 
-const SECTION_ORDER: ProjectSection[] = ["idle", "recent", "unknown"];
+// Finished worktrees first: the clearest space to give back reads first.
+const SECTION_ORDER: ProjectSection[] = ["finished", "idle", "recent", "unknown"];
 
 /** Flatten into screen rows: section headers, projects, and opened projects' artifacts. */
 export function buildProjectRows(

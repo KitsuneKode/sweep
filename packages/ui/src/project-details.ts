@@ -1,5 +1,14 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import {
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { catalogEntryFor } from "@kitsunekode/sweep-core/catalog";
 import type { CandidateKind, ScanCandidate } from "@kitsunekode/sweep-protocol";
 import type { Project } from "./projects.js";
@@ -75,17 +84,63 @@ function readRebuild(kind: CandidateKind, root: string, name?: string): Rebuild 
   }
 }
 
+const GIT_META_MAX_BYTES = 4096;
+
+function readSmallNoFollow(filePath: string, maxBytes = GIT_META_MAX_BYTES): string | undefined {
+  let fd: number | undefined;
+  try {
+    const lmeta = lstatSync(filePath);
+    if (!lmeta.isFile() || lmeta.isSymbolicLink() || lmeta.size > maxBytes) return undefined;
+    const flags =
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0);
+    fd = openSync(filePath, flags);
+    const fmeta = fstatSync(fd);
+    if (!fmeta.isFile() || fmeta.size > maxBytes) return undefined;
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    let total = 0;
+    while (total <= maxBytes) {
+      const n = readSync(fd, buffer, total, maxBytes + 1 - total, null);
+      if (n === 0) break;
+      total += n;
+    }
+    if (total > maxBytes) return undefined;
+    return buffer.subarray(0, total).toString("utf8");
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Ignore close error on read-only descriptor.
+      }
+    }
+  }
+}
+
 /** The branch a work tree has checked out, read from HEAD; never runs git. */
 export function gitBranch(root: string): string | null {
   try {
-    let gitDir = join(root, ".git");
+    const realRoot = realpathSync(root);
+    let gitDir = join(realRoot, ".git");
+    const meta = lstatSync(gitDir);
+    if (meta.isSymbolicLink()) return null;
     // A linked worktree or submodule keeps a file pointing at its git dir.
-    if (statSync(gitDir).isFile()) {
-      const pointer = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitDir, "utf8"));
-      if (!pointer?.[1]) return "";
-      gitDir = pointer[1].startsWith("/") ? pointer[1].trim() : join(root, pointer[1].trim());
+    if (meta.isFile()) {
+      const pointerText = readSmallNoFollow(gitDir);
+      if (pointerText === undefined) return null;
+      const firstLine = pointerText.split(/\r?\n/, 1)[0] ?? "";
+      const pointer = /^gitdir:\s*(.+)$/.exec(firstLine);
+      const target = pointer?.[1]?.trim();
+      if (!target) return null;
+      gitDir = isAbsolute(target) ? target : resolve(realRoot, target);
+    } else if (!meta.isDirectory()) {
+      return null;
     }
-    const head = readFileSync(join(gitDir, "HEAD"), "utf8").trim();
+    const headText = readSmallNoFollow(join(gitDir, "HEAD"));
+    if (headText === undefined) return null;
+    const head = headText.trim();
+    if (!head) return null;
     const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
     return ref?.[1] ?? `detached ${head.slice(0, 7)}`;
   } catch {

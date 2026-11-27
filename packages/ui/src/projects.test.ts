@@ -137,3 +137,63 @@ describe("what an opt-in kind says about itself", () => {
     expect(rebuildFor("custom" as never, "/work/app", "my-own-dir").how).toBe("your pattern");
   });
 });
+
+describe("finished worktrees", () => {
+  const NOW = Date.parse("2026-11-18T12:00:00Z");
+  const DAY = 86_400_000;
+  const worktree = (
+    name: string,
+    activeDaysAgo: number,
+    state?: ScanCandidate["worktreeState"],
+  ): ScanCandidate =>
+    ({
+      id: name,
+      path: `/work/app/.worktrees/${name}/node_modules`,
+      name: "node_modules",
+      estimatedBytes: 600,
+      riskTier: "safe",
+      projectRoot: `/work/app/.worktrees/${name}`,
+      projectActiveMs: NOW - activeDaysAgo * DAY,
+      worktreeOf: "/work/app",
+      ...(state ? { worktreeState: state } : {}),
+    }) as ScanCandidate;
+
+  const projects = buildProjects(
+    [
+      worktree("merged", 3, "merged"),
+      worktree("squashed", 2, "upstream_gone"),
+      worktree("old-gone", 45, "upstream_gone"),
+      worktree("just-merged", 0, "merged"),
+      worktree("open", 2),
+    ],
+    new Set(),
+    "/work",
+    NOW,
+  );
+  const byName = new Map(projects.map((project) => [project.name, project]));
+
+  test("only a proven merged branch left alone for a day reads as finished", () => {
+    expect(byName.get("merged")?.section).toBe("finished");
+    // D5: upstream_gone must never produce the "Finished worktrees" group.
+    expect(byName.get("squashed")?.section).toBe("recent");
+    expect(byName.get("old-gone")?.section).toBe("idle");
+  });
+
+  test("one merged within the day, and an open one, stay where activity puts them", () => {
+    expect(byName.get("just-merged")?.section).toBe("recent");
+    expect(byName.get("open")?.section).toBe("recent");
+  });
+
+  test("a worktree names its repository and branch state, not the .worktrees folder", () => {
+    expect(byName.get("merged")?.parent).toBe("app · merged");
+    expect(byName.get("squashed")?.parent).toBe("app · branch missing");
+    expect(byName.get("open")?.parent).toBe("app · worktree");
+  });
+
+  test("the finished section comes first", () => {
+    const sections = buildProjectRows(projects, new Set()).flatMap((row) =>
+      row.kind === "section" ? [row.section] : [],
+    );
+    expect(sections).toEqual(["finished", "idle", "recent"]);
+  });
+});

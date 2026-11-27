@@ -61,6 +61,8 @@ export function normalizePlan(plan: ScanPlan, fixtureRoot: string): ScanPlan {
           modifiedMs: _modifiedMs,
           projectActiveMs: _projectActiveMs,
           projectRoot: _projectRoot,
+          worktreeOf: _worktreeOf,
+          worktreeState: _worktreeState,
           identity: _identity,
           ...candidate
         }) => ({

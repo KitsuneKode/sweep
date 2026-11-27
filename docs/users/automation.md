@@ -110,14 +110,22 @@ and exits with code `5` when `hasWarnings` is `true` (`0` otherwise). Each entry
 it also includes two optional fields:
 
 - `reasonKind`: a stable machine-readable enum for programmatic handling:
+  - `config_dir`: `"other_user"`, `"world_writable"`, `"group_writable"`,
+    `"symlink"`, `"not_directory"`, or `"unreadable"`.
   - `opentui`: `"missing"`, `"version_mismatch"`, `"missing_exports"`, or `"load_error"`.
   - `rust_engine`: `"not_installed"`, `"libc_unknown"`, `"spawn_error"`, `"probe_failed"`, or `"timeout"`.
   - `rust_apply_safety`: `"engine_unavailable"` or `"capabilities_unsupported"`.
   - Other checks: `"lock_held"`, `"identity_unavailable"`, `"target_invalid"`,
     `"config_invalid"`, `"no_patterns"`, or `"scan_failed"`.
 - `reason`: a concise human-readable sentence explaining the warning (for example,
-  a loader stderr line on `probe_failed` or the incompatible version and path on
-  `version_mismatch`).
+  a loader stderr line on `probe_failed`, the incompatible version and path on
+  `version_mismatch`, or the untrusted path and remediation command on `config_dir`).
+
+The `config_dir` check validates the resolved sweep config directory
+(`$SWEEP_CONFIG_DIR`, else `$XDG_CONFIG_HOME/sweep`, else `~/.config/sweep`, and
+its `journals` subdirectory when present) with the same POSIX trust rule apply
+enforces. A missing directory reports `"ok"` because apply creates it with mode
+`0700`.
 
 `sweep schema` exports protocol version 1 and the plan, event, report and shared
 JSON Schemas. Register the shared schema by its `$id` before resolving the other

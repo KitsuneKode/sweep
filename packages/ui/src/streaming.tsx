@@ -308,7 +308,9 @@ export async function runSweepUiStreaming(
           });
           scannedDirs = result.scannedDirs;
           skippedDirs = result.skippedDirs;
-          finalPlan = buildPlan(target.targetDir, result, options.selectionPolicy);
+          finalPlan = await buildPlan(target.targetDir, result, options.selectionPolicy, {
+            signal,
+          });
         }
 
         await batcher.finish();

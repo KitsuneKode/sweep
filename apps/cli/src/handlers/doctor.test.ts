@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { chmodSync, chownSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import {
   collectDoctorChecks,
@@ -84,9 +84,14 @@ function baseCliOpts(overrides: Partial<CliOptions> = {}): CliOptions {
   };
 }
 
+function doctorOpts(overrides: Partial<CliOptions> = {}): CliOptions {
+  return baseCliOpts({ engine: "js", ...overrides });
+}
+
 const roots: string[] = [];
 const previousEngine = process.env.SWEEP_ENGINE_PATH;
 const previousConfig = process.env.SWEEP_CONFIG_DIR;
+const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
 
 afterEach(() => {
   registerUiModule(null as unknown as SweepUiModule);
@@ -94,6 +99,8 @@ afterEach(() => {
   else process.env.SWEEP_ENGINE_PATH = previousEngine;
   if (previousConfig === undefined) delete process.env.SWEEP_CONFIG_DIR;
   else process.env.SWEEP_CONFIG_DIR = previousConfig;
+  if (previousXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -237,4 +244,197 @@ console.log(JSON.stringify(checks.find((c) => c.name === "rust_engine")));
     expect(rustCheck.reasonKind).toBe("not_installed");
     expect(rustCheck.reason).toBe("Native Rust engine binary was not found.");
   });
+});
+
+describe("collectDoctorChecks config permission parity", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sweep-doctor-test-"));
+    roots.push(tmpDir);
+    process.env.SWEEP_CONFIG_DIR = join(tmpDir, "sweep-config");
+  });
+
+  test("validates a regular .sweeprc and rejects an invalid one consistently", async () => {
+    const project = join(tmpDir, "basic-project");
+    mkdirSync(project, { recursive: true });
+    const configPath = join(project, ".sweeprc");
+    writeFileSync(configPath, JSON.stringify({ patterns: ["custom-cache"] }));
+
+    const okChecks = await collectDoctorChecks(project, doctorOpts());
+    expect(okChecks.find((c) => c.name === "config")?.ok).toBe(true);
+
+    writeFileSync(configPath, "{ invalid json");
+    const badChecks = await collectDoctorChecks(project, doctorOpts());
+    const badConfig = badChecks.find((c) => c.name === "config");
+    expect(badConfig?.ok).toBe(false);
+    expect(badConfig?.reasonKind).toBe("config_invalid");
+    expect(badConfig?.reason).toBeTruthy();
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "allows 0664 .sweeprc owned by primary group and warns on other-group or world-writable with fix guidance",
+    async () => {
+      const project = join(tmpDir, "project");
+      mkdirSync(project, { recursive: true });
+      const configPath = join(project, ".sweeprc");
+      writeFileSync(configPath, JSON.stringify({ patterns: ["custom-cache"] }));
+
+      // Own primary group + g+w is allowed.
+      chmodSync(configPath, 0o664);
+      const allowedChecks = await collectDoctorChecks(project, doctorOpts());
+      const allowedConfig = allowedChecks.find((c) => c.name === "config");
+      expect(allowedConfig?.ok).toBe(true);
+      expect(allowedConfig?.reasonKind).toBeUndefined();
+      expect(allowedConfig?.reason).toBeUndefined();
+
+      // Other-group writable is refused with chmod g-w / --config explicitly guidance.
+      const gidSpy = spyOn(process, "getgid").mockReturnValue(process.getgid!() + 1);
+      try {
+        const otherGroupChecks = await collectDoctorChecks(project, doctorOpts());
+        const otherGroupConfig = otherGroupChecks.find((c) => c.name === "config");
+        expect(otherGroupConfig?.ok).toBe(false);
+        expect(otherGroupConfig?.reasonKind).toBe("config_invalid");
+        expect(otherGroupConfig?.reason).toContain("chmod g-w");
+        expect(otherGroupConfig?.detail).toContain("chmod g-w");
+        expect(otherGroupConfig?.detail).toContain("--config explicitly");
+
+        // Passing --config explicitly validates and allows the same file.
+        const explicitChecks = await collectDoctorChecks(
+          project,
+          doctorOpts({ config: configPath }),
+        );
+        const explicitConfig = explicitChecks.find((c) => c.name === "config");
+        expect(explicitConfig?.ok).toBe(true);
+      } finally {
+        gidSpy.mockRestore();
+      }
+
+      // World-writable is always refused even when gid matches.
+      chmodSync(configPath, 0o666);
+      const worldChecks = await collectDoctorChecks(project, doctorOpts());
+      const worldConfig = worldChecks.find((c) => c.name === "config");
+      expect(worldConfig?.ok).toBe(false);
+      expect(worldConfig?.reasonKind).toBe("config_invalid");
+      expect(worldConfig?.reason).toContain("chmod go-w");
+      expect(worldConfig?.detail).toContain("chmod go-w");
+      expect(worldConfig?.detail).not.toContain("chmod o-w");
+      expect(worldConfig?.detail).toContain("--config explicitly");
+    },
+  );
+});
+
+const supplementaryGid =
+  process.platform !== "win32" && process.getgid && process.getgroups
+    ? process.getgroups().find((gid) => gid !== process.getgid!())
+    : undefined;
+
+describe("collectDoctorChecks config_dir trust", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "sweep-doctor-config-dir-"));
+    roots.push(tmpDir);
+    process.env.SWEEP_CONFIG_DIR = join(tmpDir, "sweep-config");
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "reports missing, 0700, 0755, and primary-group 0775 config dirs as ok and warns on 0777",
+    async () => {
+      const project = join(tmpDir, "dir-project");
+      mkdirSync(project, { recursive: true });
+      const configDir = resolve(process.env.SWEEP_CONFIG_DIR!);
+
+      // Missing config directory is ok (apply creates it as 0700).
+      const missingCheck = (await collectDoctorChecks(project, doctorOpts())).find(
+        (c) => c.name === "config_dir",
+      );
+      expect(missingCheck?.ok).toBe(true);
+      expect(missingCheck?.detail).toContain(configDir);
+      expect(missingCheck?.reasonKind).toBeUndefined();
+      expect(missingCheck?.reason).toBeUndefined();
+
+      mkdirSync(configDir, { recursive: true });
+      for (const mode of [0o700, 0o755, 0o775]) {
+        chmodSync(configDir, mode);
+        const okCheck = (await collectDoctorChecks(project, doctorOpts())).find(
+          (c) => c.name === "config_dir",
+        );
+        expect(okCheck?.ok).toBe(true);
+        expect(okCheck?.reasonKind).toBeUndefined();
+        expect(okCheck?.reason).toBeUndefined();
+      }
+
+      chmodSync(configDir, 0o777);
+      const worldCheck = (await collectDoctorChecks(project, doctorOpts())).find(
+        (c) => c.name === "config_dir",
+      );
+      expect(worldCheck?.ok).toBe(false);
+      expect(worldCheck?.reasonKind).toBe("world_writable");
+      expect(worldCheck?.reason).toContain(configDir);
+      expect(worldCheck?.detail).toContain(configDir);
+      expect(worldCheck?.detail).toContain(`chmod 700 ${configDir}`);
+      expect(worldCheck?.detail).toContain(`chmod go-w ${configDir}`);
+
+      // Also checks journals subdirectory when present.
+      chmodSync(configDir, 0o700);
+      const journalsDir = join(configDir, "journals");
+      mkdirSync(journalsDir, { recursive: true });
+      chmodSync(journalsDir, 0o777);
+      const journalsCheck = (await collectDoctorChecks(project, doctorOpts())).find(
+        (c) => c.name === "config_dir",
+      );
+      expect(journalsCheck?.ok).toBe(false);
+      expect(journalsCheck?.reasonKind).toBe("world_writable");
+      expect(journalsCheck?.reason).toContain(journalsDir);
+      expect(journalsCheck?.detail).toContain(journalsDir);
+      expect(journalsCheck?.detail).toContain(`chmod 700 ${journalsDir}`);
+      chmodSync(journalsDir, 0o700);
+    },
+  );
+
+  test.skipIf(process.platform === "win32" || supplementaryGid === undefined)(
+    "warns on 0775 config dir with a non-primary group",
+    async () => {
+      const project = join(tmpDir, "supp-group-project");
+      mkdirSync(project, { recursive: true });
+      const configDir = resolve(process.env.SWEEP_CONFIG_DIR!);
+      mkdirSync(configDir, { recursive: true });
+      chownSync(configDir, process.getuid!(), supplementaryGid!);
+      chmodSync(configDir, 0o775);
+
+      const check = (await collectDoctorChecks(project, doctorOpts())).find(
+        (c) => c.name === "config_dir",
+      );
+      expect(check?.ok).toBe(false);
+      expect(check?.reasonKind).toBe("group_writable");
+      expect(check?.reason).toContain(configDir);
+      expect(check?.detail).toContain(configDir);
+      expect(check?.detail).toContain(`chmod 700 ${configDir}`);
+      expect(check?.detail).toContain(`chmod go-w ${configDir}`);
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "checks $XDG_CONFIG_HOME/sweep when SWEEP_CONFIG_DIR is unset",
+    async () => {
+      const project = join(tmpDir, "xdg-project");
+      mkdirSync(project, { recursive: true });
+      delete process.env.SWEEP_CONFIG_DIR;
+      const xdgHome = join(tmpDir, "xdg-home");
+      process.env.XDG_CONFIG_HOME = xdgHome;
+      const xdgSweepDir = resolve(join(xdgHome, "sweep"));
+      mkdirSync(xdgSweepDir, { recursive: true });
+      chmodSync(xdgSweepDir, 0o777);
+
+      const check = (await collectDoctorChecks(project, doctorOpts())).find(
+        (c) => c.name === "config_dir",
+      );
+      expect(check?.ok).toBe(false);
+      expect(check?.reasonKind).toBe("world_writable");
+      expect(check?.reason).toContain(xdgSweepDir);
+      expect(check?.detail).toContain(xdgSweepDir);
+      expect(check?.detail).toContain(`chmod 700 ${xdgSweepDir}`);
+    },
+  );
 });

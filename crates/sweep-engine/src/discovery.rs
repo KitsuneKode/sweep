@@ -740,6 +740,8 @@ impl DiscoveryIndex {
             selected_by_default: record.default,
             project_active_ms: None,
             project_root: None,
+            worktree_of: None,
+            worktree_state: None,
         }
     }
 

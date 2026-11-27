@@ -218,7 +218,23 @@ export interface ScanCandidate extends ScanEntry {
    * thinks of them (one monorepo, not forty packages). Absent on older plans.
    */
   projectRoot?: string;
+  /**
+   * When `projectRoot` is a linked git worktree: the main work tree (or bare
+   * repository) it belongs to. Absent for ordinary checkouts and older plans.
+   */
+  worktreeOf?: string;
+  /**
+   * Worktree branch status: `merged` (clean worktree with commits proven
+   * merged into a verified default branch), or `upstream_gone` (its remote
+   * tracking branch is missing — never treated as finished). A triage hint,
+   * never a safety boundary; absent when the branch is open, dirty, or its
+   * state could not be read.
+   */
+  worktreeState?: WorktreeState;
 }
+
+export const WORKTREE_STATES = ["merged", "upstream_gone"] as const;
+export type WorktreeState = (typeof WORKTREE_STATES)[number];
 
 export interface SelectionPolicy {
   mode: SelectionMode;

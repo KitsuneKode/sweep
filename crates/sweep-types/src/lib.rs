@@ -208,6 +208,12 @@ pub struct ScanCandidate {
     /// The owning project's folder. Computed by the JS planner; passed through.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_root: Option<String>,
+    /// The main work tree when the project is a linked worktree. JS planner; passed through.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_of: Option<String>,
+    /// `merged` or `upstream_gone`. JS planner; a triage hint passed through untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_state: Option<String>,
 }
 
 // Serde does not support deny_unknown_fields with flatten. Keep the public
@@ -236,8 +242,35 @@ struct CandidateInput {
     selected_by_default: bool,
     #[serde(default, deserialize_with = "optional_safe_integer")]
     project_active_ms: Option<u64>,
-    #[serde(default, deserialize_with = "present_value")]
+    #[serde(default, deserialize_with = "bounded_path_field")]
     project_root: Option<String>,
+    #[serde(default, deserialize_with = "bounded_path_field")]
+    worktree_of: Option<String>,
+    #[serde(default, deserialize_with = "worktree_state")]
+    worktree_state: Option<String>,
+}
+
+fn bounded_path_field<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+    let utf16_len = value.encode_utf16().count();
+    if utf16_len == 0 || utf16_len > 4096 {
+        return Err(serde::de::Error::custom(
+            "path metadata must be between 1 and 4096 UTF-16 units",
+        ));
+    }
+    Ok(Some(value))
+}
+
+fn worktree_state<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let state = <String as serde::Deserialize>::deserialize(deserializer)?;
+    match state.as_str() {
+        "merged" | "upstream_gone" => Ok(Some(state)),
+        _ => Err(serde::de::Error::custom("unknown worktree state")),
+    }
 }
 
 fn artifact_kind<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
@@ -270,6 +303,8 @@ impl From<CandidateInput> for ScanCandidate {
             selected_by_default: input.selected_by_default,
             project_active_ms: input.project_active_ms,
             project_root: input.project_root,
+            worktree_of: input.worktree_of,
+            worktree_state: input.worktree_state,
         }
     }
 }
@@ -478,6 +513,62 @@ mod tests {
         }
         value["candidates"][0]["kind"] = serde_json::json!("unrecognized-artifact");
         assert!(serde_json::from_value::<ScanPlan>(value).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn worktree_fields_pass_through_and_reject_unknown_states() -> Result<(), serde_json::Error> {
+        let mut value =
+            serde_json::to_value(ScanPlan::empty("/tmp/project", "2026-01-01T00:00:00.000Z"))?;
+        value["candidates"] = serde_json::json!([{
+            "id": "one", "path": "/tmp/project/.worktrees/a/dist", "name": "dist",
+            "estimatedBytes": 1, "isSymlink": false, "entryType": "directory",
+            "kind": "dist", "riskTier": "safe", "reasons": [], "selectedByDefault": true,
+            "projectRoot": "/tmp/project/.worktrees/a",
+            "worktreeOf": "/tmp/project", "worktreeState": "upstream_gone"
+        }]);
+        let plan = serde_json::from_value::<ScanPlan>(value.clone())?;
+        let candidate = &plan.candidates[0];
+        assert_eq!(candidate.worktree_of.as_deref(), Some("/tmp/project"));
+        assert_eq!(candidate.worktree_state.as_deref(), Some("upstream_gone"));
+        let round_trip = serde_json::to_value(&plan)?;
+        assert_eq!(
+            round_trip["candidates"][0]["worktreeState"],
+            "upstream_gone"
+        );
+
+        for state in [serde_json::json!("abandoned"), serde_json::json!(null)] {
+            let mut invalid = value.clone();
+            invalid["candidates"][0]["worktreeState"] = state;
+            assert!(serde_json::from_value::<ScanPlan>(invalid).is_err());
+        }
+        for field in ["worktreeOf", "projectRoot"] {
+            let over_utf16 = format!("{}xxxxx", "😀".repeat(2050));
+            assert_eq!(over_utf16.chars().count(), 2055);
+            assert_eq!(over_utf16.encode_utf16().count(), 4105);
+            for bad in [
+                serde_json::json!(""),
+                serde_json::json!("x".repeat(4097)),
+                serde_json::json!("😀".repeat(2049)),
+                serde_json::json!(over_utf16),
+                serde_json::json!(null),
+            ] {
+                let mut invalid = value.clone();
+                invalid["candidates"][0][field] = bad;
+                assert!(
+                    serde_json::from_value::<ScanPlan>(invalid).is_err(),
+                    "{field} should reject invalid length"
+                );
+            }
+            let mut boundary = value.clone();
+            let max_utf16 = "😀".repeat(2048);
+            assert_eq!(max_utf16.encode_utf16().count(), 4096);
+            boundary["candidates"][0][field] = serde_json::json!(max_utf16);
+            assert!(
+                serde_json::from_value::<ScanPlan>(boundary).is_ok(),
+                "{field} should accept 4096 UTF-16 units"
+            );
+        }
         Ok(())
     }
 }

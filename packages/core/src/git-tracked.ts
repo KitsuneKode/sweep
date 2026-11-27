@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { lookupExecutable } from "./executable-lookup.js";
 import { isReparsePointOrSymlink } from "./guardrails.js";
@@ -14,11 +23,11 @@ import { probeRustEngine } from "./rust-engine.js";
  *    `PATH`, every enclosing repository (including the candidate directory
  *    itself when it holds `.git`) is verified with `git rev-parse --show-toplevel`
  *    and queried once via a sanitized `git ls-files -z --cached --full-name`
- *    invocation (all inherited `GIT_*` variables dropped, `core.fsmonitor=false`,
- *    `LC_ALL=C`). Candidates are matched locally using the repository's own
- *    folding rules (`core.ignorecase`, `core.precomposeunicode` / macOS NFC).
- *    Any mismatch, error, timeout, or parse problem marks every candidate in
- *    that repository `unknown`.
+ *    invocation (all inherited `GIT_*` variables dropped, network protocols and
+ *    hooks disabled, `core.fsmonitor=false`, `LC_ALL=C`). Candidates are matched
+ *    locally using the repository's own folding rules (`core.ignorecase`,
+ *    `core.precomposeunicode` / macOS NFC). Any mismatch, error, timeout, or
+ *    parse problem marks every candidate in that repository `unknown`.
  * 2. The native index reader (via `sweep-engine tracked --status`) is used
  *    only when `git` is unavailable, and its answer counts only when the
  *    repository validates (gitdir, common config + `extensions.objectFormat`,
@@ -30,15 +39,56 @@ import { probeRustEngine } from "./rust-engine.js";
  *    search for any `.git` entry inside them (`containsGitRepo`; hitting a
  *    bound or unreadable directory marks the candidate `unknown`).
  */
+
+let emptyHooksDir: string | undefined;
+
+/** Empty directory passed to `-c core.hooksPath=...` so repo/global hooks never run. */
+export function emptyGitHooksDir(): string {
+  if (emptyHooksDir && existsSync(emptyHooksDir)) return emptyHooksDir;
+  emptyHooksDir = mkdtempSync(join(tmpdir(), "sweep-no-hooks-"));
+  process.once("exit", () => {
+    if (!emptyHooksDir) return;
+    try {
+      rmSync(emptyHooksDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error on exit.
+    }
+  });
+  return emptyHooksDir;
+}
+
+/** Static hardened git flags (combine with `gitSafeArgs()` for the hooks override). */
 export const GIT_ARGS = [
   "--no-pager",
+  "-c",
+  "protocol.allow=never",
+  "-c",
+  "protocol.file.allow=never",
+  "-c",
+  "protocol.git.allow=never",
+  "-c",
+  "protocol.ssh.allow=never",
+  "-c",
+  "protocol.http.allow=never",
+  "-c",
+  "protocol.https.allow=never",
   "-c",
   "core.fsmonitor=false",
   "-c",
   "core.untrackedCache=false",
   "-c",
   "core.quotePath=false",
+  "-c",
+  "gc.auto=0",
+  "-c",
+  "maintenance.auto=false",
 ];
+
+/** Hardened git CLI flags including `-c core.hooksPath=...` without relying on a writable tmpdir on Unix. */
+export function gitSafeArgs(): string[] {
+  const hooksPath = process.platform === "win32" ? emptyGitHooksDir() : "/dev/null";
+  return [...GIT_ARGS, "-c", `core.hooksPath=${hooksPath}`];
+}
 
 /**
  * Hardened environment for git subprocesses:
@@ -67,6 +117,8 @@ export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv
   clean.GIT_NO_REPLACE_OBJECTS = "1";
   return clean;
 }
+
+export const GIT_ENV: NodeJS.ProcessEnv = gitEnv();
 
 const TIMEOUT_MS = 10_000;
 const MAX_GIT_STDOUT_BYTES = 256 * 1024 * 1024;
@@ -347,12 +399,13 @@ export function sameRepoRoot(expected: string, reported: string): boolean {
 
 function runGitSubcommand(
   gitBinary: string,
+  safeArgs: readonly string[],
   root: string,
   subcommandArgs: readonly string[],
   env: NodeJS.ProcessEnv,
   maxBuffer: number,
 ): string | null {
-  const result = spawnSync(gitBinary, [...GIT_ARGS, "-C", root, ...subcommandArgs], {
+  const result = spawnSync(gitBinary, [...safeArgs, "-C", root, ...subcommandArgs], {
     env,
     encoding: "utf8",
     timeout: TIMEOUT_MS,
@@ -370,9 +423,15 @@ function runGitSubcommand(
   return result.stdout;
 }
 
-function verifyGitToplevel(gitBinary: string, root: string, env: NodeJS.ProcessEnv): boolean {
+function verifyGitToplevel(
+  gitBinary: string,
+  safeArgs: readonly string[],
+  root: string,
+  env: NodeJS.ProcessEnv,
+): boolean {
   const stdout = runGitSubcommand(
     gitBinary,
+    safeArgs,
     root,
     ["rev-parse", "--show-toplevel"],
     env,
@@ -386,11 +445,13 @@ function verifyGitToplevel(gitBinary: string, root: string, env: NodeJS.ProcessE
 
 function readGitFoldingConfig(
   gitBinary: string,
+  safeArgs: readonly string[],
   root: string,
   env: NodeJS.ProcessEnv,
 ): FoldingRules | null {
   const stdout = runGitSubcommand(
     gitBinary,
+    safeArgs,
     root,
     ["config", "--list", "--null"],
     env,
@@ -490,7 +551,15 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): GitTrackedResul
   }
 
   const gitBinary = lookupExecutable("git").resolvedPath;
-  if (!gitBinary) {
+  let safeArgs: string[] | undefined;
+  if (gitBinary) {
+    try {
+      safeArgs = gitSafeArgs();
+    } catch {
+      safeArgs = undefined;
+    }
+  }
+  if (!gitBinary || !safeArgs) {
     for (const members of byRoot.values()) {
       for (const path of members) unknown.add(path);
     }
@@ -520,13 +589,14 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): GitTrackedResul
     }
     if (repoRootMembers.length === 0 && rels.length === 0) continue;
 
-    if (!verifyGitToplevel(gitBinary, root, env)) {
+    if (!verifyGitToplevel(gitBinary, safeArgs, root, env)) {
       for (const path of members) unknown.add(path);
       continue;
     }
 
     const stdout = runGitSubcommand(
       gitBinary,
+      safeArgs,
       root,
       ["ls-files", "-z", "--cached", "--full-name"],
       env,
@@ -549,7 +619,7 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): GitTrackedResul
         const potential = new Set<string>();
         matchEntries(entries, remaining, maxRules, potential);
         if (potential.size > 0) {
-          const rules = readGitFoldingConfig(gitBinary, root, env);
+          const rules = readGitFoldingConfig(gitBinary, safeArgs, root, env);
           if (rules === null) {
             for (const path of members) unknown.add(path);
             continue;

@@ -5,7 +5,12 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
-import { findProjectConfigPath, validateProjectConfigFile } from "@kitsunekode/sweep-core/config";
+import {
+  findProjectConfigPath,
+  validateProjectConfigFile,
+  validateSweepConfigDirectory,
+  type ConfigDirReasonKind,
+} from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import { detectLinuxLibc, type DetectedLinuxLibc } from "@kitsunekode/sweep-core/native-platforms";
 import { probeRustEngine } from "@kitsunekode/sweep-core/rust-engine";
@@ -34,6 +39,7 @@ export type DoctorCheckReasonKind =
   | "identity_unavailable"
   | "target_invalid"
   | "config_invalid"
+  | ConfigDirReasonKind
   | "no_patterns"
   | "missing"
   | "version_mismatch"
@@ -106,7 +112,8 @@ export async function collectDoctorChecks(
   opts: CliOptions & { trash?: boolean },
 ): Promise<DoctorCheck[]> {
   // Report the config file loadConfig would actually find - ancestors count.
-  const configPath = findProjectConfigPath(targetDir);
+  const explicitConfigPath = opts.config ? resolve(opts.config) : null;
+  const configPath = explicitConfigPath ?? findProjectConfigPath(targetDir);
   const rustProbe = probeRustEngine();
   const rustOk = rustProbe.available;
   const rustExecutable = rustProbe.resolvedPath ?? rustProbe.binary;
@@ -131,8 +138,11 @@ export async function collectDoctorChecks(
   const openTui = embeddedUi ? null : await verifyOpenTuiAvailable();
   const hasConfigFile = configPath !== null;
   const configValidity = hasConfigFile
-    ? validateProjectConfigFile(configPath, targetDir)
+    ? validateProjectConfigFile(configPath, targetDir, {
+        requireOwned: explicitConfigPath === null,
+      })
     : { ok: true as const, path: configPath ?? "" };
+  const configDirValidity = validateSweepConfigDirectory();
 
   // The dry scan runs the config a real run would use - CLI flags included -
   // so doctor's preview matches `sweep <same flags>` behavior.
@@ -230,6 +240,21 @@ export async function collectDoctorChecks(
               (!configValidity.ok ? configValidity.detail : "Project configuration is invalid."),
           }
         : {}),
+    },
+    {
+      name: "config_dir",
+      ok: configDirValidity.ok,
+      detail: configDirValidity.ok
+        ? configDirValidity.exists
+          ? configDirValidity.path
+          : `${configDirValidity.path} (missing; apply creates it with mode 0700)`
+        : configDirValidity.detail,
+      ...(configDirValidity.ok
+        ? {}
+        : {
+            reasonKind: configDirValidity.reasonKind,
+            reason: configDirValidity.detail,
+          }),
     },
     {
       name: "patterns",

@@ -1,6 +1,6 @@
 {
   "name": "@kitsunekode/sweep-engine-linux-64-musl",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Native sweep-engine binary for linux x64 (musl)",
   "license": "MIT",
   "repository": {

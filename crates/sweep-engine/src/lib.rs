@@ -453,6 +453,8 @@ fn to_candidate(entry: &WalkEntry, size: sweep_fs::SubtreeSize) -> ScanCandidate
         selected_by_default,
         project_active_ms: None,
         project_root: None,
+        worktree_of: None,
+        worktree_state: None,
     }
 }
 
@@ -923,6 +925,8 @@ mod tests {
             selected_by_default: false,
             project_active_ms: None,
             project_root: None,
+            worktree_of: None,
+            worktree_state: None,
         };
         assert_eq!(candidate_field_chars(&candidate), 8 + 2 + 5 + 3);
     }

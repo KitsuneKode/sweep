@@ -75,15 +75,21 @@ export interface ApplyPlanResult {
   interrupted: boolean;
 }
 
-export function scanToPlan(
+export async function scanToPlan(
   targetDir: string,
   config: SweepConfig,
   options: ScanToPlanOptions = {},
 ): Promise<ScanToPlanResult> {
-  return scan(targetDir, config, options.exact ?? false, options).then((result) => {
-    if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
-    return { result, plan: buildPlan(targetDir, result, options.selectionPolicy) };
-  });
+  const result = await scan(targetDir, config, options.exact ?? false, options);
+  if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
+  const plan = await buildPlan(
+    targetDir,
+    result,
+    options.selectionPolicy,
+    options.signal ? { signal: options.signal } : undefined,
+  );
+  if (options.signal?.aborted) throw new GuardrailError("Scan interrupted", 1);
+  return { result, plan };
 }
 
 export interface ApplyPlanOptions {
