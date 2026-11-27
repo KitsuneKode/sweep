@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   closeSync,
   constants as fsConstants,
@@ -19,6 +20,8 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export const DEFAULT_MAX_INDEX_BYTES = 64 * 1024 * 1024;
 export const DEFAULT_MAX_INDEX_ENTRIES = 500_000;
+export const DEFAULT_MAX_TOTAL_PATH_BYTES = 64 * 1024 * 1024;
+const MAX_SPLIT_BITMAP_BITS = 500_000;
 const MAX_PATH_BYTES = 64 * 1024;
 const POINTER_MAX_BYTES = 4096;
 
@@ -39,7 +42,7 @@ export function canonicalPath(path: string): string | undefined {
     const real =
       typeof realpathSync.native === "function" ? realpathSync.native(path) : realpathSync(path);
     if (process.platform !== "win32") return real;
-    if (real.startsWith("\\\\?\\UNC\\")) return `\\\\${real.slice(8)}`;
+    if (/^\\\\\?\\unc\\/i.test(real)) return `\\\\${real.slice(8)}`;
     if (real.startsWith("\\\\?\\")) return real.slice(4);
     return real;
   } catch {
@@ -117,10 +120,44 @@ export interface GitIndexEntry {
   path: string;
 }
 
+/** Compact bitset decoded from Git's EWAH bitmap format (bounded memory, no per-bit Set). */
+export class EwahBitmap {
+  readonly bitSize: number;
+  readonly setCount: number;
+  private readonly bytes: Uint8Array;
+  private readonly highest: number;
+
+  constructor(bitSize: number, bytes: Uint8Array, setCount: number, highest: number) {
+    this.bitSize = bitSize;
+    this.bytes = bytes;
+    this.setCount = setCount;
+    this.highest = highest;
+  }
+
+  has(index: number): boolean {
+    if (index < 0 || index >= this.bitSize) return false;
+    return (this.bytes[index >>> 3]! & (1 << (index & 7))) !== 0;
+  }
+
+  highestSetBit(): number {
+    return this.highest;
+  }
+
+  overlaps(other: EwahBitmap): boolean {
+    const len = Math.min(this.bytes.length, other.bytes.length);
+    for (let i = 0; i < len; i++) {
+      if ((this.bytes[i]! & other.bytes[i]!) !== 0) return true;
+    }
+    return false;
+  }
+}
+
+const EMPTY_BITMAP = new EwahBitmap(0, new Uint8Array(0), 0, -1);
+
 export interface SplitIndexLink {
   baseOidHex: string;
-  deleteBitmap: Set<number>;
-  replaceBitmap: Set<number>;
+  deleteBitmap: EwahBitmap;
+  replaceBitmap: EwahBitmap;
 }
 
 export type ParseIndexResult =
@@ -128,6 +165,7 @@ export type ParseIndexResult =
       ok: true;
       version: number;
       hashLen: 20 | 32;
+      checksumHex: string;
       entries: GitIndexEntry[];
       splitLink?: SplitIndexLink;
     }
@@ -136,6 +174,8 @@ export type ParseIndexResult =
 export interface ParseIndexOptions {
   allowSplitIndex?: boolean;
   maxEntries?: number;
+  maxTotalPathBytes?: number;
+  isExpired?: () => boolean;
 }
 
 class BufferReader {
@@ -200,15 +240,22 @@ class BufferReader {
   }
 }
 
-/** Decode Git's EWAH-compressed bitmap used in the `link` split-index extension. */
-function readEwahBitmap(reader: BufferReader, maxBits: number): Set<number> | undefined {
+/** Decode Git's EWAH-compressed bitmap into a compact bounded bitset. */
+function readEwahBitmap(reader: BufferReader, maxBits: number): EwahBitmap | undefined {
   const bitSize = reader.u32();
   const wordCount = reader.u32();
-  if (bitSize === undefined || wordCount === undefined || bitSize > maxBits) return undefined;
+  const cappedMaxBits = Math.min(maxBits, MAX_SPLIT_BITMAP_BITS);
+  if (bitSize === undefined || wordCount === undefined || bitSize > cappedMaxBits) {
+    return undefined;
+  }
+  if (wordCount * 8 + 4 > reader.remaining) return undefined;
 
-  const setBits = new Set<number>();
+  const maxUncompressedWords = Math.ceil(bitSize / 64);
+  const bytes = new Uint8Array(Math.ceil(bitSize / 8));
   let wordsRead = 0;
-  let bitPos = 0;
+  let uncompressedWords = 0;
+  let setCount = 0;
+  let highest = -1;
 
   while (wordsRead < wordCount) {
     const rlw = reader.u64BigInt();
@@ -219,34 +266,55 @@ function readEwahBitmap(reader: BufferReader, maxBits: number): Set<number> | un
     const runningWords = Number((rlw >> 1n) & 0xffffffffn);
     const literalWords = Number(rlw >> 33n);
 
-    if (runningWords < 0 || literalWords < 0 || wordsRead + literalWords > wordCount) {
+    if (
+      runningWords < 0 ||
+      literalWords < 0 ||
+      wordsRead + literalWords > wordCount ||
+      uncompressedWords + runningWords + literalWords > maxUncompressedWords
+    ) {
       return undefined;
     }
 
-    const runningBits = runningWords * 64;
-    if (runningBit) {
-      const end = Math.min(bitSize, bitPos + runningBits);
-      for (let i = bitPos; i < end; i++) setBits.add(i);
+    const startBit = uncompressedWords * 64;
+    if (runningBit && runningWords > 0) {
+      const endBit = Math.min(bitSize, startBit + runningWords * 64);
+      if (endBit > startBit) {
+        const startByte = startBit >>> 3;
+        const fullEndByte = endBit >>> 3;
+        bytes.fill(0xff, startByte, fullEndByte);
+        const tailBits = endBit & 7;
+        if (tailBits > 0) {
+          bytes[fullEndByte] = (1 << tailBits) - 1;
+        }
+        setCount += endBit - startBit;
+        highest = endBit - 1;
+      }
     }
-    bitPos += runningBits;
+    uncompressedWords += runningWords;
 
     for (let w = 0; w < literalWords; w++) {
       const word = reader.u64BigInt();
       if (word === undefined) return undefined;
       wordsRead += 1;
+      const wordBitBase = uncompressedWords * 64;
       if (word !== 0n) {
-        const limit = Math.min(64, Math.max(0, bitSize - bitPos));
+        const limit = Math.min(64, Math.max(0, bitSize - wordBitBase));
         for (let b = 0; b < limit; b++) {
-          if (((word >> BigInt(b)) & 1n) !== 0n) setBits.add(bitPos + b);
+          if (((word >> BigInt(b)) & 1n) !== 0n) {
+            const bit = wordBitBase + b;
+            bytes[bit >>> 3]! |= 1 << (bit & 7);
+            setCount += 1;
+            highest = bit;
+          }
         }
       }
-      bitPos += 64;
+      uncompressedWords += 1;
     }
   }
 
   // Trailing rlw_pos u32.
   if (reader.u32() === undefined) return undefined;
-  return setBits;
+  return bitSize === 0 ? EMPTY_BITMAP : new EwahBitmap(bitSize, bytes, setCount, highest);
 }
 
 function parseSplitLinkExtension(
@@ -259,7 +327,7 @@ function parseSplitLinkExtension(
   if (!baseOid) return undefined;
   const baseOidHex = baseOid.toString("hex");
   if (reader.remaining === 0) {
-    return { baseOidHex, deleteBitmap: new Set(), replaceBitmap: new Set() };
+    return { baseOidHex, deleteBitmap: EMPTY_BITMAP, replaceBitmap: EMPTY_BITMAP };
   }
   const deleteBitmap = readEwahBitmap(reader, maxEntries);
   if (!deleteBitmap) return undefined;
@@ -277,8 +345,14 @@ export function parseGitIndex(
 ): ParseIndexResult {
   const allowSplitIndex = options.allowSplitIndex ?? false;
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_INDEX_ENTRIES;
-  const reader = new BufferReader(bytes);
+  const maxTotalPathBytes = options.maxTotalPathBytes ?? DEFAULT_MAX_TOTAL_PATH_BYTES;
+  const isExpired = options.isExpired;
 
+  if (bytes.length < 12 + hashLen) {
+    return { ok: false, reason: "truncated-header" };
+  }
+
+  const reader = new BufferReader(bytes);
   const magic = reader.take(4);
   if (!magic || magic.toString("ascii") !== "DIRC") {
     return { ok: false, reason: "bad-magic" };
@@ -288,14 +362,31 @@ export function parseGitIndex(
     return { ok: false, reason: "unsupported-version" };
   }
   const count = reader.u32();
-  if (count === undefined || count > maxEntries) {
+  const minEntryBytes = version === 4 ? 40 + hashLen + 4 : 40 + hashLen + 8;
+  const maxPossibleEntries = Math.floor((bytes.length - 12 - hashLen) / minEntryBytes);
+  if (count === undefined || count > maxEntries || count > maxPossibleEntries) {
     return { ok: false, reason: "too-many-entries" };
+  }
+
+  // Verify trailing SHA-1 / SHA-256 checksum over the entire payload before
+  // allocating entries or trusting any decoded fields.
+  const payloadEnd = bytes.length - hashLen;
+  const expectedTrailer = bytes.subarray(payloadEnd);
+  const computed = createHash(hashLen === 20 ? "sha1" : "sha256")
+    .update(bytes.subarray(0, payloadEnd))
+    .digest();
+  if (!computed.equals(expectedTrailer)) {
+    return { ok: false, reason: "bad-checksum" };
   }
 
   const entries: GitIndexEntry[] = [];
   let previousPath: Buffer = Buffer.alloc(0);
+  let totalPathBytes = 0;
 
   for (let i = 0; i < count; i++) {
+    if ((i & 0xff) === 0 && isExpired?.()) {
+      return { ok: false, reason: "expired" };
+    }
     const start = reader.at;
     const ctimeSec = reader.u32();
     const ctimeNsec = reader.u32();
@@ -344,12 +435,21 @@ export function parseGitIndex(
         return { ok: false, reason: "bad-v4-path" };
       }
       const keep = previousPath.length - strip;
-      pathBytes = Buffer.concat([previousPath.subarray(0, keep), suffix]);
+      const decodedLen = keep + suffix.length;
+      if (decodedLen > MAX_PATH_BYTES) return { ok: false, reason: "path-too-long" };
+      if (totalPathBytes + decodedLen > maxTotalPathBytes) {
+        return { ok: false, reason: "path-bytes-limit" };
+      }
+      pathBytes = Buffer.concat([previousPath.subarray(0, keep), suffix], decodedLen);
     } else {
       const name = reader.untilNul();
       if (!name) return { ok: false, reason: "unterminated-path" };
       if (nameLen < 0x0fff && name.length !== nameLen) {
         return { ok: false, reason: "path-len-mismatch" };
+      }
+      if (name.length > MAX_PATH_BYTES) return { ok: false, reason: "path-too-long" };
+      if (totalPathBytes + name.length > maxTotalPathBytes) {
+        return { ok: false, reason: "path-bytes-limit" };
       }
       const fixed = reader.at - start - name.length - 1;
       const padded = (fixed + name.length + 8) & ~7;
@@ -361,10 +461,10 @@ export function parseGitIndex(
       pathBytes = name;
     }
 
-    if (pathBytes.length > MAX_PATH_BYTES) return { ok: false, reason: "path-too-long" };
     if (pathBytes.length === 0 && !allowSplitIndex) {
       return { ok: false, reason: "empty-path" };
     }
+    totalPathBytes += pathBytes.length;
     previousPath = pathBytes;
     entries.push({
       ctimeSec,
@@ -386,6 +486,7 @@ export function parseGitIndex(
 
   let splitLink: SplitIndexLink | undefined;
   while (reader.remaining > hashLen) {
+    if (isExpired?.()) return { ok: false, reason: "expired" };
     const sigBuf = reader.take(4);
     const extSize = reader.u32();
     if (!sigBuf || extSize === undefined) return { ok: false, reason: "truncated-extension" };
@@ -415,9 +516,18 @@ export function parseGitIndex(
     ok: true,
     version,
     hashLen,
+    checksumHex: expectedTrailer.toString("hex"),
     entries,
     ...(splitLink ? { splitLink } : {}),
   };
+}
+
+/** Parse a `gitdir:` pointer line preserving trailing spaces in the path (matching Git's setup.c). */
+export function parseGitdirPointer(pointerText: string): string | undefined {
+  const firstLine = pointerText.split(/\r?\n/, 1)[0] ?? "";
+  if (!firstLine.startsWith("gitdir:")) return undefined;
+  const target = firstLine.slice(7).replace(/^[ \t]+/, "");
+  return target.length > 0 ? target : undefined;
 }
 
 /** Resolve the index file path for a repository worktree (main or linked). */
@@ -434,9 +544,7 @@ export function resolveRepoIndexFile(root: string): string | undefined {
   }
   const pointer = readSmallText(dotGit, POINTER_MAX_BYTES);
   if (pointer === undefined) return undefined;
-  const firstLine = pointer.split(/\r?\n/, 1)[0] ?? "";
-  if (!firstLine.startsWith("gitdir:")) return undefined;
-  const target = firstLine.slice(7).trim();
+  const target = parseGitdirPointer(pointer);
   if (!target) return undefined;
   const gitDir = isAbsolute(target) ? target : resolve(realRoot, target);
   return join(gitDir, "index");
@@ -480,7 +588,20 @@ export function readTrackedPathsFromIndex(root: string): string[] | null {
   const { baseOidHex, deleteBitmap, replaceBitmap } = parsed.splitLink;
   const allPaths: string[] = [];
 
-  if (!/^0+$/.test(baseOidHex)) {
+  // Validate overlay entry ordering: first `replaceBitmap.setCount` entries
+  // must have empty names (replacements), and all later entries must have
+  // non-empty names (additions).
+  if (parsed.entries.length < replaceBitmap.setCount) return null;
+  for (let i = 0; i < replaceBitmap.setCount; i++) {
+    if (parsed.entries[i]!.path.length !== 0) return null;
+  }
+  for (let i = replaceBitmap.setCount; i < parsed.entries.length; i++) {
+    if (parsed.entries[i]!.path.length === 0) return null;
+  }
+
+  if (/^0+$/.test(baseOidHex)) {
+    if (deleteBitmap.setCount > 0 || replaceBitmap.setCount > 0) return null;
+  } else {
     const sharedPath = join(dirname(indexPath), `sharedindex.${baseOidHex}`);
     const sharedFile = readSmallFile(sharedPath, DEFAULT_MAX_INDEX_BYTES);
     if (!sharedFile) return null;
@@ -488,17 +609,20 @@ export function readTrackedPathsFromIndex(root: string): string[] | null {
       allowSplitIndex: false,
     });
     if (!baseParsed.ok) return null;
-    for (let i = 0; i < baseParsed.entries.length; i++) {
+    if (baseParsed.checksumHex !== baseOidHex) return null;
+    const baseCount = baseParsed.entries.length;
+    if (deleteBitmap.highestSetBit() >= baseCount || replaceBitmap.highestSetBit() >= baseCount) {
+      return null;
+    }
+    if (deleteBitmap.overlaps(replaceBitmap)) return null;
+    for (let i = 0; i < baseCount; i++) {
       if (deleteBitmap.has(i)) continue;
-      // Replaced entries keep the base entry's path; untouched entries keep it too.
-      if (replaceBitmap.has(i) || !deleteBitmap.has(i)) {
-        allPaths.push(baseParsed.entries[i]!.path);
-      }
+      allPaths.push(baseParsed.entries[i]!.path);
     }
   }
 
-  for (const entry of parsed.entries) {
-    if (entry.path.length > 0) allPaths.push(entry.path);
+  for (let i = replaceBitmap.setCount; i < parsed.entries.length; i++) {
+    allPaths.push(parsed.entries[i]!.path);
   }
 
   const unique = [...new Set(allPaths)];

@@ -542,14 +542,32 @@ mod tests {
             invalid["candidates"][0]["worktreeState"] = state;
             assert!(serde_json::from_value::<ScanPlan>(invalid).is_err());
         }
-        for bad_of in [
-            serde_json::json!(""),
-            serde_json::json!("x".repeat(4097)),
-            serde_json::json!(null),
-        ] {
-            let mut invalid = value.clone();
-            invalid["candidates"][0]["worktreeOf"] = bad_of;
-            assert!(serde_json::from_value::<ScanPlan>(invalid).is_err());
+        for field in ["worktreeOf", "projectRoot"] {
+            let over_utf16 = format!("{}xxxxx", "😀".repeat(2050));
+            assert_eq!(over_utf16.chars().count(), 2055);
+            assert_eq!(over_utf16.encode_utf16().count(), 4105);
+            for bad in [
+                serde_json::json!(""),
+                serde_json::json!("x".repeat(4097)),
+                serde_json::json!("😀".repeat(2049)),
+                serde_json::json!(over_utf16),
+                serde_json::json!(null),
+            ] {
+                let mut invalid = value.clone();
+                invalid["candidates"][0][field] = bad;
+                assert!(
+                    serde_json::from_value::<ScanPlan>(invalid).is_err(),
+                    "{field} should reject invalid length"
+                );
+            }
+            let mut boundary = value.clone();
+            let max_utf16 = "😀".repeat(2048);
+            assert_eq!(max_utf16.encode_utf16().count(), 4096);
+            boundary["candidates"][0][field] = serde_json::json!(max_utf16);
+            assert!(
+                serde_json::from_value::<ScanPlan>(boundary).is_ok(),
+                "{field} should accept 4096 UTF-16 units"
+            );
         }
         Ok(())
     }

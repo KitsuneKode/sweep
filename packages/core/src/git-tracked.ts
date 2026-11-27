@@ -35,11 +35,21 @@ export function emptyGitHooksDir(): string {
   return emptyHooksDir;
 }
 
-/** Static hardened git flags (combine with `gitSafeArgs()` for the empty hooks path). */
+/** Static hardened git flags (combine with `gitSafeArgs()` for the hooks override). */
 export const GIT_ARGS = [
   "--no-pager",
   "-c",
   "protocol.allow=never",
+  "-c",
+  "protocol.file.allow=never",
+  "-c",
+  "protocol.git.allow=never",
+  "-c",
+  "protocol.ssh.allow=never",
+  "-c",
+  "protocol.http.allow=never",
+  "-c",
+  "protocol.https.allow=never",
   "-c",
   "core.fsmonitor=false",
   "-c",
@@ -52,9 +62,10 @@ export const GIT_ARGS = [
   "maintenance.auto=false",
 ];
 
-/** Hardened git CLI flags including `-c core.hooksPath=<empty dir>`. */
+/** Hardened git CLI flags including `-c core.hooksPath=...` without relying on a writable tmpdir on Unix. */
 export function gitSafeArgs(): string[] {
-  return [...GIT_ARGS, "-c", `core.hooksPath=${emptyGitHooksDir()}`];
+  const hooksPath = process.platform === "win32" ? emptyGitHooksDir() : "/dev/null";
+  return [...GIT_ARGS, "-c", `core.hooksPath=${hooksPath}`];
 }
 
 /**
@@ -185,7 +196,7 @@ function gitTrackedPathsViaIndexOrGit(paths: readonly string[]): Set<string> {
   for (const [root, members] of byRoot) {
     const indexed = readTrackedPathsFromIndex(root);
     if (indexed === null) {
-      fallbackPaths.push(...members);
+      for (const path of members) fallbackPaths.push(path);
       continue;
     }
     for (const path of members) {
@@ -214,7 +225,12 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
     else byRoot.set(root, [path]);
   }
 
-  const safeArgs = gitSafeArgs();
+  let safeArgs: string[];
+  try {
+    safeArgs = gitSafeArgs();
+  } catch {
+    return tracked;
+  }
   const env = gitEnv();
 
   for (const [root, members] of byRoot) {

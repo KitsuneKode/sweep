@@ -112,6 +112,22 @@ export function validatePlan(value: unknown): ScanPlan {
     for (const candidate of plan.candidates) {
       if (candidate.reasons.some((reason) => reason.length > 1024))
         throw new PlanValidationError("Invalid scan plan: candidate reason length limit exceeded");
+      if (
+        candidate.projectRoot !== undefined &&
+        (candidate.projectRoot.length === 0 || candidate.projectRoot.length > 4096)
+      ) {
+        throw new PlanValidationError(
+          "Invalid scan plan: candidate projectRoot length limit exceeded",
+        );
+      }
+      if (
+        candidate.worktreeOf !== undefined &&
+        (candidate.worktreeOf.length === 0 || candidate.worktreeOf.length > 4096)
+      ) {
+        throw new PlanValidationError(
+          "Invalid scan plan: candidate worktreeOf length limit exceeded",
+        );
+      }
       if (candidate.identity !== undefined && !validFilesystemIdentity(candidate.identity)) {
         throw new PlanValidationError("Invalid scan plan: candidate identity");
       }
@@ -217,6 +233,21 @@ export function validateScanEvent(value: unknown): ScanEvent {
       c.reasons.every(
         (reason) => typeof reason === "string" && reason.length <= MAX_REASON_CHARS,
       ) &&
+      (c.projectActiveMs === undefined ||
+        (typeof c.projectActiveMs === "number" &&
+          Number.isSafeInteger(c.projectActiveMs) &&
+          c.projectActiveMs >= 0)) &&
+      (c.projectRoot === undefined ||
+        (typeof c.projectRoot === "string" &&
+          c.projectRoot.length >= 1 &&
+          c.projectRoot.length <= MAX_NAME_CHARS)) &&
+      (c.worktreeOf === undefined ||
+        (typeof c.worktreeOf === "string" &&
+          c.worktreeOf.length >= 1 &&
+          c.worktreeOf.length <= MAX_NAME_CHARS)) &&
+      (c.worktreeState === undefined ||
+        c.worktreeState === "merged" ||
+        c.worktreeState === "upstream_gone") &&
       typeof c.selectedByDefault === "boolean"
     );
   };

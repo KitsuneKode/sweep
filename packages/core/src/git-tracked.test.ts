@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readTrackedPathsFromIndex } from "./git-index.js";
 import {
   GIT_ENV,
   gitEnv,
@@ -221,6 +222,11 @@ test("GIT_ENV and gitEnv force C locale and drop inherited GIT_* overrides", () 
 
   const args = gitSafeArgs();
   expect(args).toContain("protocol.allow=never");
+  expect(args).toContain("protocol.file.allow=never");
+  expect(args).toContain("protocol.git.allow=never");
+  expect(args).toContain("protocol.ssh.allow=never");
+  expect(args).toContain("protocol.http.allow=never");
+  expect(args).toContain("protocol.https.allow=never");
   expect(args).toContain("core.fsmonitor=false");
   expect(args.some((arg) => arg.startsWith("core.hooksPath="))).toBe(true);
 });
@@ -272,6 +278,9 @@ test.skipIf(!hasGit)(
     const pinned = new Date("2025-01-01T00:00:00.000Z");
     utimesSync(sharedPath, pinned, pinned);
     const beforeMs = Math.floor(statSync(sharedPath).mtimeMs);
+
+    expect(readTrackedPathsFromIndex(root)).toEqual(["dist/vendor.js"]);
+    expect(Math.floor(statSync(sharedPath).mtimeMs)).toBe(beforeMs);
 
     const targets = [join(root, "dist"), join(root, "node_modules")];
     expect(gitTrackedPaths(targets)).toEqual(new Set([join(root, "dist")]));
