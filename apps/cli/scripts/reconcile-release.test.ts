@@ -12,7 +12,6 @@ import {
   parseBinaryTargetsFromWorkflow,
   planReleaseReconciliation,
   runReconcileRelease,
-  type DispatchTarget,
   type DownstreamTarget,
   type ReleaseClients,
 } from "./reconcile-release.js";
@@ -279,21 +278,20 @@ describe("reconcile-release", () => {
       git(repo.worktree, ["commit", "-m", "docs: follow-up"]);
       git(repo.worktree, ["push", "origin", "main", "--tags"]);
 
-      const dispatches: Array<{
-        repository: string;
-        binaryTag: string;
-        target: DispatchTarget;
-        downstream: DownstreamTarget;
-      }> = [];
+      const binaryDispatches: Array<{ repository: string; binaryTag: string }> = [];
 
       const clients: ReleaseClients = {
         readNpmRelease: () => ({ status: "found", gitHead: null }),
         readGitHubReleaseAssets: () => ({ status: "not_found" }),
         listActiveBinaryRuns: () => ({ status: "ok", runs: [] }),
+        listActiveDownstreamRuns: () => ({ status: "ok", runs: [] }),
         readHomebrewVersion: () => ({ status: "found", version: "0.5.3" }),
         readScoopVersion: () => ({ status: "not_found" }),
-        dispatchCliBinaries: (repository, binaryTag, target, downstream) => {
-          dispatches.push({ repository, binaryTag, target, downstream });
+        dispatchCliBinaries: (repository, binaryTag) => {
+          binaryDispatches.push({ repository, binaryTag });
+        },
+        dispatchDownstreamRelease: () => {
+          throw new Error("should not dispatch downstream directly when binaries are missing");
         },
       };
 
@@ -320,12 +318,10 @@ describe("reconcile-release", () => {
       // Tag was pushed to the bare remote on the exact released commit (not HEAD).
       const remoteTagSha = git(repo.bareRemote, ["rev-parse", "refs/tags/v0.5.4^{commit}"]);
       expect(remoteTagSha).toBe(releaseSha);
-      expect(dispatches).toEqual([
+      expect(binaryDispatches).toEqual([
         {
           repository: CANONICAL_REPOSITORY,
           binaryTag: "v0.5.4",
-          target: "all",
-          downstream: "all",
         },
       ]);
     } finally {
@@ -333,7 +329,7 @@ describe("reconcile-release", () => {
     }
   });
 
-  test("temp git repo: retries Scoop downstream update separately when binaries and Homebrew are complete", () => {
+  test("temp git repo: retries Scoop downstream update via release-downstream.yml when binaries and Homebrew are complete", () => {
     const repo = createTempReleaseRepo();
     try {
       const releaseSha = repo.writeVersionCommit("0.5.4", "chore: version packages");
@@ -342,16 +338,24 @@ describe("reconcile-release", () => {
       git(repo.worktree, ["push", "origin", "main", "--tags"]);
 
       const expected = expectedReleaseAssets(["linux-x64", "win-x64"]);
-      const dispatches: Array<{ target: DispatchTarget; downstream: DownstreamTarget }> = [];
+      const downstreamDispatches: Array<{
+        repository: string;
+        binaryTag: string;
+        downstream: DownstreamTarget;
+      }> = [];
 
       const clients: ReleaseClients = {
         readNpmRelease: () => ({ status: "found", gitHead: releaseSha }),
         readGitHubReleaseAssets: () => ({ status: "found", assets: expected }),
         listActiveBinaryRuns: () => ({ status: "ok", runs: [] }),
+        listActiveDownstreamRuns: () => ({ status: "ok", runs: [] }),
         readHomebrewVersion: () => ({ status: "found", version: "0.5.4" }),
         readScoopVersion: () => ({ status: "found", version: "0.5.3" }),
-        dispatchCliBinaries: (_repo, _tag, target, downstream) => {
-          dispatches.push({ target, downstream });
+        dispatchCliBinaries: () => {
+          throw new Error("should not dispatch cli-binaries when only downstream needs retry");
+        },
+        dispatchDownstreamRelease: (repository, binaryTag, downstream) => {
+          downstreamDispatches.push({ repository, binaryTag, downstream });
         },
       };
 
@@ -372,7 +376,13 @@ describe("reconcile-release", () => {
         dispatchTarget: "downstream",
         dispatchDownstream: "scoop",
       });
-      expect(dispatches).toEqual([{ target: "downstream", downstream: "scoop" }]);
+      expect(downstreamDispatches).toEqual([
+        {
+          repository: CANONICAL_REPOSITORY,
+          binaryTag: "v0.5.4",
+          downstream: "scoop",
+        },
+      ]);
     } finally {
       rmSync(repo.root, { recursive: true, force: true });
     }
@@ -391,9 +401,13 @@ describe("reconcile-release", () => {
         readNpmRelease: () => ({ status: "found", gitHead: sideSha }),
         readGitHubReleaseAssets: () => ({ status: "not_found" }),
         listActiveBinaryRuns: () => ({ status: "ok", runs: [] }),
+        listActiveDownstreamRuns: () => ({ status: "ok", runs: [] }),
         readHomebrewVersion: () => ({ status: "found", version: "0.5.3" }),
         readScoopVersion: () => ({ status: "found", version: "0.5.3" }),
         dispatchCliBinaries: () => {
+          throw new Error("should not dispatch");
+        },
+        dispatchDownstreamRelease: () => {
           throw new Error("should not dispatch");
         },
       };
@@ -416,5 +430,69 @@ describe("reconcile-release", () => {
     } finally {
       rmSync(repo.root, { recursive: true, force: true });
     }
+  });
+
+  test("temp git repo: fails closed when origin/main does not resolve instead of falling back to HEAD", () => {
+    const repo = createTempReleaseRepo();
+    try {
+      const releaseSha = repo.writeVersionCommit("0.5.4", "chore: version packages");
+      git(repo.worktree, ["tag", "@kitsunekode/sweep@0.5.4", releaseSha]);
+      // Deliberately do NOT push to origin, so refs/remotes/origin/main does not exist.
+
+      const clients: ReleaseClients = {
+        readNpmRelease: () => ({ status: "found", gitHead: releaseSha }),
+        readGitHubReleaseAssets: () => ({ status: "not_found" }),
+        listActiveBinaryRuns: () => ({ status: "ok", runs: [] }),
+        listActiveDownstreamRuns: () => ({ status: "ok", runs: [] }),
+        readHomebrewVersion: () => ({ status: "found", version: "0.5.3" }),
+        readScoopVersion: () => ({ status: "found", version: "0.5.3" }),
+        dispatchCliBinaries: () => {
+          throw new Error("should not dispatch when origin/main is missing");
+        },
+        dispatchDownstreamRelease: () => {
+          throw new Error("should not dispatch when origin/main is missing");
+        },
+      };
+
+      const plan = runReconcileRelease(
+        {
+          repoRoot: repo.worktree,
+          repository: CANONICAL_REPOSITORY,
+          ref: CANONICAL_REF,
+          changesetsPublished: false,
+          dryRun: false,
+        },
+        clients,
+      );
+
+      expect(plan.kind).toBe("error");
+      if (plan.kind === "error") {
+        expect(plan.reason).toContain("origin/main");
+      }
+      // Must not have created the v0.5.4 tag.
+      expect(() => git(repo.worktree, ["rev-parse", "--verify", "refs/tags/v0.5.4"])).toThrow();
+    } finally {
+      rmSync(repo.root, { recursive: true, force: true });
+    }
+  });
+
+  test("deduplicates active release-downstream.yml runs on main", () => {
+    const expected = expectedReleaseAssets(["linux-x64", "win-x64"]);
+    const plan = planReleaseReconciliation({
+      ...BASE_INPUT,
+      binaryTagSha: SHA_A,
+      releaseAssets: { status: "found", assets: expected },
+      expectedAssets: expected,
+      homebrew: { status: "found", version: "0.5.3" },
+      scoop: { status: "found", version: "0.5.4" },
+      activeDownstreamRuns: {
+        status: "ok",
+        runs: [{ databaseId: 9001, status: "in_progress", headBranch: "main", headSha: SHA_A }],
+      },
+    });
+    expect(plan).toMatchObject({
+      kind: "noop",
+      activeRunId: 9001,
+    });
   });
 });

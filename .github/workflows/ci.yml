@@ -274,7 +274,13 @@ jobs:
         shell: pwsh
         run: |
           powershell -NoProfile -ExecutionPolicy Bypass -File tests/integration/install-ps1.test.ps1 -TestBinaryPath target/release/sweep-engine.exe
+          $ps51Exit = $LASTEXITCODE
           pwsh -NoProfile -File tests/integration/install-ps1.test.ps1 -TestBinaryPath target/release/sweep-engine.exe
+          $ps7Exit = $LASTEXITCODE
+          if ($ps51Exit -ne 0 -or $ps7Exit -ne 0) {
+            Write-Host "::error::install-ps1 tests failed (Windows PowerShell 5.1 exit=$ps51Exit, PowerShell 7 exit=$ps7Exit)"
+            if ($ps51Exit -ne 0) { exit $ps51Exit } else { exit $ps7Exit }
+          }
 
       - name: Smoke - scan a temp tree (no deletion, no TTY)
         shell: bash

@@ -80,10 +80,11 @@ runtime libraries dynamically).
 
 Homebrew and the install scripts fetch one self-contained binary with the
 terminal UI built in (no Node or Bun needed, SHA-256 checksums verified).
-Release binaries also carry GitHub build provenance attestations:
+Release binaries also carry GitHub build provenance attestations. Substitute
+`vX.Y.Z` with the release tag you downloaded:
 
 ```bash
-gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/v0.5.4
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/vX.Y.Z
 ```
 
 From npm, scan and cleanup run on Node; `sweep ui` runs on Bun

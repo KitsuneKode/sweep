@@ -1,33 +1,16 @@
 name: CLI Binaries
 
 # Builds standalone `sweep` executables (Bun compile with embedded OpenTUI
-# native assets and embedded Rust engine) and attaches them to the GitHub
-# release for a qualified `v*` tag. Downstream Homebrew/Scoop updates run in
-# the protected `release-downstream` environment from canonical `main`.
+# native assets and embedded Rust engine), qualifies the Homebrew formula
+# against the built archives, and attaches assets to the GitHub release for a
+# qualified `v*` tag. Downstream Homebrew/Scoop pushes run separately in
+# `.github/workflows/release-downstream.yml` from canonical `main`.
 
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      target:
-        description: "Scope: all (build, attach, downstream) or downstream (retry Homebrew/Scoop from existing GitHub Release)"
-        required: false
-        type: choice
-        default: all
-        options:
-          - all
-          - downstream
-      downstream:
-        description: "Downstream channels to update for stable releases"
-        required: false
-        type: choice
-        default: all
-        options:
-          - all
-          - homebrew
-          - scoop
 
 concurrency:
   group: cli-binaries-${{ github.ref }}
@@ -39,7 +22,6 @@ permissions:
 jobs:
   binaries:
     name: ${{ matrix.id }}
-    if: inputs.target != 'downstream'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     permissions:
@@ -286,7 +268,6 @@ jobs:
   qualify-homebrew:
     name: qualify Homebrew formula
     needs: binaries
-    if: inputs.target != 'downstream'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -353,17 +334,15 @@ jobs:
 
   attach:
     name: attach binaries to release
-    needs: binaries
+    needs: [binaries, qualify-homebrew]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
       actions: read
     if: |
-      always() &&
       github.repository == 'KitsuneKode/sweep' &&
-      startsWith(github.ref, 'refs/tags/v') &&
-      (inputs.target == 'downstream' || needs.binaries.result == 'success')
+      startsWith(github.ref, 'refs/tags/v')
     outputs:
       version: ${{ steps.version.outputs.number }}
       prerelease: ${{ steps.version.outputs.prerelease }}
@@ -371,7 +350,6 @@ jobs:
       qualified: ${{ steps.qualify.outputs.qualified }}
     steps:
       - name: Download all binaries
-        if: inputs.target != 'downstream'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           merge-multiple: true
@@ -426,7 +404,6 @@ jobs:
       # The release says what changed: its notes are this version's changelog
       # section, never an empty page beside the binaries.
       - name: Release notes from the changelog
-        if: inputs.target != 'downstream'
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.number }}
@@ -438,7 +415,6 @@ jobs:
           fi
 
       - name: Attach to GitHub release
-        if: inputs.target != 'downstream'
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: dist-bin/*
@@ -446,173 +422,3 @@ jobs:
           prerelease: ${{ steps.version.outputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  update-homebrew:
-    name: update Homebrew tap
-    needs: attach
-    environment: release-downstream
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    if: |
-      github.repository == 'KitsuneKode/sweep' &&
-      startsWith(github.ref, 'refs/tags/v') &&
-      needs.attach.result == 'success' &&
-      needs.attach.outputs.qualified == 'true' &&
-      needs.attach.outputs.prerelease != 'true' &&
-      (inputs.downstream == '' || inputs.downstream == 'all' || inputs.downstream == 'homebrew')
-    steps:
-      - name: Check for tap token
-        id: tap
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-        run: |
-          if [ -n "${TAP_TOKEN:-}" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::TAP_GITHUB_TOKEN not set; skipping Homebrew formula bump"
-          fi
-
-      # Always render templates and scripts from canonical `main`, never from tag content.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.tap.outputs.present == 'true'
-        with:
-          ref: main
-          sparse-checkout: |
-            apps/cli/scripts/render-packaging.ts
-            packaging/homebrew/sweep.rb.tmpl
-          sparse-checkout-cone-mode: false
-          path: main-src
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        if: steps.tap.outputs.present == 'true'
-        with:
-          bun-version: 1.4.2
-
-      - name: Download release checksums
-        if: steps.tap.outputs.present == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.attach.outputs.version }}
-        run: |
-          mkdir -p dist-bin
-          gh release download "v$VERSION" \
-            --repo KitsuneKode/sweep \
-            -p 'sweep-darwin-arm64.gz.sha256' \
-            -p 'sweep-darwin-x64.gz.sha256' \
-            -p 'sweep-linux-arm64.gz.sha256' \
-            -p 'sweep-linux-x64.gz.sha256' \
-            -D dist-bin
-
-      - name: Render and push Homebrew tap formula
-        if: steps.tap.outputs.present == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-          VERSION: ${{ needs.attach.outputs.version }}
-        run: |
-          version="$VERSION"
-          # Bind git push authentication to the repo-scoped GH_TOKEN without echoing it.
-          gh auth setup-git --hostname github.com
-          gh repo clone KitsuneKode/homebrew-tap tap -- --depth 1
-          bun run main-src/apps/cli/scripts/render-packaging.ts homebrew \
-            --version "$version" \
-            --dist-dir dist-bin \
-            --template main-src/packaging/homebrew/sweep.rb.tmpl \
-            --out tap/Formula/sweep.rb \
-            --reject-downgrade
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/sweep.rb
-          if git diff --cached --quiet; then
-            echo "formula already at $version"
-          else
-            git commit -m "sweep $version"
-            git push origin HEAD
-          fi
-
-  update-scoop:
-    name: update Scoop bucket
-    needs: attach
-    environment: release-downstream
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    if: |
-      github.repository == 'KitsuneKode/sweep' &&
-      startsWith(github.ref, 'refs/tags/v') &&
-      needs.attach.result == 'success' &&
-      needs.attach.outputs.qualified == 'true' &&
-      needs.attach.outputs.prerelease != 'true' &&
-      (inputs.downstream == '' || inputs.downstream == 'all' || inputs.downstream == 'scoop')
-    steps:
-      - name: Check for Scoop bucket token
-        id: scoop
-        env:
-          SCOOP_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-        run: |
-          if [ -n "${SCOOP_TOKEN:-}" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::SCOOP_BUCKET_TOKEN not set; skipping Scoop bucket update"
-          fi
-
-      # Always render templates and scripts from canonical `main`, never from tag content.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.scoop.outputs.present == 'true'
-        with:
-          ref: main
-          sparse-checkout: |
-            apps/cli/scripts/render-packaging.ts
-            packaging/scoop/sweep.json
-          sparse-checkout-cone-mode: false
-          path: main-src
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        if: steps.scoop.outputs.present == 'true'
-        with:
-          bun-version: 1.4.2
-
-      - name: Download Windows checksum
-        if: steps.scoop.outputs.present == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.attach.outputs.version }}
-        run: |
-          mkdir -p dist-bin
-          gh release download "v$VERSION" \
-            --repo KitsuneKode/sweep \
-            -p 'sweep-win-x64.exe.sha256' \
-            -D dist-bin
-
-      - name: Render and push Scoop bucket manifest
-        if: steps.scoop.outputs.present == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
-          VERSION: ${{ needs.attach.outputs.version }}
-        run: |
-          version="$VERSION"
-          # Bind git push authentication to the repo-scoped GH_TOKEN without echoing it.
-          gh auth setup-git --hostname github.com
-          gh repo clone KitsuneKode/scoop-bucket scoop -- --depth 1
-          mkdir -p scoop/bucket
-          bun run main-src/apps/cli/scripts/render-packaging.ts scoop \
-            --version "$version" \
-            --dist-dir dist-bin \
-            --template main-src/packaging/scoop/sweep.json \
-            --out scoop/bucket/sweep.json \
-            --reject-downgrade
-          cd scoop
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add bucket/sweep.json
-          if git diff --cached --quiet; then
-            echo "Scoop manifest already at $version"
-          else
-            git commit -m "sweep $version"
-            git push origin HEAD
-          fi

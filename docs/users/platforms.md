@@ -63,11 +63,12 @@ executables, verified `.gz` archives, and `.sha256` sidecars.
 Every released standalone binary, `.gz` archive, and native engine binary is
 attested with GitHub Artifact Attestations (`actions/attest-build-provenance`).
 To verify a standalone release asset or `.gz` archive against the exact
-`cli-binaries.yml` signer workflow and release tag:
+`cli-binaries.yml` signer workflow and release tag, substitute `vX.Y.Z` with
+the version you downloaded:
 
 ```sh
-gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/v0.5.4
-gh attestation verify sweep-win-x64.exe -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/v0.5.4
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/vX.Y.Z
+gh attestation verify sweep-win-x64.exe -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/vX.Y.Z
 ```
 
 Native engine binaries packaged for npm are built by `native-engine-release.yml`

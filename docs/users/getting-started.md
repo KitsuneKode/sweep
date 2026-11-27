@@ -43,10 +43,10 @@ scoop install sweep
 The standalone installers verify SHA-256 checksums and test `--version` on the
 staged binary before replacing any existing install. You can also verify GitHub
 build provenance attestations on any downloaded release binary or `.gz` archive
-with the GitHub CLI:
+with the GitHub CLI (substitute `vX.Y.Z` with the release tag you downloaded):
 
 ```sh
-gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/v0.5.4
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/vX.Y.Z
 ```
 
 ### npm or Bun

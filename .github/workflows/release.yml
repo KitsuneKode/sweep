@@ -183,11 +183,12 @@ jobs:
       # vVERSION and reconcile idempotently: if npm already has this version
       # but vVERSION or its release binaries are missing, tag the exact
       # released commit (refusing a mismatched existing tag) and dispatch
-      # cli-binaries.yml.
+      # cli-binaries.yml (or release-downstream.yml on main for downstream-only retries).
       - name: Reconcile release tag and standalone binaries
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git fetch origin main:refs/remotes/origin/main
           bun run apps/cli/scripts/reconcile-release.ts \
             --repo "${{ github.repository }}" \
             --ref "${{ github.ref }}" \

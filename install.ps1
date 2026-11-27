@@ -178,21 +178,48 @@ param(
   function Invoke-DownloadWithRetry([string]$Uri, [string]$OutFile, [long]$MaxBytes) {
     $maxAttempts = 3
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+      $response = $null
       try {
-        $params = @{
-          Uri             = $Uri
-          OutFile         = $OutFile
-          UseBasicParsing = $true
-          TimeoutSec      = 120
-        }
-        Invoke-WebRequest @params | Out-Null
-        $fileInfo = Get-Item -LiteralPath $OutFile
-        if ($fileInfo.Length -gt $MaxBytes) {
-          Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
-          Fail "downloaded file exceeds maximum allowed size ($MaxBytes bytes): $Uri"
+        # Stream directly via HttpWebRequest + System.IO.File so literal paths
+        # containing wildcard characters like [brackets] work on Windows
+        # PowerShell 5.1 (where Invoke-WebRequest -OutFile expands wildcards)
+        # and the byte cap is enforced during download.
+        $request = [System.Net.HttpWebRequest][System.Net.WebRequest]::Create($Uri)
+        $request.Method = "GET"
+        $request.UserAgent = "sweep-installer"
+        $request.Timeout = 120000
+        $request.ReadWriteTimeout = 120000
+        $request.AllowAutoRedirect = $true
+
+        $response = $request.GetResponse()
+        $responseStream = $response.GetResponseStream()
+        try {
+          $outputStream = [System.IO.File]::Create($OutFile)
+          try {
+            $buffer = New-Object byte[] 65536
+            [long]$total = 0
+            while (($read = $responseStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+              $total += $read
+              if ($total -gt $MaxBytes) {
+                Fail "downloaded file exceeds maximum allowed size ($MaxBytes bytes): $Uri"
+              }
+              $outputStream.Write($buffer, 0, $read)
+            }
+          } finally {
+            $outputStream.Dispose()
+          }
+        } finally {
+          $responseStream.Dispose()
         }
         return
       } catch {
+        if ($null -ne $response) {
+          $response.Dispose()
+          $response = $null
+        }
+        if ([System.IO.File]::Exists($OutFile)) {
+          [System.IO.File]::Delete($OutFile)
+        }
         if ($_.Exception.Message -like "sweep-install:*") {
           throw
         }
@@ -200,6 +227,10 @@ param(
           Fail "download failed after $maxAttempts attempts ($Uri): $($_.Exception.Message)"
         }
         Start-Sleep -Seconds $attempt
+      } finally {
+        if ($null -ne $response) {
+          $response.Dispose()
+        }
       }
     }
   }
@@ -301,29 +332,52 @@ param(
     Expand-GzipFile -SourcePath $downloadPath -DestinationPath $stagedBin -MaxBytes $MaxDecompressedBytes
 
     # Prove the replacement starts and executes cleanly before touching any existing install.
-    $global:LASTEXITCODE = 0
+    # Use ProcessStartInfo directly so literal paths with [brackets] bypass PowerShell 5.1
+    # wildcard command lookup and non-executable files never fall back to ShellExecute.
     $versionOk = $false
-    $versionOut = @()
+    $versionOut = ""
     try {
-      $versionOut = @(& $stagedBin --version 2>&1)
-      $cmdOk = $?
-      $exitVar = Get-Variable -Name LASTEXITCODE -ErrorAction SilentlyContinue
-      $exitCode = if ($null -ne $exitVar) { $exitVar.Value } else { $null }
-      $versionOk = $cmdOk -and ($null -eq $exitCode -or $exitCode -eq 0)
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = $stagedBin
+      $psi.Arguments = "--version"
+      $psi.UseShellExecute = $false
+      $psi.RedirectStandardOutput = $true
+      $psi.RedirectStandardError = $true
+      $psi.CreateNoWindow = $true
+      $proc = [System.Diagnostics.Process]::Start($psi)
+      try {
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+        $stdout = $proc.StandardOutput.ReadToEnd()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if (-not $proc.WaitForExit(15000)) {
+          try { $proc.Kill() } catch { }
+          $versionOut = "timed out waiting for --version"
+          $versionOk = $false
+        } else {
+          $parts = @($stdout.Trim(), $stderr.Trim()) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+          $versionOut = ($parts -join " ").Trim()
+          $versionOk = ($proc.ExitCode -eq 0)
+        }
+      } finally {
+        $proc.Dispose()
+      }
     } catch {
-      $versionOut = @($_.Exception.Message)
+      $versionOut = $_.Exception.Message
       $versionOk = $false
     }
     if (-not $versionOk) {
-      $detail = (@($versionOut) | ForEach-Object { "$_" }) -join " "
-      Fail "staged binary failed --version; existing installation was left unchanged: $detail"
+      Fail "staged binary failed --version; existing installation was left unchanged: $versionOut"
     }
 
     if (Test-Path -LiteralPath $destBin -PathType Container) {
       Fail "destination path is a directory, refusing to install: $destBin"
     }
-    Move-Item -LiteralPath $stagedBin -Destination $destBin -Force
-    $versionText = (@($versionOut) | ForEach-Object { "$_" }) -join " "
+    if ([System.IO.File]::Exists($destBin)) {
+      [System.IO.File]::Replace($stagedBin, $destBin, $null)
+    } else {
+      [System.IO.File]::Move($stagedBin, $destBin)
+    }
+    $versionText = $versionOut
     Write-Info "installed sweep -> $destBin ($versionText)"
 
     $pathUpdated = $false

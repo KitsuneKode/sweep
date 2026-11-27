@@ -115,6 +115,7 @@ export interface ReleaseReconciliationInput {
   targetCommitPackageVersion: string | null;
   releaseAssets: GitHubReleaseAssetsLookup;
   activeBinaryRuns: ActiveBinaryRunsLookup;
+  activeDownstreamRuns?: ActiveBinaryRunsLookup;
   homebrew: DownstreamVersionLookup;
   scoop: DownstreamVersionLookup;
   expectedAssets?: readonly string[];
@@ -389,6 +390,31 @@ export function planReleaseReconciliation(
     };
   }
 
+  if (needsDownstreamOnly && state.activeDownstreamRuns) {
+    if (state.activeDownstreamRuns.status === "error") {
+      return {
+        kind: "error",
+        reason: `Failed to query active release-downstream.yml runs: ${state.activeDownstreamRuns.error}`,
+        binaryTag,
+        packageTag,
+        targetCommit,
+      };
+    }
+    const matchingDownstreamRun = state.activeDownstreamRuns.runs.find(
+      (run) => ACTIVE_RUN_STATUSES.has(run.status) && run.headBranch === "main",
+    );
+    if (matchingDownstreamRun) {
+      return {
+        kind: "noop",
+        reason: `release-downstream.yml run ${matchingDownstreamRun.databaseId} (${matchingDownstreamRun.status}) is already active on main; skipping duplicate dispatch`,
+        binaryTag,
+        packageTag,
+        targetCommit,
+        activeRunId: matchingDownstreamRun.databaseId,
+      };
+    }
+  }
+
   const dispatchTarget: DispatchTarget = needsBinaryBuild ? "all" : "downstream";
   let dispatchDownstream: DownstreamTarget = "all";
   if (!policy.prerelease) {
@@ -447,12 +473,13 @@ export interface ReleaseClients {
   readNpmRelease(version: string): NpmReleaseLookup;
   readGitHubReleaseAssets(repository: string, binaryTag: string): GitHubReleaseAssetsLookup;
   listActiveBinaryRuns(repository: string): ActiveBinaryRunsLookup;
+  listActiveDownstreamRuns?(repository: string): ActiveBinaryRunsLookup;
   readHomebrewVersion(): DownstreamVersionLookup;
   readScoopVersion(): DownstreamVersionLookup;
-  dispatchCliBinaries(
+  dispatchCliBinaries(repository: string, binaryTag: string): void;
+  dispatchDownstreamRelease(
     repository: string,
     binaryTag: string,
-    target: DispatchTarget,
     downstream: DownstreamTarget,
   ): void;
 }
@@ -592,6 +619,41 @@ export function createLiveReleaseClients(repoRoot: string): ReleaseClients {
       return { status: "ok", runs };
     },
 
+    listActiveDownstreamRuns(repository: string): ActiveBinaryRunsLookup {
+      const proc = spawnSync(
+        "gh",
+        [
+          "run",
+          "list",
+          "--repo",
+          repository,
+          "--workflow",
+          "release-downstream.yml",
+          "--branch",
+          "main",
+          "--limit",
+          "20",
+          "--json",
+          "databaseId,status,headBranch,headSha",
+        ],
+        {
+          cwd: repoRoot,
+          encoding: "utf8",
+          timeout: 30_000,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      if (proc.status !== 0) {
+        const combined = `${proc.stdout ?? ""}\n${proc.stderr ?? ""}`.trim();
+        return {
+          status: "error",
+          error: combined || `gh run list exited ${String(proc.status)}`,
+        };
+      }
+      const runs = JSON.parse(proc.stdout) as BinaryWorkflowRun[];
+      return { status: "ok", runs };
+    },
+
     readHomebrewVersion(): DownstreamVersionLookup {
       const file = readGitHubFileContent(repoRoot, "KitsuneKode/homebrew-tap", "Formula/sweep.rb");
       if (file.status !== "found") return file;
@@ -618,12 +680,7 @@ export function createLiveReleaseClients(repoRoot: string): ReleaseClients {
       return { status: "found", version };
     },
 
-    dispatchCliBinaries(
-      repository: string,
-      binaryTag: string,
-      target: DispatchTarget,
-      downstream: DownstreamTarget,
-    ): void {
+    dispatchCliBinaries(repository: string, binaryTag: string): void {
       runCommand(repoRoot, "gh", [
         "workflow",
         "run",
@@ -632,8 +689,24 @@ export function createLiveReleaseClients(repoRoot: string): ReleaseClients {
         repository,
         "--ref",
         binaryTag,
+      ]);
+    },
+
+    dispatchDownstreamRelease(
+      repository: string,
+      binaryTag: string,
+      downstream: DownstreamTarget,
+    ): void {
+      runCommand(repoRoot, "gh", [
+        "workflow",
+        "run",
+        "release-downstream.yml",
+        "--repo",
+        repository,
+        "--ref",
+        "main",
         "-f",
-        `target=${target}`,
+        `tag=${binaryTag}`,
         "-f",
         `downstream=${downstream}`,
       ]);
@@ -705,15 +778,26 @@ export function runReconcileRelease(
     `refs/tags/${binaryTag}^{commit}`,
   ]);
 
+  const mainRefSha = gitOptional(repoRoot, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${mainRef}^{commit}`,
+  ]);
+  if (mainRefSha === null) {
+    return {
+      kind: "error",
+      reason: `Refusing to reconcile: canonical main ref ${mainRef} does not resolve to a commit`,
+      binaryTag,
+      packageTag,
+    };
+  }
+
   const npm = clients.readNpmRelease(version);
   const authoritativeCommit = (npm.status === "found" ? npm.gitHead : null) ?? packageTagSha;
-  const resolvedMainRef =
-    gitOptional(repoRoot, ["rev-parse", "--verify", "--quiet", `${mainRef}^{commit}`]) !== null
-      ? mainRef
-      : "HEAD";
 
   const targetCommitOnMain =
-    authoritativeCommit !== null && gitIsAncestor(repoRoot, authoritativeCommit, resolvedMainRef);
+    authoritativeCommit !== null && gitIsAncestor(repoRoot, authoritativeCommit, mainRefSha);
   const targetCommitPackageVersion =
     authoritativeCommit !== null ? packageVersionAtCommit(repoRoot, authoritativeCommit) : null;
 
@@ -723,12 +807,16 @@ export function runReconcileRelease(
       : expectedReleaseAssets(DEFAULT_RELEASE_BINARY_TARGETS);
 
   const shouldProbeRelease = npm.status === "found" || changesetsPublished;
-  const releaseAssets: GitHubReleaseAssetsLookup = shouldProbeRelease
-    ? clients.readGitHubReleaseAssets(repository, binaryTag)
-    : { status: "not_found" };
   const activeBinaryRuns: ActiveBinaryRunsLookup = shouldProbeRelease
     ? clients.listActiveBinaryRuns(repository)
     : { status: "ok", runs: [] };
+  const activeDownstreamRuns: ActiveBinaryRunsLookup =
+    shouldProbeRelease && clients.listActiveDownstreamRuns
+      ? clients.listActiveDownstreamRuns(repository)
+      : { status: "ok", runs: [] };
+  const releaseAssets: GitHubReleaseAssetsLookup = shouldProbeRelease
+    ? clients.readGitHubReleaseAssets(repository, binaryTag)
+    : { status: "not_found" };
   const homebrew: DownstreamVersionLookup = shouldProbeRelease
     ? clients.readHomebrewVersion()
     : { status: "not_found" };
@@ -749,6 +837,7 @@ export function runReconcileRelease(
     targetCommitPackageVersion,
     releaseAssets,
     activeBinaryRuns,
+    activeDownstreamRuns,
     homebrew,
     scoop,
     expectedAssets: expected,
@@ -782,12 +871,11 @@ export function runReconcileRelease(
     runCommand(repoRoot, "git", ["push", remoteName, `refs/tags/${plan.binaryTag}`]);
   }
   if (plan.dispatchWorkflow) {
-    clients.dispatchCliBinaries(
-      repository,
-      plan.binaryTag,
-      plan.dispatchTarget,
-      plan.dispatchDownstream,
-    );
+    if (plan.dispatchTarget === "downstream") {
+      clients.dispatchDownstreamRelease(repository, plan.binaryTag, plan.dispatchDownstream);
+    } else {
+      clients.dispatchCliBinaries(repository, plan.binaryTag);
+    }
   }
 
   return plan;
