@@ -52,18 +52,34 @@ Space queues a project, Enter opens it, `i` queues every idle project,
 ## Install
 
 ```bash
-brew install kitsunekode/tap/sweep     # macOS and Linux
+brew install kitsunekode/tap/sweep     # macOS and Linux (with shell completions)
 curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
 npm install -g @kitsunekode/sweep      # commands on Node.js 20.3+
 bun add -g @kitsunekode/sweep          # commands and the terminal UI
 bunx @kitsunekode/sweep ui ~/Projects  # try the UI without a global install
 ```
 
-Homebrew and the install script fetch one self-contained binary with the
-terminal UI built in (no Node or Bun needed, checksums verified). From npm,
-scan and cleanup run on Node. `sweep ui` runs on Bun; `@opentui/core` is
-installed with the package.
-Linux (x64, arm64), macOS (x64, arm64) and Windows (x64) are supported.
+On Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 | iex
+```
+
+Or via [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add kitsunekode https://github.com/KitsuneKode/scoop-bucket
+scoop install sweep
+```
+
+Homebrew, Scoop, and the install scripts fetch one self-contained binary with
+the terminal UI built in (no Node or Bun needed, SHA-256 checksums verified).
+Release binaries also carry GitHub build provenance attestations (`gh
+attestation verify <file> -R KitsuneKode/sweep`). From npm, scan and cleanup
+run on Node; `sweep ui` runs on Bun (`@opentui/core` is installed with the
+package).
+Linux glibc (x64, arm64, glibc 2.17+), Linux musl/Alpine (x64, arm64), macOS
+(x64, arm64), and Windows (x64) are supported.
 
 For coding agents: `npx skills add KitsuneKode/sweep`.
 

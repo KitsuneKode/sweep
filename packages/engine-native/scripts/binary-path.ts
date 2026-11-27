@@ -1,16 +1,31 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { NativePlatform } from "@kitsunekode/sweep-core/native-platforms";
+import {
+  detectLinuxLibc,
+  type LinuxLibc,
+  type NativePlatform,
+} from "@kitsunekode/sweep-core/native-platforms";
 
-/** A host build must never be relabeled as a foreign-platform package. */
+export interface BinaryPathHost {
+  os: string;
+  cpu: string;
+  libc?: LinuxLibc;
+}
+
+/** A host build must never be relabeled as a foreign-platform or foreign-libc package. */
 export function defaultBinaryPath(
   root: string,
   platform: NativePlatform,
-  host = { os: process.platform as string, cpu: process.arch as string },
+  host: BinaryPathHost = {
+    os: process.platform as string,
+    cpu: process.arch as string,
+    ...(process.platform === "linux" ? { libc: detectLinuxLibc() } : {}),
+  },
 ): string {
   const binary = `sweep-engine${platform.os === "win32" ? ".exe" : ""}`;
   const cross = join(root, "target", platform.cargoTarget, "release", binary);
-  if (platform.os === host.os && platform.cpu === host.cpu) {
+  const sameLibc = platform.os !== "linux" || platform.libc === (host.libc ?? "glibc");
+  if (platform.os === host.os && platform.cpu === host.cpu && sameLibc) {
     const native = join(root, "target/release", binary);
     if (existsSync(native)) return native;
   }

@@ -21,7 +21,7 @@ concurrency:
   group: native-engine-release-${{ github.ref }}
   cancel-in-progress: false
 
-# Build + artifact upload only - nothing here writes to the repo or releases.
+# Default read-only; the build job escalates only what attestations need.
 permissions:
   contents: read
 
@@ -30,6 +30,10 @@ jobs:
     name: build ${{ matrix.id }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -37,22 +41,51 @@ jobs:
           - id: linux-64
             runs-on: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            zigbuild: true
+            abi_mode: glibc
+            container: debian:11-slim
+            binary: sweep-engine
+          - id: linux-64-musl
+            runs-on: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            zigbuild: false
+            abi_mode: musl-static
+            container: alpine:3.21
             binary: sweep-engine
           - id: linux-arm64
             runs-on: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            zigbuild: true
+            abi_mode: glibc
+            container: debian:11-slim
+            binary: sweep-engine
+          - id: linux-arm64-musl
+            runs-on: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            zigbuild: false
+            abi_mode: musl-static
+            container: alpine:3.21
             binary: sweep-engine
           - id: darwin-64
             runs-on: macos-15-intel
             target: x86_64-apple-darwin
+            zigbuild: false
+            abi_mode: ""
+            container: ""
             binary: sweep-engine
           - id: darwin-arm64
             runs-on: macos-latest
             target: aarch64-apple-darwin
+            zigbuild: false
+            abi_mode: ""
+            container: ""
             binary: sweep-engine
           - id: windows-64
             runs-on: windows-latest
             target: x86_64-pc-windows-msvc
+            zigbuild: false
+            abi_mode: ""
+            container: ""
             binary: sweep-engine.exe
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,6 +97,16 @@ jobs:
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
+      - name: Setup Zig for glibc 2.17 floor
+        if: matrix.zigbuild
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+
+      - name: Install cargo-zigbuild
+        if: matrix.zigbuild
+        uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
+        with:
+          tool: cargo-zigbuild
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
@@ -71,7 +114,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: cargo build --release
+      - name: Build release engine (glibc 2.17 via cargo-zigbuild)
+        if: matrix.zigbuild
+        run: cargo zigbuild --release -p sweep-engine-cli --target ${{ matrix.target }}.2.17 --locked
+
+      - name: Build release engine
+        if: ${{ !matrix.zigbuild }}
         run: cargo build --release -p sweep-engine-cli --target ${{ matrix.target }} --locked
 
       - name: Pack native package
@@ -86,9 +134,37 @@ jobs:
           BINARY="target/${{ matrix.target }}/release/${{ matrix.binary }}"
           bun run packages/engine-native/scripts/pack.ts --platform ${{ matrix.id }} --binary "$BINARY" --version "$VERSION"
 
+      - name: Verify Linux ELF ABI floor
+        if: matrix.abi_mode != ''
+        shell: bash
+        run: |
+          bun run packages/engine-native/scripts/check-elf-abi.ts \
+            --binary "native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}" \
+            --mode "${{ matrix.abi_mode }}" \
+            --max-glibc 2.17
+
       - name: Verify packaged binary
         shell: bash
         run: bun run packages/engine-native/scripts/verify-binary.ts --binary "native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}"
+
+      - name: Smoke-run engine in target Linux container
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          mkdir -p "$tmp/proj/node_modules"
+          printf 'container-smoke' > "$tmp/proj/node_modules/file"
+          docker run --rm \
+            -v "${{ github.workspace }}/native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}:/usr/local/bin/sweep-engine:ro" \
+            -v "$tmp/proj:/work/proj:ro" \
+            "${{ matrix.container }}" \
+            sh -eu -c '
+              /usr/local/bin/sweep-engine --version
+              /usr/local/bin/sweep-engine --capabilities
+              out="$(/usr/local/bin/sweep-engine scan /work/proj < /dev/null)"
+              printf "%s\n" "$out" | grep -q "node_modules"
+            '
 
       - name: Verify packaged apply outcomes and cancellation
         shell: bash
@@ -96,6 +172,11 @@ jobs:
         # bash is MSYS form (/d/a/...), which the test's existsSync may not
         # resolve, silently skipping every rust-gated assertion.
         run: SWEEP_ENGINE_PATH="${{ github.workspace }}/native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}" bun test packages/core/src/engine.test.ts
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: native-packages/${{ matrix.id }}/bin/${{ matrix.binary }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -30,13 +30,14 @@ Stable publishes explicitly use
 The policy rejects prerelease/latest and conflicting pre-mode tags. Changesets
 pre mode controls its own tag and rejects an extra `--tag` argument.
 
-After publication, the workflow verifies that Changesets' scoped package tag
-points at the checked-out commit, creates a matching immutable `vVERSION`
-alias, and explicitly dispatches the binary workflow. A GITHUB_TOKEN tag push
-does not automatically trigger another workflow. If binary building fails
-after npm succeeds, retry that workflow on the exact alias; do not republish
-the package or move an existing tag. Hosted qualification of this routing is
-still required.
+After publication, `apps/cli/scripts/reconcile-release.ts` verifies that
+Changesets' scoped package tag points at the released commit, creates a
+matching immutable `vVERSION` alias (refusing to move a mismatched existing
+tag), and explicitly dispatches `cli-binaries.yml`. A GITHUB_TOKEN tag push
+does not automatically trigger another workflow. Because reconciliation checks
+npm, git tags, and GitHub Release assets idempotently, rerunning `release.yml`
+after an interrupted handoff creates the missing tag on the exact released
+commit and dispatches `cli-binaries.yml` without republishing npm.
 
 Internal workspace packages are `private` and unpublished. They still need a
 `version` field so `@kitsunekode/sweep` can depend on them during `changeset
@@ -91,16 +92,18 @@ this has to be run by a human; CI cannot do it.
 
 ## 2. Standalone binaries (GitHub releases)
 
-`.github/workflows/cli-binaries.yml` accepts `v*`, scoped npm package tags, and
-manual dispatch. Normal npm release dispatches it on the canonical `v*` alias:
+`.github/workflows/cli-binaries.yml` accepts `v*` tags and manual dispatch.
+Normal npm release dispatches it on the canonical `v*` alias:
 
-| Artifact             | Runner           | Notes         |
-| -------------------- | ---------------- | ------------- |
-| `sweep-darwin-arm64` | macos-latest     | Apple Silicon |
-| `sweep-darwin-x64`   | macos-15-intel   | Intel         |
-| `sweep-linux-x64`    | ubuntu-latest    | glibc         |
-| `sweep-linux-arm64`  | ubuntu-24.04-arm | glibc ARM64   |
-| `sweep-win-x64`      | windows-latest   | `.exe`        |
+| Artifact                 | Runner           | Notes                                     |
+| ------------------------ | ---------------- | ----------------------------------------- |
+| `sweep-darwin-arm64`     | macos-latest     | Apple Silicon                             |
+| `sweep-darwin-x64`       | macos-15-intel   | Intel                                     |
+| `sweep-linux-x64`        | ubuntu-latest    | glibc 2.17+ via `cargo-zigbuild`          |
+| `sweep-linux-x64-musl`   | ubuntu-latest    | musl (`OPENTUI_LIBC=musl`, static engine) |
+| `sweep-linux-arm64`      | ubuntu-24.04-arm | glibc 2.17+ via `cargo-zigbuild`          |
+| `sweep-linux-arm64-musl` | ubuntu-24.04-arm | musl (`OPENTUI_LIBC=musl`, static engine) |
+| `sweep-win-x64`          | windows-latest   | `.exe`                                    |
 
 Each is built on its target runner by `scripts/build-standalone.ts` from
 `apps/cli/src/bin-standalone.ts`, with ESM bytecode. The static UI import embeds
@@ -111,11 +114,19 @@ leave it behind. Help/version avoid extraction. Runtime dotenv/bunfig autoload
 is disabled so scanning a project does not import its Bun runtime settings.
 No external Node, Bun or Rust engine is needed for the default standalone scan.
 
-Before upload, every runner checks `--ui-probe`, `--version`, and an owned scan
-with PATH emptied. Each binary also gets a streaming, round-trip-verified `.gz` archive with its
-own SHA-256 sidecar. The raw assets and installer path remain available; archives
-reduce download size without changing the executable. All five binaries attach to one release; preview releases
-are marked prerelease and cannot update the stable Homebrew formula. Linux
+Before upload, Linux jobs enforce ELF ABI metadata via
+`packages/engine-native/scripts/check-elf-abi.ts` (glibc <= 2.17 for gnu
+targets; zero glibc symbols and static/musl linkage for musl targets) and
+smoke-run the artifacts inside `debian:11-slim` or `alpine:3.21`. Every runner
+checks `--ui-probe`, `--version`, and an owned scan with PATH emptied. Each
+binary also gets a streaming, round-trip-verified `.gz` archive with its own
+SHA-256 sidecar and a GitHub build provenance attestation
+(`actions/attest-build-provenance`). All seven target families attach to one
+release; preview releases are marked prerelease and cannot update the stable
+Homebrew formula or Scoop bucket. Homebrew (`packaging/homebrew/sweep.rb.tmpl`)
+and Scoop (`packaging/scoop/sweep.json`) manifests are rendered from this
+repository's checked-in templates by `apps/cli/scripts/render-packaging.ts` and
+pushed only when `TAP_GITHUB_TOKEN` / `SCOOP_BUCKET_TOKEN` are configured. Linux
 local success does not substitute for passing those hosted platform jobs.
 
 The workflow also builds `sweep-engine-TARGET` assets (with `.exe` on Windows),
@@ -174,6 +185,6 @@ from [testing](testing.md) before accepting a Linux deletion release.
 
 ## Known distribution gaps
 
-- musl (Alpine): requires `OPENTUI_LIBC=musl` build variant - not wired yet
+- Windows ARM64: not yet built or published as a native engine or standalone target
 - Windows TUI: OpenTUI native FFI works under Bun on Windows; CI smoke covers
   non-TTY commands only, interactive verification is manual

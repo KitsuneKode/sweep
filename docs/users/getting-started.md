@@ -5,6 +5,40 @@ description: Install Sweep and complete your first read-only review.
 
 ## Install
 
+### Standalone binary (no Node or Bun required)
+
+macOS and Linux (glibc 2.17+ and musl/Alpine):
+
+```sh
+brew install kitsunekode/tap/sweep
+# or:
+curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
+```
+
+Windows (x64, PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 | iex
+```
+
+Or with [Scoop](https://scoop.sh):
+
+```powershell
+scoop bucket add kitsunekode https://github.com/KitsuneKode/scoop-bucket
+scoop install sweep
+```
+
+The standalone installers verify SHA-256 checksums and test `--version` on the
+staged binary before replacing any existing install. You can also verify GitHub
+build provenance attestations on any downloaded release binary or `.gz` archive
+with the GitHub CLI:
+
+```sh
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep
+```
+
+### npm or Bun
+
 For command-line scans and cleanup, use Node.js 20.3 or newer:
 
 ```sh
@@ -20,13 +54,15 @@ sweep --version
 ```
 
 The npm package includes bundled JavaScript and selects a matching optional Rust
-engine package for supported platforms. Keep optional dependencies enabled if you
-want the native engine. [Platforms](platforms.md) explains fallback requirements.
+engine package (including separate glibc and musl packages on Linux) for
+supported platforms. Keep optional dependencies enabled if you want the native
+engine. [Platforms](platforms.md) explains the Linux ABI floor and fallback
+requirements.
 
 The full-screen UI runs on Bun. `@opentui/core` is a dependency of the package,
 so `bun add -g` and `bunx @kitsunekode/sweep ui` install it with sweep. If you
-only need scans and saved plans, Node is enough. A qualified standalone release
-embeds the UI; see the release's checksum and platform instructions.
+only need scans and saved plans, Node is enough. A standalone release embeds
+the UI and native engine in one executable.
 
 ## Scan one project
 

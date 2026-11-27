@@ -60,6 +60,10 @@ jobs:
     name: build native engines
     needs: release-intent
     if: needs.release-intent.outputs.needs_native_build == 'true'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/native-engine-release.yml
 
   release:
@@ -172,25 +176,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SWEEP_RELEASE_REQUIRES_NATIVE: "true"
 
-      # Changesets uses package@version. Keep the public binary/download tag
-      # as vVERSION and dispatch explicitly: GITHUB_TOKEN pushes do not trigger
-      # another workflow. Refuse to move an existing version tag.
-      - name: Build standalone binaries for the tag
-        if: steps.release.outputs.published == 'true'
+      # Changesets uses package@version. Keep the public binary/download tag as
+      # vVERSION and reconcile idempotently: if npm already has this version
+      # but vVERSION or its release binaries are missing, tag the exact
+      # released commit (refusing a mismatched existing tag) and dispatch
+      # cli-binaries.yml.
+      - name: Reconcile release tag and standalone binaries
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="$(node -p "require('./apps/cli/package.json').version")"
-          package_tag="@kitsunekode/sweep@$version"
-          binary_tag="v$version"
-          commit="$(git rev-parse "$package_tag^{commit}")"
-          if [ "$commit" != "$(git rev-parse HEAD)" ]; then
-            echo "Package release tag does not match the checked-out release"; exit 1
-          fi
-          if git show-ref --verify --quiet "refs/tags/$binary_tag"; then
-            [ "$(git rev-parse "$binary_tag^{commit}")" = "$commit" ] || exit 1
-          else
-            git tag "$binary_tag" "$commit"
-          fi
-          git push origin "refs/tags/$binary_tag"
-          gh workflow run cli-binaries.yml --ref "$binary_tag"
+          bun run apps/cli/scripts/reconcile-release.ts \
+            --changesets-published "${{ steps.release.outputs.published == 'true' }}"

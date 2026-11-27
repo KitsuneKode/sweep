@@ -1,14 +1,13 @@
 name: CLI Binaries
 
 # Builds standalone `sweep` executables (Bun compile with embedded OpenTUI
-# native assets) and attaches them to the GitHub release for the tag.
-# Intentionally decoupled from release.yml's changesets/npm flow.
+# native assets and embedded Rust engine) and attaches them to the GitHub
+# release for the tag. Intentionally decoupled from release.yml's npm flow.
 
 on:
   push:
     tags:
       - "v*"
-      - "@kitsunekode/sweep@*"
   workflow_dispatch: {}
 
 concurrency:
@@ -23,20 +22,70 @@ jobs:
     name: ${{ matrix.id }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - id: darwin-arm64
             os: macos-latest
+            cargo_target: aarch64-apple-darwin
+            bun_target: ""
+            zigbuild: false
+            engine_abi_mode: ""
+            standalone_abi_mode: ""
+            container: ""
           - id: darwin-x64
             os: macos-15-intel
+            cargo_target: x86_64-apple-darwin
+            bun_target: ""
+            zigbuild: false
+            engine_abi_mode: ""
+            standalone_abi_mode: ""
+            container: ""
           - id: linux-x64
             os: ubuntu-latest
+            cargo_target: x86_64-unknown-linux-gnu
+            bun_target: bun-linux-x64
+            zigbuild: true
+            engine_abi_mode: glibc
+            standalone_abi_mode: glibc
+            container: debian:11-slim
+          - id: linux-x64-musl
+            os: ubuntu-latest
+            cargo_target: x86_64-unknown-linux-musl
+            bun_target: bun-linux-x64-musl
+            zigbuild: false
+            engine_abi_mode: musl-static
+            standalone_abi_mode: musl-dynamic
+            container: alpine:3.21
           - id: linux-arm64
             os: ubuntu-24.04-arm
+            cargo_target: aarch64-unknown-linux-gnu
+            bun_target: bun-linux-arm64
+            zigbuild: true
+            engine_abi_mode: glibc
+            standalone_abi_mode: glibc
+            container: debian:11-slim
+          - id: linux-arm64-musl
+            os: ubuntu-24.04-arm
+            cargo_target: aarch64-unknown-linux-musl
+            bun_target: bun-linux-arm64-musl
+            zigbuild: false
+            engine_abi_mode: musl-static
+            standalone_abi_mode: musl-dynamic
+            container: alpine:3.21
           - id: win-x64
             os: windows-latest
+            cargo_target: x86_64-pc-windows-msvc
+            bun_target: ""
+            zigbuild: false
+            engine_abi_mode: ""
+            standalone_abi_mode: ""
+            container: ""
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,17 +100,35 @@ jobs:
       # Rust must exist before any turbo invocation: turbo resolves cargo
       # workspaces via `cargo metadata` and the CLI build pulls in the engine
       # build task.
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: 1.99.1
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.cargo_target }}
+
+      - name: Setup Zig for glibc 2.17 floor
+        if: matrix.zigbuild
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+
+      - name: Install cargo-zigbuild
+        if: matrix.zigbuild
+        uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
+        with:
+          tool: cargo-zigbuild
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Bundle CLI + UI
         run: bunx turbo run build --filter=@kitsunekode/sweep
 
+      - name: Build embedded native engine (glibc 2.17 via cargo-zigbuild)
+        if: matrix.zigbuild
+        run: cargo zigbuild --release -p sweep-engine-cli --target ${{ matrix.cargo_target }}.2.17 --locked
+
       - name: Build embedded native engine
-        run: cargo build --release -p sweep-engine-cli --locked
+        if: ${{ !matrix.zigbuild }}
+        run: cargo build --release -p sweep-engine-cli --target ${{ matrix.cargo_target }} --locked
 
       - name: Compile standalone executable
         shell: bash
@@ -70,25 +137,68 @@ jobs:
             win-x64)
               out="sweep-${{ matrix.id }}.exe"
               engine_out="sweep-engine-${{ matrix.id }}.exe"
-              cp target/release/sweep-engine.exe "$engine_out"
+              engine_src="target/${{ matrix.cargo_target }}/release/sweep-engine.exe"
               ;;
             *)
               out="sweep-${{ matrix.id }}"
               engine_out="sweep-engine-${{ matrix.id }}"
-              cp target/release/sweep-engine "$engine_out"
+              engine_src="target/${{ matrix.cargo_target }}/release/sweep-engine"
               ;;
           esac
-          bun run scripts/build-standalone.ts "" "$out"
+          cp "$engine_src" "$engine_out"
+          bun run scripts/build-standalone.ts "${{ matrix.bun_target }}" "$out" --engine "$engine_src"
           echo "OUT=$out" >> "$GITHUB_ENV"
           echo "ENGINE_OUT=$engine_out" >> "$GITHUB_ENV"
 
-      - name: Smoke - embedded UI probe + version
+      - name: Verify Linux ELF ABI floor
+        if: matrix.engine_abi_mode != ''
+        shell: bash
+        run: |
+          bun run packages/engine-native/scripts/check-elf-abi.ts \
+            --binary "./$ENGINE_OUT" \
+            --mode "${{ matrix.engine_abi_mode }}" \
+            --max-glibc 2.17
+          bun run packages/engine-native/scripts/check-elf-abi.ts \
+            --binary "./$OUT" \
+            --mode "${{ matrix.standalone_abi_mode }}" \
+            --max-glibc 2.17
+
+      - name: Smoke - host standalone and engine
+        if: matrix.standalone_abi_mode != 'musl-dynamic'
         shell: bash
         run: |
           "./$OUT" --ui-probe
           "./$OUT" --version
           bun run scripts/smoke-standalone.ts "./$OUT"
           bun run packages/engine-native/scripts/verify-binary.ts --binary "./$ENGINE_OUT"
+
+      - name: Smoke - host static musl engine
+        if: matrix.standalone_abi_mode == 'musl-dynamic'
+        shell: bash
+        run: bun run packages/engine-native/scripts/verify-binary.ts --binary "./$ENGINE_OUT"
+
+      - name: Smoke - run standalone and engine in target Linux container
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          mkdir -p "$tmp/proj/node_modules"
+          printf 'container-smoke' > "$tmp/proj/node_modules/file"
+          docker run --rm \
+            -v "${{ github.workspace }}/$OUT:/usr/local/bin/sweep:ro" \
+            -v "${{ github.workspace }}/$ENGINE_OUT:/usr/local/bin/sweep-engine:ro" \
+            -v "$tmp/proj:/work/proj:ro" \
+            "${{ matrix.container }}" \
+            sh -eu -c '
+              /usr/local/bin/sweep-engine --version
+              eng="$(/usr/local/bin/sweep-engine scan /work/proj < /dev/null)"
+              printf "%s\n" "$eng" | grep -q "node_modules"
+              PATH="" /usr/local/bin/sweep --ui-probe
+              PATH="" /usr/local/bin/sweep --version
+              scan="$(PATH="" /usr/local/bin/sweep scan /work/proj --engine rust --json)"
+              printf "%s\n" "$scan" | grep -q "node_modules"
+            '
 
       - name: Generate checksum
         shell: bash
@@ -107,6 +217,15 @@ jobs:
         run: |
           bun run apps/cli/scripts/compress-standalone.ts "$OUT"
           bun run apps/cli/scripts/compress-standalone.ts "$ENGINE_OUT"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ env.OUT }}
+            ${{ env.OUT }}.gz
+            ${{ env.ENGINE_OUT }}
+            ${{ env.ENGINE_OUT }}.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -129,7 +248,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/@kitsunekode/sweep@')
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download all binaries
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -144,7 +263,6 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           case "$TAG" in
-            @kitsunekode/sweep@*) version="${TAG#@kitsunekode/sweep@}" ;;
             v*) version="${TAG#v}" ;;
             *) echo "Unsupported release tag"; exit 1 ;;
           esac
@@ -154,12 +272,22 @@ jobs:
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       # The release says what changed: its notes are this version's changelog
-      # section, never an empty page beside the binaries.
+      # section, never an empty page beside the binaries. Checkout packaging
+      # templates and the renderer from this exact release ref as well so tap
+      # and Scoop updates never run unpinned scripts from external repos.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: apps/cli/CHANGELOG.md
+          sparse-checkout: |
+            apps/cli/CHANGELOG.md
+            apps/cli/scripts/render-packaging.ts
+            packaging/homebrew/sweep.rb.tmpl
+            packaging/scoop/sweep.json
           sparse-checkout-cone-mode: false
           path: src
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
 
       - name: Release notes from the changelog
         shell: bash
@@ -196,7 +324,7 @@ jobs:
             echo "::notice::TAP_GITHUB_TOKEN not set; skipping Homebrew formula bump"
           fi
 
-      - name: Bump Homebrew tap formula
+      - name: Render and push Homebrew tap formula
         if: steps.tap.outputs.present == 'true' && steps.version.outputs.prerelease != 'true' && startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
@@ -204,13 +332,55 @@ jobs:
         run: |
           version="$VERSION"
           gh repo clone KitsuneKode/homebrew-tap tap -- --depth 1
+          bun run src/apps/cli/scripts/render-packaging.ts homebrew \
+            --version "$version" \
+            --dist-dir dist-bin \
+            --template src/packaging/homebrew/sweep.rb.tmpl \
+            --out tap/Formula/sweep.rb
           cd tap
-          bin/update-formula "$version"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Formula/sweep.rb
           if git diff --cached --quiet; then
             echo "formula already at $version"
+          else
+            git commit -m "sweep $version"
+            git push
+          fi
+
+      # Scoop bucket lives in a separate repo; skip cleanly if no secret exists.
+      - name: Check for Scoop bucket token
+        id: scoop
+        env:
+          SCOOP_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+        run: |
+          if [ -n "${SCOOP_TOKEN:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SCOOP_BUCKET_TOKEN not set; skipping Scoop bucket update"
+          fi
+
+      - name: Render and push Scoop bucket manifest
+        if: steps.scoop.outputs.present == 'true' && steps.version.outputs.prerelease != 'true' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          VERSION: ${{ steps.version.outputs.number }}
+        run: |
+          version="$VERSION"
+          gh repo clone KitsuneKode/scoop-bucket scoop -- --depth 1
+          mkdir -p scoop/bucket
+          bun run src/apps/cli/scripts/render-packaging.ts scoop \
+            --version "$version" \
+            --dist-dir dist-bin \
+            --template src/packaging/scoop/sweep.json \
+            --out scoop/bucket/sweep.json
+          cd scoop
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/sweep.json
+          if git diff --cached --quiet; then
+            echo "Scoop manifest already at $version"
           else
             git commit -m "sweep $version"
             git push

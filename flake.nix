@@ -22,23 +22,6 @@
             rustfmt
           ];
         };
-
-        packages.default = pkgs.stdenv.mkDerivation {
-          pname = "sweep";
-          # The published package owns the version; a literal here drifts.
-          version = (builtins.fromJSON (builtins.readFile ./apps/cli/package.json)).version;
-          src = ./.;
-          buildInputs = [ pkgs.bun ];
-          buildPhase = ''
-            bun install --frozen-lockfile
-            bun run build
-          '';
-          installPhase = ''
-            mkdir -p $out/bin
-            cp apps/cli/dist/sweep.js $out/bin/sweep
-            chmod +x $out/bin/sweep
-          '';
-        };
       }
     );
 }

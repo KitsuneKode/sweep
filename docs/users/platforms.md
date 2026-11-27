@@ -5,29 +5,59 @@ description: Choose an engine and understand runtime, memory and filesystem limi
 
 ## Distribution targets
 
-| Target              | Installed packages / standalone source qualification |
-| ------------------- | ---------------------------------------------------- |
-| Linux glibc x64     | Passed on hosted runner                              |
-| Linux glibc ARM64   | Passed on hosted runner                              |
-| macOS Intel         | Passed on hosted runner                              |
-| macOS Apple Silicon | Passed on hosted runner                              |
-| Windows x64         | Passed on hosted runner                              |
+| Target              | Minimum ABI / libc          | Standalone asset (`sweep-*`) | Native npm engine package (`@kitsunekode/*`) |
+| ------------------- | --------------------------- | ---------------------------- | -------------------------------------------- |
+| Linux glibc x64     | glibc 2.17+                 | `sweep-linux-x64`            | `sweep-engine-linux-64`                      |
+| Linux glibc ARM64   | glibc 2.17+                 | `sweep-linux-arm64`          | `sweep-engine-linux-arm64`                   |
+| Linux musl x64      | musl (Alpine, Void, static) | `sweep-linux-x64-musl`       | `sweep-engine-linux-64-musl`                 |
+| Linux musl ARM64    | musl (Alpine, Void, static) | `sweep-linux-arm64-musl`     | `sweep-engine-linux-arm64-musl`              |
+| macOS Intel         | macOS x64                   | `sweep-darwin-x64`           | `sweep-engine-darwin-64`                     |
+| macOS Apple Silicon | macOS arm64                 | `sweep-darwin-arm64`         | `sweep-engine-darwin-arm64`                  |
+| Windows x64         | Windows 10/11 x64           | `sweep-win-x64.exe`          | `sweep-engine-windows-64`                    |
 
-The October 4 source checkpoint passed the
-[CI matrix](https://github.com/KitsuneKode/sweep/actions/runs/37218603503) and
-[binary workflow](https://github.com/KitsuneKode/sweep/actions/runs/37218647608).
-This verifies local tarball installation and headless standalone checks on
-those runners; it is not a published release or a physical-terminal guarantee.
-Interactive terminals still need qualification. Current performance
-measurements were collected on Linux x64. Alpine/musl and Windows
-ARM64 are not currently shipped targets. Refer to the specific release assets
-rather than assuming an unsupported binary will work.
+### Linux ABI floor and musl support
+
+Linux glibc engine binaries are built against **glibc 2.17** via `cargo-zigbuild`
+(`x86_64-unknown-linux-gnu.2.17` and `aarch64-unknown-linux-gnu.2.17`). Both the
+Bun standalone executable and OpenTUI's Linux glibc library also target glibc
+2.17, so the glibc standalone and npm engine packages run on Ubuntu 20.04+,
+Debian 11+, RHEL 8/9, Rocky/AlmaLinux, and Amazon Linux 2/2023. Release CI
+enforces this floor by inspecting ELF `DT_VERNEED` symbol versions (failing if
+any required symbol exceeds `GLIBC_2.17`) and smoke-running the artifacts inside
+`debian:11-slim`.
+
+Linux musl engine binaries are statically linked (`x86_64-unknown-linux-musl`
+and `aarch64-unknown-linux-musl`) with zero glibc dependencies, and musl
+standalone binaries target Bun's musl runtime with OpenTUI's musl native
+library. Release CI checks ELF metadata for zero glibc dependencies and
+smoke-runs the artifacts inside `alpine:3.21`.
+
+Windows ARM64 is not currently a shipped target. Refer to the specific release
+assets rather than assuming an unsupported binary will work. Interactive
+physical-terminal qualification on macOS and Windows remains separate from
+headless CI checks.
 
 Choose the npm CLI plus its optional precompiled engine when you already have
-Node/Bun. Choose `sweep-TARGET` for the self-contained application. The smaller
+Node/Bun. Choose `sweep-TARGET` (or Homebrew / Scoop / `install.sh` /
+`install.ps1`) for the self-contained application. The smaller
 `sweep-engine-TARGET` download is only the machine-protocol backend; it does not
-include interactive commands or the TUI. Both binary families get checksums and
-gzip assets through the release workflow.
+include interactive commands or the TUI. Both binary families ship raw
+executables, verified `.gz` archives, and `.sha256` sidecars.
+
+### Verifying build provenance attestations
+
+Every released standalone binary, `.gz` archive, and native engine binary is
+attested with GitHub Artifact Attestations (`actions/attest-build-provenance`).
+To verify that a downloaded file was built by this repository's release workflow
+before running it:
+
+```sh
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep
+gh attestation verify sweep-win-x64.exe -R KitsuneKode/sweep
+```
+
+Published npm packages carry npm provenance automatically via OIDC trusted
+publishing (`npm audit signatures`).
 
 ## Runtime and engine selection
 
