@@ -114,7 +114,7 @@ export function ProjectDetails({
         ? field("git", t`${fg(tokens.textMuted)("not a repository")}`)
         : field(
             "branch",
-            t`${fg(tokens.text)(clipCells(facts.branch || "linked work tree", inner - LABEL_W, true))}`,
+            t`${fg(tokens.text)(clipCells(sanitizeTerminalText(facts.branch) || "linked work tree", inner - LABEL_W, true))}`,
           )}
       {field(
         "queued",

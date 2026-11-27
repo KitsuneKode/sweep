@@ -21,13 +21,29 @@ export const GIT_ARGS = [
   "-c",
   "core.quotePath=false",
 ];
-export const GIT_ENV = {
+export const GIT_ENV: NodeJS.ProcessEnv = {
   ...process.env,
+  LC_ALL: "C",
+  LANG: "C",
+  LANGUAGE: "C",
   GIT_OPTIONAL_LOCKS: "0",
   // Pathspecs are paths, never globs: a folder named `*` must not match all.
   GIT_LITERAL_PATHSPECS: "1",
   GIT_TERMINAL_PROMPT: "0",
 };
+
+/** Hardened environment for git subprocesses, always forcing the C locale. */
+export function gitEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...base,
+    LC_ALL: "C",
+    LANG: "C",
+    LANGUAGE: "C",
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_LITERAL_PATHSPECS: "1",
+    GIT_TERMINAL_PROMPT: "0",
+  };
+}
 const TIMEOUT_MS = 10_000;
 
 /** Nearest ancestor holding `.git` (a directory, or a file for worktrees). */
@@ -108,7 +124,7 @@ export function gitTrackedPathsViaGit(paths: readonly string[]): Set<string> {
         "git",
         [...GIT_ARGS, "-C", root, "ls-files", "-z", "--cached", "--", ...chunk],
         {
-          env: GIT_ENV,
+          env: gitEnv(),
           encoding: "utf8",
           timeout: TIMEOUT_MS,
           maxBuffer: 256 * 1024 * 1024,

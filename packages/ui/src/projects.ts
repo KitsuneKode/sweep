@@ -83,7 +83,7 @@ export const ARTIFACT_PREVIEW = 6;
 
 const WORKTREE_STATE_LABEL: Record<WorktreeState, string> = {
   merged: "merged",
-  upstream_gone: "remote branch gone",
+  upstream_gone: "Tracking branch missing · check git",
 };
 
 /**
@@ -143,7 +143,7 @@ export function buildProjects(
     const section: ProjectSection =
       activeMs === undefined || !known
         ? "unknown"
-        : worktreeState !== undefined && now - activeMs >= FINISHED_QUIET_MS
+        : worktreeState === "merged" && now - activeMs >= FINISHED_QUIET_MS
           ? "finished"
           : now - activeMs >= IDLE_SECTION_MS
             ? "idle"

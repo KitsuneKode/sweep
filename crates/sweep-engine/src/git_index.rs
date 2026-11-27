@@ -383,28 +383,34 @@ fn tracked_via_git(root: &Path, rels: &[(Vec<u8>, &PathBuf)]) -> Vec<PathBuf> {
     tracked
 }
 
+fn git_ls_files_command(root: &Path, pathspecs: &[&str]) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+        "-c",
+        "core.quotePath=false",
+        "-C",
+    ])
+    .arg(root)
+    .args(["ls-files", "-z", "--cached", "--"])
+    .args(pathspecs)
+    .env("LC_ALL", "C")
+    .env("LANG", "C")
+    .env("LANGUAGE", "C")
+    .env("GIT_OPTIONAL_LOCKS", "0")
+    .env("GIT_LITERAL_PATHSPECS", "1")
+    .env("GIT_TERMINAL_PROMPT", "0")
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::null());
+    cmd
+}
+
 fn run_git_ls_files(root: &Path, pathspecs: &[&str]) -> Option<Vec<u8>> {
-    let mut child = Command::new("git")
-        .args([
-            "-c",
-            "core.fsmonitor=false",
-            "-c",
-            "core.untrackedCache=false",
-            "-c",
-            "core.quotePath=false",
-            "-C",
-        ])
-        .arg(root)
-        .args(["ls-files", "-z", "--cached", "--"])
-        .args(pathspecs)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_LITERAL_PATHSPECS", "1")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+    let mut child = git_ls_files_command(root, pathspecs).spawn().ok()?;
     let mut stdout = child.stdout.take()?;
     let reader = std::thread::spawn(move || {
         let mut out = Vec::new();
@@ -522,5 +528,19 @@ mod tests {
         lying[8..12].copy_from_slice(&u32::MAX.to_be_bytes());
         assert_eq!(parse_index(&lying, 20), Err(IndexError::Unsupported));
         assert_eq!(parse_index(b"NOPE", 20), Err(IndexError::Unsupported));
+    }
+
+    #[test]
+    fn git_command_forces_c_locale() {
+        let cmd = git_ls_files_command(Path::new("/tmp/repo"), &["dist"]);
+        let envs: HashMap<_, _> = cmd.get_envs().collect();
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("LC_ALL")),
+            Some(&Some(std::ffi::OsStr::new("C")))
+        );
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("LANG")),
+            Some(&Some(std::ffi::OsStr::new("C")))
+        );
     }
 }

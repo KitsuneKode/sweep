@@ -64,11 +64,13 @@ says how much you can reclaim, how much of it sits in idle projects, and once
 you queue something, how much is queued.
 
 Linked git worktrees name their repository instead of the folder they sit in
-(`app · merged`, `app · worktree`). A worktree whose branch is merged into the
-default branch, or whose remote branch was deleted (what a merged pull request
-leaves), and that nobody has touched for a day, is listed first under
-**Finished worktrees**. That is a hint about which build output you are done
-with: sweep still removes only build output, never the worktree or its branch.
+(`app · merged`, `app · worktree`, `app · Tracking branch missing · check git`).
+A clean worktree whose own commits are proven merged into the repository's
+verified default branch, and that nobody has touched for a day, is listed first
+under **Finished worktrees**. A worktree whose remote tracking branch is missing
+shows **Tracking branch missing · check git** and is never listed as finished.
+That is a hint about which build output you are done with: sweep still removes
+only build output, never the worktree or its branch.
 
 - Space queues a whole project's safe and caution items, or unqueues them.
 - Enter opens a project to show its artifacts by path; Space then queues one.

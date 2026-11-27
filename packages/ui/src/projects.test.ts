@@ -162,6 +162,7 @@ describe("finished worktrees", () => {
     [
       worktree("merged", 3, "merged"),
       worktree("squashed", 2, "upstream_gone"),
+      worktree("old-gone", 45, "upstream_gone"),
       worktree("just-merged", 0, "merged"),
       worktree("open", 2),
     ],
@@ -171,9 +172,11 @@ describe("finished worktrees", () => {
   );
   const byName = new Map(projects.map((project) => [project.name, project]));
 
-  test("a merged or remote-gone branch left alone for a day reads as finished", () => {
+  test("only a proven merged branch left alone for a day reads as finished", () => {
     expect(byName.get("merged")?.section).toBe("finished");
-    expect(byName.get("squashed")?.section).toBe("finished");
+    // D5: upstream_gone must never produce the "Finished worktrees" group.
+    expect(byName.get("squashed")?.section).toBe("recent");
+    expect(byName.get("old-gone")?.section).toBe("idle");
   });
 
   test("one merged within the day, and an open one, stay where activity puts them", () => {
@@ -183,7 +186,7 @@ describe("finished worktrees", () => {
 
   test("a worktree names its repository and branch state, not the .worktrees folder", () => {
     expect(byName.get("merged")?.parent).toBe("app · merged");
-    expect(byName.get("squashed")?.parent).toBe("app · remote branch gone");
+    expect(byName.get("squashed")?.parent).toBe("app · Tracking branch missing · check git");
     expect(byName.get("open")?.parent).toBe("app · worktree");
   });
 
@@ -191,6 +194,6 @@ describe("finished worktrees", () => {
     const sections = buildProjectRows(projects, new Set()).flatMap((row) =>
       row.kind === "section" ? [row.section] : [],
     );
-    expect(sections).toEqual(["finished", "recent"]);
+    expect(sections).toEqual(["finished", "idle", "recent"]);
   });
 });

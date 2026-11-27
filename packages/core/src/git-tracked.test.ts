@@ -3,7 +3,12 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitTrackedPaths, gitTrackedPathsViaEngine, gitTrackedPathsViaGit } from "./git-tracked.js";
+import {
+  GIT_ENV,
+  gitTrackedPaths,
+  gitTrackedPathsViaEngine,
+  gitTrackedPathsViaGit,
+} from "./git-tracked.js";
 import { isRustEngineAvailable } from "./rust-engine.js";
 
 let root: string;
@@ -155,6 +160,11 @@ for (const impl of IMPLEMENTATIONS) {
     });
   });
 }
+
+test("GIT_ENV forces C locale so parsed git output is locale-independent", () => {
+  expect(GIT_ENV.LC_ALL).toBe("C");
+  expect(GIT_ENV.LANG).toBe("C");
+});
 
 test("the public check agrees with git on an ordinary repository", () => {
   if (!hasGit) return;

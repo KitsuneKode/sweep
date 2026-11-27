@@ -224,10 +224,11 @@ export interface ScanCandidate extends ScanEntry {
    */
   worktreeOf?: string;
   /**
-   * Whether that worktree's branch is finished: `merged` into the default
-   * branch, or `upstream_gone` (its remote branch was deleted, as a merged
-   * pull request leaves it). A triage hint, never a safety boundary; absent
-   * when the branch is open or its state could not be read.
+   * Worktree branch status: `merged` (clean worktree with commits proven
+   * merged into a verified default branch), or `upstream_gone` (its remote
+   * tracking branch is missing — never treated as finished). A triage hint,
+   * never a safety boundary; absent when the branch is open, dirty, or its
+   * state could not be read.
    */
   worktreeState?: WorktreeState;
 }
