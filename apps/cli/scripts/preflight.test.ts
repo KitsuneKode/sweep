@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { removeTempDir, runCommand } from "./preflight.js";
+import { parseNpmPackJson, removeTempDir, runCommand } from "./preflight.js";
 
 const PREFLIGHT_TEST_TIMEOUT_MS = 30_000;
 const PREFLIGHT_CHILD_TIMEOUT_MS = 25_000;
@@ -252,3 +252,34 @@ test(
   },
   PREFLIGHT_TEST_TIMEOUT_MS,
 );
+
+test("parseNpmPackJson parses npm array, npm 12 keyed object, and single object after lifecycle text", () => {
+  const npm11 = [
+    "> @kitsunekode/sweep@0.5.3 prepack",
+    "> bun run ./scripts/prepack.ts",
+    "[info] preparing manifest",
+    "[",
+    '  { "id": "@kitsunekode/sweep@0.5.3", "filename": "kitsunekode-sweep-0.5.3.tgz" }',
+    "]",
+  ].join("\n");
+  expect(parseNpmPackJson(npm11)).toEqual(["kitsunekode-sweep-0.5.3.tgz"]);
+
+  const npm12 = [
+    "> @kitsunekode/sweep@0.5.3 prepack",
+    "> bun run ./scripts/prepack.ts",
+    "{not-json}",
+    "{",
+    '  "@kitsunekode/sweep": {',
+    '    "id": "@kitsunekode/sweep@0.5.3",',
+    '    "filename": "kitsunekode-sweep-0.5.3.tgz"',
+    "  }",
+    "}",
+  ].join("\n");
+  expect(parseNpmPackJson(npm12)).toEqual(["kitsunekode-sweep-0.5.3.tgz"]);
+
+  const directObject = '{"filename": "kitsunekode-sweep-0.5.3.tgz"}\n';
+  expect(parseNpmPackJson(directObject)).toEqual(["kitsunekode-sweep-0.5.3.tgz"]);
+
+  expect(() => parseNpmPackJson("> prepack\nno json here\n")).toThrow(/no parseable JSON/);
+  expect(() => parseNpmPackJson('[{"id": "missing-filename"}]')).toThrow(/missing filename/);
+});

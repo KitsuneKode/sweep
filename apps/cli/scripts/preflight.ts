@@ -218,6 +218,46 @@ function linkNodeModules(source: string, destination: string): void {
   symlinkSync(source, destination, process.platform === "win32" ? "junction" : "dir");
 }
 
+export function parseNpmPackJson(stdout: string): string[] {
+  let parsed: unknown;
+  let found = false;
+  for (const match of stdout.matchAll(/^[ \t]*[[{]/gm)) {
+    const index = match.index;
+    if (index === undefined) continue;
+    try {
+      parsed = JSON.parse(stdout.slice(index));
+      found = true;
+      break;
+    } catch {
+      // Lifecycle output may precede the JSON payload.
+    }
+  }
+  if (!found) {
+    throw new Error(`npm pack --json produced no parseable JSON: ${stdout.slice(0, 400)}`);
+  }
+  const entries: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : parsed !== null && typeof parsed === "object"
+      ? "filename" in parsed
+        ? [parsed]
+        : Object.values(parsed)
+      : [];
+  const filenames: string[] = [];
+  for (const entry of entries) {
+    if (
+      entry === null ||
+      typeof entry !== "object" ||
+      !("filename" in entry) ||
+      typeof entry.filename !== "string" ||
+      entry.filename.length === 0
+    ) {
+      throw new Error(`npm pack --json entry missing filename: ${stdout.slice(0, 400)}`);
+    }
+    filenames.push(entry.filename);
+  }
+  return filenames;
+}
+
 async function packAndExtractTarball(): Promise<ExtractedTarball> {
   const packDir = mkdtempSync(join(tmpdir(), "sweep-preflight-pack-"));
   try {
@@ -225,15 +265,12 @@ async function packAndExtractTarball(): Promise<ExtractedTarball> {
       cwd: CLI_ROOT,
       timeoutMs: 60_000,
     });
-    const jsonStart = out.search(/^\s*\[/m);
-    const packedList = JSON.parse(jsonStart >= 0 ? out.slice(jsonStart) : out) as Array<{
-      filename: string;
-    }>;
+    const packedFiles = parseNpmPackJson(out);
     assert(
-      packedList.length === 1 && typeof packedList[0]?.filename === "string",
+      packedFiles.length === 1,
       `npm pack did not produce a single tarball: ${out.slice(0, 400)}`,
     );
-    const tgzPath = join(packDir, packedList[0]!.filename);
+    const tgzPath = join(packDir, packedFiles[0]!);
     const packageDir = join(packDir, "package");
     const { entries, manifest } = readPackedTarball(tgzPath, packageDir);
     assert(manifest !== null, "packed tarball is missing package/package.json");
