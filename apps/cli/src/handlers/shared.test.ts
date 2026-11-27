@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -21,6 +22,8 @@ import {
   executePlanDeletion,
   isOpenTuiAvailable,
   openTuiMissingMessage,
+  resetEngineFallbackNoteForTest,
+  resolveEngineBackend,
   resolveScanTarget,
 } from "./shared.js";
 
@@ -235,20 +238,94 @@ function claimedPlan(path: string, name: string, riskTier: ScanCandidate["riskTi
   };
 }
 
-test("a missing terminal UI library names a reinstall of sweep, not a second npm install", () => {
+test("a missing terminal UI library names reinstall, bunx, and standalone fixes", async () => {
   const missing = [
     () => {
       throw new Error("not installed");
     },
   ];
   expect(isOpenTuiAvailable(missing)).toBe(false);
-  expect(() => assertOpenTuiAvailable(missing)).toThrow(GuardrailError);
+  await expect(assertOpenTuiAvailable(missing)).rejects.toThrow(GuardrailError);
   const message = openTuiMissingMessage();
   expect(message).toMatch(/bun add -g @kitsunekode\/sweep|npm install -g @kitsunekode\/sweep/);
-  expect(message).toContain("bun add -g @opentui/core");
-  expect(message).toContain("sweep ui <folder>");
+  expect(message).toContain("bunx @kitsunekode/sweep ui <folder>");
+  expect(message).toContain("standalone");
   expect(message).not.toContain("npm install @opentui/core");
-  expect(isOpenTuiAvailable([() => "/opt/opentui/core"])).toBe(true);
+
+  const root = mkdtempSync(join(tmpdir(), "sweep-opentui-shared-"));
+  roots.push(root);
+  const pkgDir = join(root, "node_modules", "@opentui", "core");
+  mkdirSync(pkgDir, { recursive: true });
+  writeFileSync(
+    join(pkgDir, "package.json"),
+    JSON.stringify({ name: "@opentui/core", version: "0.6.8" }),
+  );
+  const entry = join(pkgDir, "index.js");
+  writeFileSync(entry, "export const createCliRenderer = () => {};\n");
+  expect(
+    isOpenTuiAvailable({
+      resolvers: [() => entry],
+      requiredRange: "^0.6.8",
+      requiredExports: ["createCliRenderer"],
+    }),
+  ).toBe(true);
+});
+
+test.skipIf(process.platform === "win32")(
+  "--engine auto prints a single stderr note when Rust probe fails for a non-missing reason",
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-auto-fallback-"));
+    roots.push(root);
+    const previousEngine = process.env.SWEEP_ENGINE_PATH;
+    const fakeEngine = join(root, "broken-engine");
+    writeFileSync(
+      fakeEngine,
+      "#!/bin/sh\necho \"libc.so.6: version 'GLIBC_2.39' not found\" >&2\nexit 127\n",
+    );
+    chmodSync(fakeEngine, 0o700);
+    process.env.SWEEP_ENGINE_PATH = fakeEngine;
+    resetEngineFallbackNoteForTest();
+
+    const errors: string[] = [];
+    const spy = spyOn(console, "error").mockImplementation((message: unknown) => {
+      errors.push(String(message));
+    });
+    try {
+      expect(resolveEngineBackend({ engine: "auto" })).toBe("js");
+      expect(resolveEngineBackend({ engine: "auto" })).toBe("js");
+    } finally {
+      spy.mockRestore();
+      if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previousEngine;
+    }
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("Rust engine unavailable");
+    expect(errors[0]).toContain("GLIBC_2.39");
+    expect(errors[0]).toContain("falling back to JS engine");
+  },
+);
+
+test("--engine auto stays silent when the Rust engine is simply not installed", () => {
+  const root = mkdtempSync(join(tmpdir(), "sweep-auto-missing-"));
+  roots.push(root);
+  const previousEngine = process.env.SWEEP_ENGINE_PATH;
+  process.env.SWEEP_ENGINE_PATH = join(root, "does-not-exist");
+  resetEngineFallbackNoteForTest();
+
+  const errors: string[] = [];
+  const spy = spyOn(console, "error").mockImplementation((message: unknown) => {
+    errors.push(String(message));
+  });
+  try {
+    expect(resolveEngineBackend({ engine: "auto" })).toBe("js");
+  } finally {
+    spy.mockRestore();
+    if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+    else process.env.SWEEP_ENGINE_PATH = previousEngine;
+  }
+
+  expect(errors).toEqual([]);
 });
 
 test("unattended consent follows the live tier, and --json still names the path", () => {

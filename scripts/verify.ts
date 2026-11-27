@@ -76,6 +76,17 @@ const steps: Step[] = [
     unless: () =>
       engineBin()?.includes("release") ? false : "no release engine for native package install",
   },
+  {
+    name: "installed UI smoke",
+    cmd: ["bun", "run", "scripts/smoke-installed-ui.ts"],
+    release: true,
+    unless: () =>
+      process.platform !== "linux"
+        ? "Linux tmux PTY smoke only"
+        : !Bun.which("tmux")
+          ? "tmux not installed"
+          : false,
+  },
   { name: "pack:preview", cmd: ["bun", "run", "pack:preview"], release: true },
   {
     name: "standalone smoke",

@@ -37,6 +37,8 @@ const args = [
   outfile,
   "--define",
   `__SWEEP_VERSION__:${JSON.stringify(version)}`,
+  "--define",
+  `process.env.NODE_ENV:"production"`,
 ];
 // Opt-out exists only to measure the same source with and without bytecode.
 if (!process.argv.includes("--no-bytecode")) args.push("--bytecode");
@@ -46,6 +48,7 @@ if (target && target.startsWith("bun-")) {
 
 const proc = Bun.spawnSync(args, {
   cwd: REPO_ROOT,
+  env: { ...process.env, NODE_ENV: "production" },
   stdout: "inherit",
   stderr: "inherit",
 });

@@ -7,22 +7,21 @@ import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
 import { findProjectConfigPath, validateProjectConfigFile } from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
-import {
-  isRustEngineAvailable,
-  resolveRustEngineBinary,
-} from "@kitsunekode/sweep-core/rust-engine";
+import { probeRustEngine } from "@kitsunekode/sweep-core/rust-engine";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { formatBytes, sanitizeTerminalText } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
-  isOpenTuiAvailable,
+  drainStdout,
   resolveScanConfig,
   resolveEngineBackend,
   runScanToPlan,
+  verifyOpenTuiAvailable,
   warnIgnoredOptions,
   writeJson,
 } from "./shared.js";
+import { hasRegisteredUiModule } from "./ui.js";
 
 export type DoctorHandlerOptions = CliOptions & {
   path?: string;
@@ -33,6 +32,8 @@ export type DoctorCheck = {
   name: string;
   ok: boolean;
   detail: string;
+  /** Additive machine-readable failure/fallback reason when a check warns. */
+  reason?: string;
 };
 
 function targetIsDirectory(targetDir: string): boolean {
@@ -49,13 +50,14 @@ export async function collectDoctorChecks(
 ): Promise<DoctorCheck[]> {
   // Report the config file loadConfig would actually find - ancestors count.
   const configPath = findProjectConfigPath(targetDir);
-  const rustBinary = resolveRustEngineBinary();
-  const rustOk = isRustEngineAvailable();
+  const rustProbe = probeRustEngine();
+  const rustOk = rustProbe.available;
+  const rustExecutable = rustProbe.resolvedPath ?? rustProbe.binary;
   let rustSafetyOk = false;
   if (rustOk) {
     try {
       const capabilities = JSON.parse(
-        execFileSync(rustBinary, ["--capabilities"], {
+        execFileSync(rustExecutable, ["--capabilities"], {
           encoding: "utf8",
           timeout: 1000,
           killSignal: "SIGKILL",
@@ -67,8 +69,9 @@ export async function collectDoctorChecks(
       /* Report an incompatible or broken engine rather than certifying it. */
     }
   }
-  const engine = resolveEngineBackend(opts);
-  const openTuiOk = isOpenTuiAvailable();
+  const engine = resolveEngineBackend(opts, { warnOnFallback: false });
+  const embeddedUi = hasRegisteredUiModule();
+  const openTui = embeddedUi ? null : await verifyOpenTuiAvailable();
   const hasConfigFile = configPath !== null;
   const configValidity = hasConfigFile
     ? validateProjectConfigFile(configPath, targetDir)
@@ -155,12 +158,22 @@ export async function collectDoctorChecks(
 
     {
       name: "opentui",
-      ok: openTuiOk,
-      detail: openTuiOk
-        ? "available"
-        : "reinstall @kitsunekode/sweep; sweep ui includes @opentui/core",
+      ok: embeddedUi ? true : (openTui?.ok ?? false),
+      detail: embeddedUi
+        ? "embedded (standalone)"
+        : (openTui?.detail ?? "missing; reinstall @kitsunekode/sweep"),
+      ...(!embeddedUi && openTui && !openTui.ok ? { reason: openTui.reason } : {}),
     },
-    { name: "rust_engine", ok: rustOk, detail: rustOk ? rustBinary : "not found" },
+    {
+      name: "rust_engine",
+      ok: rustOk,
+      detail: rustOk
+        ? rustExecutable
+        : rustProbe.reasonKind === "not_installed"
+          ? "not found"
+          : `${rustExecutable} (${rustProbe.reason ?? rustProbe.reasonKind})`,
+      ...(!rustOk && rustProbe.reason ? { reason: rustProbe.reason } : {}),
+    },
     {
       name: "rust_apply_safety",
       ok: rustSafetyOk,
@@ -196,9 +209,11 @@ export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
           name: check.name,
           status: check.ok ? "ok" : "warn",
           detail: check.detail,
+          ...(check.reason ? { reason: check.reason } : {}),
         })),
         hasWarnings,
       });
+      await drainStdout();
       exitWith(hasWarnings ? EXIT.WARN : EXIT.OK);
     }
 

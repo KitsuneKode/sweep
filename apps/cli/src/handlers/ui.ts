@@ -118,6 +118,10 @@ export function registerUiModule(mod: SweepUiModule): void {
   registeredUiModule = mod;
 }
 
+export function hasRegisteredUiModule(): boolean {
+  return registeredUiModule !== null;
+}
+
 let registeredUiModule: SweepUiModule | null = null;
 
 async function loadSweepUi(): Promise<SweepUiModule> {

@@ -10,8 +10,15 @@ test("actual preflight accepts preview versions and rejects malformed versions",
   const owned = mkdtempSync(join(parent, "preflight-version-"));
   const cli = join(owned, "apps/cli");
   mkdirSync(join(cli, "scripts"), { recursive: true });
-  for (const script of ["preflight.ts", "release-policy.ts"])
+  for (const script of [
+    "preflight.ts",
+    "release-policy.ts",
+    "bundle-contract.ts",
+    "prepack.ts",
+    "atomic-write.ts",
+  ])
     copyFileSync(join(import.meta.dir, script), join(cli, "scripts", script));
+  writeFileSync(join(owned, "package.json"), JSON.stringify({ workspaces: { catalog: {} } }));
   try {
     for (const [version, valid] of [
       ["0.4.0-next.0", true],

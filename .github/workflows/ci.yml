@@ -170,7 +170,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y zsh fish
+          sudo apt-get install -y zsh fish tmux
           for shell in bash zsh fish; do
             node apps/cli/dist/sweep.js completions "$shell" > "$RUNNER_TEMP/sweep-completion.$shell"
             "$shell" -n "$RUNNER_TEMP/sweep-completion.$shell"
@@ -178,6 +178,9 @@ jobs:
 
       - name: Install local tarballs and verify owned scan-save-apply
         run: bun run scripts/smoke-package.ts --online
+
+      - name: Install packed CLI globally over old @opentui/core and verify UI in tmux PTY
+        run: bun run scripts/smoke-installed-ui.ts
 
       - name: Qualify nested bind mounts in a private namespace
         shell: bash

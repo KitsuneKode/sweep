@@ -6,10 +6,8 @@ import { beginApplySession, type ApplySession } from "@kitsunekode/sweep-core/ap
 import { randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, join, resolve, sep } from "node:path";
 import type {
   ApplyProgress,
   ApplyReport,
@@ -43,13 +41,22 @@ import { resolveSelectedCandidates, toCandidate } from "@kitsunekode/sweep-core/
 import { appendHistory } from "@kitsunekode/sweep-core/history";
 import {
   scanToPlanViaRust,
-  isRustEngineAvailable,
+  probeRustEngine,
   rustScanBlockedReason,
   defaultRustSelectionPolicy,
   type EngineBackend,
 } from "@kitsunekode/sweep-core/rust-engine";
 import { JsonOutput } from "../json-output.js";
 import { setActiveApply } from "../apply-lifecycle.js";
+import {
+  defaultOpenTuiResolvers,
+  inspectOpenTui,
+  openTuiInstallHint,
+  openTuiMissingMessage,
+  verifyOpenTuiAvailable,
+  type OpenTuiInspectOptions,
+  type OpenTuiInspection,
+} from "./opentui-check.js";
 
 export type OutputOptions = Pick<CliOptions, "quiet" | "verbose">;
 
@@ -131,10 +138,37 @@ export function resolveProjectScanConfig(targetDir: string, opts: CliOptions): S
   return loadConfig(targetDir, opts.config, {}, warnConfig);
 }
 
-export function resolveEngineBackend(opts: Pick<CliOptions, "engine">): EngineBackend {
+let lastEngineFallbackNoteKey: string | undefined;
+
+/** @internal Test seam to verify single-note fallback behavior across cases. */
+export function resetEngineFallbackNoteForTest(): void {
+  lastEngineFallbackNoteKey = undefined;
+}
+
+export function resolveEngineBackend(
+  opts: Pick<CliOptions, "engine">,
+  options: { warnOnFallback?: boolean } = {},
+): EngineBackend {
   if (opts.engine === "js") return "js";
   if (opts.engine === "rust") return "rust";
-  return isRustEngineAvailable() ? "rust" : "js";
+  const probe = probeRustEngine();
+  if (probe.available) return "rust";
+  if (
+    options.warnOnFallback !== false &&
+    probe.reasonKind &&
+    probe.reasonKind !== "not_installed"
+  ) {
+    const target = probe.resolvedPath ?? probe.binary;
+    const detail = probe.reason ?? probe.reasonKind;
+    const key = `${target}\0${detail}`;
+    if (lastEngineFallbackNoteKey !== key) {
+      lastEngineFallbackNoteKey = key;
+      console.error(
+        `note: Rust engine unavailable (${sanitizeTerminalText(detail)}); falling back to JS engine`,
+      );
+    }
+  }
+  return "js";
 }
 
 /**
@@ -286,63 +320,34 @@ function isSelectionMode(value: string | undefined): value is SelectionMode {
   return value === "default" || value === "safe" || value === "all" || value === "none";
 }
 
-const OPEN_TUI = "@opentui/core";
-
-interface BunModuleResolver {
-  resolveSync?: (specifier: string, from: string) => string;
-}
-
-function bunModuleResolver(): BunModuleResolver | undefined {
-  return (globalThis as { Bun?: BunModuleResolver }).Bun;
-}
-
-/** Node's require from the bundle, then Bun's resolver. bunx installs dependencies
- * into its own tree; createRequire from the bundled file misses that layout. */
-export function defaultOpenTuiResolvers(): readonly (() => string)[] {
-  const from = dirname(fileURLToPath(import.meta.url));
-  return [
-    () => createRequire(import.meta.url).resolve(OPEN_TUI),
-    () => {
-      const resolveSync = bunModuleResolver()?.resolveSync;
-      if (!resolveSync) throw new Error("bun resolver unavailable");
-      return resolveSync(OPEN_TUI, from);
-    },
-  ];
-}
+export {
+  defaultOpenTuiResolvers,
+  inspectOpenTui,
+  openTuiInstallHint,
+  openTuiMissingMessage,
+  verifyOpenTuiAvailable,
+  type OpenTuiInspectOptions,
+  type OpenTuiInspection,
+};
 
 export function isOpenTuiAvailable(
-  resolvers: readonly (() => string)[] = defaultOpenTuiResolvers(),
+  resolversOrOptions?: readonly (() => string)[] | OpenTuiInspectOptions,
 ): boolean {
-  for (const resolveModule of resolvers) {
-    try {
-      resolveModule();
-      return true;
-    } catch {
-      continue;
-    }
-  }
-  return false;
+  const options = Array.isArray(resolversOrOptions)
+    ? { resolvers: resolversOrOptions }
+    : (resolversOrOptions as OpenTuiInspectOptions | undefined);
+  return inspectOpenTui(options).ok;
 }
 
-/** One package install. `@opentui/core` ships with sweep; it is not a second manual install. */
-export function openTuiInstallHint(): string {
-  return bunModuleResolver()
-    ? "bun add -g @kitsunekode/sweep"
-    : "npm install -g @kitsunekode/sweep";
-}
-
-export function openTuiMissingMessage(): string {
-  return [
-    "sweep ui needs @opentui/core, and this install does not have it.",
-    `Reinstall sweep so the UI library comes with it:  ${openTuiInstallHint()}`,
-    "A copy published before that still needs the library named:  bun add -g @opentui/core",
-    "Then run:  sweep ui <folder>",
-  ].join("\n");
-}
-
-export function assertOpenTuiAvailable(resolvers?: readonly (() => string)[]): void {
-  if (isOpenTuiAvailable(resolvers)) return;
-  throw new GuardrailError(openTuiMissingMessage());
+export async function assertOpenTuiAvailable(
+  resolversOrOptions?: readonly (() => string)[] | OpenTuiInspectOptions,
+): Promise<void> {
+  const options = Array.isArray(resolversOrOptions)
+    ? { resolvers: resolversOrOptions }
+    : (resolversOrOptions as OpenTuiInspectOptions | undefined);
+  const result = await verifyOpenTuiAvailable(options);
+  if (result.ok) return;
+  throw new GuardrailError(result.message);
 }
 
 let jsonOutput: JsonOutput | undefined;

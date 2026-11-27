@@ -8,6 +8,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORM_NPM_NAMES } from "@kitsunekode/sweep-core/native-platforms";
+import { findReactDevMarkers, verifyDistAgainstManifest } from "./bundle-contract.js";
+import { preparePublishManifest, readCatalogs } from "./prepack.js";
 import { releasePolicy } from "./release-policy.js";
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -82,6 +84,30 @@ check("publish bundles stay within the 4 MiB distribution budget", () => {
     bytes <= 4 * 1024 * 1024,
     `${bytes} bundle bytes exceed 4 MiB; review dependency/asset growth`,
   );
+});
+
+check("dist/sweep-ui.js contains no React development markers", () => {
+  const uiBundle = join(CLI_ROOT, "dist/sweep-ui.js");
+  assert(existsSync(uiBundle), "not found. Run: bun run build");
+  const markers = findReactDevMarkers(readFileSync(uiBundle, "utf8"));
+  assert(
+    markers.length === 0,
+    `dist/sweep-ui.js contains React development markers: ${markers.join(", ")}`,
+  );
+});
+
+check("packed manifest strips devDependencies/scripts and resolves all ranges", () => {
+  const packed = preparePublishManifest(pkg(), readCatalogs(REPO_ROOT));
+  assert(!("devDependencies" in packed), "packed manifest must not include devDependencies");
+  assert(!("scripts" in packed), "packed manifest must not include monorepo scripts");
+});
+
+check("dist/ bare package imports match packed manifest dependencies and built versions", () => {
+  const distDir = join(CLI_ROOT, "dist");
+  assert(existsSync(distDir), "dist/ not found. Run: bun run build");
+  const packed = preparePublishManifest(pkg(), readCatalogs(REPO_ROOT));
+  const { errors } = verifyDistAgainstManifest({ distDir, packedManifest: packed });
+  assert(errors.length === 0, errors.join("\n     "));
 });
 
 check("sweep --version prints a version string", () => {
