@@ -17,6 +17,7 @@ import { join } from "node:path";
 import {
   DEFAULT_CONFIG,
   DEFAULT_PATTERNS,
+  checkInitSweeprcTarget,
   loadConfig,
   buildRescanConfig,
   ConfigParseError,
@@ -268,19 +269,62 @@ describe("writeInitSweeprc", () => {
   );
 
   test.skipIf(process.platform === "win32")(
-    "force replacement refuses to overwrite a config owned by another user",
+    "refuses a config owned by another user both with and without force",
     () => {
       mkdirSync(dir("other-owner"), { recursive: true });
       const configPath = dir("other-owner", ".sweeprc");
       const original = '{"maxSizeGB": 2}\n';
       writeFileSync(configPath, original);
       const actualUid = process.getuid!();
+
+      // Injected stat simulates another owner even when no second uid is available.
+      expect(() =>
+        checkInitSweeprcTarget(configPath, false, {
+          lstat: () => ({
+            isSymbolicLink: () => false,
+            isFile: () => true,
+            uid: actualUid + 1,
+            mode: 0o100644,
+          }),
+        }),
+      ).toThrow(/owned by another user and cannot be replaced by sweep/);
+
       const uidSpy = spyOn(process, "getuid").mockReturnValue(actualUid + 1);
       try {
+        expect(() => checkInitSweeprcTarget(configPath, false)).toThrow(
+          /owned by another user and cannot be replaced by sweep/,
+        );
+        expect(() => writeInitSweeprc(configPath, false)).toThrow(
+          /owned by another user and cannot be replaced by sweep/,
+        );
         expect(() => writeInitSweeprc(configPath, true)).toThrow(ConfigParseError);
         expect(readFileSync(configPath, "utf8")).toBe(original);
       } finally {
         uidSpy.mockRestore();
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "ignores EINVAL/ENOTSUP on best-effort parent directory fsync",
+    () => {
+      mkdirSync(dir("fsync-best-effort"), { recursive: true });
+      const configPath = dir("fsync-best-effort", ".sweeprc");
+      const realFsync = fs.fsyncSync;
+      let calls = 0;
+      const fsyncSpy = spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+        calls++;
+        // First fsync is the file; second fsync is the parent directory.
+        if (calls === 2) {
+          throw Object.assign(new Error("dir fsync unsupported"), { code: "EINVAL" });
+        }
+        return realFsync(fd);
+      });
+      try {
+        expect(writeInitSweeprc(configPath, false)).toBe("created");
+        expect(calls).toBeGreaterThanOrEqual(2);
+      } finally {
+        fsyncSpy.mockRestore();
       }
     },
   );
@@ -392,13 +436,35 @@ describe("writeProjectSweeprc", () => {
     }
   });
 
-  test.skipIf(process.platform === "win32")("an update keeps existing config permissions", () => {
-    const path = dir(".sweeprc");
-    writeFileSync(path, "{}");
-    chmodSync(path, 0o640);
-    expect(writeProjectSweeprc(path, delta, true, projectSweeprcRevision(path)!)).toBe("updated");
-    expect(statSync(path).mode & 0o777).toBe(0o640);
-  });
+  test.skipIf(process.platform === "win32")(
+    "an update tightens overly permissive modes to 0644 while preserving stricter modes",
+    () => {
+      const strictProject = dir("strict-mode");
+      mkdirSync(strictProject, { recursive: true });
+      for (const strictMode of [0o600, 0o640]) {
+        const path = join(strictProject, ".sweeprc");
+        writeFileSync(path, "{}");
+        chmodSync(path, strictMode);
+        expect(writeProjectSweeprc(path, delta, true, projectSweeprcRevision(path)!)).toBe(
+          "updated",
+        );
+        expect(statSync(path).mode & 0o777).toBe(strictMode);
+      }
+
+      const looseProject = dir("loose-mode");
+      mkdirSync(looseProject, { recursive: true });
+      const loosePath = join(looseProject, ".sweeprc");
+      for (const looseMode of [0o666, 0o664]) {
+        writeFileSync(loosePath, "{}");
+        chmodSync(loosePath, looseMode);
+        expect(
+          writeProjectSweeprc(loosePath, delta, true, projectSweeprcRevision(loosePath)!),
+        ).toBe("updated");
+        expect(statSync(loosePath).mode & 0o777).toBe(0o644);
+        expect(loadConfig(looseProject).patterns).toContain("dist");
+      }
+    },
+  );
 
   test("unsupported exclusive installation leaves no partial config and explains recovery", () => {
     const path = dir(".sweeprc");
@@ -406,7 +472,16 @@ describe("writeProjectSweeprc", () => {
       throw Object.assign(new Error("hardlinks unsupported"), { code: "ENOTSUP" });
     });
     try {
-      expect(() => writeProjectSweeprc(path, delta)).toThrow("Create an empty .sweeprc");
+      let thrown: Error | undefined;
+      try {
+        writeProjectSweeprc(path, delta);
+      } catch (err) {
+        thrown = err as Error;
+      }
+      expect(thrown).toBeInstanceOf(ConfigParseError);
+      expect(thrown?.message).toContain("sweep init");
+      expect(thrown?.message).toContain("{}");
+      expect(thrown?.message).not.toContain("Create an empty .sweeprc");
       expect(fs.readdirSync(tmpDir)).toEqual([]);
     } finally {
       publication.mockRestore();
@@ -668,7 +743,8 @@ describe("config hardening", () => {
         const validated = validateProjectConfigFile(configPath, project);
         expect(validated.ok).toBe(false);
         if (!validated.ok) {
-          expect(validated.detail).toMatch(/chmod/);
+          expect(validated.detail).toContain("chmod go-w");
+          expect(validated.detail).not.toContain("chmod o-w");
           expect(validated.detail).toContain("--config explicitly");
         }
         // Explicit --config remains allowed for reviewed shared files.
