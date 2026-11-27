@@ -7,7 +7,7 @@ description: Install Sweep and complete your first read-only review.
 
 ### Standalone binary (no Node or Bun required)
 
-macOS and Linux (glibc 2.17+ and musl/Alpine):
+macOS and Linux (glibc 2.17+ and musl/Alpine; minimal Alpine containers need `apk add libstdc++ libgcc` for the standalone binary):
 
 ```sh
 brew install kitsunekode/tap/sweep

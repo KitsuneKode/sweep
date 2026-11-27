@@ -194,6 +194,10 @@ jobs:
               /usr/local/bin/sweep-engine --version
               eng="$(/usr/local/bin/sweep-engine scan /work/proj < /dev/null)"
               printf "%s\n" "$eng" | grep -q "node_modules"
+              if command -v apk >/dev/null 2>&1; then
+                # Bun musl standalone executables dynamically link libstdc++/libgcc.
+                apk add --no-cache libstdc++ libgcc >/dev/null
+              fi
               PATH="" /usr/local/bin/sweep --ui-probe
               PATH="" /usr/local/bin/sweep --version
               scan="$(PATH="" /usr/local/bin/sweep scan /work/proj --engine rust --json)"

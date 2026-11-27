@@ -27,10 +27,12 @@ any required symbol exceeds `GLIBC_2.17`) and smoke-running the artifacts inside
 `debian:11-slim`.
 
 Linux musl engine binaries are statically linked (`x86_64-unknown-linux-musl`
-and `aarch64-unknown-linux-musl`) with zero glibc dependencies, and musl
-standalone binaries target Bun's musl runtime with OpenTUI's musl native
-library. Release CI checks ELF metadata for zero glibc dependencies and
-smoke-runs the artifacts inside `alpine:3.21`.
+and `aarch64-unknown-linux-musl`) with zero glibc or shared-library
+dependencies, so they run on bare Alpine containers. Musl standalone binaries
+target Bun's musl runtime with OpenTUI's musl native library and dynamically
+link `libstdc++` and `libgcc` (on minimal Alpine images, run
+`apk add libstdc++ libgcc`). Release CI checks ELF metadata for zero glibc
+dependencies and smoke-runs the artifacts inside `alpine:3.21`.
 
 Windows ARM64 is not currently a shipped target. Refer to the specific release
 assets rather than assuming an unsupported binary will work. Interactive
