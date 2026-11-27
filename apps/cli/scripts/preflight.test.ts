@@ -47,3 +47,69 @@ test("actual preflight accepts preview versions and rejects malformed versions",
     rmSync(owned, { recursive: true, force: true });
   }
 });
+
+test("actual preflight fails when dist/sweep-lib.js is missing even if src/ and dist/sweep.js exist", async () => {
+  const parent = join(import.meta.dir, "../../../target");
+  mkdirSync(parent, { recursive: true });
+  const owned = mkdtempSync(join(parent, "preflight-missing-lib-"));
+  const cli = join(owned, "apps/cli");
+  mkdirSync(join(cli, "scripts"), { recursive: true });
+  mkdirSync(join(cli, "src"), { recursive: true });
+  mkdirSync(join(cli, "dist"), { recursive: true });
+  for (const script of [
+    "preflight.ts",
+    "release-policy.ts",
+    "bundle-contract.ts",
+    "prepack.ts",
+    "postpack.ts",
+    "atomic-write.ts",
+  ]) {
+    copyFileSync(join(import.meta.dir, script), join(cli, "scripts", script));
+  }
+  writeFileSync(join(owned, "package.json"), JSON.stringify({ workspaces: { catalog: {} } }));
+  writeFileSync(join(owned, "README.md"), "# readme\n");
+  writeFileSync(join(owned, "LICENSE"), "MIT\n");
+  writeFileSync(join(cli, "src/index.ts"), "export {};\n");
+  writeFileSync(join(cli, "src/bin.ts"), "export {};\n");
+  writeFileSync(
+    join(cli, "dist/sweep.js"),
+    `#!/usr/bin/env node\n${"//".repeat(6000)}\nconsole.log("0.5.3");\n`,
+  );
+  writeFileSync(join(cli, "dist/sweep-ui.js"), "export const ui = 1;\n");
+  // Deliberately omit dist/sweep-lib.js.
+  writeFileSync(
+    join(cli, "package.json"),
+    JSON.stringify({
+      name: "@kitsunekode/sweep",
+      version: "0.5.3",
+      description: "test",
+      license: "MIT",
+      bin: { sweep: "dist/sweep.js" },
+      files: ["dist", "README.md", "LICENSE"],
+      exports: { ".": "./src/index.ts", "./bin": "./src/bin.ts" },
+      publishConfig: { access: "public" },
+      repository: "https://example.com/repo",
+      homepage: "https://example.com",
+      bugs: "https://example.com/issues",
+      scripts: {
+        prepack: "bun run ./scripts/prepack.ts",
+        postpack: "bun run ./scripts/postpack.ts",
+      },
+    }),
+  );
+
+  try {
+    const child = Bun.spawn([process.execPath, join(cli, "scripts/preflight.ts")], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [err, code] = await Promise.all([new Response(child.stderr).text(), child.exited]);
+    expect(code).not.toBe(0);
+    expect(err).toContain("dist/sweep-lib.js");
+    expect(err).toContain("every workspace and packed exports/bin target resolves to a real file");
+    expect(err).toContain("packed tarball contains every exports/bin entry point");
+    expect(err).toContain("sweep-lib.js imports without running the CLI");
+  } finally {
+    rmSync(owned, { recursive: true, force: true });
+  }
+});

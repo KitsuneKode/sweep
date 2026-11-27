@@ -109,7 +109,7 @@ async function runBundle(
  * markers in the bundle and would break `@opentui/react`'s ErrorBoundary if it
  * ever rendered. Rewrite those references to production `jsx` at bundle time.
  */
-const openTuiProdJsxPlugin: Bun.BunPlugin = {
+export const openTuiProdJsxPlugin: Bun.BunPlugin = {
   name: "opentui-react-prod-jsx",
   setup(build) {
     build.onLoad({ filter: /[\\/]@opentui[\\/]react[\\/].*\.js$/ }, async (args) => {

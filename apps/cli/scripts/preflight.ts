@@ -4,11 +4,17 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORM_NPM_NAMES } from "@kitsunekode/sweep-core/native-platforms";
-import { findReactDevMarkers, verifyDistAgainstManifest } from "./bundle-contract.js";
+import {
+  collectManifestEntryTargets,
+  findReactDevMarkers,
+  readPackedTarball,
+  verifyDistAgainstManifest,
+} from "./bundle-contract.js";
 import { preparePublishManifest, readCatalogs } from "./prepack.js";
 import { releasePolicy } from "./release-policy.js";
 
@@ -52,8 +58,10 @@ function pkg(): Record<string, unknown> {
 
 console.log("\npreflight checks\n");
 
-check("dist/sweep.js exists", () => {
-  assert(existsSync(DIST), "not found. Run: bun run build");
+check("dist/sweep.js, dist/sweep-ui.js, and dist/sweep-lib.js all exist", () => {
+  for (const file of ALLOWED_DIST_FILES) {
+    assert(existsSync(join(CLI_ROOT, "dist", file)), `missing dist/${file}. Run: bun run build`);
+  }
 });
 
 check("dist/sweep.js starts with shebang on line 1", () => {
@@ -102,12 +110,45 @@ check("packed manifest strips devDependencies/scripts and resolves all ranges", 
   assert(!("scripts" in packed), "packed manifest must not include monorepo scripts");
 });
 
-check("dist/ bare package imports match packed manifest dependencies and built versions", () => {
+check("packed tarball contains every exports/bin entry point and valid runtime imports", () => {
   const distDir = join(CLI_ROOT, "dist");
   assert(existsSync(distDir), "dist/ not found. Run: bun run build");
-  const packed = preparePublishManifest(pkg(), readCatalogs(REPO_ROOT));
-  const { errors } = verifyDistAgainstManifest({ distDir, packedManifest: packed });
-  assert(errors.length === 0, errors.join("\n     "));
+  const packDir = mkdtempSync(join(tmpdir(), "sweep-preflight-pack-"));
+  try {
+    const out = execFileSync("npm", ["pack", "--json", "--pack-destination", packDir], {
+      cwd: CLI_ROOT,
+      encoding: "utf8",
+      timeout: 60_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const jsonStart = out.search(/^\s*\[/m);
+    const packedList = JSON.parse(jsonStart >= 0 ? out.slice(jsonStart) : out) as Array<{
+      filename: string;
+    }>;
+    assert(
+      packedList.length === 1 && typeof packedList[0]?.filename === "string",
+      `npm pack did not produce a single tarball: ${out.slice(0, 400)}`,
+    );
+    const tgzPath = join(packDir, packedList[0]!.filename);
+    const { entries, manifest } = readPackedTarball(tgzPath);
+    assert(manifest !== null, "packed tarball is missing package/package.json");
+
+    const entryTargets = collectManifestEntryTargets(manifest);
+    assert(entryTargets.length > 0, "packed manifest has no exports/bin targets");
+    for (const target of entryTargets) {
+      assert(entries.has(target), `packed tarball is missing advertised entry point "${target}"`);
+    }
+
+    const { errors } = verifyDistAgainstManifest({
+      distDir,
+      packedManifest: manifest,
+      tarballEntries: entries,
+      nodeBin: NODE,
+    });
+    assert(errors.length === 0, errors.join("\n     "));
+  } finally {
+    rmSync(packDir, { recursive: true, force: true });
+  }
 });
 
 check("sweep --version prints a version string", () => {
@@ -191,20 +232,18 @@ check("bin points to dist/sweep.js", () => {
   assert(bin?.["sweep"] === "dist/sweep.js", `got: ${JSON.stringify(bin)}`);
 });
 
-check("every exports/bin target resolves to a real file", () => {
-  // The workspace manifest points exports at ./src/*.ts; prepack rewrites them
-  // to dist. Either way, whatever a manifest advertises must exist - a
-  // dangling target is "import worked in dev, E404 in production".
-  const p = pkg() as { exports?: Record<string, unknown>; bin?: Record<string, string> };
-  const targets: string[] = [];
-  for (const value of Object.values(p.exports ?? {})) {
-    if (typeof value === "string") targets.push(value);
+check("every workspace and packed exports/bin target resolves to a real file", () => {
+  const workspaceTargets = collectManifestEntryTargets(pkg());
+  assert(workspaceTargets.length > 0, "workspace manifest has no exports/bin targets");
+  for (const target of workspaceTargets) {
+    assert(existsSync(join(CLI_ROOT, target)), `missing workspace target: ${target}`);
   }
-  for (const value of Object.values(p.bin ?? {})) targets.push(value);
-  assert(targets.length > 0, "manifest has no exports/bin targets");
-  for (const target of targets) {
-    const rel = target.replace(/^\.\//, "");
-    assert(existsSync(join(CLI_ROOT, rel)), `missing target: ${target}`);
+  const packedTargets = collectManifestEntryTargets(
+    preparePublishManifest(pkg(), readCatalogs(REPO_ROOT)),
+  );
+  assert(packedTargets.length > 0, "packed manifest has no exports/bin targets");
+  for (const target of packedTargets) {
+    assert(existsSync(join(CLI_ROOT, target)), `missing packed target: ${target}`);
   }
 });
 
@@ -212,7 +251,7 @@ check("sweep-lib.js imports without running the CLI", () => {
   // The programmatic surface must not parse argv on import - importing the
   // package and exiting clean proves the bin bootstrap isn't in this bundle.
   const lib = join(CLI_ROOT, "dist/sweep-lib.js");
-  if (!existsSync(lib)) return;
+  assert(existsSync(lib), "dist/sweep-lib.js is missing. Run: bun run build");
   const out = execFileSync(
     NODE,
     [
