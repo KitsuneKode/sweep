@@ -203,3 +203,152 @@ fn tracked_status_reports_unknown_when_index_fallback_has_no_git_on_path() {
     assert!(!records.contains(&format!("T\t{}", repo_candidate.display()).as_str()));
     assert!(!records.contains(&format!("U\t{}", outside_candidate.display()).as_str()));
 }
+
+#[test]
+fn tracked_gitfile_without_index_marks_unknown_and_fails_legacy_mode() {
+    let root = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let repo = root.path().join("repo");
+    let empty_gitdir = root.path().join("empty-gitdir");
+    let preserved_gitdir = root.path().join("preserved-gitdir");
+    let candidate = repo.join("node_modules");
+    std::fs::create_dir_all(candidate.join("pkg")).unwrap_or_else(|err| panic!("mkdir: {err}"));
+    std::fs::write(
+        candidate.join("pkg").join("index.js"),
+        b"module.exports = 1;\n",
+    )
+    .unwrap_or_else(|err| panic!("write: {err}"));
+    std::fs::create_dir_all(&empty_gitdir).unwrap_or_else(|err| panic!("mkdir: {err}"));
+
+    let has_git = std::process::Command::new("git")
+        .arg("--version")
+        .status()
+        .is_ok_and(|s| s.success());
+    if has_git {
+        for args in [
+            vec!["init", "-q"],
+            vec!["config", "user.email", "t@example.com"],
+            vec!["config", "user.name", "t"],
+            vec!["config", "commit.gpgsign", "false"],
+            vec!["add", "node_modules/pkg/index.js"],
+            vec!["commit", "-qm", "init"],
+        ] {
+            assert!(std::process::Command::new("git")
+                .arg("-C")
+                .arg(&repo)
+                .args(args)
+                .status()
+                .is_ok_and(|s| s.success()));
+        }
+        std::fs::rename(repo.join(".git"), &preserved_gitdir)
+            .unwrap_or_else(|err| panic!("rename .git: {err}"));
+    }
+
+    let target = empty_gitdir.to_string_lossy().replace('\\', "/");
+    std::fs::write(repo.join(".git"), format!("gitdir: {target}\n"))
+        .unwrap_or_else(|err| panic!("write gitfile: {err}"));
+
+    let stdin = format!("{}\0", candidate.display());
+    let status_out = Command::cargo_bin("sweep-engine")
+        .unwrap_or_else(|err| panic!("failed to locate sweep-engine binary: {err}"))
+        .args(["tracked", "--status"])
+        .write_stdin(stdin.as_bytes())
+        .output()
+        .unwrap_or_else(|err| panic!("failed to run sweep-engine tracked --status: {err}"));
+    assert!(
+        status_out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&status_out.stderr)
+    );
+    let records: Vec<&str> = std::str::from_utf8(&status_out.stdout)
+        .unwrap_or_else(|err| panic!("utf8: {err}"))
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    assert_eq!(records.first().copied(), Some("SWEEP_TRACKED_V2"));
+    assert!(records.contains(&format!("U\t{}", candidate.display()).as_str()));
+    assert!(!records.contains(&format!("T\t{}", candidate.display()).as_str()));
+
+    let legacy_out = Command::cargo_bin("sweep-engine")
+        .unwrap_or_else(|err| panic!("failed to locate sweep-engine binary: {err}"))
+        .arg("tracked")
+        .write_stdin(stdin.as_bytes())
+        .output()
+        .unwrap_or_else(|err| panic!("failed to run sweep-engine tracked: {err}"));
+    assert_eq!(
+        legacy_out.status.code(),
+        Some(4),
+        "legacy tracked must exit non-zero when any path is unknown; stdout={} stderr={}",
+        String::from_utf8_lossy(&legacy_out.stdout),
+        String::from_utf8_lossy(&legacy_out.stderr)
+    );
+}
+
+#[test]
+fn tracked_valid_repo_with_deleted_index_stays_empty_in_both_modes() {
+    let has_git = std::process::Command::new("git")
+        .arg("--version")
+        .status()
+        .is_ok_and(|s| s.success());
+    if !has_git {
+        return;
+    }
+    let root = tempdir().unwrap_or_else(|err| panic!("tempdir: {err}"));
+    let repo = root.path().join("repo");
+    let candidate = repo.join("node_modules");
+    std::fs::create_dir_all(candidate.join("pkg")).unwrap_or_else(|err| panic!("mkdir: {err}"));
+    std::fs::write(
+        candidate.join("pkg").join("index.js"),
+        b"module.exports = 1;\n",
+    )
+    .unwrap_or_else(|err| panic!("write: {err}"));
+
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["add", "node_modules/pkg/index.js"],
+        vec!["commit", "-qm", "init"],
+    ] {
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .args(args)
+            .status()
+            .is_ok_and(|s| s.success()));
+    }
+    std::fs::remove_file(repo.join(".git").join("index"))
+        .unwrap_or_else(|err| panic!("remove index: {err}"));
+
+    let stdin = format!("{}\0", candidate.display());
+    let status_out = Command::cargo_bin("sweep-engine")
+        .unwrap_or_else(|err| panic!("failed to locate sweep-engine binary: {err}"))
+        .args(["tracked", "--status"])
+        .write_stdin(stdin.as_bytes())
+        .output()
+        .unwrap_or_else(|err| panic!("failed to run sweep-engine tracked --status: {err}"));
+    assert!(
+        status_out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&status_out.stderr)
+    );
+    let records: Vec<&str> = std::str::from_utf8(&status_out.stdout)
+        .unwrap_or_else(|err| panic!("utf8: {err}"))
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    assert_eq!(records, vec!["SWEEP_TRACKED_V2"]);
+
+    let legacy_out = Command::cargo_bin("sweep-engine")
+        .unwrap_or_else(|err| panic!("failed to locate sweep-engine binary: {err}"))
+        .arg("tracked")
+        .write_stdin(stdin.as_bytes())
+        .output()
+        .unwrap_or_else(|err| panic!("failed to run sweep-engine tracked: {err}"));
+    assert!(
+        legacy_out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&legacy_out.stderr)
+    );
+    assert!(legacy_out.stdout.is_empty());
+}

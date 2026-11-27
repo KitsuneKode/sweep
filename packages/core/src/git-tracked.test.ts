@@ -6,8 +6,10 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  renameSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -285,6 +287,102 @@ describe.skipIf(!hasGit)("plans block tracked content", () => {
       }
     },
   );
+
+  test("gitfile pointing at an existing directory without an index is unknown in both engines", async () => {
+    const { scanToPlan } = await import("./engine.js");
+    const { DEFAULT_CONFIG } = await import("./config.js");
+    const scratch = mkdtempSync(join(tmpdir(), "sweep-gitfile-no-index-"));
+    try {
+      const emptyGitdir = join(scratch, "not-a-gitdir");
+      const preservedGitdir = join(scratch, "preserved-gitdir");
+      mkdirSync(emptyGitdir, { recursive: true });
+
+      write("package.json", "{}\n");
+      write("node_modules/pkg/index.js", "module.exports = 1;\n");
+      git("add", "package.json", "node_modules/pkg/index.js");
+      git("commit", "-qm", "init");
+      renameSync(join(root, ".git"), preservedGitdir);
+      writeFileSync(join(root, ".git"), `gitdir: ${emptyGitdir.replaceAll("\\", "/")}\n`);
+
+      const nmPath = join(root, "node_modules");
+      const expected = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
+      expect(gitTrackedPaths([nmPath])).toEqual(expected);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([nmPath])).toEqual(expected);
+      }
+
+      const { plan: jsPlan } = await scanToPlan(root, DEFAULT_CONFIG);
+      const jsNm = jsPlan.candidates.find((candidate) => candidate.name === "node_modules");
+      expect(jsNm?.riskTier).toBe("dangerous");
+      expect(jsNm?.reasons).toContain("tracked-status-unknown");
+      expect(jsNm?.selectedByDefault).toBe(false);
+      expect(jsPlan.selectedCandidateIds).not.toContain(jsNm?.id);
+
+      if (isRustEngineAvailable()) {
+        const { scanToPlanViaRust } = await import("./rust-engine.js");
+        const rustPlan = await scanToPlanViaRust(root, {
+          config: DEFAULT_CONFIG,
+          selectionPolicy: { mode: "default", includeDangerous: false },
+        });
+        const rustNm = rustPlan.candidates.find((candidate) => candidate.name === "node_modules");
+        expect(rustNm?.riskTier).toBe("dangerous");
+        expect(rustNm?.reasons).toContain("tracked-status-unknown");
+        expect(rustNm?.selectedByDefault).toBe(false);
+        expect(rustPlan.selectedCandidateIds).not.toContain(rustNm?.id);
+      }
+    } finally {
+      rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  test("empty .git directory without an index is unknown in both engines", () => {
+    const fakeRepo = mkdtempSync(join(tmpdir(), "sweep-empty-dot-git-"));
+    try {
+      mkdirSync(join(fakeRepo, ".git"), { recursive: true });
+      const nmPath = join(fakeRepo, "node_modules");
+      mkdirSync(nmPath, { recursive: true });
+      const expected = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      expect(gitTrackedPathsViaGit([nmPath])).toEqual(expected);
+      expect(gitTrackedPaths([nmPath])).toEqual(expected);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([nmPath])).toEqual(expected);
+      }
+    } finally {
+      rmSync(fakeRepo, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  test("valid repo with a deleted index stays empty when git succeeds and is unknown without git", () => {
+    write("package.json", "{}\n");
+    write("node_modules/pkg/index.js", "module.exports = 1;\n");
+    git("add", "package.json", "node_modules/pkg/index.js");
+    git("commit", "-qm", "init");
+    unlinkSync(join(root, ".git", "index"));
+
+    const nmPath = join(root, "node_modules");
+    const empty = { tracked: new Set<string>(), unknown: new Set<string>() };
+    expect(gitTrackedPathsViaGit([nmPath])).toEqual(empty);
+    expect(gitTrackedPaths([nmPath])).toEqual(empty);
+    if (isRustEngineAvailable()) {
+      expect(gitTrackedPathsViaEngine([nmPath])).toEqual(empty);
+    }
+
+    const previousPath = process.env.PATH;
+    try {
+      process.env.PATH =
+        process.platform === "win32" ? "C:\\nonexistent-sweep-no-git" : "/nonexistent-sweep-no-git";
+      const unknown = { tracked: new Set<string>(), unknown: new Set([nmPath]) };
+      expect(gitTrackedPathsViaGit([nmPath])).toEqual(unknown);
+      expect(gitTrackedPaths([nmPath])).toEqual(unknown);
+      if (isRustEngineAvailable()) {
+        expect(gitTrackedPathsViaEngine([nmPath])).toEqual(unknown);
+      }
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
 });
 
 test.skipIf(process.platform === "win32")(

@@ -7,12 +7,12 @@
 //! repository's config (a hostile clone's `core.fsmonitor` names a program)
 //! is ever consulted. Repositories are checked in parallel.
 //!
-//! Index layouts this reader does not handle in full (a split index, a sparse
-//! index, an unknown version, an oversized file) fall back to the hardened
-//! `git ls-files` invocation the JavaScript implementation uses. When neither
-//! the index reader nor `git` can answer for a repository, those candidates are
-//! reported as `unknown` so callers fail closed rather than treating them as
-//! untracked.
+//! Index layouts this reader does not handle in full (a missing index, a split
+//! index, a sparse index, an unknown version, an oversized file) fall back to
+//! the hardened `git ls-files` invocation the JavaScript implementation uses.
+//! When neither the index reader nor `git` can answer for a repository, those
+//! candidates are reported as `unknown` so callers fail closed rather than
+//! treating them as untracked.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -185,11 +185,11 @@ enum IndexError {
 }
 
 /// The index file `git` itself would read for this work tree.
-fn index_file(root: &Path) -> Result<Option<PathBuf>, IndexError> {
+fn index_file(root: &Path) -> Result<PathBuf, IndexError> {
     let dot_git = root.join(".git");
     let meta = std::fs::symlink_metadata(&dot_git).map_err(|_| IndexError::Unsupported)?;
     if meta.is_dir() {
-        return Ok(Some(dot_git.join("index")));
+        return Ok(dot_git.join("index"));
     }
     if !meta.is_file() || meta.len() > 4096 {
         return Err(IndexError::Unsupported);
@@ -212,19 +212,12 @@ fn index_file(root: &Path) -> Result<Option<PathBuf>, IndexError> {
     if !gitdir.is_dir() {
         return Err(IndexError::Unsupported);
     }
-    Ok(Some(gitdir.join("index")))
+    Ok(gitdir.join("index"))
 }
 
 fn read_index_paths(root: &Path) -> Result<Vec<Vec<u8>>, IndexError> {
-    let Some(path) = index_file(root)? else {
-        return Ok(Vec::new());
-    };
-    let file = match std::fs::File::open(&path) {
-        Ok(file) => file,
-        // No index yet: nothing staged, nothing committed - `git ls-files` agrees.
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(_) => return Err(IndexError::Unsupported),
-    };
+    let path = index_file(root)?;
+    let file = std::fs::File::open(&path).map_err(|_| IndexError::Unsupported)?;
     let len = file.metadata().map_err(|_| IndexError::Unsupported)?.len();
     if len > MAX_INDEX_BYTES {
         return Err(IndexError::Unsupported);
@@ -233,6 +226,9 @@ fn read_index_paths(root: &Path) -> Result<Vec<Vec<u8>>, IndexError> {
     file.take(MAX_INDEX_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| IndexError::Unsupported)?;
+    if bytes.len() as u64 > MAX_INDEX_BYTES {
+        return Err(IndexError::Unsupported);
+    }
     // SHA-1 repositories are the norm; SHA-256 ones store 32-byte names.
     parse_index(&bytes, 20).or_else(|_| parse_index(&bytes, 32))
 }
@@ -743,6 +739,119 @@ mod tests {
         assert!(result.tracked.is_empty());
         assert!(result.unknown.contains(&repo_dist));
         assert!(!result.unknown.contains(&outside_dist));
+        Ok(())
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) -> bool {
+        Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn git_available() -> bool {
+        Command::new("git")
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    #[test]
+    fn missing_index_in_gitfile_target_asks_git_and_marks_unknown() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let empty_gitdir = dir.path().join("not-a-gitdir");
+        let preserved_gitdir = dir.path().join("preserved-gitdir");
+        let candidate = repo.join("node_modules");
+        std::fs::create_dir_all(candidate.join("pkg"))?;
+        std::fs::write(
+            candidate.join("pkg").join("index.js"),
+            b"module.exports = 1;\n",
+        )?;
+        std::fs::create_dir_all(&empty_gitdir)?;
+
+        if git_available() {
+            assert!(run_git(&repo, &["init", "-q"]));
+            assert!(run_git(&repo, &["config", "user.email", "t@example.com"]));
+            assert!(run_git(&repo, &["config", "user.name", "t"]));
+            assert!(run_git(&repo, &["config", "commit.gpgsign", "false"]));
+            assert!(run_git(&repo, &["add", "node_modules/pkg/index.js"]));
+            assert!(run_git(&repo, &["commit", "-qm", "init"]));
+            std::fs::rename(repo.join(".git"), &preserved_gitdir)?;
+        }
+
+        let target = empty_gitdir.to_string_lossy().replace('\\', "/");
+        std::fs::write(repo.join(".git"), format!("gitdir: {target}\n"))?;
+        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+
+        let result = tracked_paths(std::slice::from_ref(&candidate));
+        assert!(result.tracked.is_empty());
+        assert!(
+            result.unknown.contains(&candidate),
+            "gitfile pointing at a directory without an index must be unknown, got {result:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn missing_index_in_empty_dot_git_dir_marks_unknown() -> std::io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let candidate = repo.join("node_modules");
+        std::fs::create_dir_all(repo.join(".git"))?;
+        std::fs::create_dir_all(&candidate)?;
+
+        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+        let result = tracked_paths(std::slice::from_ref(&candidate));
+        assert!(result.tracked.is_empty());
+        assert!(result.unknown.contains(&candidate));
+        Ok(())
+    }
+
+    #[test]
+    fn valid_repo_with_deleted_index_matches_git_and_fails_closed_without_git(
+    ) -> std::io::Result<()> {
+        if !git_available() {
+            return Ok(());
+        }
+        let dir = tempfile::tempdir()?;
+        let repo = dir.path().join("repo");
+        let candidate = repo.join("node_modules");
+        std::fs::create_dir_all(candidate.join("pkg"))?;
+        std::fs::write(
+            candidate.join("pkg").join("index.js"),
+            b"module.exports = 1;\n",
+        )?;
+
+        assert!(run_git(&repo, &["init", "-q"]));
+        assert!(run_git(&repo, &["config", "user.email", "t@example.com"]));
+        assert!(run_git(&repo, &["config", "user.name", "t"]));
+        assert!(run_git(&repo, &["config", "commit.gpgsign", "false"]));
+        assert!(run_git(&repo, &["add", "node_modules/pkg/index.js"]));
+        assert!(run_git(&repo, &["commit", "-qm", "init"]));
+        std::fs::remove_file(repo.join(".git").join("index"))?;
+
+        assert_eq!(read_index_paths(&repo), Err(IndexError::Unsupported));
+
+        let with_git = tracked_paths(std::slice::from_ref(&candidate));
+        assert!(with_git.tracked.is_empty());
+        assert!(
+            with_git.unknown.is_empty(),
+            "valid repo with deleted index should stay empty when git succeeds, got {with_git:?}"
+        );
+
+        let without_git =
+            tracked_paths_with_path(std::slice::from_ref(&candidate), Some(OsStr::new("")), None);
+        assert!(without_git.tracked.is_empty());
+        assert!(without_git.unknown.contains(&candidate));
         Ok(())
     }
 }
