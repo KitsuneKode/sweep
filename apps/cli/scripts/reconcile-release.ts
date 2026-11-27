@@ -86,6 +86,21 @@ export interface BinaryWorkflowRun {
   status: string;
   headBranch: string;
   headSha: string;
+  displayTitle?: string;
+}
+
+const DOWNSTREAM_RUN_TITLE_RE = /^Release Downstream \((v[^\s/]+)\s*\/\s*(all|homebrew|scoop)\)$/;
+
+export function parseDownstreamRunTitle(
+  displayTitle: string | undefined,
+): { tag: string; channel: DownstreamTarget } | null {
+  if (!displayTitle) return null;
+  const match = DOWNSTREAM_RUN_TITLE_RE.exec(displayTitle.trim());
+  if (!match?.[1] || !match[2]) return null;
+  return {
+    tag: match[1],
+    channel: match[2] as DownstreamTarget,
+  };
 }
 
 export type ActiveBinaryRunsLookup =
@@ -267,13 +282,25 @@ export function planReleaseReconciliation(
     };
   }
 
-  // Authoritative publication commit: npm gitHead when present, otherwise the
-  // durable scoped package tag. Never guess from version-bump git log history.
-  const targetCommit = npmGitHead ?? state.packageTagSha;
+  // Authoritative publication commit must come from npm `gitHead` (never from
+  // a git tag alone or version-bump log history). Legacy releases without
+  // `gitHead` refuse automatic reconciliation and print the manual path.
+  if (npmPublished && !npmGitHead) {
+    return {
+      kind: "error",
+      reason:
+        `Refusing automatic reconciliation for ${CLI_NAME}@${state.version}: published npm package has no gitHead metadata (legacy release). ` +
+        `Manual path: verify the published npm tarball commit, create or verify ${binaryTag} manually, and upload release assets / update downstream manifests with maintainer review.`,
+      binaryTag,
+      packageTag,
+    };
+  }
+
+  const targetCommit = npmGitHead;
   if (!targetCommit) {
     return {
       kind: "error",
-      reason: `Refusing to reconcile ${CLI_NAME}@${state.version}: missing authoritative publication commit (both npm gitHead and ${packageTag} tag are absent)`,
+      reason: `Refusing to reconcile ${CLI_NAME}@${state.version}: missing authoritative npm gitHead publication commit`,
       binaryTag,
       packageTag,
     };
@@ -390,27 +417,66 @@ export function planReleaseReconciliation(
     };
   }
 
-  if (needsDownstreamOnly && state.activeDownstreamRuns) {
-    if (state.activeDownstreamRuns.status === "error") {
-      return {
-        kind: "error",
-        reason: `Failed to query active release-downstream.yml runs: ${state.activeDownstreamRuns.error}`,
-        binaryTag,
-        packageTag,
-        targetCommit,
-      };
-    }
-    const matchingDownstreamRun = state.activeDownstreamRuns.runs.find(
-      (run) => ACTIVE_RUN_STATUSES.has(run.status) && run.headBranch === "main",
+  // Inspect active release-downstream.yml runs matched strictly by release tag
+  // and channel (from `displayTitle`), so a run for another version or a single
+  // channel never suppresses an unrelated downstream or attach update.
+  if (state.activeDownstreamRuns?.status === "error") {
+    return {
+      kind: "error",
+      reason: `Failed to query active release-downstream.yml runs: ${state.activeDownstreamRuns.error}`,
+      binaryTag,
+      packageTag,
+      targetCommit,
+    };
+  }
+  const activeDownstreamForTag = (state.activeDownstreamRuns?.runs ?? [])
+    .filter((run) => ACTIVE_RUN_STATUSES.has(run.status) && run.headBranch === "main")
+    .map((run) => ({ run, parsed: parseDownstreamRunTitle(run.displayTitle) }))
+    .filter(
+      (
+        entry,
+      ): entry is { run: BinaryWorkflowRun; parsed: { tag: string; channel: DownstreamTarget } } =>
+        entry.parsed !== null && entry.parsed.tag === binaryTag,
     );
-    if (matchingDownstreamRun) {
+
+  // If release-downstream.yml is already actively running `all` for this tag
+  // (which handles `workflow_run` attachment + downstream updates), skip a
+  // duplicate cli-binaries rebuild while attachment is in flight.
+  if (needsBinaryBuild && !createBinaryTag) {
+    const activeAttachRun = activeDownstreamForTag.find((entry) => entry.parsed.channel === "all");
+    if (activeAttachRun) {
       return {
         kind: "noop",
-        reason: `release-downstream.yml run ${matchingDownstreamRun.databaseId} (${matchingDownstreamRun.status}) is already active on main; skipping duplicate dispatch`,
+        reason: `release-downstream.yml run ${activeAttachRun.run.databaseId} (${activeAttachRun.run.status}) is already active for ${binaryTag} (all); skipping duplicate dispatch`,
         binaryTag,
         packageTag,
         targetCommit,
-        activeRunId: matchingDownstreamRun.databaseId,
+        activeRunId: activeAttachRun.run.databaseId,
+      };
+    }
+  }
+
+  let effectiveHomebrewNeedsUpdate = homebrewNeedsUpdate;
+  let effectiveScoopNeedsUpdate = scoopNeedsUpdate;
+  if (needsDownstreamOnly) {
+    const hbCoveringRun = activeDownstreamForTag.find(
+      (entry) => entry.parsed.channel === "all" || entry.parsed.channel === "homebrew",
+    );
+    const scoopCoveringRun = activeDownstreamForTag.find(
+      (entry) => entry.parsed.channel === "all" || entry.parsed.channel === "scoop",
+    );
+    if (hbCoveringRun) effectiveHomebrewNeedsUpdate = false;
+    if (scoopCoveringRun) effectiveScoopNeedsUpdate = false;
+
+    if (!effectiveHomebrewNeedsUpdate && !effectiveScoopNeedsUpdate) {
+      const covering = hbCoveringRun ?? scoopCoveringRun;
+      return {
+        kind: "noop",
+        reason: `release-downstream.yml run ${covering?.run.databaseId ?? "active"} (${covering?.run.status ?? "active"}) is already active for ${binaryTag} covering required downstream channel(s); skipping duplicate dispatch`,
+        binaryTag,
+        packageTag,
+        targetCommit,
+        ...(covering ? { activeRunId: covering.run.databaseId } : {}),
       };
     }
   }
@@ -418,9 +484,9 @@ export function planReleaseReconciliation(
   const dispatchTarget: DispatchTarget = needsBinaryBuild ? "all" : "downstream";
   let dispatchDownstream: DownstreamTarget = "all";
   if (!policy.prerelease) {
-    if (homebrewNeedsUpdate && scoopNeedsUpdate) dispatchDownstream = "all";
-    else if (homebrewNeedsUpdate) dispatchDownstream = "homebrew";
-    else if (scoopNeedsUpdate) dispatchDownstream = "scoop";
+    if (effectiveHomebrewNeedsUpdate && effectiveScoopNeedsUpdate) dispatchDownstream = "all";
+    else if (effectiveHomebrewNeedsUpdate) dispatchDownstream = "homebrew";
+    else if (effectiveScoopNeedsUpdate) dispatchDownstream = "scoop";
   }
 
   return {
@@ -433,8 +499,8 @@ export function planReleaseReconciliation(
     dispatchWorkflow: true,
     dispatchTarget,
     dispatchDownstream,
-    homebrewNeedsUpdate,
-    scoopNeedsUpdate,
+    homebrewNeedsUpdate: effectiveHomebrewNeedsUpdate,
+    scoopNeedsUpdate: effectiveScoopNeedsUpdate,
     missingAssets,
   };
 }
@@ -634,7 +700,7 @@ export function createLiveReleaseClients(repoRoot: string): ReleaseClients {
           "--limit",
           "20",
           "--json",
-          "databaseId,status,headBranch,headSha",
+          "databaseId,status,headBranch,headSha,displayTitle",
         ],
         {
           cwd: repoRoot,
@@ -794,7 +860,7 @@ export function runReconcileRelease(
   }
 
   const npm = clients.readNpmRelease(version);
-  const authoritativeCommit = (npm.status === "found" ? npm.gitHead : null) ?? packageTagSha;
+  const authoritativeCommit = npm.status === "found" ? npm.gitHead : null;
 
   const targetCommitOnMain =
     authoritativeCommit !== null && gitIsAncestor(repoRoot, authoritativeCommit, mainRefSha);

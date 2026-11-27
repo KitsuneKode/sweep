@@ -262,6 +262,54 @@ param(
     }
   }
 
+  function Invoke-StagedVersionCheck([string]$ExecutablePath, [int]$TimeoutMs = 15000, [string]$Arguments = "--version") {
+    try {
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = $ExecutablePath
+      $psi.Arguments = $Arguments
+      $psi.UseShellExecute = $false
+      $psi.RedirectStandardOutput = $true
+      $psi.RedirectStandardError = $true
+      $psi.CreateNoWindow = $true
+      $proc = [System.Diagnostics.Process]::Start($psi)
+      try {
+        # Drain stdout and stderr concurrently before WaitForExit so pipe buffers
+        # cannot deadlock, and bound both process exit and stream completion so a
+        # stalled child (or inherited pipe handle) never hangs the installer.
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+        if (-not $proc.WaitForExit($TimeoutMs)) {
+          try { $proc.Kill() } catch { }
+          try { [void]$proc.WaitForExit(2000) } catch { }
+          try { [void]$stdoutTask.Wait(1000) } catch { }
+          try { [void]$stderrTask.Wait(1000) } catch { }
+          return [PSCustomObject]@{
+            Ok     = $false
+            Output = "timed out waiting for --version"
+          }
+        }
+        $stdoutDone = $false
+        $stderrDone = $false
+        try { $stdoutDone = $stdoutTask.Wait(2000) } catch { }
+        try { $stderrDone = $stderrTask.Wait(2000) } catch { }
+        $stdout = if ($stdoutDone) { $stdoutTask.GetAwaiter().GetResult() } else { "" }
+        $stderr = if ($stderrDone) { $stderrTask.GetAwaiter().GetResult() } else { "" }
+        $parts = @($stdout.Trim(), $stderr.Trim()) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+        return [PSCustomObject]@{
+          Ok     = ($proc.ExitCode -eq 0)
+          Output = ($parts -join " ").Trim()
+        }
+      } finally {
+        $proc.Dispose()
+      }
+    } catch {
+      return [PSCustomObject]@{
+        Ok     = $false
+        Output = $_.Exception.Message
+      }
+    }
+  }
+
   Enable-ModernTls
 
   $arch = ""
@@ -334,50 +382,26 @@ param(
     # Prove the replacement starts and executes cleanly before touching any existing install.
     # Use ProcessStartInfo directly so literal paths with [brackets] bypass PowerShell 5.1
     # wildcard command lookup and non-executable files never fall back to ShellExecute.
-    $versionOk = $false
-    $versionOut = ""
-    try {
-      $psi = New-Object System.Diagnostics.ProcessStartInfo
-      $psi.FileName = $stagedBin
-      $psi.Arguments = "--version"
-      $psi.UseShellExecute = $false
-      $psi.RedirectStandardOutput = $true
-      $psi.RedirectStandardError = $true
-      $psi.CreateNoWindow = $true
-      $proc = [System.Diagnostics.Process]::Start($psi)
-      try {
-        $stderrTask = $proc.StandardError.ReadToEndAsync()
-        $stdout = $proc.StandardOutput.ReadToEnd()
-        $stderr = $stderrTask.GetAwaiter().GetResult()
-        if (-not $proc.WaitForExit(15000)) {
-          try { $proc.Kill() } catch { }
-          $versionOut = "timed out waiting for --version"
-          $versionOk = $false
-        } else {
-          $parts = @($stdout.Trim(), $stderr.Trim()) | Where-Object { -not [string]::IsNullOrEmpty($_) }
-          $versionOut = ($parts -join " ").Trim()
-          $versionOk = ($proc.ExitCode -eq 0)
-        }
-      } finally {
-        $proc.Dispose()
-      }
-    } catch {
-      $versionOut = $_.Exception.Message
-      $versionOk = $false
-    }
-    if (-not $versionOk) {
-      Fail "staged binary failed --version; existing installation was left unchanged: $versionOut"
+    $probeResult = Invoke-StagedVersionCheck -ExecutablePath $stagedBin -TimeoutMs 15000
+    if (-not $probeResult.Ok) {
+      Fail "staged binary failed --version; existing installation was left unchanged: $($probeResult.Output)"
     }
 
     if (Test-Path -LiteralPath $destBin -PathType Container) {
       Fail "destination path is a directory, refusing to install: $destBin"
     }
     if ([System.IO.File]::Exists($destBin)) {
-      [System.IO.File]::Replace($stagedBin, $destBin, $null)
+      # Use [NullString]::Value rather than $null so PowerShell passes a true null
+      # string reference instead of "" to File.Replace on both PS 5.1 and PS 7.
+      [System.IO.File]::Replace(
+        $stagedBin,
+        $destBin,
+        [System.Management.Automation.Language.NullString]::Value
+      )
     } else {
       [System.IO.File]::Move($stagedBin, $destBin)
     }
-    $versionText = $versionOut
+    $versionText = $probeResult.Output
     Write-Info "installed sweep -> $destBin ($versionText)"
 
     $pathUpdated = $false

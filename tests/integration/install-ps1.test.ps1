@@ -54,10 +54,10 @@ Run-Test "install.ps1 parses with zero syntax errors" {
 $helperDefs = $ast.FindAll({
   param($node)
   $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-    $node.Name -in @("ConvertTo-NormalizedPathEntry", "Update-SweepUserPathValue", "Test-ProcessPathContains")
+    $node.Name -in @("ConvertTo-NormalizedPathEntry", "Update-SweepUserPathValue", "Test-ProcessPathContains", "Invoke-StagedVersionCheck")
 }, $true)
 
-Assert-True ($helperDefs.Count -eq 3) "Expected 3 PATH helper functions in install.ps1, found $($helperDefs.Count)"
+Assert-True ($helperDefs.Count -eq 4) "Expected 4 helper functions in install.ps1, found $($helperDefs.Count)"
 foreach ($def in $helperDefs) {
   Invoke-Expression $def.Extent.Text
 }
@@ -118,7 +118,51 @@ Run-Test "install.ps1 does not leak ErrorActionPreference, ProgressPreference, o
   Assert-Equal ([string]$ProgressPreference) $origProg "caller ProgressPreference must be preserved"
 }
 
+Run-Test "File.Replace with NullString::Value replaces existing file in [bracket] directory" {
+  $tmp = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("sweep-replace-test-" + [System.Guid]::NewGuid().ToString("N"))
+  $dir = Join-Path -Path $tmp -ChildPath "replace [bracket] dir"
+  try {
+    [System.IO.Directory]::CreateDirectory($dir) | Out-Null
+    $src = Join-Path -Path $dir -ChildPath "staged.bin"
+    $dst = Join-Path -Path $dir -ChildPath "sweep.exe"
+    [System.IO.File]::WriteAllText($dst, "old-version")
+    [System.IO.File]::WriteAllText($src, "new-version")
+    [System.IO.File]::Replace($src, $dst, [System.Management.Automation.Language.NullString]::Value)
+    Assert-Equal ([System.IO.File]::ReadAllText($dst)) "new-version" "destination should hold new content"
+    Assert-True (-not [System.IO.File]::Exists($src)) "staged source should be moved away"
+  } finally {
+    if (Test-Path -LiteralPath $tmp) {
+      Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 $isWindowsHost = ($env:OS -eq "Windows_NT") -or ((Get-Variable -Name IsWindows -ErrorAction SilentlyContinue) -and $IsWindows)
+
+Run-Test "Invoke-StagedVersionCheck kills stalled child within bounded timeout" {
+  $tmp = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ("sweep-timeout-test-" + [System.Guid]::NewGuid().ToString("N"))
+  try {
+    [System.IO.Directory]::CreateDirectory($tmp) | Out-Null
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    if ($isWindowsHost) {
+      $exe = (Get-Process -Id $PID).Path
+      $res = Invoke-StagedVersionCheck -ExecutablePath $exe -TimeoutMs 500 -Arguments "-NoProfile -Command Write-Output starting; Start-Sleep -Seconds 15"
+    } else {
+      $stallPath = Join-Path -Path $tmp -ChildPath "stall.sh"
+      [System.IO.File]::WriteAllText($stallPath, "#!/bin/sh`necho starting`nsleep 15`n")
+      & chmod +x $stallPath
+      $res = Invoke-StagedVersionCheck -ExecutablePath $stallPath -TimeoutMs 500
+    }
+    $sw.Stop()
+    Assert-True (-not $res.Ok) "stalled probe should fail"
+    Assert-True ($res.Output -like "*timed out*") "expected timeout message, got: $($res.Output)"
+    Assert-True ($sw.ElapsedMilliseconds -lt 6000) "timeout probe took too long: $($sw.ElapsedMilliseconds)ms"
+  } finally {
+    if (Test-Path -LiteralPath $tmp) {
+      Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
 
 if ($isWindowsHost) {
   Add-Type -AssemblyName System.IO.Compression

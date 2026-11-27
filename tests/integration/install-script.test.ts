@@ -115,6 +115,23 @@ describe.if(isPosixHost)("install.sh", () => {
         if (url.pathname.includes("v0.5.9-http403")) {
           return new Response("forbidden", { status: 403 });
         }
+        if (url.pathname.includes("v0.5.9-chunked-oversize")) {
+          // Stream a chunked body with no Content-Length header to verify
+          // download caps are enforced during transfer even on curl < 8.4.
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const chunk = new Uint8Array(1024).fill(65);
+              for (let i = 0; i < 64; i++) {
+                controller.enqueue(chunk);
+              }
+              controller.close();
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "content-type": "application/octet-stream" },
+          });
+        }
         const filePath = join(releaseRoot, url.pathname.replace(/^\/+/, ""));
         if (!existsSync(filePath)) {
           return new Response("not found", { status: 404 });
@@ -320,6 +337,92 @@ describe.if(isPosixHost)("install.sh", () => {
     expect(bombProc.exitCode).not.toBe(0);
     expect(bombProc.stderr).toContain("decompressed binary exceeds maximum allowed size");
     expect(existsSync(join(bombDir, "sweep"))).toBe(false);
+
+    // Simulate curl < 8.4 (ignoring --max-filesize) downloading a chunked response
+    // with no Content-Length header: the streaming pipe cap must stop the transfer.
+    const oldCurlBin = join(root, "fake-old-curl");
+    mkdirSync(oldCurlBin, { recursive: true });
+    const realCurl = Bun.which("curl")!;
+    writeFileSync(
+      join(oldCurlBin, "curl"),
+      `#!/usr/bin/env sh
+set -- "$@"
+args=""
+skip_next=0
+for arg in "$@"; do
+  if [ "$skip_next" -eq 1 ]; then
+    skip_next=0
+    continue
+  fi
+  if [ "$arg" = "--max-filesize" ]; then
+    skip_next=1
+    continue
+  fi
+  args="$args $(printf '%s' "$arg" | sed "s/'/'\\\\''/g; s/^/'/; s/$/'/")"
+done
+eval "exec '${realCurl}' $args"
+`,
+    );
+    chmodSync(join(oldCurlBin, "curl"), 0o755);
+
+    const chunkedDir = join(root, "install-cap-chunked");
+    const chunkedProc = await runInstall({
+      SWEEP_INSTALL_DIR: chunkedDir,
+      SWEEP_VERSION: "0.5.9-chunked-oversize",
+      SWEEP_TEST_MAX_DOWNLOAD_BYTES: "4096",
+      PATH: `${oldCurlBin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+    });
+    expect(chunkedProc.exitCode).not.toBe(0);
+    expect(chunkedProc.stderr).toContain("exceeds maximum allowed size");
+    expect(existsSync(join(chunkedDir, "sweep"))).toBe(false);
+  });
+
+  test("refuses symlink-to-directory destination and supports exact rename without mv -T", async () => {
+    const installDir = join(root, "install-symlink-dir");
+    const realTargetDir = join(root, "real-dir-target");
+    mkdirSync(installDir, { recursive: true });
+    mkdirSync(realTargetDir, { recursive: true });
+    symlinkSync(realTargetDir, join(installDir, "sweep"));
+
+    const symProc = await runInstall({
+      SWEEP_INSTALL_DIR: installDir,
+      SWEEP_VERSION: "0.5.2",
+    });
+    expect(symProc.exitCode).not.toBe(0);
+    expect(symProc.stderr).toContain("is a directory");
+    expect(existsSync(join(realTargetDir, "sweep"))).toBe(false);
+
+    // Simulate BSD/macOS where `mv -T` is unsupported: installer falls back to
+    // exact rename(2) via perl/python3 and still replaces an existing file cleanly.
+    const noMvTBin = join(root, "fake-bsd-mv");
+    mkdirSync(noMvTBin, { recursive: true });
+    const realMv = Bun.which("mv")!;
+    writeFileSync(
+      join(noMvTBin, "mv"),
+      `#!/usr/bin/env sh
+for arg in "$@"; do
+  if [ "$arg" = "-T" ]; then
+    echo "mv: illegal option -- T" >&2
+    exit 64
+  fi
+done
+exec "${realMv}" "$@"
+`,
+    );
+    chmodSync(join(noMvTBin, "mv"), 0o755);
+
+    const bsdDir = join(root, "install-bsd-mv");
+    mkdirSync(bsdDir, { recursive: true });
+    writeFileSync(join(bsdDir, "sweep"), "#!/usr/bin/env sh\necho '0.5.1-old'\n");
+    chmodSync(join(bsdDir, "sweep"), 0o755);
+
+    const bsdProc = await runInstall({
+      SWEEP_INSTALL_DIR: bsdDir,
+      SWEEP_VERSION: "0.5.2",
+      PATH: `${noMvTBin}:${process.env.PATH ?? "/usr/bin:/bin"}`,
+    });
+    expect(bsdProc.exitCode).toBe(0);
+    expect(readFileSync(join(bsdDir, "sweep"), "utf8")).toContain("0.5.2");
   });
 
   test("distinguishes HTTP 404 (missing asset), HTTP 403, curl write error (exit 23), and network error", async () => {

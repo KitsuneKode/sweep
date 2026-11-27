@@ -44,10 +44,37 @@ fetch_checked() {
   fetch_max="$3"
   fetch_kind="$4"
 
-  curl_rc=0
-  http_code="$(curl --retry 3 --connect-timeout 15 --max-time 180 --max-filesize "$fetch_max" -sS -L -w '%{http_code}' "$fetch_url" -o "$fetch_out")" || curl_rc=$?
+  fetch_limit_plus_one=$((fetch_max + 1))
+  curl_status_file="$stage_dir/curl.status"
+  curl_headers_file="$stage_dir/curl.headers"
+  rm -f "$curl_status_file" "$curl_headers_file" "$fetch_out"
+
+  # Stream through `head -c $((fetch_max + 1))` in addition to `--max-filesize`
+  # so curl < 8.4 cannot write an unbounded body when Content-Length is omitted.
+  head_rc=0
+  (
+    rc=0
+    curl --retry 3 --connect-timeout 15 --max-time 180 \
+      --max-filesize "$fetch_max" -sS -L \
+      -D "$curl_headers_file" \
+      "$fetch_url" || rc=$?
+    printf '%s' "$rc" > "$curl_status_file"
+  ) | head -c "$fetch_limit_plus_one" > "$fetch_out" || head_rc=$?
+
+  curl_rc="$(cat "$curl_status_file" 2>/dev/null || printf '1')"
+  actual_bytes="$(wc -c < "$fetch_out" | tr -d '[:space:]')"
+  if [ "$actual_bytes" -gt "$fetch_max" ]; then
+    rm -f "$fetch_out"
+    fail "${fetch_kind} failed (exceeds maximum allowed size of ${fetch_max} bytes): $fetch_url"
+  fi
+
+  if [ "$head_rc" -ne 0 ]; then
+    rm -f "$fetch_out"
+    fail "${fetch_kind} failed (write error; head exit $head_rc): $fetch_url"
+  fi
 
   if [ "$curl_rc" -ne 0 ]; then
+    rm -f "$fetch_out"
     case "$curl_rc" in
       23)
         fail "${fetch_kind} failed (write error; curl exit 23): $fetch_url"
@@ -64,20 +91,57 @@ fetch_checked() {
     esac
   fi
 
+  http_code="$(awk '/^HTTP\// { code = $2 } END { print code }' "$curl_headers_file" 2>/dev/null || true)"
   case "$http_code" in
     2??) ;;
     404)
+      rm -f "$fetch_out"
       fail "${fetch_kind} failed (HTTP 404: release asset missing for $label): $fetch_url"
       ;;
     *)
-      fail "${fetch_kind} failed (HTTP $http_code): $fetch_url"
+      rm -f "$fetch_out"
+      fail "${fetch_kind} failed (HTTP ${http_code:-unknown}): $fetch_url"
       ;;
   esac
+}
 
-  actual_bytes="$(wc -c < "$fetch_out" | tr -d '[:space:]')"
-  if [ "$actual_bytes" -gt "$fetch_max" ]; then
-    fail "${fetch_kind} failed (exceeds maximum allowed size of ${fetch_max} bytes): $fetch_url"
+install_atomic() {
+  src_path="$1"
+  dst_path="$2"
+
+  if [ -d "$dst_path" ]; then
+    fail "destination path is a directory, refusing to install: $dst_path"
   fi
+
+  # Prefer `mv -T` (GNU coreutils, BusyBox) for an exact-target rename(2) that
+  # refuses directories and never moves into a directory or symlink-to-dir.
+  probe_a="$stage_dir/.mv-probe-a"
+  probe_b="$stage_dir/.mv-probe-b"
+  : > "$probe_a"
+  if mv -T -f "$probe_a" "$probe_b" 2>/dev/null; then
+    rm -f "$probe_b"
+    mv -T -f "$src_path" "$dst_path" || fail "failed to install sweep into $dst_path"
+    return 0
+  fi
+  rm -f "$probe_a" "$probe_b"
+
+  # On BSD/macOS where `mv -T` is unavailable, call exact rename(2) directly.
+  if command -v perl >/dev/null 2>&1; then
+    perl -e 'rename($ARGV[0], $ARGV[1]) or die "$!\n"' "$src_path" "$dst_path" \
+      || fail "failed to install sweep into $dst_path"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' "$src_path" "$dst_path" \
+      || fail "failed to install sweep into $dst_path"
+    return 0
+  fi
+
+  # Last-resort fallback: refuse directory or symlink targets before moving.
+  if [ -d "$dst_path" ] || [ -L "$dst_path" ]; then
+    fail "destination path is a directory or symlink, refusing to install: $dst_path"
+  fi
+  mv -f "$src_path" "$dst_path" || fail "failed to install sweep into $dst_path"
 }
 
 sha256_file() {
@@ -258,10 +322,7 @@ if ! version_out="$("$staged_bin" --version 2>&1)"; then
   esac
 fi
 
-if [ -d "$dest_bin" ]; then
-  fail "destination path is a directory, refusing to install: $dest_bin"
-fi
-mv -f "$staged_bin" "$dest_bin" || fail "failed to install sweep into $dest_bin"
+install_atomic "$staged_bin" "$dest_bin"
 
 info "installed sweep -> $dest_bin ($version_out)"
 case ":$PATH:" in

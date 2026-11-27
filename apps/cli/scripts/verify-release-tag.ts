@@ -8,10 +8,12 @@
  * 2. Tag commit is reachable from canonical `origin/main`
  * 3. `apps/cli/package.json` at the tagged commit matches the tag version
  * 4. Scoped package tag (`@kitsunekode/sweep@X.Y.Z`), if present, points at the same commit
- * 5. Push CI (`ci.yml`) on `main` succeeded for the exact tagged commit
- * 6. Release workflow (`release.yml`) on `main` succeeded for the tagged commit
- *    (or for a descendant `main` commit during reconciliation, backed by durable
- *    scoped-tag + npm publication evidence)
+ * 5. Independent npm publication identity: `@kitsunekode/sweep@X.Y.Z` is published on npm
+ *    with `gitHead` matching the exact tagged commit (legacy releases without `gitHead`
+ *    refuse automatic qualification and print the manual path)
+ * 6. Push CI (`ci.yml`) on `main` succeeded for the exact tagged commit
+ * 7. Release workflow (`release.yml`) on `main` succeeded for the tagged commit
+ *    (or for a descendant `main` commit during reconciliation)
  */
 
 import { spawnSync } from "node:child_process";
@@ -33,6 +35,12 @@ export interface WorkflowRunRecord {
   conclusion: string | null;
 }
 
+export interface NpmReleaseRecord {
+  published: boolean;
+  gitHead: string | null;
+  error?: string;
+}
+
 export interface ReleaseTagQualificationInput {
   repository: string;
   ref: string;
@@ -44,8 +52,9 @@ export interface ReleaseTagQualificationInput {
   releaseRuns: readonly WorkflowRunRecord[];
   /** Commits on main that are descendants of tagSha (inclusive) with a successful release.yml run. */
   releaseRunShaIsDescendantOfTag?: (sha: string) => boolean;
-  npmPublished?: boolean;
-  npmGitHead?: string | null;
+  npmPublished: boolean;
+  npmGitHead: string | null;
+  npmError?: string;
 }
 
 export type ReleaseTagQualificationResult =
@@ -62,6 +71,18 @@ export type ReleaseTagQualificationResult =
       waiting?: boolean;
       reason: string;
     };
+
+export function legacyManualQualificationMessage(
+  version: string,
+  tag: string,
+  commitSha: string | null,
+): string {
+  const commitHint = commitSha ? ` against commit ${commitSha}` : "";
+  return (
+    `Refusing automatic qualification for ${tag}: published ${CLI_NAME}@${version} on npm has no gitHead metadata (legacy release). ` +
+    `Manual path: verify the published npm tarball${commitHint}, create or verify tags manually, and upload GitHub Release assets / update downstream manifests with maintainer review.`
+  );
+}
 
 export function evaluateReleaseTagQualification(
   input: ReleaseTagQualificationInput,
@@ -128,6 +149,59 @@ export function evaluateReleaseTagQualification(
     }
   }
 
+  const releaseOnMain = input.releaseRuns.filter(
+    (run) =>
+      run.headBranch === "main" && (run.event === "push" || run.event === "workflow_dispatch"),
+  );
+
+  // Independently verify npm publication identity BEFORE accepting either a
+  // direct or reconciled release.yml pass: release.yml can succeed after
+  // opening a version PR or skipping an already-published version.
+  if (input.npmError) {
+    return {
+      ok: false,
+      reason: `Failed to verify npm publication identity for ${CLI_NAME}@${version}: ${input.npmError}`,
+    };
+  }
+
+  if (!input.npmPublished) {
+    const inFlightDirect = releaseOnMain.find(
+      (run) => run.status !== "completed" && run.headSha === input.tagSha,
+    );
+    if (inFlightDirect) {
+      return {
+        ok: false,
+        waiting: true,
+        reason: `${CLI_NAME}@${version} is not yet visible on npm while Release workflow (release.yml) run ${inFlightDirect.databaseId} on main is still ${inFlightDirect.status}`,
+      };
+    }
+    return {
+      ok: false,
+      reason: `Refusing to qualify ${tag}: ${CLI_NAME}@${version} is not published on npm`,
+    };
+  }
+
+  if (!input.npmGitHead) {
+    return {
+      ok: false,
+      reason: legacyManualQualificationMessage(version, tag, input.tagSha),
+    };
+  }
+
+  if (!SHA_RE.test(input.npmGitHead)) {
+    return {
+      ok: false,
+      reason: `Published ${CLI_NAME}@${version} on npm has invalid gitHead ${JSON.stringify(input.npmGitHead)}`,
+    };
+  }
+
+  if (input.npmGitHead !== input.tagSha) {
+    return {
+      ok: false,
+      reason: `Published ${CLI_NAME}@${version} on npm has gitHead ${input.npmGitHead}, which does not match ${tag} (${input.tagSha})`,
+    };
+  }
+
   const ciState = ciQualification(
     input.ciRuns.map((run) => ({
       ...run,
@@ -149,12 +223,8 @@ export function evaluateReleaseTagQualification(
     };
   }
 
-  const releaseOnMain = input.releaseRuns.filter(
-    (run) =>
-      run.headBranch === "main" && (run.event === "push" || run.event === "workflow_dispatch"),
-  );
-
-  // Direct match: a release.yml run on main for this exact tagged commit succeeded.
+  // Direct match: a release.yml run on main for this exact tagged commit succeeded
+  // AND npm gitHead independently matched tagSha above.
   const directSuccess = releaseOnMain.find(
     (run) =>
       run.headSha === input.tagSha && run.status === "completed" && run.conclusion === "success",
@@ -170,13 +240,9 @@ export function evaluateReleaseTagQualification(
     };
   }
 
-  // Reconciled match: a later release.yml run on main reconciled an already-published commit.
-  const hasDurableNpmEvidence =
-    input.npmPublished === true &&
-    (input.npmGitHead === input.tagSha ||
-      ((input.npmGitHead === null || input.npmGitHead === undefined) &&
-        input.packageTagSha === input.tagSha));
-  if (hasDurableNpmEvidence && input.releaseRunShaIsDescendantOfTag) {
+  // Reconciled match: a later release.yml run on main reconciled an already-published commit
+  // whose npm gitHead independently matched tagSha above.
+  if (input.releaseRunShaIsDescendantOfTag) {
     const reconciledSuccess = releaseOnMain.find(
       (run) =>
         run.status === "completed" &&
@@ -202,8 +268,7 @@ export function evaluateReleaseTagQualification(
     (run) =>
       run.status !== "completed" &&
       (run.headSha === input.tagSha ||
-        (hasDurableNpmEvidence &&
-          input.releaseRunShaIsDescendantOfTag !== undefined &&
+        (input.releaseRunShaIsDescendantOfTag !== undefined &&
           SHA_RE.test(run.headSha) &&
           input.releaseRunShaIsDescendantOfTag(run.headSha))),
   );
@@ -245,6 +310,7 @@ function listWorkflowRuns(
   repository: string,
   workflow: string,
   extraArgs: string[] = [],
+  env: NodeJS.ProcessEnv = process.env,
 ): WorkflowRunRecord[] {
   const proc = spawnSync(
     "gh",
@@ -265,6 +331,7 @@ function listWorkflowRuns(
     ],
     {
       cwd: repoRoot,
+      env,
       encoding: "utf8",
       timeout: 30_000,
       maxBuffer: 2 * 1024 * 1024,
@@ -278,28 +345,53 @@ function listWorkflowRuns(
   return JSON.parse(proc.stdout) as WorkflowRunRecord[];
 }
 
-function readNpmReleaseRecord(version: string): { published: boolean; gitHead: string | null } {
+export function readNpmReleaseRecord(
+  version: string,
+  env: NodeJS.ProcessEnv = process.env,
+): NpmReleaseRecord {
   const proc = spawnSync(
     "npm",
     ["view", `${CLI_NAME}@${version}`, "version", "gitHead", "--json"],
     {
+      env,
       encoding: "utf8",
       timeout: 30_000,
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  if (proc.status !== 0 || !proc.stdout.trim()) {
+  const stdout = proc.stdout?.trim() ?? "";
+  const stderr = proc.stderr?.trim() ?? "";
+  if (proc.status !== 0) {
+    const combined = `${stdout}\n${stderr}`;
+    if (/\bE404\b|404 Not Found|is not in this registry/i.test(combined)) {
+      return { published: false, gitHead: null };
+    }
+    return {
+      published: false,
+      gitHead: null,
+      error: combined.trim() || `npm view exited with status ${String(proc.status)}`,
+    };
+  }
+  if (!stdout) {
     return { published: false, gitHead: null };
   }
-  const parsed = JSON.parse(proc.stdout) as string | { version?: string; gitHead?: string };
-  if (typeof parsed === "string") {
-    return { published: parsed.trim() === version, gitHead: null };
+  try {
+    const parsed = JSON.parse(stdout) as string | { version?: string; gitHead?: string };
+    if (typeof parsed === "string") {
+      return { published: parsed.trim() === version, gitHead: null };
+    }
+    return {
+      published: parsed.version === version,
+      gitHead:
+        typeof parsed.gitHead === "string" && SHA_RE.test(parsed.gitHead) ? parsed.gitHead : null,
+    };
+  } catch (error) {
+    return {
+      published: false,
+      gitHead: null,
+      error: `Failed to parse npm view JSON: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
-  return {
-    published: parsed.version === version,
-    gitHead:
-      typeof parsed.gitHead === "string" && SHA_RE.test(parsed.gitHead) ? parsed.gitHead : null,
-  };
 }
 
 function parseArgs(argv: string[]): {
@@ -307,17 +399,20 @@ function parseArgs(argv: string[]): {
   ref: string;
   mainRef: string;
   waitSeconds: number;
+  repoRoot?: string;
 } {
   let repository = process.env.GITHUB_REPOSITORY ?? "";
   let ref = process.env.GITHUB_REF ?? "";
   let mainRef = "origin/main";
   let waitSeconds = 180;
+  let repoRoot: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--repo") repository = argv[++i] ?? "";
     else if (arg === "--ref") ref = argv[++i] ?? "";
     else if (arg === "--main-ref") mainRef = argv[++i] ?? "";
+    else if (arg === "--repo-root") repoRoot = argv[++i] ?? "";
     else if (arg === "--wait-seconds") {
       waitSeconds = Number.parseInt(argv[++i] ?? "180", 10);
       if (!Number.isFinite(waitSeconds) || waitSeconds < 0) {
@@ -328,19 +423,39 @@ function parseArgs(argv: string[]): {
     }
   }
 
-  return { repository, ref, mainRef, waitSeconds };
+  return {
+    repository,
+    ref,
+    mainRef,
+    waitSeconds,
+    ...(repoRoot !== undefined ? { repoRoot } : {}),
+  };
 }
 
-if (import.meta.main) {
-  const { repository, ref, mainRef, waitSeconds } = parseArgs(process.argv.slice(2));
-  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+export async function runVerifyReleaseTag(options: {
+  repoRoot: string;
+  repository: string;
+  ref: string;
+  mainRef: string;
+  waitSeconds: number;
+  env?: NodeJS.ProcessEnv;
+}): Promise<ReleaseTagQualificationResult> {
+  const { repoRoot, repository, ref, mainRef, waitSeconds } = options;
+  const env = options.env ?? process.env;
 
   const tag = ref.startsWith("refs/tags/") ? ref.slice("refs/tags/".length) : "";
   const version = tag.startsWith("v") ? tag.slice(1) : "";
   const tagSha = tag
     ? gitOptional(repoRoot, ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`])
     : null;
-  const tagOnMain = tagSha !== null && gitIsAncestor(repoRoot, tagSha, mainRef);
+  const mainRefSha = gitOptional(repoRoot, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${mainRef}^{commit}`,
+  ]);
+  const tagOnMain =
+    tagSha !== null && mainRefSha !== null && gitIsAncestor(repoRoot, tagSha, mainRefSha);
 
   let packageVersionAtTag: string | null = null;
   if (tagSha) {
@@ -365,17 +480,25 @@ if (import.meta.main) {
       ])
     : null;
 
-  const npmRecord = version ? readNpmReleaseRecord(version) : { published: false, gitHead: null };
   const deadline = Date.now() + waitSeconds * 1000;
 
   while (true) {
+    const npmRecord = version
+      ? readNpmReleaseRecord(version, env)
+      : { published: false, gitHead: null };
     const ciRuns =
       repository === CANONICAL_REPOSITORY && tagSha
-        ? listWorkflowRuns(repoRoot, repository, "ci.yml", ["--commit", tagSha, "--event", "push"])
+        ? listWorkflowRuns(
+            repoRoot,
+            repository,
+            "ci.yml",
+            ["--commit", tagSha, "--event", "push"],
+            env,
+          )
         : [];
     const releaseRuns =
       repository === CANONICAL_REPOSITORY && tagSha
-        ? listWorkflowRuns(repoRoot, repository, "release.yml")
+        ? listWorkflowRuns(repoRoot, repository, "release.yml", [], env)
         : [];
 
     const result = evaluateReleaseTagQualification({
@@ -388,18 +511,17 @@ if (import.meta.main) {
       ciRuns,
       releaseRuns,
       releaseRunShaIsDescendantOfTag:
-        tagSha === null
+        tagSha === null || mainRefSha === null
           ? undefined
-          : (sha) => gitIsAncestor(repoRoot, tagSha, sha) && gitIsAncestor(repoRoot, sha, mainRef),
+          : (sha) =>
+              gitIsAncestor(repoRoot, tagSha, sha) && gitIsAncestor(repoRoot, sha, mainRefSha),
       npmPublished: npmRecord.published,
       npmGitHead: npmRecord.gitHead,
+      ...(npmRecord.error !== undefined ? { npmError: npmRecord.error } : {}),
     });
 
     if (result.ok) {
-      console.log(
-        `verify-release-tag: qualified ${result.tag} (${result.tagSha}) via ${result.qualificationMode}`,
-      );
-      process.exit(0);
+      return result;
     }
 
     if (result.waiting && Date.now() < deadline) {
@@ -408,7 +530,37 @@ if (import.meta.main) {
       continue;
     }
 
-    console.error(`verify-release-tag: error: ${result.reason}`);
-    process.exit(1);
+    return result;
   }
+}
+
+if (import.meta.main) {
+  const {
+    repository,
+    ref,
+    mainRef,
+    waitSeconds,
+    repoRoot: cliRepoRoot,
+  } = parseArgs(process.argv.slice(2));
+  const repoRoot = cliRepoRoot
+    ? resolve(cliRepoRoot)
+    : resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+  const result = await runVerifyReleaseTag({
+    repoRoot,
+    repository,
+    ref,
+    mainRef,
+    waitSeconds,
+  });
+
+  if (result.ok) {
+    console.log(
+      `verify-release-tag: qualified ${result.tag} (${result.tagSha}) via ${result.qualificationMode}`,
+    );
+    process.exit(0);
+  }
+
+  console.error(`verify-release-tag: error: ${result.reason}`);
+  process.exit(1);
 }

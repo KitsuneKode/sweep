@@ -37,14 +37,21 @@ Stable publishes explicitly use
 The policy rejects prerelease/latest and conflicting pre-mode tags. Changesets
 pre mode controls its own tag and rejects an extra `--tag` argument.
 
-After publication, `apps/cli/scripts/reconcile-release.ts` requires canonical
+After publication, `apps/cli/scripts/prepack.ts` embeds the exact source commit
+SHA (`gitHead`) into the packed tarball manifest so `@kitsunekode/sweep` on npm
+carries authoritative `gitHead` metadata. `scripts/publish-release.ts` only
+creates a missing `@kitsunekode/sweep@X.Y.Z` tag at the verified npm `gitHead`
+commit (never blindly at the current checkout), after proving `origin/main`
+ancestry and `apps/cli/package.json` version parity.
+`apps/cli/scripts/reconcile-release.ts` requires canonical
 `KitsuneKode/sweep` + `refs/heads/main`, a resolved `origin/main` ref (never
-falling back to `HEAD`), and durable publication commit evidence
-(`npm gitHead` when present, otherwise `@kitsunekode/sweep@X.Y.Z`, refusing to
-guess from version-bump history), verifies the commit is on `main` and carries
-the exact `apps/cli/package.json` version, creates a matching immutable
-`vVERSION` alias (refusing to move a mismatched existing tag), deduplicates any
-in-flight or queued `cli-binaries.yml` or `release-downstream.yml` run, tracks
+falling back to `HEAD`), and verified npm `gitHead` publication identity
+(refusing automatic qualification/reconciliation for legacy versions without
+`gitHead`, such as `0.5.2`, and printing the manual path), verifies the commit
+is on `main` and carries the exact `apps/cli/package.json` version, creates a
+matching immutable `vVERSION` alias (refusing to move a mismatched existing
+tag), deduplicates any in-flight or queued `cli-binaries.yml` run by tag+SHA
+and `release-downstream.yml` run by release version and channel, tracks
 Homebrew tap and Scoop bucket updates separately (never downgrading), and
 explicitly dispatches `cli-binaries.yml` on `vVERSION` (or
 `release-downstream.yml` on `main` when only downstream channels need a retry).
@@ -138,46 +145,59 @@ also gets a streaming, round-trip-verified `.gz` archive with its own SHA-256
 sidecar and a GitHub build provenance attestation
 (`actions/attest-build-provenance`).
 
-Before `attach` uploads assets to a GitHub Release, both `binaries` and
-`qualify-homebrew` must succeed, and `apps/cli/scripts/verify-release-tag.ts`
-verifies canonical `KitsuneKode/sweep`, exact semver `v*` tag matching
-`apps/cli/package.json`, `origin/main` ancestry, exact-commit push CI pass, and
-a passing `release.yml` run on `main`. All seven target families attach to one
-release; preview releases are marked prerelease and cannot update the stable
-Homebrew formula or Scoop bucket.
+Tag-triggered `.github/workflows/cli-binaries.yml` holds only `contents: read`
+(plus `id-token: write` / `attestations: write` for build provenance): it
+builds all seven targets, runs ELF/container/Homebrew qualification, and
+uploads workflow artifacts without ever writing to GitHub Releases or
+downstream repositories.
 
-Downstream Homebrew (`update-homebrew`) and Scoop (`update-scoop`) updates live
-in a separate default-branch workflow, `.github/workflows/release-downstream.yml`,
-never in `cli-binaries.yml`. It triggers via `workflow_run` when `CLI Binaries`
-completes successfully (or via manual `workflow_dispatch` on `main`), so GitHub
-always loads the workflow definition from `main` rather than from a pushed tag.
-Its `qualify` job runs outside the `release-downstream` environment, checks out
-`main`, re-verifies the tag with `apps/cli/scripts/verify-release-tag.ts`
-against `origin/main`, and verifies `qualify Homebrew formula` succeeded before
-`update-homebrew` and `update-scoop` enter the protected `release-downstream`
-environment. Both update jobs render templates from canonical `main`, enforce
-`--reject-downgrade`, bind git push auth via `gh auth setup-git --hostname github.com`
-with their repo-scoped token, and skip cleanly when `TAP_GITHUB_TOKEN` or
-`SCOOP_BUCKET_TOKEN` is unset. Linux local success does not substitute for
-passing those hosted platform jobs.
+All privileged release publication lives in the canonical-`main` workflow
+`.github/workflows/release-downstream.yml` (never loaded from a tag). It
+triggers via `workflow_run` when `CLI Binaries` completes successfully (or via
+manual `workflow_dispatch` on `main` for downstream-only retries):
+
+1. `qualify` runs outside the `release-downstream` environment with read-only
+   permissions, checks out `main`, verifies the tag with
+   `apps/cli/scripts/verify-release-tag.ts` against `origin/main`, push CI,
+   `release.yml`, and independent npm `gitHead` publication proof, and confirms
+   all seven `CLI Binaries` targets plus `qualify Homebrew formula` succeeded
+   (on manual `workflow_dispatch`, it also verifies all 56 expected release
+   assets and validates the target channel's SHA-256 digests).
+2. `attach` (only on `workflow_run`, outside `release-downstream`, with
+   `contents: write` and `actions: read`) downloads the verified workflow
+   artifacts from the triggering `CLI Binaries` run, validates the exact 56-file
+   asset inventory and every `.sha256` checksum, extracts release notes from the
+   qualified commit's `apps/cli/CHANGELOG.md`, and attaches them to the GitHub
+   Release. Preview releases are marked prerelease and cannot update Homebrew
+   or Scoop.
+3. `update-homebrew` and `update-scoop` enter the `main`-only
+   `release-downstream` environment with minimal `contents: read` permissions
+   only after `attach` succeeds (or after `qualify` independently verifies the
+   attached release assets on manual dispatch). Both render templates from
+   canonical `main`, enforce `--reject-downgrade`, bind git push auth via
+   `gh auth setup-git --hostname github.com` with their repo-scoped token, and
+   skip cleanly when `TAP_GITHUB_TOKEN` or `SCOOP_BUCKET_TOKEN` is unset. Linux
+   local success does not substitute for passing those hosted platform jobs.
 
 ### One-time owner repository setup
 
-1. **Configure GitHub Environment `release-downstream`** in repository Settings ->
-   Environments: restrict deployment branches to branch **`main` only** (once
-   `.github/workflows/release-downstream.yml` merges to `main`, remove the `v*`
-   tag deployment policy so no tag workflow can receive environment secrets;
-   optionally add required reviewers), and store `TAP_GITHUB_TOKEN`
-   (`contents:write` on `KitsuneKode/homebrew-tap`) and `SCOOP_BUCKET_TOKEN`
-   (`contents:write` on `KitsuneKode/scoop-bucket`) as environment secrets.
+1. **Before adding or enabling downstream tokens, restrict GitHub Environment
+   `release-downstream` to branch `main` only** in repository Settings ->
+   Environments: remove the `v*` tag deployment policy completely (nothing in
+   the pipeline runs inside `release-downstream` from a tag, so no tag workflow
+   can ever receive environment secrets; optionally add required reviewers),
+   then configure `TAP_GITHUB_TOKEN` (`contents:write` on
+   `KitsuneKode/homebrew-tap`) and `SCOOP_BUCKET_TOKEN` (`contents:write` on
+   `KitsuneKode/scoop-bucket`) as environment secrets.
 2. **Tag protection ruleset (`release-tags`)** in repository Settings -> Rules ->
    Rulesets covers `refs/tags/v*` and `refs/tags/@kitsunekode/sweep@*`, blocking
    update, deletion, and non-fast-forward (force-push) with repository-admin
    bypass. Tag creation is not restricted because a personal-account repository
-   cannot exempt the GitHub Actions app; downstream credential isolation relies
-   on `release-downstream.yml` running only from `main`, verifying tags against
-   `origin/main` + CI + `release.yml`, and restricting the `release-downstream`
-   environment to branch `main` only.
+   cannot exempt the GitHub Actions app; release and downstream credential
+   isolation relies on `cli-binaries.yml` holding `contents: read` only,
+   `release-downstream.yml` running exclusively from `main`, verifying tags
+   against `origin/main` + independent npm `gitHead` + CI + `release.yml`, and
+   restricting the `release-downstream` environment to branch `main` only.
 3. **Bootstrap the two musl engine npm packages** (`@kitsunekode/sweep-engine-linux-64-musl`
    and `@kitsunekode/sweep-engine-linux-arm64-musl`) via
    `bun run bootstrap:npm-trust -- --publish --trust` before merging the release

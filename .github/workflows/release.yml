@@ -164,6 +164,10 @@ jobs:
         if: steps.changesets.outputs.run != 'true'
         run: echo "No pending changesets or version publish; skipping changesets action."
 
+      - name: Fetch canonical main ref
+        shell: bash
+        run: git fetch origin main:refs/remotes/origin/main
+
       - name: Create release PR or publish
         id: release
         if: steps.changesets.outputs.run == 'true'

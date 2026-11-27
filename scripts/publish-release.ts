@@ -4,7 +4,10 @@
  *
  * 1. Run prepublishOnly (check, build, preflight)
  * 2. Publish native `@kitsunekode/sweep-engine-*` packages (when packed under native-packages/)
- * 3. Pack @kitsunekode/sweep and publish that tarball, then tag the release
+ * 3. Pack @kitsunekode/sweep (embedding `gitHead`) and publish that tarball
+ * 4. Create a missing scoped tag (`@kitsunekode/sweep@X.Y.Z`) ONLY at the verified
+ *    npm `gitHead` commit (never blindly at the current checkout), after proving
+ *    it is an ancestor of `origin/main` and matches `apps/cli/package.json`
  *
  * The CLI is published from a packed tarball, not with `changeset publish`.
  * `npm publish <dir>` reads package.json before the prepack step rewrites it
@@ -36,6 +39,26 @@ import { assertPublishable } from "../apps/cli/scripts/prepack.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_DIST_DIR = join(REPO_ROOT, "apps/cli/dist");
+const CLI_NAME = "@kitsunekode/sweep";
+const SHA_RE = /^[a-f0-9]{40}$/;
+
+export type NpmPackageRecord =
+  | { status: "found"; version: string; gitHead: string | null }
+  | { status: "not_found" }
+  | { status: "error"; error: string };
+
+export interface ScopedTagResolutionInput {
+  version: string;
+  gitTag: string;
+  npmRecord: NpmPackageRecord;
+  existingScopedTagSha: string | null;
+  npmGitHeadOnMain: boolean;
+  npmGitHeadPackageVersion: string | null;
+}
+
+export type ScopedTagResolutionResult =
+  | { ok: true; action: "create" | "noop"; targetCommit: string }
+  | { ok: false; reason: string };
 
 function run(command: string, args: string[], options: { cwd?: string } = {}): void {
   const result = spawnSync(command, args, {
@@ -48,12 +71,35 @@ function run(command: string, args: string[], options: { cwd?: string } = {}): v
   }
 }
 
-function npmViewStatus(spec: string): {
+function gitOptional(repoRoot: string, args: string[]): string | null {
+  const proc = spawnSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (proc.status !== 0) return null;
+  const out = proc.stdout.trim();
+  return out.length > 0 ? out : null;
+}
+
+function gitIsAncestor(repoRoot: string, ancestor: string, descendant: string): boolean {
+  const proc = spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+    cwd: repoRoot,
+    stdio: "ignore",
+  });
+  return proc.status === 0;
+}
+
+function npmViewStatus(
+  spec: string,
+  env: NodeJS.ProcessEnv = process.env,
+): {
   status: "found" | "not_found" | "error";
   output: string;
   error?: string;
 } {
   const result = spawnSync("npm", ["view", spec, "version"], {
+    env,
     encoding: "utf8",
     timeout: 30_000,
     stdio: ["ignore", "pipe", "pipe"],
@@ -72,6 +118,198 @@ function npmViewStatus(spec: string): {
     output: stdout,
     error: combined.trim() || `npm view ${spec} exited with status ${String(result.status)}`,
   };
+}
+
+export function readNpmPackageRecord(
+  name: string,
+  version: string,
+  env: NodeJS.ProcessEnv = process.env,
+): NpmPackageRecord {
+  const result = spawnSync("npm", ["view", `${name}@${version}`, "version", "gitHead", "--json"], {
+    env,
+    encoding: "utf8",
+    timeout: 30_000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const stdout = result.stdout?.trim() ?? "";
+  const stderr = result.stderr?.trim() ?? "";
+  if (result.status !== 0) {
+    const combined = `${stdout}\n${stderr}`;
+    if (/\bE404\b|404 Not Found|is not in this registry/i.test(combined)) {
+      return { status: "not_found" };
+    }
+    return {
+      status: "error",
+      error:
+        combined.trim() ||
+        `npm view ${name}@${version} exited with status ${String(result.status)}`,
+    };
+  }
+  if (!stdout) {
+    return { status: "not_found" };
+  }
+  try {
+    const parsed = JSON.parse(stdout) as string | { version?: string; gitHead?: string };
+    if (typeof parsed === "string") {
+      return parsed.trim() === version
+        ? { status: "found", version, gitHead: null }
+        : { status: "not_found" };
+    }
+    if (parsed.version !== version) {
+      return { status: "not_found" };
+    }
+    const gitHead =
+      typeof parsed.gitHead === "string" && SHA_RE.test(parsed.gitHead) ? parsed.gitHead : null;
+    return { status: "found", version, gitHead };
+  } catch (error) {
+    return {
+      status: "error",
+      error: `Failed to parse npm view JSON for ${name}@${version}: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+export function resolveScopedTagTarget(input: ScopedTagResolutionInput): ScopedTagResolutionResult {
+  if (input.npmRecord.status === "error") {
+    return {
+      ok: false,
+      reason: `Failed to query npm for ${CLI_NAME}@${input.version}: ${input.npmRecord.error}`,
+    };
+  }
+  if (input.npmRecord.status === "not_found") {
+    return {
+      ok: false,
+      reason: `Refusing to create ${input.gitTag}: ${CLI_NAME}@${input.version} is not visible on npm`,
+    };
+  }
+
+  const npmGitHead = input.npmRecord.gitHead;
+  if (!npmGitHead) {
+    return {
+      ok: false,
+      reason:
+        `Refusing automatic scoped tag creation/qualification for ${input.gitTag}: published ${CLI_NAME}@${input.version} on npm has no gitHead metadata (legacy release). ` +
+        `Manual path: verify the published npm tarball commit, then run \`git tag ${input.gitTag} <verified-sha> && git push origin ${input.gitTag}\`.`,
+    };
+  }
+
+  if (!SHA_RE.test(npmGitHead)) {
+    return {
+      ok: false,
+      reason: `Published ${CLI_NAME}@${input.version} on npm has invalid gitHead ${JSON.stringify(npmGitHead)}`,
+    };
+  }
+
+  if (!input.npmGitHeadOnMain) {
+    return {
+      ok: false,
+      reason: `Published npm gitHead ${npmGitHead} for ${CLI_NAME}@${input.version} is not an ancestor of canonical main`,
+    };
+  }
+
+  if (input.npmGitHeadPackageVersion !== input.version) {
+    return {
+      ok: false,
+      reason: `apps/cli/package.json at published npm gitHead ${npmGitHead} has version ${JSON.stringify(input.npmGitHeadPackageVersion)}, expected ${input.version}`,
+    };
+  }
+
+  if (input.existingScopedTagSha !== null) {
+    if (input.existingScopedTagSha !== npmGitHead) {
+      return {
+        ok: false,
+        reason: `Existing scoped tag ${input.gitTag} (${input.existingScopedTagSha}) disagrees with published npm gitHead (${npmGitHead})`,
+      };
+    }
+    return { ok: true, action: "noop", targetCommit: npmGitHead };
+  }
+
+  return { ok: true, action: "create", targetCommit: npmGitHead };
+}
+
+export function ensureScopedTagAtPublishedCommit(options: {
+  repoRoot: string;
+  version: string;
+  gitTag: string;
+  mainRef?: string;
+  env?: NodeJS.ProcessEnv;
+  readNpm?: (name: string, version: string) => NpmPackageRecord;
+}): { action: "create" | "noop"; targetCommit: string } {
+  const { repoRoot, version, gitTag } = options;
+  const mainRef = options.mainRef ?? "origin/main";
+  const env = options.env ?? process.env;
+
+  const mainRefSha = gitOptional(repoRoot, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${mainRef}^{commit}`,
+  ]);
+  if (!mainRefSha) {
+    throw new Error(
+      `Refusing to create or verify ${gitTag}: canonical main ref ${mainRef} does not resolve to a commit`,
+    );
+  }
+
+  const npmRecord = options.readNpm
+    ? options.readNpm(CLI_NAME, version)
+    : readNpmPackageRecord(CLI_NAME, version, env);
+
+  const existingScopedTagSha = gitOptional(repoRoot, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `refs/tags/${gitTag}^{commit}`,
+  ]);
+
+  const npmGitHead = npmRecord.status === "found" ? npmRecord.gitHead : null;
+  const npmGitHeadExists =
+    npmGitHead !== null &&
+    gitOptional(repoRoot, ["rev-parse", "--verify", "--quiet", `${npmGitHead}^{commit}`]) ===
+      npmGitHead;
+  const npmGitHeadOnMain = npmGitHeadExists && gitIsAncestor(repoRoot, npmGitHead, mainRefSha);
+
+  let npmGitHeadPackageVersion: string | null = null;
+  if (npmGitHeadExists) {
+    const rawPkg = gitOptional(repoRoot, ["show", `${npmGitHead}:apps/cli/package.json`]);
+    if (rawPkg) {
+      try {
+        const parsed = JSON.parse(rawPkg) as { version?: unknown };
+        npmGitHeadPackageVersion = typeof parsed.version === "string" ? parsed.version : null;
+      } catch {
+        npmGitHeadPackageVersion = null;
+      }
+    }
+  }
+
+  const resolution = resolveScopedTagTarget({
+    version,
+    gitTag,
+    npmRecord,
+    existingScopedTagSha,
+    npmGitHeadOnMain,
+    npmGitHeadPackageVersion,
+  });
+
+  if (!resolution.ok) {
+    throw new Error(resolution.reason);
+  }
+
+  if (resolution.action === "create") {
+    const tagProc = spawnSync("git", ["tag", gitTag, resolution.targetCommit], {
+      cwd: repoRoot,
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (tagProc.status !== 0) {
+      throw new Error(
+        `git tag ${gitTag} ${resolution.targetCommit} failed (${String(tagProc.status)}): ${tagProc.stderr.trim()}`,
+      );
+    }
+  }
+
+  return { action: resolution.action, targetCommit: resolution.targetCommit };
 }
 
 /**
@@ -145,6 +383,39 @@ async function waitForNativePackagesPublished(
   }
 }
 
+/**
+ * Confirm `@kitsunekode/sweep@version` is queryable on npm with the expected
+ * `gitHead` after a fresh publish before tagging.
+ */
+async function waitForCliPublishedWithGitHead(
+  version: string,
+  expectedGitHead: string,
+  timeoutMs = 60_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const record = readNpmPackageRecord(CLI_NAME, version);
+    if (record.status === "error") {
+      throw new Error(`Failed to verify ${CLI_NAME}@${version} on npm: ${record.error}`);
+    }
+    if (record.status === "found") {
+      if (record.gitHead !== expectedGitHead) {
+        throw new Error(
+          `Published ${CLI_NAME}@${version} on npm reports gitHead ${JSON.stringify(record.gitHead)}, expected ${expectedGitHead}`,
+        );
+      }
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Timed out waiting for ${CLI_NAME}@${version} (${expectedGitHead}) to appear on npm`,
+      );
+    }
+    console.log(`waiting for npm registry propagation of ${CLI_NAME}@${version}...`);
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 5_000));
+  }
+}
+
 function cliVersion(): string {
   return execFileSync("node", ["-p", "require('./package.json').version"], {
     cwd: join(REPO_ROOT, "apps/cli"),
@@ -152,149 +423,169 @@ function cliVersion(): string {
   }).trim();
 }
 
-const skipNative = process.argv.includes("--skip-native");
-const requiresNative =
-  process.env.CI === "true" || process.env.SWEEP_RELEASE_REQUIRES_NATIVE === "true";
-const version = cliVersion();
-const preFile = join(REPO_ROOT, ".changeset/pre.json");
-const preState = existsSync(preFile)
-  ? (JSON.parse(readFileSync(preFile, "utf8")) as PreState)
-  : undefined;
-const policy = releasePolicy(version, preState);
-if (skipNative && requiresNative)
-  throw new Error(
-    "CI publication requires the complete native matrix; --skip-native is not allowed",
-  );
+async function main(): Promise<void> {
+  const skipNative = process.argv.includes("--skip-native");
+  const requiresNative =
+    process.env.CI === "true" || process.env.SWEEP_RELEASE_REQUIRES_NATIVE === "true";
+  const version = cliVersion();
+  const preFile = join(REPO_ROOT, ".changeset/pre.json");
+  const preState = existsSync(preFile)
+    ? (JSON.parse(readFileSync(preFile, "utf8")) as PreState)
+    : undefined;
+  const policy = releasePolicy(version, preState);
+  if (skipNative && requiresNative)
+    throw new Error(
+      "CI publication requires the complete native matrix; --skip-native is not allowed",
+    );
 
-await requirePublicationCi(REPO_ROOT);
+  await requirePublicationCi(REPO_ROOT);
 
-// Gate before any publish: a failing check must not strand engine packages on
-// the registry with no matching CLI release.
-console.log("\nrunning prepublishOnly...");
-run("bun", ["run", "prepublishOnly"]);
+  // Gate before any publish: a failing check must not strand engine packages on
+  // the registry with no matching CLI release.
+  console.log("\nrunning prepublishOnly...");
+  run("bun", ["run", "prepublishOnly"]);
 
-if (!skipNative) {
-  const packed: string[] = [];
-  const missing: string[] = [];
+  if (!skipNative) {
+    const packed: string[] = [];
+    const missing: string[] = [];
 
-  for (const platform of NATIVE_PLATFORMS) {
-    const dir = join(REPO_ROOT, "native-packages", platform.id);
-    const binPath = join(dir, "bin", platform.binaryName);
-    if (existsSync(binPath)) {
-      assertNativeBinary(binPath, platform);
-      // Actions artifacts drop file modes: 0.5.0's engines were published
-      // 0644, failed to spawn with EACCES, and every install quietly fell
-      // back to the JS engine. npm keeps the mode that is packed.
-      if (platform.os !== "win32") {
-        chmodSync(binPath, 0o755);
-        if ((statSync(binPath).mode & 0o111) === 0)
-          throw new Error(`${binPath} is not executable; refusing to publish it`);
+    for (const platform of NATIVE_PLATFORMS) {
+      const dir = join(REPO_ROOT, "native-packages", platform.id);
+      const binPath = join(dir, "bin", platform.binaryName);
+      if (existsSync(binPath)) {
+        assertNativeBinary(binPath, platform);
+        // Actions artifacts drop file modes: 0.5.0's engines were published
+        // 0644, failed to spawn with EACCES, and every install quietly fell
+        // back to the JS engine. npm keeps the mode that is packed.
+        if (platform.os !== "win32") {
+          chmodSync(binPath, 0o755);
+          if ((statSync(binPath).mode & 0o111) === 0)
+            throw new Error(`${binPath} is not executable; refusing to publish it`);
+        }
+        const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+          name?: string;
+          version?: string;
+        };
+        if (manifest.name !== platform.npmName || manifest.version !== version)
+          throw new Error(
+            `Native package ${platform.id} does not match ${platform.npmName}@${version}`,
+          );
+        packed.push(platform.id);
+      } else {
+        missing.push(platform.id);
       }
-      const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
-        name?: string;
-        version?: string;
-      };
-      if (manifest.name !== platform.npmName || manifest.version !== version)
-        throw new Error(
-          `Native package ${platform.id} does not match ${platform.npmName}@${version}`,
-        );
-      packed.push(platform.id);
-    } else {
-      missing.push(platform.id);
     }
-  }
 
-  if (packed.length === 0) {
-    if (requiresNative) {
-      console.error(
-        "error: no packed native engine binaries found; CI release expects native-packages/*/bin",
-      );
-      process.exit(1);
-    }
-    console.warn("warn: skipping native engine publish (no packed binaries)");
-  } else {
-    if (missing.length > 0) {
-      console.warn(`warn: missing packed binaries for: ${missing.join(", ")}`);
+    if (packed.length === 0) {
       if (requiresNative) {
-        console.error("error: incomplete native engine matrix in CI");
+        console.error(
+          "error: no packed native engine binaries found; CI release expects native-packages/*/bin",
+        );
         process.exit(1);
       }
-    }
-
-    const packedPlatforms = NATIVE_PLATFORMS.filter((p) => packed.includes(p.id));
-    // Verify every target package is already registered on npm before writing
-    // any engine version, so an unregistered package (e.g. a new musl target)
-    // cannot strand earlier packages half-published.
-    assertNativePackagesRegistered(packedPlatforms.map((p) => p.npmName));
-
-    for (const platform of packedPlatforms) {
-      const dir = join(REPO_ROOT, "native-packages", platform.id);
-      if (alreadyPublished(platform.npmName, version)) {
-        console.log(`\nskipping ${platform.npmName}@${version} (already published)`);
-        continue;
+      console.warn("warn: skipping native engine publish (no packed binaries)");
+    } else {
+      if (missing.length > 0) {
+        console.warn(`warn: missing packed binaries for: ${missing.join(", ")}`);
+        if (requiresNative) {
+          console.error("error: incomplete native engine matrix in CI");
+          process.exit(1);
+        }
       }
-      console.log(`\npublishing ${platform.npmName}@${version}...`);
-      // No --provenance: trusted publishing attests automatically, and the
-      // flag is only needed for token-authenticated publishes.
-      run("npm", [
-        "publish",
-        dir,
-        "--access",
-        "public",
-        "--ignore-scripts",
-        "--tag",
-        policy.distTag,
-      ]);
+
+      const packedPlatforms = NATIVE_PLATFORMS.filter((p) => packed.includes(p.id));
+      // Verify every target package is already registered on npm before writing
+      // any engine version, so an unregistered package (e.g. a new musl target)
+      // cannot strand earlier packages half-published.
+      assertNativePackagesRegistered(packedPlatforms.map((p) => p.npmName));
+
+      for (const platform of packedPlatforms) {
+        const dir = join(REPO_ROOT, "native-packages", platform.id);
+        if (alreadyPublished(platform.npmName, version)) {
+          console.log(`\nskipping ${platform.npmName}@${version} (already published)`);
+          continue;
+        }
+        console.log(`\npublishing ${platform.npmName}@${version}...`);
+        // No --provenance: trusted publishing attests automatically, and the
+        // flag is only needed for token-authenticated publishes.
+        run("npm", [
+          "publish",
+          dir,
+          "--access",
+          "public",
+          "--ignore-scripts",
+          "--tag",
+          policy.distTag,
+        ]);
+      }
+
+      // Confirm every expected engine package is queryable at the exact release
+      // version on npm before promoting the CLI package.
+      const requiredNames = requiresNative
+        ? NATIVE_PLATFORMS.map((p) => p.npmName)
+        : packedPlatforms.map((p) => p.npmName);
+      await waitForNativePackagesPublished(requiredNames, version);
     }
-
-    // Confirm every expected engine package is queryable at the exact release
-    // version on npm before promoting the CLI package.
-    const requiredNames = requiresNative
-      ? NATIVE_PLATFORMS.map((p) => p.npmName)
-      : packedPlatforms.map((p) => p.npmName);
-    await waitForNativePackagesPublished(requiredNames, version);
+  } else {
+    console.log("skipping native engine publish (--skip-native)");
   }
-} else {
-  console.log("skipping native engine publish (--skip-native)");
-}
 
-const CLI_NAME = "@kitsunekode/sweep";
-if (alreadyPublished(CLI_NAME, version)) {
-  console.log(`\nskipping ${CLI_NAME}@${version} (already published)`);
-} else {
-  console.log(`\npublishing ${CLI_NAME}@${version}...`);
-  const packDir = mkdtempSync(join(tmpdir(), "sweep-pack-"));
-  try {
-    // `npm pack` runs prepack (resolve workspace:/catalog:) and postpack.
-    run("npm", ["pack", join(REPO_ROOT, "apps/cli"), "--pack-destination", packDir]);
-    const tarball = readdirSync(packDir).find((file) => file.endsWith(".tgz"));
-    if (!tarball) throw new Error("npm pack produced no tarball");
-    const tarballPath = join(packDir, tarball);
-    run("tar", ["-xzf", tarballPath, "-C", packDir, "package/package.json"]);
-    const manifest = JSON.parse(
-      readFileSync(join(packDir, "package", "package.json"), "utf8"),
-    ) as Record<string, unknown>;
-    if (manifest.name !== CLI_NAME || manifest.version !== version)
-      throw new Error(`Packed manifest is not ${CLI_NAME}@${version}`);
-    // The registry's install metadata is exactly this manifest.
-    assertPublishable(manifest);
-    run("npm", ["publish", tarballPath, "--access", "public", "--tag", policy.distTag]);
-  } finally {
-    rmSync(packDir, { recursive: true, force: true });
+  const headSha = gitOptional(REPO_ROOT, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+  if (!headSha || !SHA_RE.test(headSha)) {
+    throw new Error("Unable to resolve current HEAD commit SHA");
   }
+
+  const cliRecord = readNpmPackageRecord(CLI_NAME, version);
+  if (cliRecord.status === "error") {
+    throw new Error(`Failed to query npm registry for ${CLI_NAME}@${version}: ${cliRecord.error}`);
+  }
+
+  if (cliRecord.status === "found") {
+    console.log(`\nskipping ${CLI_NAME}@${version} (already published)`);
+  } else {
+    console.log(`\npublishing ${CLI_NAME}@${version}...`);
+    const packDir = mkdtempSync(join(tmpdir(), "sweep-pack-"));
+    try {
+      // `npm pack` runs prepack (resolve workspace:/catalog: and embed gitHead) and postpack.
+      run("npm", ["pack", join(REPO_ROOT, "apps/cli"), "--pack-destination", packDir]);
+      const tarball = readdirSync(packDir).find((file) => file.endsWith(".tgz"));
+      if (!tarball) throw new Error("npm pack produced no tarball");
+      const tarballPath = join(packDir, tarball);
+      run("tar", ["-xzf", tarballPath, "-C", packDir, "package/package.json"]);
+      const manifest = JSON.parse(
+        readFileSync(join(packDir, "package", "package.json"), "utf8"),
+      ) as Record<string, unknown>;
+      if (manifest.name !== CLI_NAME || manifest.version !== version)
+        throw new Error(`Packed manifest is not ${CLI_NAME}@${version}`);
+      if (manifest.gitHead !== headSha)
+        throw new Error(
+          `Packed manifest gitHead (${String(manifest.gitHead)}) does not match HEAD (${headSha})`,
+        );
+      // The registry's install metadata is exactly this manifest.
+      assertPublishable(manifest);
+      run("npm", ["publish", tarballPath, "--access", "public", "--tag", policy.distTag]);
+    } finally {
+      rmSync(packDir, { recursive: true, force: true });
+    }
+    await waitForCliPublishedWithGitHead(version, headSha);
+  }
+
+  // Only create a missing scoped tag at the verified npm `gitHead` commit (never
+  // at the current checkout), and only after verifying `origin/main` ancestry.
+  const tagResult = ensureScopedTagAtPublishedCommit({
+    repoRoot: REPO_ROOT,
+    version,
+    gitTag: policy.gitTag,
+    mainRef: "origin/main",
+  });
+  if (tagResult.action === "create") {
+    console.log(`🦋  New tag:  ${policy.gitTag}`);
+  }
+
+  const distFiles = existsSync(CLI_DIST_DIR) ? readdirSync(CLI_DIST_DIR) : [];
+  console.log(`\nrelease complete (apps/cli/dist: ${distFiles.join(", ") || "empty"})`);
 }
 
-// The release workflow builds binaries for a new `package@version` tag, and
-// changesets/action pushes tags it sees announced in this output.
-const tagExists =
-  spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${policy.gitTag}`], {
-    cwd: REPO_ROOT,
-    stdio: "ignore",
-  }).status === 0;
-if (!tagExists) {
-  run("git", ["tag", policy.gitTag]);
-  console.log(`🦋  New tag:  ${policy.gitTag}`);
+if (import.meta.main) {
+  await main();
 }
-
-const distFiles = existsSync(CLI_DIST_DIR) ? readdirSync(CLI_DIST_DIR) : [];
-console.log(`\nrelease complete (apps/cli/dist: ${distFiles.join(", ") || "empty"})`);

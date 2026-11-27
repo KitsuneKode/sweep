@@ -132,17 +132,18 @@ describe("reconcile-release", () => {
     });
   });
 
-  test("refuses reconciliation when both npm gitHead and scoped package tag are absent", () => {
+  test("refuses reconciliation when npm gitHead is absent (legacy release) even if scoped tag exists", () => {
     const plan = planReleaseReconciliation({
       ...BASE_INPUT,
       headSha: SHA_B,
       npm: { status: "found", gitHead: null },
-      packageTagSha: null,
+      packageTagSha: SHA_A,
       binaryTagSha: null,
     });
     expect(plan.kind).toBe("error");
     if (plan.kind === "error") {
-      expect(plan.reason).toContain("missing authoritative publication commit");
+      expect(plan.reason).toContain("no gitHead metadata");
+      expect(plan.reason).toContain("Manual path");
     }
   });
 
@@ -281,7 +282,7 @@ describe("reconcile-release", () => {
       const binaryDispatches: Array<{ repository: string; binaryTag: string }> = [];
 
       const clients: ReleaseClients = {
-        readNpmRelease: () => ({ status: "found", gitHead: null }),
+        readNpmRelease: () => ({ status: "found", gitHead: releaseSha }),
         readGitHubReleaseAssets: () => ({ status: "not_found" }),
         listActiveBinaryRuns: () => ({ status: "ok", runs: [] }),
         listActiveDownstreamRuns: () => ({ status: "ok", runs: [] }),
@@ -476,23 +477,112 @@ describe("reconcile-release", () => {
     }
   });
 
-  test("deduplicates active release-downstream.yml runs on main", () => {
+  test("deduplicates active release-downstream.yml runs strictly by release version and channel", () => {
     const expected = expectedReleaseAssets(["linux-x64", "win-x64"]);
-    const plan = planReleaseReconciliation({
+    const baseDownstream = {
       ...BASE_INPUT,
       binaryTagSha: SHA_A,
-      releaseAssets: { status: "found", assets: expected },
+      releaseAssets: { status: "found" as const, assets: expected },
       expectedAssets: expected,
+    };
+
+    // Matching tag and channel suppresses duplicate dispatch.
+    const sameTagAndChannel = planReleaseReconciliation({
+      ...baseDownstream,
       homebrew: { status: "found", version: "0.5.3" },
       scoop: { status: "found", version: "0.5.4" },
       activeDownstreamRuns: {
         status: "ok",
-        runs: [{ databaseId: 9001, status: "in_progress", headBranch: "main", headSha: SHA_A }],
+        runs: [
+          {
+            databaseId: 9001,
+            status: "in_progress",
+            headBranch: "main",
+            headSha: SHA_A,
+            displayTitle: "Release Downstream (v0.5.4 / homebrew)",
+          },
+        ],
       },
     });
-    expect(plan).toMatchObject({
+    expect(sameTagAndChannel).toMatchObject({
       kind: "noop",
       activeRunId: 9001,
+    });
+
+    // Active run for a DIFFERENT release version does NOT suppress v0.5.4.
+    const differentVersion = planReleaseReconciliation({
+      ...baseDownstream,
+      homebrew: { status: "found", version: "0.5.3" },
+      scoop: { status: "found", version: "0.5.4" },
+      activeDownstreamRuns: {
+        status: "ok",
+        runs: [
+          {
+            databaseId: 9002,
+            status: "in_progress",
+            headBranch: "main",
+            headSha: SHA_A,
+            displayTitle: "Release Downstream (v0.5.3 / all)",
+          },
+        ],
+      },
+    });
+    expect(differentVersion).toMatchObject({
+      kind: "reconcile",
+      dispatchTarget: "downstream",
+      dispatchDownstream: "homebrew",
+    });
+
+    // Active run for ONLY scoop does NOT suppress homebrew, and when both are
+    // needed it narrows the new dispatch to the uncovered homebrew channel.
+    const otherChannel = planReleaseReconciliation({
+      ...baseDownstream,
+      homebrew: { status: "found", version: "0.5.3" },
+      scoop: { status: "found", version: "0.5.3" },
+      activeDownstreamRuns: {
+        status: "ok",
+        runs: [
+          {
+            databaseId: 9003,
+            status: "queued",
+            headBranch: "main",
+            headSha: SHA_A,
+            displayTitle: "Release Downstream (v0.5.4 / scoop)",
+          },
+        ],
+      },
+    });
+    expect(otherChannel).toMatchObject({
+      kind: "reconcile",
+      dispatchTarget: "downstream",
+      dispatchDownstream: "homebrew",
+      homebrewNeedsUpdate: true,
+      scoopNeedsUpdate: false,
+    });
+
+    // Active `all` run for the same tag while release assets are still being
+    // attached suppresses redundant cli-binaries rebuilds.
+    const activeAttach = planReleaseReconciliation({
+      ...BASE_INPUT,
+      binaryTagSha: SHA_A,
+      releaseAssets: { status: "not_found" },
+      expectedAssets: expected,
+      activeDownstreamRuns: {
+        status: "ok",
+        runs: [
+          {
+            databaseId: 9004,
+            status: "in_progress",
+            headBranch: "main",
+            headSha: SHA_A,
+            displayTitle: "Release Downstream (v0.5.4 / all)",
+          },
+        ],
+      },
+    });
+    expect(activeAttach).toMatchObject({
+      kind: "noop",
+      activeRunId: 9004,
     });
   });
 });

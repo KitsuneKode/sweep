@@ -1,5 +1,5 @@
 ---
-"@kitsunekode/sweep": minor
+"@kitsunekode/sweep": patch
 ---
 
 Cross-platform distribution and installer hardening:

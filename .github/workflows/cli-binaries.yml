@@ -2,9 +2,12 @@ name: CLI Binaries
 
 # Builds standalone `sweep` executables (Bun compile with embedded OpenTUI
 # native assets and embedded Rust engine), qualifies the Homebrew formula
-# against the built archives, and attaches assets to the GitHub release for a
-# qualified `v*` tag. Downstream Homebrew/Scoop pushes run separately in
-# `.github/workflows/release-downstream.yml` from canonical `main`.
+# against the built archives, attests build provenance, and uploads workflow
+# artifacts with read-only contents permission.
+#
+# Privileged tag qualification, GitHub Release asset attachment (`contents: write`),
+# and downstream Homebrew/Scoop pushes run exclusively from canonical `main` in
+# `.github/workflows/release-downstream.yml` via `workflow_run`.
 
 on:
   push:
@@ -331,94 +334,3 @@ jobs:
           test -s "$(brew --prefix)/share/zsh/site-functions/_sweep"
           test -s "$(brew --prefix)/share/fish/vendor_completions.d/sweep.fish"
           brew test local/sweep-smoke/sweep
-
-  attach:
-    name: attach binaries to release
-    needs: [binaries, qualify-homebrew]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-      actions: read
-    if: |
-      github.repository == 'KitsuneKode/sweep' &&
-      startsWith(github.ref, 'refs/tags/v')
-    outputs:
-      version: ${{ steps.version.outputs.number }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
-      tag_sha: ${{ steps.version.outputs.tag_sha }}
-      qualified: ${{ steps.qualify.outputs.qualified }}
-    steps:
-      - name: Download all binaries
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          merge-multiple: true
-          path: dist-bin
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          path: src
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-
-      - name: Fetch canonical main ref
-        working-directory: src
-        run: git fetch origin main:refs/remotes/origin/main
-
-      - name: Qualify release tag against canonical main, CI, and Release workflow
-        id: qualify
-        working-directory: src
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          bun run apps/cli/scripts/verify-release-tag.ts \
-            --repo "${{ github.repository }}" \
-            --ref "${{ github.ref }}" \
-            --main-ref origin/main
-          echo "qualified=true" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve release version
-        id: version
-        shell: bash
-        working-directory: src
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          case "$TAG" in
-            v*) version="${TAG#v}" ;;
-            *) echo "Unsupported release tag"; exit 1 ;;
-          esac
-          prerelease="false"
-          [[ "$version" != *-* ]] || prerelease="true"
-          tag_sha="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
-          {
-            echo "number=$version"
-            echo "prerelease=$prerelease"
-            echo "tag_sha=$tag_sha"
-          } >> "$GITHUB_OUTPUT"
-
-      # The release says what changed: its notes are this version's changelog
-      # section, never an empty page beside the binaries.
-      - name: Release notes from the changelog
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.number }}
-        run: |
-          awk -v head="## $VERSION" '$0 == head { on = 1; next } /^## / && on { exit } on' \
-            src/apps/cli/CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "::error::apps/cli/CHANGELOG.md has no section for $VERSION"; exit 1
-          fi
-
-      - name: Attach to GitHub release
-        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
-        with:
-          files: dist-bin/*
-          body_path: release-notes.md
-          prerelease: ${{ steps.version.outputs.prerelease }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
