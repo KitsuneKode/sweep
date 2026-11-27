@@ -69,13 +69,17 @@ Global config is `~/.config/sweep/config.json` on Linux/macOS, honoring
 `SWEEP_CONFIG_DIR` overrides the config directory and also determines history
 storage. Use it for isolated automation.
 
-On Linux/macOS, automatically discovered project and global config files must
-be owned by the running user. This prevents another user's ancestor `.sweeprc`
-from silently changing the selection policy. For a shared file you have reviewed,
-pass `--config PATH` explicitly. Configs must be bounded regular JSON objects;
-the same 1 MiB read limit applies to the UI pattern editor.
-Unknown fields and non-object JSON are rejected. A misspelled ceiling cannot
-silently fall back to an uncapped run.
+On Linux/macOS, automatically discovered project and global config files, as well
+as the sweep config directory, must be owned by the running user and must never
+be world-writable; group-writable files and directories are allowed only when
+their group matches the user's primary group (supporting `umask 002` user-private
+groups). `sweep init` creates `.sweeprc` with mode `0644` and refuses symlinks
+or non-regular targets. If a discovered config is owned by another user or
+writable by another group or others, tighten its permissions with `chmod g-w`
+(or `chmod go-w`), or pass `--config PATH` explicitly after reviewing it. Configs
+must be bounded regular JSON objects; the same 1 MiB read limit applies to the UI
+pattern editor. Unknown fields and non-object JSON are rejected. A misspelled
+ceiling cannot silently fall back to an uncapped run.
 
 ## Match rules
 

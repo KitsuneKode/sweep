@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import type { ApplyOutcome, ApplyReport, ScanPlan } from "@kitsunekode/sweep-protocol";
-import { sweepConfigDir } from "./config.js";
+import { checkPosixTrust, sweepConfigDir } from "./config.js";
 import { ApplyRefusedError, GuardrailError } from "./guardrails.js";
 import { assertPlanResources } from "./resource-budget.js";
 import { resolveSelectedCandidates } from "./planner.js";
@@ -25,13 +25,19 @@ const MAX_LINE = 64 * 1024;
 function privateDirectory(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   const meta = lstatSync(path);
-  if (
-    !meta.isDirectory() ||
-    meta.isSymbolicLink() ||
-    (process.getuid && meta.uid !== process.getuid()) ||
-    (process.platform !== "win32" && (meta.mode & 0o022) !== 0)
-  ) {
+  if (!meta.isDirectory() || meta.isSymbolicLink()) {
     throw new GuardrailError(`Unsafe apply journal directory: ${path}`);
+  }
+  const trustIssue = checkPosixTrust(meta);
+  if (trustIssue === "other_user") {
+    throw new GuardrailError(`Unsafe apply journal directory: ${path} is owned by another user`);
+  }
+  if (trustIssue !== null) {
+    const reason =
+      trustIssue === "world_writable" ? "is world-writable" : "is group-writable by another group";
+    throw new GuardrailError(
+      `Unsafe apply journal directory: ${path} ${reason}; tighten permissions with \`chmod 700\` (or \`chmod go-w\`)`,
+    );
   }
 }
 

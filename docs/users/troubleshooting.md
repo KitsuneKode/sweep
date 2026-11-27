@@ -64,3 +64,19 @@ even when the file is present. Sweep fails closed instead of substituting a
 path. Use the Node CLI with `--engine js` for trash moves in those trees, or the
 native engine for supported scan/permanent-delete workflows. The full-screen UI
 requires Bun; it does not bypass failed canonicalization.
+
+## Config and directory permissions
+
+On Linux/macOS, Sweep and `sweep doctor` reject automatically discovered
+`.sweeprc` files, global configs, and the resolved sweep config directory
+(`$SWEEP_CONFIG_DIR`, else `$XDG_CONFIG_HOME/sweep`, else `~/.config/sweep`,
+along with its `journals` subdirectory when present) that are owned by another
+user, world-writable, or group-writable by a group other than your primary
+group. Group-writable files and directories belonging to your own primary group
+(such as `0664` or `0775` under `umask 002`) are accepted, and a missing config
+directory passes `sweep doctor` because apply creates it with mode `0700`. To
+fix a refused file, run `chmod g-w .sweeprc` (or `chmod go-w .sweeprc` if
+world-writable), or pass `--config PATH` explicitly after reviewing it; for a
+refused config directory, run `chmod 700 <path>` (or `chmod go-w <path>`) on the
+absolute path reported by Sweep or `sweep doctor` (for example,
+`chmod 700 ~/.config/sweep` when using the default location).
