@@ -80,16 +80,24 @@ The user approved this interaction contract after the grilling interview:
   matching native matrix in CI and explicit preview dist-tags. These workflow
   changes require hosted qualification; no publication was performed locally.
 
-## Narrowing `.app` bundle detection to macOS bundles (2026-11-28)
+## Narrowing `.app` bundle detection and scoping tool-home/root guardrails (2026-11-28)
 
 - Previously, `isInsideToolHome` demoted any path with a segment ending in
   `.app` on every platform, causing false positives on ordinary web/project
   folders such as `example.app/node_modules`.
 - Both JS and Rust engines now treat a `.app` ancestor as a macOS application
   bundle (`tool-home`) only on macOS (`darwin`) and only when that folder
-  contains a `Contents/Info.plist` file. `~/Applications` and `/Applications`
-  remain unconditionally protected as tool homes on all platforms.
-- This is an explicit false-positive correction (issue #130); all other
-  classification changes in the same change move strictly toward caution
-  (expanding `HOME_TOOL_DIRS`, `SYSTEM_TOOL_DIRS`, and prefix-blocking OS
-  roots).
+  contains a `Contents/Info.plist` file. `/Applications` remains unconditionally
+  protected and `~/Applications` is newly added to `HOME_TOOL_DIRS` on all
+  platforms.
+- Not every change in this batch moves strictly toward caution; several defaults
+  were intentionally narrowed or kept scoped so real project roots remain
+  cleanable by default: `.app` false-positive correction (issue #130), keeping
+  `/run` exact-match so `/run/media/<user>/<drive>` and `/run/user/<uid>/gvfs`
+  mounts scan cleanly, exempting `/dev/shm`, scoping Unix OS `SYSTEM_TOOL_DIRS`
+  entries away from Windows drive/UNC paths such as `C:\dev`, narrowing
+  `~/go` to `~/go/pkg` and `~/.t3` to `~/.t3/userdata`, carving out
+  `~/.codex/worktrees`, and surfacing cloud-sync folders (`~/Dropbox`,
+  `~/OneDrive`, `~/OneDrive - <Org>`, `~/Google Drive`, `~/My Drive`,
+  `~/Library/CloudStorage/*`) with a non-blocking `cloud-sync` notice instead
+  of demoting them to `dangerous`.

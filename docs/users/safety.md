@@ -60,11 +60,13 @@ appear in a scan as **blocked** and cannot be selected:
   removable.
 - **Version-control internals** (`.git`, `.hg`, `.jj`, ...) and protected roots.
   Sweep refuses to scan filesystem roots, your home folder directly, and
-  operating-system trees: anything under `/etc`, `/sys`, `/proc`, `/dev`,
-  `/boot`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/run` (plus `/private/etc` on
-  macOS) or `C:\Windows` (on any Windows drive, including `\\?\` verbatim
-  paths) is refused as a scan target. `/usr` and `/var` themselves are refused,
-  while project directories beneath them such as `/var/www` remain scannable.
+  operating-system trees: anything under `/etc`, `/sys`, `/proc`, `/dev`
+  (except `/dev/shm`), `/boot`, `/bin`, `/sbin`, `/lib`, `/lib64` (plus
+  `/private/etc` on macOS) or `C:\Windows` (on any Windows drive, including
+  `\\?\` verbatim paths) is refused as a scan target. `/run`, `/usr`, and `/var`
+  themselves are refused, while directories beneath them such as
+  `/run/media/<user>/<drive>`, `/run/user/<uid>/gvfs`, `/var/www`, `/var/tmp`,
+  and `/usr/local/src` remain scannable.
 
 ## Dangerous items need consent by name
 
@@ -74,18 +76,31 @@ Interactively, they are listed by path before you confirm. An unattended run
 (`--yes`) refuses them unless you also pass `--allow-dangerous`; it still prints
 each path before removing it.
 
-Matches inside operating-system trees, system installs (such as `/usr`, `/opt`,
-`/home/linuxbrew/.linuxbrew`, `Windows`, `Program Files`), or personal tool,
-editor, agent, package-manager, and cloud-sync homes under your home folder
-(including `~/.bun`, `~/.cargo`, `~/.npm-global`, `~/.asdf`, `~/.mise`,
-`~/.conda`, `~/miniconda3`, `~/anaconda3`, `~/scoop`, `~/snap`, `~/.var/app`,
-`~/.vscode-insiders`, `~/.vscode-oss`, `~/.windsurf`, `~/.claude`, `~/.codex`,
-`~/.cache`, `~/Applications`, `~/Library`, `~/AppData`, `~/Dropbox`, and
-`~/OneDrive`) are marked **dangerous** (`tool-home`) instead of safe so global
-installs and editor runtimes are never queued by default. On macOS, a folder
-ending in `.app` is treated as an app bundle only when it contains
-`Contents/Info.plist`; outside macOS, or without `Contents/Info.plist`, a
-project folder named `example.app` is treated as an ordinary project folder.
+Matches inside POSIX operating-system trees (except `/dev/shm`), system installs
+(such as `/usr`, `/opt`, `/home/linuxbrew/.linuxbrew`, `Windows`, `Program
+Files`; Unix OS root names do not demote Windows drive paths such as `C:\dev`),
+or personal tool, editor, agent, and package-manager homes under your home
+folder (including `~/.bun`, `~/.cargo`, `~/.npm-global`, `~/.asdf`, `~/.mise`,
+`~/.conda`, `~/miniconda3`, `~/anaconda3`, `~/go/pkg`, `~/scoop`, `~/snap`,
+`~/.var/app`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.windsurf`, `~/.claude`,
+`~/.codex`, `~/.t3/userdata`, `~/.cache`, `~/Applications`, `~/Library`, and
+`~/AppData`) are marked **dangerous** (`tool-home`) instead of safe so global
+installs and editor runtimes are never queued by default. Real project spaces
+such as `~/go/src`, `~/.t3/worktrees`, and `~/.codex/worktrees` stay cleanable
+by default. On macOS, a folder ending in `.app` is treated as an app bundle only
+when it contains `Contents/Info.plist`; outside macOS, or without
+`Contents/Info.plist`, a project folder named `example.app` is treated as an
+ordinary project folder.
+
+Candidates inside cloud-synced folders (`~/Dropbox`, `~/OneDrive`,
+`~/OneDrive - <Org>`, `~/Google Drive`, `~/My Drive`, and macOS
+`~/Library/CloudStorage/*`) keep their normal tier and selection and carry a
+non-blocking `cloud-sync` notice in scan output, because removing build output
+inside a synced folder can trigger a large sync.
+
+To clean a project that legitimately lives under a tool home, either select that
+entry explicitly in `sweep ui` (a single explicit selection) or pass
+`--include-dangerous` (with `--allow-dangerous` when combined with `-y`):
 
 ```sh
 sweep --dry-run --select all --include-dangerous   # look first

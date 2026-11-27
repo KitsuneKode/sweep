@@ -217,7 +217,7 @@ describe("assertSafeCwd: adversarial inputs", () => {
   });
 
   test.skipIf(process.platform === "win32")(
-    "prefix-blocks deep Unix OS subtrees while keeping /var and /usr exact-match",
+    "prefix-blocks deep Unix OS subtrees while keeping /var, /usr, /run exact-match and /dev/shm usable",
     () => {
       for (const path of [
         "/etc/systemd",
@@ -225,19 +225,24 @@ describe("assertSafeCwd: adversarial inputs", () => {
         "/sys/class",
         "/proc/sys",
         "/dev/disk",
+        "/dev/shm-other",
         "/boot/grub",
         "/bin/sub",
         "/sbin/sub",
         "/lib/x86_64-linux-gnu",
         "/lib64/sub",
-        "/run/user/1000",
+        "/run",
       ]) {
         expect(() => assertSafeCwd(path)).toThrow(GuardrailError);
       }
-      // /var and /usr stay exact-match, and look-alike sibling names stay allowed.
+      // /var, /usr, and /run stay exact-match; /dev/shm and look-alike sibling names stay allowed.
       expect(() => assertSafeCwd("/var/www/site")).not.toThrow();
       expect(() => assertSafeCwd("/var/tmp/sweep-test/project")).not.toThrow();
       expect(() => assertSafeCwd("/usr/local/src/project")).not.toThrow();
+      expect(() => assertSafeCwd("/run/media/u/Data/proj")).not.toThrow();
+      expect(() => assertSafeCwd("/run/user/1000/gvfs/smb/proj")).not.toThrow();
+      expect(() => assertSafeCwd("/dev/shm")).not.toThrow();
+      expect(() => assertSafeCwd("/dev/shm/build")).not.toThrow();
       expect(() => assertSafeCwd("/etcetera/project")).not.toThrow();
     },
   );

@@ -108,8 +108,9 @@ export const DARWIN_SYSTEM_ROOTS: readonly string[] = [
 
 /**
  * Unix OS trees whose entire subtrees are refused as scan targets.
- * `/usr` and `/var` stay exact-match in `BLOCKED_ROOTS` so `/var/www`,
- * `/var/tmp`, macOS `/var/folders`, and `/usr/local/...` stay usable.
+ * `/usr`, `/var`, and `/run` stay exact-match in `BLOCKED_ROOTS` so `/var/www`,
+ * `/var/tmp`, macOS `/var/folders`, `/usr/local/...`, `/run/media/...`, and
+ * `/run/user/<uid>/gvfs/...` stay usable.
  * Rust parity: `UNIX_PREFIX_BLOCKED_ROOTS` in `sweep-engine`.
  */
 export const UNIX_PREFIX_BLOCKED_ROOTS: readonly string[] = [
@@ -122,8 +123,14 @@ export const UNIX_PREFIX_BLOCKED_ROOTS: readonly string[] = [
   "/sbin",
   "/lib",
   "/lib64",
-  "/run",
 ];
+
+/**
+ * Carve-outs under `UNIX_PREFIX_BLOCKED_ROOTS` where legitimate scratch builds
+ * live (e.g. Linux `/dev/shm` tmpfs).
+ * Rust parity: `UNIX_PREFIX_BLOCKED_EXCEPTIONS` in `sweep-engine`.
+ */
+export const UNIX_PREFIX_BLOCKED_EXCEPTIONS: readonly string[] = ["/dev/shm"];
 
 /**
  * Strip Windows verbatim path prefixes (`\\?\` and `\\?\UNC\`, including `/`
@@ -216,6 +223,10 @@ const BLOCKED_ROOTS_LOWER = new Set([...BLOCKED_ROOTS].map((root) => root.toLowe
 const PREFIX_BLOCKED_ROOTS = buildPrefixBlockedRoots().map((root) =>
   CASE_FOLD_BLOCKED ? root.toLowerCase() : root,
 );
+const PREFIX_BLOCKED_EXCEPTIONS =
+  process.platform === "win32"
+    ? []
+    : UNIX_PREFIX_BLOCKED_EXCEPTIONS.map((root) => (CASE_FOLD_BLOCKED ? root.toLowerCase() : root));
 
 // ─── Error type ───────────────────────────────────────────────────────────────
 
@@ -324,6 +335,13 @@ function protectedPathHint(resolved: string): string {
 
 function isPrefixBlocked(resolved: string): boolean {
   const candidate = CASE_FOLD_BLOCKED ? resolved.toLowerCase() : resolved;
+  if (
+    PREFIX_BLOCKED_EXCEPTIONS.some(
+      (exception) => candidate === exception || candidate.startsWith(`${exception}${sep}`),
+    )
+  ) {
+    return false;
+  }
   return PREFIX_BLOCKED_ROOTS.some(
     (prefix) => candidate === prefix || candidate.startsWith(`${prefix}${sep}`),
   );

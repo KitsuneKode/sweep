@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScanEntry } from "@kitsunekode/sweep-protocol";
-import { hasMacOsAppBundleAncestor, isInsideToolHome } from "./classification.js";
+import {
+  CLOUD_SYNC_REASON,
+  hasMacOsAppBundleAncestor,
+  isInsideCloudSyncDir,
+  isInsideCloudSyncDirFor,
+  isInsideToolHome,
+  isInsideToolHomeFor,
+} from "./classification.js";
 import { classifyEntry, toCandidate } from "./planner.js";
 
 let root: string;
@@ -167,8 +174,6 @@ describe("isInsideToolHome", () => {
     "/home/dev/.codex/skills/node_modules",
     "/home/dev/.gemini/extensions/node_modules",
     "/home/dev/.t3/userdata/node_modules",
-    "/home/dev/Dropbox/work/node_modules",
-    "/home/dev/OneDrive/work/node_modules",
     "/home/dev/.local/share/zed/prettier/node_modules",
     "/home/dev/.local/share/nvim/lazy/blink.cmp/target",
     "/home/dev/.config/Cursor/node_modules",
@@ -188,7 +193,6 @@ describe("isInsideToolHome", () => {
     "/sbin/sub/node_modules",
     "/lib/sub/node_modules",
     "/lib64/sub/node_modules",
-    "/run/user/1000/node_modules",
     "/var/lib/docker/overlay2/abc/diff/app/node_modules",
     "/nix/store/abc-pkg/lib/node_modules",
   ])("protects %s", (path) => {
@@ -198,9 +202,21 @@ describe("isInsideToolHome", () => {
   test.each([
     "/home/dev/Projects/app/node_modules",
     "/home/dev/Projects/example.app/node_modules",
+    "/home/dev/go/src/proj/node_modules",
+    "/home/dev/go/src/github.com/me/app/node_modules",
+    "/home/dev/.t3/worktrees/x/node_modules",
+    "/home/dev/.codex/worktrees/x/node_modules",
+    "/home/dev/Dropbox/proj/node_modules",
+    "/home/dev/OneDrive/Documents/proj/node_modules",
+    "/home/dev/OneDrive - Contoso/proj/node_modules",
+    "/home/dev/Google Drive/proj/node_modules",
+    "/home/dev/My Drive/proj/node_modules",
     "/home/dev/code/.github-like/target",
     "/home/devops/.bun/node_modules",
     "/home/linuxbrew/Projects/app/node_modules",
+    "/run/media/u/Data/proj/node_modules",
+    "/run/user/1000/gvfs/smb/proj/node_modules",
+    "/dev/shm/build/node_modules",
     "/var/www/site/node_modules",
     "/var/folders/xy/T/sweep-test/node_modules",
     "/tmp/sweep-test/node_modules",
@@ -232,25 +248,151 @@ describe("isInsideToolHome", () => {
     expect(result.riskTier).toBe(expected ? "dangerous" : "safe");
   });
 
-  test.if(process.platform === "win32")("Windows app data is protected, temp is not", () => {
+  test("Windows drive and UNC paths do not match Unix OS system roots (cross-platform)", () => {
     const winHome = "C:\\Users\\dev";
-    expect(isInsideToolHome("C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules", winHome)).toBe(
-      true,
-    );
-    expect(isInsideToolHome("c:\\users\\DEV\\appdata\\local\\x\\node_modules", winHome)).toBe(true);
-    expect(isInsideToolHome("C:\\Users\\dev\\AppData\\Local\\Temp\\t\\node_modules", winHome)).toBe(
+    for (const safeWinPath of [
+      "C:\\dev\\app\\node_modules",
+      "D:\\bin\\x\\node_modules",
+      "C:\\etc\\project\\node_modules",
+      "\\\\?\\C:\\dev\\app\\node_modules",
+      "\\\\server\\share\\dev\\app\\node_modules",
+      "\\\\?\\UNC\\server\\share\\dev\\app\\node_modules",
+      "C:\\Users\\dev\\AppData\\Local\\Temp\\t\\node_modules",
+      "C:\\Users\\dev\\go\\src\\proj\\node_modules",
+      "C:\\Users\\dev\\.t3\\worktrees\\x\\node_modules",
+      "C:\\Users\\dev\\.codex\\worktrees\\x\\node_modules",
+      "C:\\Users\\dev\\OneDrive\\Documents\\proj\\node_modules",
+    ]) {
+      expect(isInsideToolHomeFor(safeWinPath, winHome, true, false)).toBe(false);
+    }
+
+    for (const protectedWinPath of [
+      "C:\\Windows\\System32\\target",
+      "c:\\windows\\winsxs\\target",
+      "\\\\?\\C:\\Windows\\System32\\target",
+      "D:\\Program Files\\App\\resources\\node_modules",
+      "C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules",
+      "C:\\Users\\dev\\go\\pkg\\mod\\node_modules",
+      "C:\\Users\\dev\\.t3\\userdata\\node_modules",
+      "C:\\Users\\dev\\.codex\\skills\\node_modules",
+    ]) {
+      expect(isInsideToolHomeFor(protectedWinPath, winHome, true, false)).toBe(true);
+    }
+
+    // POSIX paths still match Unix OS roots (except /dev/shm).
+    expect(isInsideToolHomeFor("/dev/disk/target", home, false, false)).toBe(true);
+    expect(isInsideToolHomeFor("/etc/nginx/node_modules", home, false, false)).toBe(true);
+    expect(isInsideToolHomeFor("/dev/shm/build/node_modules", home, false, false)).toBe(false);
+    expect(isInsideToolHomeFor("/run/media/u/Data/proj/node_modules", home, false, false)).toBe(
       false,
     );
-    expect(isInsideToolHome("D:\\Program Files\\App\\resources\\node_modules", winHome)).toBe(true);
-    expect(isInsideToolHome("C:\\Windows\\System32\\target", winHome)).toBe(true);
-    expect(isInsideToolHome("\\\\?\\C:\\Windows\\System32\\target", winHome)).toBe(true);
-    expect(isInsideToolHome("\\\\?\\C:\\Users\\dev\\.bun\\node_modules", winHome)).toBe(true);
-    expect(isInsideToolHome("C:\\Users\\dev\\scoop\\apps\\node\\node_modules", winHome)).toBe(true);
   });
+
+  test.if(process.platform === "win32")(
+    "Windows app data is protected, temp and C:\\dev are not",
+    () => {
+      const winHome = "C:\\Users\\dev";
+      expect(isInsideToolHome("C:\\dev\\app\\node_modules", winHome)).toBe(false);
+      expect(isInsideToolHome("D:\\bin\\x\\node_modules", winHome)).toBe(false);
+      expect(isInsideToolHome("C:\\Users\\dev\\AppData\\Roaming\\npm\\node_modules", winHome)).toBe(
+        true,
+      );
+      expect(isInsideToolHome("c:\\users\\DEV\\appdata\\local\\x\\node_modules", winHome)).toBe(
+        true,
+      );
+      expect(
+        isInsideToolHome("C:\\Users\\dev\\AppData\\Local\\Temp\\t\\node_modules", winHome),
+      ).toBe(false);
+      expect(isInsideToolHome("D:\\Program Files\\App\\resources\\node_modules", winHome)).toBe(
+        true,
+      );
+      expect(isInsideToolHome("C:\\Windows\\System32\\target", winHome)).toBe(true);
+      expect(isInsideToolHome("\\\\?\\C:\\Windows\\System32\\target", winHome)).toBe(true);
+      expect(isInsideToolHome("\\\\?\\C:\\Users\\dev\\.bun\\node_modules", winHome)).toBe(true);
+      expect(isInsideToolHome("C:\\Users\\dev\\scoop\\apps\\node\\node_modules", winHome)).toBe(
+        true,
+      );
+    },
+  );
 
   test("an unset or root home disables home rules but keeps system rules", () => {
     expect(isInsideToolHome("/.bun/node_modules", "/")).toBe(false);
     expect(isInsideToolHome("/usr/share/x/node_modules", "")).toBe(true);
+  });
+});
+
+describe("cloud-sync folders add a non-blocking informational reason", () => {
+  const home = "/home/dev";
+
+  test.each([
+    "/home/dev/Dropbox/proj/node_modules",
+    "/home/dev/OneDrive/Documents/proj/node_modules",
+    "/home/dev/OneDrive - Contoso/proj/node_modules",
+    "/home/dev/Google Drive/proj/node_modules",
+    "/home/dev/My Drive/proj/node_modules",
+    "/home/dev/Library/CloudStorage/GoogleDrive-me@example.com/proj/node_modules",
+  ])("tags %s as cloud-sync", (path) => {
+    expect(isInsideCloudSyncDir(path, home)).toBe(true);
+  });
+
+  test.each([
+    "/home/dev/Projects/app/node_modules",
+    "/home/dev/DropboxBackup/proj/node_modules",
+    "/home/dev/OneDriveBackup/proj/node_modules",
+    "/home/dev/OneDrive - /proj/node_modules",
+    "/home/dev/Library/CloudStorage",
+    "/tmp/Dropbox/proj/node_modules",
+  ])("does not tag %s as cloud-sync", (path) => {
+    expect(isInsideCloudSyncDir(path, home)).toBe(false);
+  });
+
+  test("Windows org-named OneDrive paths match case-insensitively", () => {
+    const winHome = "C:\\Users\\dev";
+    expect(
+      isInsideCloudSyncDirFor(
+        "C:\\Users\\dev\\onedrive - acme corp\\proj\\node_modules",
+        winHome,
+        true,
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      isInsideCloudSyncDirFor(
+        "C:\\Users\\dev\\OneDrive\\Documents\\proj\\node_modules",
+        winHome,
+        true,
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      isInsideCloudSyncDirFor("C:\\Users\\dev\\Projects\\app\\node_modules", winHome, true, false),
+    ).toBe(false);
+  });
+
+  test("cloud-sync reason does not demote safe projects or alter default selection", () => {
+    for (const path of [
+      "/home/dev/Dropbox/proj/node_modules",
+      "/home/dev/OneDrive/Documents/proj/node_modules",
+      "/home/dev/OneDrive - Contoso/proj/node_modules",
+      "/home/dev/Google Drive/proj/node_modules",
+      "/home/dev/My Drive/proj/node_modules",
+    ]) {
+      const result = classifyEntry(entry(path, "node_modules", "directory"), home);
+      expect(result.riskTier).toBe("safe");
+      expect(result.reasons).toEqual(["default-pattern", CLOUD_SYNC_REASON]);
+    }
+
+    // ~/Library/CloudStorage/* stays dangerous because of ~/Library while also recording cloud-sync.
+    const cloudStorage = classifyEntry(
+      entry(
+        "/home/dev/Library/CloudStorage/GoogleDrive-me/proj/node_modules",
+        "node_modules",
+        "directory",
+      ),
+      home,
+    );
+    expect(cloudStorage.riskTier).toBe("dangerous");
+    expect(cloudStorage.reasons).toEqual(["default-pattern", "tool-home", CLOUD_SYNC_REASON]);
   });
 });
 

@@ -182,7 +182,7 @@ pub fn assert_safe_cwd(target_path: &str) -> Result<(), EngineError> {
 /// Drop Windows verbatim prefixes (`\\?\` and `\\?\UNC\`, including `/`
 /// variants) so lexical and canonical paths compare consistently against
 /// blocked roots and prefixes. JS parity: `stripWindowsVerbatimPrefix`.
-fn strip_verbatim_str_for(input: &str, is_windows: bool) -> String {
+pub(crate) fn strip_verbatim_str_for(input: &str, is_windows: bool) -> String {
     if !is_windows {
         return input.to_owned();
     }
@@ -298,13 +298,34 @@ const DARWIN_SYSTEM_ROOTS: &[&str] = &[
 ];
 
 /// Unix OS trees whose entire subtrees are refused as scan targets.
-/// `/usr` and `/var` stay exact-match in `blocked_roots` so `/var/www`,
-/// `/var/tmp`, macOS `/var/folders`, and `/usr/local/...` stay usable.
+/// `/usr`, `/var`, and `/run` stay exact-match in `blocked_roots` so `/var/www`,
+/// `/var/tmp`, macOS `/var/folders`, `/usr/local/...`, `/run/media/...`, and
+/// `/run/user/<uid>/gvfs/...` stay usable.
 /// JS parity: `UNIX_PREFIX_BLOCKED_ROOTS` in `guardrails.ts`.
 #[cfg_attr(windows, allow(dead_code))]
 const UNIX_PREFIX_BLOCKED_ROOTS: &[&str] = &[
-    "/etc", "/sys", "/proc", "/dev", "/boot", "/bin", "/sbin", "/lib", "/lib64", "/run",
+    "/etc", "/sys", "/proc", "/dev", "/boot", "/bin", "/sbin", "/lib", "/lib64",
 ];
+
+/// Carve-outs under `UNIX_PREFIX_BLOCKED_ROOTS` where legitimate scratch builds
+/// live (e.g. Linux `/dev/shm` tmpfs).
+/// JS parity: `UNIX_PREFIX_BLOCKED_EXCEPTIONS` in `guardrails.ts`.
+#[cfg_attr(windows, allow(dead_code))]
+const UNIX_PREFIX_BLOCKED_EXCEPTIONS: &[&str] = &["/dev/shm"];
+
+fn prefix_blocked_exceptions() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        Vec::new()
+    }
+    #[cfg(not(windows))]
+    {
+        UNIX_PREFIX_BLOCKED_EXCEPTIONS
+            .iter()
+            .map(PathBuf::from)
+            .collect()
+    }
+}
 
 fn prefix_blocked_roots() -> Vec<PathBuf> {
     #[cfg(windows)]
@@ -327,15 +348,28 @@ fn prefix_blocked_roots() -> Vec<PathBuf> {
 }
 
 fn is_prefix_blocked(resolved: &Path) -> bool {
+    let exceptions = prefix_blocked_exceptions();
     let prefixes = prefix_blocked_roots();
     if cfg!(windows) || cfg!(target_os = "macos") {
         let sep = std::path::MAIN_SEPARATOR;
         let candidate = resolved.to_string_lossy().to_lowercase();
+        if exceptions.iter().any(|exception| {
+            let e = exception.to_string_lossy().to_lowercase();
+            candidate == e || candidate.starts_with(&format!("{e}{sep}"))
+        }) {
+            return false;
+        }
         prefixes.iter().any(|prefix| {
             let p = prefix.to_string_lossy().to_lowercase();
             candidate == p || candidate.starts_with(&format!("{p}{sep}"))
         })
     } else {
+        if exceptions
+            .iter()
+            .any(|exception| resolved.starts_with(exception))
+        {
+            return false;
+        }
         prefixes.iter().any(|prefix| resolved.starts_with(prefix))
     }
 }
@@ -526,25 +560,30 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn unix_os_subtrees_are_prefix_blocked_while_var_and_usr_stay_exact() {
+    fn unix_os_subtrees_are_prefix_blocked_while_var_usr_run_stay_exact_and_dev_shm_allowed() {
         for path in [
             "/etc/systemd",
             "/etc/ssh",
             "/sys/class",
             "/proc/sys",
             "/dev/disk",
+            "/dev/shm-other",
             "/boot/grub",
             "/bin/sub",
             "/sbin/sub",
             "/lib/x86_64-linux-gnu",
             "/lib64/sub",
-            "/run/user/1000",
+            "/run",
         ] {
             assert!(assert_safe_cwd(path).is_err(), "{path} should be refused");
         }
         assert!(assert_safe_cwd("/var/www/site").is_ok());
         assert!(assert_safe_cwd("/var/tmp/sweep-test/project").is_ok());
         assert!(assert_safe_cwd("/usr/local/src/project").is_ok());
+        assert!(assert_safe_cwd("/run/media/u/Data/proj").is_ok());
+        assert!(assert_safe_cwd("/run/user/1000/gvfs/smb/proj").is_ok());
+        assert!(assert_safe_cwd("/dev/shm").is_ok());
+        assert!(assert_safe_cwd("/dev/shm/build").is_ok());
         assert!(assert_safe_cwd("/etcetera/project").is_ok());
     }
 
