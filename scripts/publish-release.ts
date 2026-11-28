@@ -30,7 +30,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
+import { NATIVE_PLATFORMS, type NativePlatform } from "@kitsunekode/sweep-core/native-platforms";
 
 import { releasePolicy, type PreState } from "../apps/cli/scripts/release-policy.js";
 import { requirePublicationCi } from "../apps/cli/scripts/release-ci.js";
@@ -423,34 +423,95 @@ function cliVersion(): string {
   }).trim();
 }
 
-async function main(): Promise<void> {
-  const skipNative = process.argv.includes("--skip-native");
-  const requiresNative =
-    process.env.CI === "true" || process.env.SWEEP_RELEASE_REQUIRES_NATIVE === "true";
-  const version = cliVersion();
-  const preFile = join(REPO_ROOT, ".changeset/pre.json");
-  const preState = existsSync(preFile)
-    ? (JSON.parse(readFileSync(preFile, "utf8")) as PreState)
-    : undefined;
-  const policy = releasePolicy(version, preState);
-  if (skipNative && requiresNative)
-    throw new Error(
-      "CI publication requires the complete native matrix; --skip-native is not allowed",
-    );
+export function collectPublishTargets(options: {
+  repoRoot: string;
+  skipNative: boolean;
+  requiresNative: boolean;
+  nativePlatforms?: readonly NativePlatform[] | undefined;
+}): string[] {
+  const platforms = options.nativePlatforms ?? NATIVE_PLATFORMS;
+  const targets: string[] = [];
+  if (!options.skipNative) {
+    if (options.requiresNative) {
+      for (const platform of platforms) {
+        targets.push(platform.npmName);
+      }
+    } else {
+      for (const platform of platforms) {
+        const binPath = join(
+          options.repoRoot,
+          "native-packages",
+          platform.id,
+          "bin",
+          platform.binaryName,
+        );
+        if (existsSync(binPath)) {
+          targets.push(platform.npmName);
+        }
+      }
+    }
+  }
+  targets.push(CLI_NAME);
+  return targets;
+}
 
-  await requirePublicationCi(REPO_ROOT);
+export function findUnpublishedPackages(
+  targetPackages: readonly string[],
+  version: string,
+  isPublished: (name: string, version: string) => boolean = alreadyPublished,
+): string[] {
+  return targetPackages.filter((name) => !isPublished(name, version));
+}
+
+export interface PublishReleaseRunOptions {
+  repoRoot?: string;
+  skipNative?: boolean;
+  requiresNative?: boolean;
+  version?: string;
+  preState?: PreState;
+  nativePlatforms?: readonly NativePlatform[];
+  isAlreadyPublished?: (name: string, version: string) => boolean;
+  requireCi?: (repoRoot: string) => Promise<void>;
+  ensureScopedTag?: (options: {
+    repoRoot: string;
+    version: string;
+    gitTag: string;
+    mainRef?: string;
+  }) => { action: "create" | "noop"; targetCommit: string };
+  executePublish?: (context: {
+    repoRoot: string;
+    version: string;
+    skipNative: boolean;
+    requiresNative: boolean;
+    policy: ReturnType<typeof releasePolicy>;
+  }) => Promise<void>;
+  log?: (message: string) => void;
+}
+
+export type PublishReleaseOutcome =
+  | { status: "noop"; unpublished: []; tagAction: "create" | "noop"; targetCommit: string }
+  | { status: "published"; unpublished: string[] };
+
+async function executePublishFlow(context: {
+  repoRoot: string;
+  version: string;
+  skipNative: boolean;
+  requiresNative: boolean;
+  policy: ReturnType<typeof releasePolicy>;
+}): Promise<void> {
+  const { repoRoot, version, skipNative, requiresNative, policy } = context;
 
   // Gate before any publish: a failing check must not strand engine packages on
   // the registry with no matching CLI release.
   console.log("\nrunning prepublishOnly...");
-  run("bun", ["run", "prepublishOnly"]);
+  run("bun", ["run", "prepublishOnly"], { cwd: repoRoot });
 
   if (!skipNative) {
     const packed: string[] = [];
     const missing: string[] = [];
 
     for (const platform of NATIVE_PLATFORMS) {
-      const dir = join(REPO_ROOT, "native-packages", platform.id);
+      const dir = join(repoRoot, "native-packages", platform.id);
       const binPath = join(dir, "bin", platform.binaryName);
       if (existsSync(binPath)) {
         assertNativeBinary(binPath, platform);
@@ -500,7 +561,7 @@ async function main(): Promise<void> {
       assertNativePackagesRegistered(packedPlatforms.map((p) => p.npmName));
 
       for (const platform of packedPlatforms) {
-        const dir = join(REPO_ROOT, "native-packages", platform.id);
+        const dir = join(repoRoot, "native-packages", platform.id);
         if (alreadyPublished(platform.npmName, version)) {
           console.log(`\nskipping ${platform.npmName}@${version} (already published)`);
           continue;
@@ -508,15 +569,11 @@ async function main(): Promise<void> {
         console.log(`\npublishing ${platform.npmName}@${version}...`);
         // No --provenance: trusted publishing attests automatically, and the
         // flag is only needed for token-authenticated publishes.
-        run("npm", [
-          "publish",
-          dir,
-          "--access",
-          "public",
-          "--ignore-scripts",
-          "--tag",
-          policy.distTag,
-        ]);
+        run(
+          "npm",
+          ["publish", dir, "--access", "public", "--ignore-scripts", "--tag", policy.distTag],
+          { cwd: repoRoot },
+        );
       }
 
       // Confirm every expected engine package is queryable at the exact release
@@ -530,7 +587,7 @@ async function main(): Promise<void> {
     console.log("skipping native engine publish (--skip-native)");
   }
 
-  const headSha = gitOptional(REPO_ROOT, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+  const headSha = gitOptional(repoRoot, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
   if (!headSha || !SHA_RE.test(headSha)) {
     throw new Error("Unable to resolve current HEAD commit SHA");
   }
@@ -547,11 +604,13 @@ async function main(): Promise<void> {
     const packDir = mkdtempSync(join(tmpdir(), "sweep-pack-"));
     try {
       // `npm pack` runs prepack (resolve workspace:/catalog: and embed gitHead) and postpack.
-      run("npm", ["pack", join(REPO_ROOT, "apps/cli"), "--pack-destination", packDir]);
+      run("npm", ["pack", join(repoRoot, "apps/cli"), "--pack-destination", packDir], {
+        cwd: repoRoot,
+      });
       const tarball = readdirSync(packDir).find((file) => file.endsWith(".tgz"));
       if (!tarball) throw new Error("npm pack produced no tarball");
       const tarballPath = join(packDir, tarball);
-      run("tar", ["-xzf", tarballPath, "-C", packDir, "package/package.json"]);
+      run("tar", ["-xzf", tarballPath, "-C", packDir, "package/package.json"], { cwd: repoRoot });
       const manifest = JSON.parse(
         readFileSync(join(packDir, "package", "package.json"), "utf8"),
       ) as Record<string, unknown>;
@@ -563,7 +622,9 @@ async function main(): Promise<void> {
         );
       // The registry's install metadata is exactly this manifest.
       assertPublishable(manifest);
-      run("npm", ["publish", tarballPath, "--access", "public", "--tag", policy.distTag]);
+      run("npm", ["publish", tarballPath, "--access", "public", "--tag", policy.distTag], {
+        cwd: repoRoot,
+      });
     } finally {
       rmSync(packDir, { recursive: true, force: true });
     }
@@ -573,7 +634,7 @@ async function main(): Promise<void> {
   // Only create a missing scoped tag at the verified npm `gitHead` commit (never
   // at the current checkout), and only after verifying `origin/main` ancestry.
   const tagResult = ensureScopedTagAtPublishedCommit({
-    repoRoot: REPO_ROOT,
+    repoRoot,
     version,
     gitTag: policy.gitTag,
     mainRef: "origin/main",
@@ -584,6 +645,73 @@ async function main(): Promise<void> {
 
   const distFiles = existsSync(CLI_DIST_DIR) ? readdirSync(CLI_DIST_DIR) : [];
   console.log(`\nrelease complete (apps/cli/dist: ${distFiles.join(", ") || "empty"})`);
+}
+
+export async function runPublishRelease(
+  options: PublishReleaseRunOptions = {},
+): Promise<PublishReleaseOutcome> {
+  const repoRoot = options.repoRoot ?? REPO_ROOT;
+  const skipNative = options.skipNative ?? process.argv.includes("--skip-native");
+  const requiresNative =
+    options.requiresNative ??
+    (process.env.CI === "true" || process.env.SWEEP_RELEASE_REQUIRES_NATIVE === "true");
+  const version = options.version ?? cliVersion();
+  const preFile = join(repoRoot, ".changeset/pre.json");
+  const preState =
+    options.preState !== undefined
+      ? options.preState
+      : existsSync(preFile)
+        ? (JSON.parse(readFileSync(preFile, "utf8")) as PreState)
+        : undefined;
+  const policy = releasePolicy(version, preState);
+  if (skipNative && requiresNative) {
+    throw new Error(
+      "CI publication requires the complete native matrix; --skip-native is not allowed",
+    );
+  }
+
+  const log = options.log ?? ((msg: string) => console.log(msg));
+  const isPublished = options.isAlreadyPublished ?? alreadyPublished;
+  const requireCi = options.requireCi ?? requirePublicationCi;
+  const ensureTag = options.ensureScopedTag ?? ensureScopedTagAtPublishedCommit;
+
+  const targetPackages = collectPublishTargets({
+    repoRoot,
+    skipNative,
+    requiresNative,
+    nativePlatforms: options.nativePlatforms,
+  });
+  const unpublished = findUnpublishedPackages(targetPackages, version, isPublished);
+
+  if (unpublished.length === 0) {
+    const tagResult = ensureTag({
+      repoRoot,
+      version,
+      gitTag: policy.gitTag,
+      mainRef: "origin/main",
+    });
+    if (tagResult.action === "create") {
+      log(`🦋  New tag:  ${policy.gitTag}`);
+    }
+    log(`All packages for ${version} are already published on npm; nothing to publish.`);
+    return {
+      status: "noop",
+      unpublished: [],
+      tagAction: tagResult.action,
+      targetCommit: tagResult.targetCommit,
+    };
+  }
+
+  await requireCi(repoRoot);
+
+  const execute = options.executePublish ?? executePublishFlow;
+  await execute({ repoRoot, version, skipNative, requiresNative, policy });
+
+  return { status: "published", unpublished };
+}
+
+async function main(): Promise<void> {
+  await runPublishRelease();
 }
 
 if (import.meta.main) {

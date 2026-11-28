@@ -19,9 +19,9 @@ import { expectApplyOutput } from "../apply-lifecycle.js";
 import {
   applyNoColor,
   assertDangerousConsent,
+  confirmPlanDeletion,
   drainStdout,
   executePlanDeletion,
-  promptConfirm,
   resolveEngineBackend,
   warnIgnoredOptions,
   writeJson,
@@ -103,17 +103,16 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
       ...(opts.json ? { json: true } : {}),
     });
 
-    if (!opts.yes) {
-      const totalBytes = getSelectedBytes(plan);
-      const action = opts.trash
-        ? `Move ${selectedCount} plan items to .sweep-trash`
-        : `Apply plan with ${selectedCount} items`;
-      const confirmed = await promptConfirm(`${action} (~${formatBytes(totalBytes)})?`);
-      if (!confirmed) {
-        // A decline under --json emits no stdout at all - exit code carries it.
-        if (!opts.json) printDeclined();
-        exitWith(EXIT.ABORTED);
-      }
+    if (
+      !(await confirmPlanDeletion(plan, {
+        yes: opts.yes,
+        ...(opts.trash ? { trash: true } : {}),
+        mode: "plan",
+      }))
+    ) {
+      // A decline under --json emits no stdout at all - exit code carries it.
+      if (!opts.json) printDeclined();
+      exitWith(EXIT.ABORTED);
     }
 
     const engine = resolveEngineBackend({ engine: opts.engine ?? "auto" });
