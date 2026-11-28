@@ -422,26 +422,128 @@ export interface StatsTotals {
   totalFailed: number;
 }
 
-/** `sweep status` - what could be freed now, answer first. */
-export function printStatusSummary(status: StatusSummary): void {
-  if (status.reclaimableBytes === 0) {
-    console.log(pc.dim("  Nothing to free here."));
-    return;
+function formatStatusProjectDuration(project: { idleDays: number; idleMs: number }): string {
+  if (project.idleMs < 86_400_000) {
+    if (project.idleMs >= 3_600_000) {
+      const hours = Math.floor(project.idleMs / 3_600_000);
+      return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+    }
+    const minutes = Math.max(1, Math.floor(project.idleMs / 60_000));
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
   }
-  const idle =
-    status.idle.projects > 0
-      ? pc.dim(
-          ` · ${formatBytes(status.idle.bytes)} in ${status.idle.projects} project${
-            status.idle.projects === 1 ? "" : "s"
-          } idle ${status.idle.days}+ days`,
-        )
-      : "";
-  console.log(`  ${pc.bold(pc.green(formatBytes(status.reclaimableBytes)))} you could free${idle}`);
-  if (status.protectedCount > 0) {
-    console.log(
-      pc.dim(`  ${status.protectedCount} protected item(s) found, never counted as space to free`),
+  return `${project.idleDays} ${project.idleDays === 1 ? "day" : "days"}`;
+}
+
+function formatStatusWorktreeTag(project: {
+  worktreeOf?: string;
+  worktreeState?: "merged" | "upstream_gone";
+}): string {
+  if (project.worktreeOf === undefined) return "";
+  const repo = sanitizeTerminalText(
+    project.worktreeOf
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .pop() || project.worktreeOf,
+  );
+  const state =
+    project.worktreeState === "merged"
+      ? "merged"
+      : project.worktreeState === "upstream_gone"
+        ? "branch missing"
+        : "worktree";
+  return ` (${repo} · ${state})`;
+}
+
+function printStatusCoverageNote(status: StatusSummary): void {
+  if (status.complete) return;
+  const parts: string[] = [];
+  if (status.skippedDirs > 0) {
+    parts.push(
+      `${status.skippedDirs} folder${status.skippedDirs === 1 ? "" : "s"} could not be read`,
     );
   }
+  if (status.bytesPartial) {
+    parts.push(
+      `${status.partialByteCount} item${status.partialByteCount === 1 ? "" : "s"} partially sized`,
+    );
+  }
+  if (parts.length > 0) {
+    console.log(pc.yellow(`  incomplete scan: ${parts.join(" · ")}`));
+  }
+}
+
+function printStatusProjectSection(title: string, projects: StatusSummary["projects"]): void {
+  console.log();
+  console.log(pc.dim(`  ${title}`));
+  const labels = projects.map(
+    (project) => `${sanitizeTerminalText(project.name)}${formatStatusWorktreeTag(project)}`,
+  );
+  const nameWidth = Math.max(0, ...labels.map((label) => label.length));
+  for (const [index, project] of projects.entries()) {
+    const label = labels[index]!;
+    console.log(
+      `  ${label.padEnd(nameWidth)}  ${formatBytes(project.bytes).padStart(9)}  ${pc.dim(
+        formatStatusProjectDuration(project),
+      )}`,
+    );
+  }
+}
+
+/** `sweep status` - what could be freed now, answer first. */
+export function printStatusSummary(status: StatusSummary): void {
+  const hasReclaimable = status.reclaimableBytes > 0 || status.kinds.length > 0;
+  if (!hasReclaimable) {
+    if (status.protectedCount > 0) {
+      console.log(pc.dim("  Nothing automatically reclaimable here."));
+      const bytesNote = status.protectedBytes > 0 ? ` (${formatBytes(status.protectedBytes)})` : "";
+      console.log(
+        pc.dim(
+          `  ${status.protectedCount} guarded item(s) found${bytesNote}, never counted as space to free`,
+        ),
+      );
+    } else {
+      console.log(pc.dim("  Nothing to free here."));
+    }
+    printStatusCoverageNote(status);
+    return;
+  }
+
+  const headlineParts: string[] = [];
+  if (status.finishedWorktrees.projects > 0) {
+    headlineParts.push(
+      `${formatBytes(status.finishedWorktrees.bytes)} in ${status.finishedWorktrees.projects} finished worktree${
+        status.finishedWorktrees.projects === 1 ? "" : "s"
+      }`,
+    );
+  }
+  if (status.idle.projects > 0) {
+    headlineParts.push(
+      `${formatBytes(status.idle.bytes)} in ${status.idle.projects} project${
+        status.idle.projects === 1 ? "" : "s"
+      } idle ${status.idle.windowLabel}`,
+    );
+  }
+  const suffix = headlineParts.length > 0 ? pc.dim(` · ${headlineParts.join(" · ")}`) : "";
+  const totalSize = `${status.bytesPartial ? "~" : ""}${formatBytes(status.reclaimableBytes)}`;
+  console.log(`  ${pc.bold(pc.green(totalSize))} you could free${suffix}`);
+  if (status.protectedCount > 0) {
+    const bytesNote = status.protectedBytes > 0 ? ` (${formatBytes(status.protectedBytes)})` : "";
+    console.log(
+      pc.dim(
+        `  ${status.protectedCount} guarded item(s) found${bytesNote}, never counted as space to free`,
+      ),
+    );
+  }
+  if (status.branchMissingWorktrees.projects > 0) {
+    console.log(
+      pc.yellow(
+        `  ${status.branchMissingWorktrees.projects} worktree${
+          status.branchMissingWorktrees.projects === 1 ? "" : "s"
+        } with tracking branch missing (${formatBytes(status.branchMissingWorktrees.bytes)}) · check git`,
+      ),
+    );
+  }
+  printStatusCoverageNote(status);
   console.log();
   const width = Math.max(0, ...status.kinds.map((entry) => entry.kind.length));
   for (const entry of status.kinds) {
@@ -451,17 +553,11 @@ export function printStatusSummary(status: StatusSummary): void {
       )}`,
     );
   }
+  if (status.finishedWorktrees.items.length > 0) {
+    printStatusProjectSection("Finished worktrees", status.finishedWorktrees.items);
+  }
   if (status.projects.length > 0) {
-    console.log();
-    console.log(pc.dim(`  Idle ${status.idle.days}+ days`));
-    const nameWidth = Math.max(0, ...status.projects.map((project) => project.name.length));
-    for (const project of status.projects) {
-      console.log(
-        `  ${sanitizeTerminalText(project.name).padEnd(nameWidth)}  ${formatBytes(project.bytes).padStart(9)}  ${pc.dim(
-          `${project.idleDays} days`,
-        )}`,
-      );
-    }
+    printStatusProjectSection(`Idle ${status.idle.windowLabel}`, status.projects);
   }
 }
 

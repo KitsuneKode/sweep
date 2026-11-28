@@ -535,28 +535,36 @@ export function assertDangerousConsent(
   }
 }
 
-export async function confirmPlanDeletion(
+export async function formatConfirmPlanPrompt(
   plan: ScanPlan,
-  options: { yes?: boolean; trash?: boolean },
-): Promise<boolean> {
-  if (options.yes) return true;
-
+  options: { trash?: boolean; mode?: "clean" | "plan" } = {},
+): Promise<string> {
   const { formatBytes } = await import("@kitsunekode/sweep-display");
   const selectedIds = new Set(plan.selectedCandidateIds);
-  const selectedBytes = plan.candidates
-    .filter((candidate) => selectedIds.has(candidate.id))
-    .reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
+  const selected = plan.candidates.filter((candidate) => selectedIds.has(candidate.id));
+  const selectedBytes = selected.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
 
-  const dangerousCount = plan.candidates.filter(
-    (candidate) =>
-      selectedIds.has(candidate.id) &&
-      (candidate.riskTier === "dangerous" || candidate.riskTier === "blocked"),
-  ).length;
+  const dangerousCount = selected.filter((candidate) => {
+    if (candidate.riskTier === "dangerous" || candidate.riskTier === "blocked") return true;
+    const live = classifyEntry({
+      path: candidate.path,
+      name: basename(candidate.path),
+      entryType: candidate.entryType,
+      isSymlink: candidate.isSymlink,
+      estimatedBytes: candidate.estimatedBytes,
+    }).riskTier;
+    return live === "dangerous" || live === "blocked";
+  }).length;
 
   const dangerNote = dangerousCount > 0 ? ` · ${dangerousCount} dangerous` : "";
+  const count = plan.selectedCandidateIds.length;
   const action = options.trash
-    ? `Move ${plan.selectedCandidateIds.length} selected items to .sweep-trash`
-    : `Delete ${plan.selectedCandidateIds.length} selected items`;
+    ? options.mode === "plan"
+      ? `Move ${count} plan items to .sweep-trash`
+      : `Move ${count} selected items to .sweep-trash`
+    : options.mode === "plan"
+      ? `Apply plan with ${count} items`
+      : `Delete ${count} selected items`;
   // Show where the deletion actually lands: a symlinked-ancestor spelling is
   // legal in a real plan, but the user deserves to see the resolved truth -
   // and a forged spelling can't hide behind what it resolves to.
@@ -571,9 +579,15 @@ export async function confirmPlanDeletion(
     resolvedTarget === plan.targetDir
       ? sanitizeTerminalText(plan.targetDir)
       : `${sanitizeTerminalText(plan.targetDir)} → ${sanitizeTerminalText(resolvedTarget)}`;
-  return promptConfirm(
-    `${action} in ${targetDisplay} (~${formatBytes(selectedBytes)})${dangerNote}?`,
-  );
+  return `${action} in ${targetDisplay} (~${formatBytes(selectedBytes)})${dangerNote}?`;
+}
+
+export async function confirmPlanDeletion(
+  plan: ScanPlan,
+  options: { yes?: boolean; trash?: boolean; mode?: "clean" | "plan" },
+): Promise<boolean> {
+  if (options.yes) return true;
+  return promptConfirm(await formatConfirmPlanPrompt(plan, options));
 }
 
 /**

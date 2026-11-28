@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -44,11 +44,13 @@ const dir = (...parts: string[]) => join(tmpDir, ...parts);
 function runCli(
   args: string[],
   env: Record<string, string> = {},
+  stdin?: string,
 ): { stdout: string; stderr: string; exitCode: number } {
   const withEngine = args.includes("--engine") ? args : ["--engine", "js", ...args];
   const proc = Bun.spawnSync({
     cmd: ["bun", SWEEP, ...withEngine],
     cwd: REPO_ROOT,
+    ...(stdin === undefined ? {} : { stdin: new TextEncoder().encode(stdin) }),
     stdout: "pipe",
     stderr: "pipe",
     // Isolate user state - applies write to the real history.jsonl otherwise.
@@ -97,7 +99,9 @@ describe("CLI scan/apply", () => {
         .map((line) => JSON.parse(line) as ScanEvent);
       expect(await proc.exited).toBe(0);
       expect(events.filter((e) => e.type === "candidate_found")).toHaveLength(count);
-      expect(events.filter((e) => e.type === "candidate_updated")).toHaveLength(count);
+      const updated = events.filter((e) => e.type === "candidate_updated");
+      expect(updated.length).toBeGreaterThanOrEqual(count);
+      expect(new Set(updated.map((e) => e.candidate.id)).size).toBe(count);
       const completed = events.at(-1);
       expect(completed?.type).toBe("scan_completed");
       if (completed?.type === "scan_completed")
@@ -164,8 +168,35 @@ describe("CLI scan/apply", () => {
     expect(status.reclaimableBytes).toBe(status.safeBytes + status.cautionBytes);
     expect(status.kinds.map((entry) => entry.kind)).toContain("node_modules");
     expect(status.idle.days).toBe(30);
+    expect(status.idle.windowMs).toBe(30 * 86_400_000);
+    expect(status.idle.windowLabel).toBe("30+ days");
+    expect(status.complete).toBe(true);
+    expect(status.skippedDirs).toBe(0);
+    expect(status.bytesPartial).toBe(false);
+    expect(status.finishedWorktrees.projects).toBe(0);
+    expect(status.branchMissingWorktrees.projects).toBe(0);
     // A summary, not a plan: no candidate list to parse.
     expect(Object.hasOwn(status, "candidates")).toBe(false);
+  });
+
+  test("status reports guarded-only wording and exact sub-day idle window", () => {
+    // Unmarked `target` (no Cargo.toml) is classified as dangerous (guarded).
+    mkdirSync(dir("target"));
+    writeFileSync(dir("target", "notes.txt"), "x".repeat(1024));
+
+    const human = runCli(["status", tmpDir, "--idle", "12h", "--no-color"]);
+    expect(human.exitCode).toBe(0);
+    expect(human.stdout).toContain("Nothing automatically reclaimable here.");
+    expect(human.stdout).toContain("1 guarded item(s) found");
+
+    const json = runCli(["status", tmpDir, "--idle", "12h", "--json"]);
+    expect(json.exitCode).toBe(0);
+    const parsed = JSON.parse(json.stdout) as StatusSummary;
+    expect(parsed.reclaimableBytes).toBe(0);
+    expect(parsed.protectedCount).toBe(1);
+    expect(parsed.protectedBytes).toBeGreaterThan(0);
+    expect(parsed.idle.windowMs).toBe(12 * 3_600_000);
+    expect(parsed.idle.windowLabel).toBe("12+ hours");
   });
 
   test("scan --json emits a plan-shaped document with candidates", () => {
@@ -204,6 +235,109 @@ describe("CLI scan/apply", () => {
     expect(found.length).toBeGreaterThan(0);
     expect(events.some((event) => event.type === "candidate_updated")).toBe(true);
     expect(events.at(-1)?.type).toBe("scan_completed");
+  });
+
+  test("scan --json-stream final events match scan --json post-enrichment tiers (git-tracked, unmarked target, worktree)", () => {
+    const repo = dir("repo");
+    mkdirSync(join(repo, "node_modules"), { recursive: true });
+    mkdirSync(join(repo, "target"), { recursive: true });
+    writeFileSync(join(repo, "node_modules", "tracked.js"), "tracked");
+    writeFileSync(join(repo, "target", "notes.txt"), "authored");
+
+    const git = (args: string[], cwd = repo) => {
+      const res = spawnSync("git", ["-c", "commit.gpgsign=false", ...args], {
+        cwd,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_CONFIG_NOSYSTEM: "1",
+          GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+          GIT_AUTHOR_NAME: "Test",
+          GIT_AUTHOR_EMAIL: "test@example.com",
+          GIT_COMMITTER_NAME: "Test",
+          GIT_COMMITTER_EMAIL: "test@example.com",
+        },
+      });
+      if (res.status !== 0) throw new Error(`git ${args.join(" ")}: ${res.stderr}`);
+    };
+    git(["init", "-b", "main"]);
+    git(["add", "node_modules/tracked.js"]);
+    git(["commit", "-m", "commit tracked node_modules"]);
+
+    const wtDir = dir("repo-wt");
+    git(["worktree", "add", "-b", "feat/stream", wtDir]);
+    mkdirSync(join(wtDir, "node_modules"), { recursive: true });
+    writeFileSync(join(wtDir, "node_modules", "untracked.js"), "pkg");
+
+    const engines: ReadonlyArray<"js" | "rust"> = NATIVE_CLI_AVAILABLE ? ["js", "rust"] : ["js"];
+    for (const engine of engines) {
+      const env = engine === "rust" ? { SWEEP_ENGINE_PATH: LOCAL_RUST_ENGINE } : {};
+      const jsonRun = runCli(["scan", tmpDir, "--json", "--engine", engine], env);
+      expect(jsonRun.exitCode).toBe(0);
+      const plan = JSON.parse(jsonRun.stdout) as ScanPlan;
+
+      const streamRun = runCli(["scan", tmpDir, "--json-stream", "--engine", engine], env);
+      expect(streamRun.exitCode).toBe(0);
+      const events = streamRun.stdout
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as ScanEvent);
+      expect(events.at(-1)?.type).toBe("scan_completed");
+
+      const finalById = new Map<string, ScanPlan["candidates"][number]>();
+      for (const event of events) {
+        if (event.type === "candidate_found" || event.type === "candidate_updated") {
+          finalById.set(event.candidate.id, event.candidate);
+        }
+      }
+
+      expect(finalById.size).toBe(plan.candidates.length);
+      for (const expected of plan.candidates) {
+        const streamed = finalById.get(expected.id);
+        expect(streamed).toBeDefined();
+        expect(streamed?.riskTier).toBe(expected.riskTier);
+        expect(streamed?.reasons).toEqual(expected.reasons);
+        expect(streamed?.selectedByDefault).toBe(expected.selectedByDefault);
+        expect(streamed?.projectRoot).toBe(expected.projectRoot);
+        expect(streamed?.worktreeOf).toBe(expected.worktreeOf);
+        expect(streamed?.worktreeState).toBe(expected.worktreeState);
+      }
+
+      const trackedCandidate = [...finalById.values()].find(
+        (c) => c.path === join(repo, "node_modules"),
+      );
+      expect(trackedCandidate?.riskTier).toBe("blocked");
+      expect(trackedCandidate?.reasons).toContain("git-tracked");
+      expect(trackedCandidate?.selectedByDefault).toBe(false);
+
+      const unmarkedTarget = [...finalById.values()].find((c) => c.path === join(repo, "target"));
+      expect(unmarkedTarget?.riskTier).toBe("dangerous");
+
+      const worktreeCandidate = [...finalById.values()].find(
+        (c) => c.path === join(wtDir, "node_modules"),
+      );
+      expect(worktreeCandidate?.worktreeOf).toBeDefined();
+    }
+  });
+
+  test("apply --plan confirmation prompt shows target directory and dangerous count", () => {
+    mkdirSync(dir("node_modules"));
+    mkdirSync(dir("target")); // unmarked target -> dangerous
+    writeFileSync(dir("node_modules", "a.js"), "x");
+    writeFileSync(dir("target", "authored.txt"), "keep");
+
+    const scanResult = runCli(["scan", tmpDir, "--json", "--select", "all", "--include-dangerous"]);
+    expect(scanResult.exitCode).toBe(0);
+    const planPath = dir("plan-confirm.json");
+    writeFileSync(planPath, scanResult.stdout);
+
+    const declined = runCli(["apply", "--plan", planPath], {}, "n\n");
+    expect(declined.exitCode).toBe(1);
+    expect(declined.stderr).toContain(tmpDir);
+    expect(declined.stderr).toContain("1 dangerous");
+    expect(declined.stderr).toContain("1 dangerous item(s) will be removed:");
+    expect(existsSync(dir("node_modules"))).toBe(true);
+    expect(existsSync(dir("target"))).toBe(true);
   });
 
   test("apply --plan deletes planned candidates and reports JSON results", () => {

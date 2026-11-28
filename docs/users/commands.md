@@ -24,13 +24,24 @@ the options supported by your installed version.
 ## Status for scripts and widgets
 
 `sweep status . --json` is a scan boiled down to a few hundred bytes: what could
-be freed, which kinds hold it (`node_modules`, `target`, `.next`), the idle
-projects holding the most, and how many items are protected. Only safe and
-caution items count as space; dangerous and blocked ones are reported as
-`protectedCount` and never added to a size. A project whose last activity could
-not be read is not called idle. `idle.kinds` says what the idle bytes are made of,
-so a bar drawn from it adds up to the idle total. `--idle <age>` sets the idle window here (30
-days by default). It is read-only.
+be freed, which kinds hold it (`node_modules`, `target`, `.next`), finished
+worktrees and idle projects holding the most, how many items are guarded, and
+whether scan coverage was complete. Only safe and caution items count as space;
+dangerous and blocked ones are reported separately as `protectedCount` and
+`protectedBytes` and never added to `reclaimableBytes`. When a directory holds
+only guarded items, `sweep status` says nothing is automatically reclaimable
+and names the guarded count instead of claiming the tree is empty. Scan and
+sizing gaps are reported via `skippedDirs`, `bytesPartial`, `partialByteCount`,
+and `complete`. A project whose last activity could not be proven is not called
+idle. `idle.windowMs` and `idle.windowLabel` preserve exact thresholds
+(including sub-day windows like `--idle 12h`), and each project carries its
+exact `idleMs` alongside `idleDays`. Linked git worktrees match the Projects
+view: clean, proven-merged worktrees quiet for at least 24 hours appear under
+`finishedWorktrees` (excluded from `idle` to avoid double-counting), while
+`upstream_gone` worktrees are surfaced under `branchMissingWorktrees` and never
+treated as finished. `idle.kinds` says what the idle bytes are made of, so a
+bar drawn from it adds up to the idle total. `--idle <age>` sets the idle
+window here (30 days by default). It is read-only.
 
 ## Save and review
 
@@ -48,8 +59,11 @@ sweep apply --plan sweep-plan.json
 
 Saved plans contain paths, candidate IDs, selections and provenance. Treat them
 as local operational data. Applying revalidates the filesystem; a saved plan is
-not permission to follow an arbitrary changed path. Inspecting is not a signature
-check or proof that a plan from another person is trustworthy.
+not permission to follow an arbitrary changed path. Without `--yes`, `sweep
+apply --plan` confirms interactively with the resolved target directory, item
+count, estimated size, and any dangerous-item count (and lists each dangerous
+path before the prompt). Inspecting is not a signature check or proof that a
+plan from another person is trustworthy.
 
 ## Frequently used options
 

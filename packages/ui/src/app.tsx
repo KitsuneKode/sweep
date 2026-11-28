@@ -1,4 +1,4 @@
-import { bold, fg, type KeyEvent, StyledText, t } from "@opentui/core";
+import { fg, type KeyEvent, t } from "@opentui/core";
 import {
   flushSync,
   useKeyboard,
@@ -6,102 +6,46 @@ import {
   useRenderer,
   useTerminalDimensions,
 } from "@opentui/react";
-import type { ApplyProgress, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
+import type { ApplyProgress, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { statfsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { IDLE_WINDOW_DAYS, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes } from "@kitsunekode/sweep-display";
-import { isColdRequested } from "@kitsunekode/sweep-core/cold";
-import {
-  writeProjectSweeprc,
-  projectSweeprcRevision,
-  type ProjectSweeprcDelta,
-} from "@kitsunekode/sweep-core/config";
+import { writeProjectSweeprc, projectSweeprcRevision } from "@kitsunekode/sweep-core/config";
 import { assertSafePattern, isApplyRefusedError } from "@kitsunekode/sweep-core/guardrails";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { buildActionMenuCommands } from "./action-menu.js";
 import {
-  Component,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-} from "react";
-import { ReviewPane } from "./ReviewPane.js";
-import { candidateIndex } from "./candidate-index.js";
+  ActionMenuModal,
+  ConfigSaveModal,
+  FolderInfoModal,
+  PatternInfoModal,
+  ScanErrorModal,
+  UnavailableItemModal,
+  type ConfigSaveState,
+  type FolderInfoState,
+} from "./AppModals.js";
 import { ApplyOverlay } from "./ApplyOverlay.js";
-import { ActionButton } from "./ActionButton.js";
-import { LedgerBand, type LedgerReceipt } from "./LedgerBand.js";
-import { captureReviewedApply } from "./reviewed-apply.js";
-import type { ViewPreferences } from "./view-preferences.js";
-import { MotionContext, motionEnabledFromEnvironment } from "./motion.js";
-import { handleKeymap, type KeyInput } from "./keymap.js";
+import { ConfirmOverlay, type DiskSpace } from "./ConfirmOverlay.js";
+import { FilterPicker } from "./FilterPicker.js";
+import { FolderJump } from "./FolderJump.js";
+import { HelpOverlay, ProjectsHelp } from "./HelpOverlay.js";
+import { InspectOverlay } from "./InspectOverlay.js";
 import { KeyHints } from "./KeyHints.js";
-import { darkTheme, mixHex } from "./theme.js";
-import { Meter } from "./Meter.js";
-import type { SweepUiOutcome } from "./outcome.js";
-import { UiOperationSession } from "./operation-session.js";
-import { writePlanExport } from "./plan-export.js";
-import { noteCtrlCHandled, registerUiApplyCancellation } from "./runtime.js";
+import { LedgerBand, type LedgerReceipt } from "./LedgerBand.js";
+import { ProjectsView } from "./ProjectsView.js";
+import { ReviewPane } from "./ReviewPane.js";
+import { UiErrorBoundary } from "./UiErrorBoundary.js";
 import {
-  buildBrandLine,
-  buildContextLine,
-  applyNotice,
-  footerHintItems,
-  keycap,
-  buildHeaderStats,
-  buildRiskTally,
-  modeLabel,
-  relativePath,
-  riskGlyph,
-  type FooterContext,
-  type FooterHint,
-} from "./presentation.js";
+  calmHintItems,
+  displayTargetPath,
+  formatScanMs,
+  uiReducer,
+  type ModalKind,
+  type Notice,
+} from "./app-helpers.js";
+import { candidateIndex } from "./candidate-index.js";
 import { rankConfirmPreview } from "./confirm-preview.js";
-import { cellWidth } from "./text-cells.js";
-import { buildDisplayRows } from "./rows.js";
-import {
-  addCustomPattern,
-  applyUiSelection,
-  applyVisualRange,
-  createUiState,
-  finalizeScan,
-  getCurrentCandidate,
-  getUiSummary,
-  mergeApplyReport,
-  resetForRescan,
-  rescanConfigFromState,
-  setFocus,
-  setPatternInput,
-  setScanning,
-  setScanCurrentDir,
-  sweeprcPayload,
-  patternAtCursor,
-  toggleSelectionById,
-  toggleSidebarScopeSelection,
-  toggleScopeSelection,
-  toggleSortBy,
-  setScannedDirs,
-  setSkippedDirs,
-  upsertCandidates,
-  clearSelection,
-  clearVisibleSelection,
-  selectVisible,
-  setFilter,
-  setRiskFilter,
-  selectSafeOnly,
-  selectIdleSafe,
-  toggleIdsSelection,
-  idleSafeCandidates,
-  setScopeFilter,
-  setThemeMode,
-  visualRange,
-  type SweepUiInitOptions,
-  type SweepUiState,
-} from "./state.js";
-import { getVisibleCandidates } from "./state/selectors.js";
 import {
   clearFacets,
   facetOptions,
@@ -109,42 +53,65 @@ import {
   readFacets,
   toggleFacet,
 } from "./filter-facets.js";
-import { FilterPicker } from "./FilterPicker.js";
-import {
-  cycleThemeMode,
-  noticeColor,
-  resolveTheme,
-  type NoticeTone,
-  type ThemeTokens,
-} from "./theme.js";
-import { ModeChip, ScanModeChip, Modal } from "./widgets.js";
-import type { FolderSwitcher, UiScanControl } from "./streaming.js";
-import { FolderJump } from "./FolderJump.js";
-import { ProjectsView } from "./ProjectsView.js";
-import {
-  buildProjectRows,
-  buildProjects,
-  moveCursor as moveProjectCursor,
-  settleCursor,
-  type Project,
-  type ProjectSection,
-} from "./projects.js";
-import { reclaimByCost, rebuildSummary } from "./project-details.js";
 import { rankJumpTargets, type JumpTarget } from "./folder-jump.js";
+import { handleKeymap, type KeyInput } from "./keymap.js";
+import { MotionContext, motionEnabledFromEnvironment } from "./motion.js";
+import { UiOperationSession } from "./operation-session.js";
+import type { SweepUiOutcome } from "./outcome.js";
+import { writePlanExport } from "./plan-export.js";
+import {
+  applyNotice,
+  buildBrandLine,
+  buildContextLine,
+  buildHeaderStats,
+  buildRiskTally,
+  footerHintItems,
+  modeLabel,
+  relativePath,
+  type FooterContext,
+} from "./presentation.js";
+import { rebuildSummary } from "./project-details.js";
+import type { Project } from "./projects.js";
+import { captureReviewedApply } from "./reviewed-apply.js";
+import { buildDisplayRows } from "./rows.js";
+import { noteCtrlCHandled, registerUiApplyCancellation } from "./runtime.js";
+import {
+  addCustomPattern,
+  applyUiSelection,
+  applyVisualRange,
+  createUiState,
+  getCurrentCandidate,
+  getUiSummary,
+  idleSafeCandidates,
+  mergeApplyReport,
+  patternAtCursor,
+  selectSafeOnly,
+  setFilter,
+  setFocus,
+  setPatternInput,
+  setRiskFilter,
+  sweeprcPayload,
+  toggleScopeSelection,
+  toggleSelectionById,
+  toggleSidebarScopeSelection,
+  toggleSortBy,
+  visualRange,
+  type SweepUiInitOptions,
+  type SweepUiState,
+} from "./state.js";
+import { getVisibleCandidates } from "./state/selectors.js";
+import type { FolderSwitcher, UiScanControl } from "./streaming.js";
+import { noticeColor, resolveTheme, type NoticeTone } from "./theme.js";
+import { useLiveScan } from "./useLiveScan.js";
+import { useProjectsController } from "./useProjectsController.js";
+import type { ViewPreferences } from "./view-preferences.js";
+import { ModeChip, ScanModeChip } from "./widgets.js";
 
 export { runSweepUiStreaming } from "./streaming.js";
 export type { SweepUiStreamingOptions } from "./streaming.js";
-
 export type { SweepUiOutcome } from "./outcome.js";
-
-type UiAction =
-  | { type: "replace"; state: SweepUiState }
-  | { type: "mutate"; fn: (state: SweepUiState) => SweepUiState };
-
-function uiReducer(state: SweepUiState, action: UiAction): SweepUiState {
-  if (action.type === "replace") return action.state;
-  return action.fn(state);
-}
+export { UiErrorBoundary };
+export type { DiskSpace };
 
 export interface SweepAppProps {
   plan: ScanPlan;
@@ -176,746 +143,6 @@ export interface SweepAppProps {
   terminalBackground?: string | null;
   /** `--theme` with no saved preferences yet. */
   initialTheme?: "auto" | "dark" | "light";
-}
-
-function styledContentFallback(message: string, closing: boolean): ReactNode {
-  // Renders when the app crashed before (or without) theme context - always
-  // uses the dark palette directly rather than resolving a mode.
-  return (
-    <box
-      width="100%"
-      height="100%"
-      flexDirection="column"
-      padding={1}
-      backgroundColor={darkTheme.bg}
-    >
-      <text
-        content={t`${bold(fg(darkTheme.danger)("◆ sweep"))} ${fg(darkTheme.textMuted)("hit an error in the interactive view")}`}
-      />
-      <text content="" />
-      <text content={sanitizeTerminalText(message).slice(0, 4096)} fg={darkTheme.text} />
-      <text content="" />
-      <text
-        content={
-          closing
-            ? "Closing the view; waiting for any active apply report."
-            : "Press Ctrl+C to exit."
-        }
-        fg={darkTheme.textDim}
-      />
-    </box>
-  );
-}
-
-export class UiErrorBoundary extends Component<
-  { children: ReactNode; onError?: (error: Error) => void },
-  { error: Error | null }
-> {
-  constructor(props: { children: ReactNode; onError?: (error: Error) => void }) {
-    super(props);
-    this.state = { error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): { error: Error } {
-    return { error };
-  }
-
-  override componentDidCatch(error: Error): void {
-    this.props.onError?.(error);
-  }
-
-  override render(): ReactNode {
-    if (this.state.error) {
-      return styledContentFallback(this.state.error.message, this.props.onError !== undefined);
-    }
-    return this.props.children;
-  }
-}
-
-/** A help row: keycap + what it does. Sections break on `keys === null`. */
-type HelpRow = readonly [keys: string | null, description: string];
-
-interface Notice {
-  text: string;
-  tone: NoticeTone;
-}
-
-const HELP_MOVE: ReadonlyArray<HelpRow> = [
-  [null, "move"],
-  ["↑↓ / j k", "cursor · wheel scrolls"],
-  ["g / G", "first / last row"],
-  ["ctrl-u/d", "page up · down"],
-  ["h · l", "fold · open a group or project"],
-  ["w · e", "collapse all · expand all"],
-];
-
-const HELP_QUEUE: ReadonlyArray<HelpRow> = [
-  [null, "queue"],
-  ["space", "queue / unqueue row"],
-  ["v", "visual range - space queues"],
-  ["a · s", "queue all removable · safe only"],
-  ["u / U", "clear entire queue / visible only"],
-  ["x · d", "remove this item or project (confirms)"],
-  ["c · ctrl+enter", "review the queue (confirms)"],
-  ["y · t · esc", "in a review: remove · trash · cancel"],
-];
-
-const HELP_VIEW: ReadonlyArray<HelpRow> = [
-  [null, "view"],
-  ["/", "filter list · tab cycles panes"],
-  ["1 - 4", "risk filter"],
-  ["f", "filter by risk · kind · size · age"],
-  ["o", "sort size · name · age"],
-  ["enter · i", "open item details"],
-  ["ctrl-k / F2", "search actions and settings"],
-  ["ctrl-o", "switch folder - fuzzy or a path"],
-  ["b", "projects view ↔ full view"],
-  ["backspace", "up one folder in the tree"],
-  ["y", "copy row path"],
-  ["S", "save queue as a plan"],
-];
-
-// The calm default screen has fewer keys, and `i` means something else here
-// than in the full view, so it gets its own card rather than a filtered copy.
-const HELP_PROJECTS: ReadonlyArray<HelpRow> = [
-  [null, "projects"],
-  ["↑↓ / j k", "move · wheel moves the cursor"],
-  ["enter · l", "open a project · enter on an item: details"],
-  ["h · esc", "close it"],
-  ["space", "queue / unqueue the project or item"],
-  ["a", "queue all removable"],
-  ["i", "queue safe items in projects idle 30+ days"],
-  ["u", "clear the queue"],
-  ["x · d", "remove this project or item (confirms)"],
-  ["c", "review the queue (confirms)"],
-  ["y · t · esc", "in a review: remove · trash · cancel"],
-  ["/", "search projects"],
-  ["b", "full view: folders, ranges, patterns, copy"],
-  ["t · q", "theme · quit"],
-];
-
-const HELP_PATTERNS: ReadonlyArray<HelpRow> = [
-  [null, "patterns (p)"],
-  ["space", "toggle pattern"],
-  ["/", "filter the catalog"],
-  ["a · d", "add · remove custom"],
-  ["w / W", "save patterns (review existing config)"],
-  ["r", "rescan with new set"],
-];
-
-const HELP_APP: ReadonlyArray<HelpRow> = [
-  [null, "app"],
-  ["tab", "switch panes"],
-  ["t", "theme dark · light · auto"],
-  ["m", "pause / resume activity animation"],
-  ["E", "swap scan engine js · rust"],
-  ["q · ctrl-c", "quit · stop active cleanup"],
-];
-
-// Two columns split as move+queue+app | view+patterns so both land near the
-// same height; a narrow terminal folds into a single column in reading order.
-const HELP_LEFT: ReadonlyArray<HelpRow> = [...HELP_MOVE, ...HELP_QUEUE, ...HELP_APP];
-const HELP_RIGHT: ReadonlyArray<HelpRow> = [...HELP_VIEW, ...HELP_PATTERNS];
-const HELP_SINGLE: ReadonlyArray<HelpRow> = [
-  ...HELP_MOVE,
-  ...HELP_QUEUE,
-  ...HELP_VIEW,
-  ...HELP_PATTERNS,
-  ...HELP_APP,
-];
-
-const HELP_FILTER_SYNTAX = "kind:x  risk:y  path:z  >100MB  older:30d  is:dir  is:file  !term";
-
-/** Compact duration for scan timing chips/notices: 96ms, 1.2s, 2m 4s. */
-function formatScanMs(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  return `${minutes}m ${Math.round((ms - minutes * 60_000) / 1000)}s`;
-}
-
-/**
- * Scan-timing fragment for the completion notice: `rust 96ms` alone, or
- * `rust 96ms vs js 214ms (2.2× faster)` once both engines have timed a run
- * on this tree.
- */
-function engineTimingLabel(
-  engine: "js" | "rust",
-  durations: Partial<Record<"js" | "rust", number>>,
-): string {
-  const current = durations[engine];
-  if (current === undefined) return engine;
-  const otherEngine = engine === "rust" ? "js" : "rust";
-  const other = durations[otherEngine];
-  if (other === undefined) return `${engine} ${formatScanMs(current)}`;
-  const ratio = other > 0 ? current / other : 1;
-  const verdict =
-    ratio < 0.95
-      ? `${formatRatio(1 / ratio)} faster`
-      : ratio > 1.05
-        ? `${formatRatio(ratio)} slower`
-        : "about equal";
-  return `${engine} ${formatScanMs(current)} vs ${otherEngine} ${formatScanMs(other)} (${verdict})`;
-}
-
-function formatRatio(ratio: number): string {
-  return ratio >= 10 ? `${Math.round(ratio)}×` : `${ratio.toFixed(1)}×`;
-}
-
-function helpColumn(rows: ReadonlyArray<HelpRow>, keyWidth: number, tokens: ThemeTokens) {
-  return (
-    <box flexDirection="column" flexShrink={0}>
-      {rows.map(([keys, description], index) =>
-        keys === null ? (
-          <box key={`section-${description}`} flexDirection="column">
-            {index > 0 ? <text content="" /> : null}
-            <text
-              content={t`${bold(fg(tokens.accent)(description.toUpperCase()))}`}
-              wrapMode="none"
-            />
-          </box>
-        ) : (
-          <text
-            // Index, not the keycap: "space" and "/" legitimately appear in
-            // two sections, and single-column mode concatenates both columns.
-            key={`${keys}-${index}`}
-            content={t`${keycap(keys, tokens)}${" ".repeat(Math.max(1, keyWidth - cellWidth(keys)))}${fg(tokens.textSecondary)(description)}`}
-            wrapMode="none"
-          />
-        ),
-      )}
-    </box>
-  );
-}
-
-function ProjectsHelp({ tokens, width }: { tokens: ThemeTokens; width: number }) {
-  const keyWidth = Math.max(...HELP_PROJECTS.map(([k]) => (k === null ? 0 : cellWidth(k)))) + 1;
-  const bodyWidth = keyWidth + 2 + Math.max(...HELP_PROJECTS.map(([, d]) => cellWidth(d)));
-  const modalWidth = Math.min(bodyWidth + 10, Math.max(28, width - 4));
-  const bodyLines = HELP_PROJECTS.length;
-  return (
-    <Modal tokens={tokens} title=" keys " width={modalWidth} height={bodyLines + 2 + 4}>
-      {helpColumn(HELP_PROJECTS, keyWidth, tokens)}
-      <text content="" />
-      <text
-        content={t`${fg(tokens.textDim)("esc unwinds one layer · ctrl-c quits")}`}
-        wrapMode="none"
-      />
-    </Modal>
-  );
-}
-
-function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: number }) {
-  // Keys get the strong color, descriptions recede, section headers are the
-  // only accent - the hierarchy reads at a glance instead of one gray wall.
-  // Keycaps add a cell of fill on each side; +1 more keeps them off the text.
-  const keyWidth =
-    Math.max(
-      ...HELP_LEFT.map(([k]) => (k === null ? 0 : cellWidth(k))),
-      ...HELP_RIGHT.map(([k]) => (k === null ? 0 : cellWidth(k))),
-    ) + 1;
-  const leftWidth = keyWidth + 2 + Math.max(...HELP_LEFT.map(([, d]) => d.length));
-  const rightWidth = keyWidth + 2 + Math.max(...HELP_RIGHT.map(([, d]) => d.length));
-  const twoColWidth = leftWidth + rightWidth + 4; // column gap
-
-  // Modal chrome: 2 border + 6 paddingX + 2 scrollbox reserve. Budget for all
-  // of it or the widest row clips against the right edge.
-  const CHROME = 10;
-
-  // Narrow terminals collapse to one column and drop the syntax sample -
-  // better absent than wrapped mid-token.
-  const singleWidth = Math.max(leftWidth, rightWidth);
-  const twoCol = width >= twoColWidth + CHROME;
-  const modalWidth = twoCol
-    ? twoColWidth + CHROME
-    : Math.min(singleWidth + CHROME, Math.max(28, width - 4));
-
-  // Hug the content: a card taller than its rows reads as unfinished.
-  const lines = (rows: ReadonlyArray<HelpRow>) =>
-    rows.reduce((n, [keys]) => n + (keys === null ? 2 : 1), 0) - 1; // first section has no gap
-  const bodyLines = twoCol ? Math.max(lines(HELP_LEFT), lines(HELP_RIGHT)) : lines(HELP_SINGLE);
-  const modalHeight = bodyLines + 3 + 4; // syntax + exit lines, border + padding
-
-  return (
-    <Modal tokens={tokens} title=" keys " width={modalWidth} height={modalHeight}>
-      {twoCol ? (
-        <box flexDirection="row" gap={4}>
-          {helpColumn(HELP_LEFT, keyWidth, tokens)}
-          {helpColumn(HELP_RIGHT, keyWidth, tokens)}
-        </box>
-      ) : (
-        helpColumn(HELP_SINGLE, keyWidth, tokens)
-      )}
-      <text content="" />
-      {HELP_FILTER_SYNTAX.length + 8 <= modalWidth - CHROME ? (
-        <text
-          content={t`${fg(tokens.textDim)("filter")}  ${fg(tokens.textSecondary)(HELP_FILTER_SYNTAX)}`}
-          wrapMode="none"
-        />
-      ) : null}
-      <text
-        content={t`${fg(tokens.textDim)("esc unwinds one layer · ctrl-c stops cleanup, quits when idle")}`}
-        wrapMode="none"
-      />
-    </Modal>
-  );
-}
-
-export interface DiskSpace {
-  free: number;
-  total: number;
-}
-
-/**
- * The volume before and after, in one bar: the solid part stays used, the
- * soft part is what this removal gives back, the track is free already.
- * The confirm is the one moment the size is about to become real, so it is
- * shown against the whole disk rather than against the queue.
- */
-function DiskAfter({
-  tokens,
-  disk,
-  bytes,
-  width,
-  dryRun,
-}: {
-  tokens: ThemeTokens;
-  disk: DiskSpace;
-  bytes: number;
-  width: number;
-  dryRun?: boolean;
-}) {
-  const used = Math.max(0, disk.total - disk.free);
-  const gain = Math.min(bytes, used);
-  return (
-    <>
-      <text content="" />
-      <text
-        content={
-          // A gain below the display's precision would read "37 GiB → 37 GiB".
-          formatBytes(disk.free) === formatBytes(disk.free + gain)
-            ? t`${fg(tokens.textMuted)("disk  ")}${fg(tokens.textSecondary)(`${formatBytes(disk.free)} free`)}${fg(tokens.textDim)("  ")}${bold(fg(tokens.positive)(`+${formatBytes(gain)}`))}${fg(tokens.textMuted)(dryRun ? " if removed" : " after")}`
-            : t`${fg(tokens.textMuted)("disk  ")}${fg(tokens.textSecondary)(`${formatBytes(disk.free)} free`)}${fg(tokens.textDim)("  →  ")}${bold(fg(tokens.positive)(formatBytes(disk.free + gain)))}${fg(tokens.textMuted)(dryRun ? " if removed" : " after")}`
-        }
-        wrapMode="none"
-      />
-      <Meter
-        width={width}
-        value={(used - gain) / disk.total}
-        preview={used / disk.total}
-        fill={mixHex(tokens.meterTrack, tokens.textSecondary, 0.7)}
-        previewColor={tokens.positive}
-        track={tokens.meterTrack}
-        background={tokens.surface}
-      />
-    </>
-  );
-}
-
-function ConfirmOverlay({
-  tokens,
-  selectedCount,
-  selectedBytes,
-  dangerousCount,
-  previewPaths,
-  costLine,
-  dryRun,
-  trash,
-  applyPolicy,
-  lowerBound,
-  otherQueuedCount,
-  heading,
-  linkOnly,
-  feedback,
-  onConfirm,
-  onCancel,
-  onToggleTrash,
-  outsideViewCount = 0,
-  directoryCount = 0,
-  canConfirm = true,
-  onOverrideSizeLimit,
-  sizeLimitOverridden = false,
-  disk,
-}: {
-  tokens: ThemeTokens;
-  /** The volume the queue lives on, to draw what removal gives back. */
-  disk?: DiskSpace | null | undefined;
-  selectedCount: number;
-  selectedBytes: number;
-  dangerousCount: number;
-  /** Largest queued candidates by bytes - the last gate should name names. */
-  previewPaths: string[];
-  /** What the queue costs to bring back, one line. */
-  costLine?: string | undefined;
-  applyPolicy?: { maxSizeGB: number | null; forceLarge: boolean } | undefined;
-  lowerBound?: boolean;
-  dryRun?: boolean;
-  trash?: boolean;
-  otherQueuedCount?: number;
-  /** What this dialog removes, in words: the item, the project, or the queue. */
-  heading?: string;
-  linkOnly?: boolean;
-  feedback?: string | undefined;
-  onConfirm: () => void;
-  onCancel: () => void;
-  onToggleTrash: () => void;
-  outsideViewCount?: number;
-  directoryCount?: number;
-  canConfirm?: boolean;
-  onOverrideSizeLimit?: (() => void) | undefined;
-  sizeLimitOverridden?: boolean;
-}) {
-  // Confirmation describes the operation, including link-only removal.
-  const action = dryRun ? "Preview removal of" : trash ? "Move to trash" : "Permanently delete";
-  const dangerous = dangerousCount > 0;
-  const accent = dangerous && !trash ? tokens.danger : tokens.accent;
-  const shown = previewPaths.slice(0, 3);
-  const hidden = selectedCount - shown.length;
-  // Trash on the same volume keeps the bytes, so only deletion draws a gain.
-  const showDisk = disk !== null && disk !== undefined && disk.total > 0 && !trash;
-  const { width: screenWidth } = useTerminalDimensions();
-  const meterWidth = Math.max(8, Math.min(48, screenWidth - 12));
-
-  return (
-    <Modal
-      tokens={tokens}
-      title={`${dangerous ? "⚠ " : ""}${dryRun ? "Preview" : trash ? "Move" : "Delete"} ${selectedCount} item${selectedCount === 1 ? "" : "s"}${trash && !dryRun ? " to trash" : ""}`}
-      titleColor={accent}
-      width={56}
-      height={
-        (applyPolicy && applyPolicy.maxSizeGB !== null
-          ? 24
-          : selectedCount === 1 && !dangerous
-            ? 18
-            : 22) +
-        (showDisk ? 3 : 0) +
-        (costLine ? 2 : 0)
-      }
-      footer={
-        <>
-          {feedback ? <text fg={tokens.info} content={feedback} /> : null}
-          <box flexDirection="row" flexWrap="wrap" gap={1}>
-            <ActionButton
-              tokens={tokens}
-              label={dryRun ? "y Preview" : trash ? "y Move to trash" : "y Delete"}
-              danger={!trash && !dryRun}
-              disabled={!canConfirm}
-              onPress={onConfirm}
-            />
-            <ActionButton tokens={tokens} label="n / Esc Cancel" onPress={onCancel} />
-            {dryRun ? null : (
-              <ActionButton
-                tokens={tokens}
-                label={trash ? "t Delete permanently instead" : "t Move to trash instead"}
-                onPress={onToggleTrash}
-              />
-            )}
-            {onOverrideSizeLimit ? (
-              <ActionButton
-                tokens={tokens}
-                label={sizeLimitOverridden ? "f Restore size ceiling" : "f Override size ceiling"}
-                onPress={onOverrideSizeLimit}
-                disabled={!canConfirm}
-              />
-            ) : null}
-          </box>
-        </>
-      }
-    >
-      <text
-        fg={tokens.textMuted}
-        content={
-          heading ?? (otherQueuedCount === undefined ? "The queued items" : "Only this item")
-        }
-      />
-      {outsideViewCount > 0 ? (
-        <text
-          fg={tokens.info}
-          content={`${outsideViewCount} queued item${outsideViewCount === 1 ? " is" : "s are"} outside the current view.`}
-        />
-      ) : null}
-      {directoryCount > 0 ? (
-        <text content="Selected folders include everything inside them." fg={tokens.textMuted} />
-      ) : null}
-      <text
-        content={t`${bold(fg(accent)(`${action} ${selectedCount} item${selectedCount === 1 ? "" : "s"}`))}`}
-      />
-      <text
-        content={t`${fg(tokens.positive)(`${lowerBound ? "~" : ""}${formatBytes(selectedBytes)}`)} ${fg(tokens.textMuted)(lowerBound ? "partial estimate; actual bytes may differ" : "estimated size")}`}
-      />
-      {costLine ? (
-        <text
-          content={t`${fg(tokens.textMuted)("comes back by ")}${fg(tokens.textSecondary)(costLine)}`}
-          wrapMode="word"
-        />
-      ) : null}
-      {showDisk ? (
-        <DiskAfter
-          tokens={tokens}
-          disk={disk}
-          bytes={selectedBytes}
-          width={meterWidth}
-          {...(dryRun ? { dryRun: true } : {})}
-        />
-      ) : null}
-      {shown.map((path) => (
-        <text
-          key={path}
-          content={t`${fg(tokens.textDim)("·")} ${fg(tokens.textSecondary)(path)}`}
-          wrapMode="word"
-        />
-      ))}
-      {hidden > 0 ? (
-        <text content={t`${fg(tokens.textDim)(`  …and ${hidden} more`)}`} wrapMode="none" />
-      ) : null}
-      {linkOnly ? (
-        <text
-          fg={tokens.warning}
-          content={
-            trash
-              ? "Moves only the symbolic link. Linked contents stay."
-              : "Removes only the symbolic link. Linked contents stay."
-          }
-        />
-      ) : null}
-      {otherQueuedCount !== undefined && otherQueuedCount > 0 ? (
-        <text
-          fg={tokens.textSecondary}
-          content={`${otherQueuedCount} other queued item${otherQueuedCount === 1 ? " stays" : "s stay"} queued`}
-        />
-      ) : null}
-      <text content="" />
-      {applyPolicy && (applyPolicy.maxSizeGB !== null || applyPolicy.forceLarge) ? (
-        <text
-          fg={
-            applyPolicy.forceLarge || applyPolicy.maxSizeGB !== null
-              ? tokens.warning
-              : tokens.textMuted
-          }
-          content={
-            applyPolicy.forceLarge
-              ? sizeLimitOverridden
-                ? "Size ceiling overridden for this review only."
-                : "Size ceiling bypass enabled (--force-large)."
-              : applyPolicy.maxSizeGB === null
-                ? "No byte ceiling"
-                : `Size ceiling: ${applyPolicy.maxSizeGB} GiB; checked again before removal.`
-          }
-        />
-      ) : null}
-      {applyPolicy &&
-      applyPolicy.maxSizeGB !== null &&
-      !applyPolicy.forceLarge &&
-      selectedBytes > applyPolicy.maxSizeGB * 1024 ** 3 ? (
-        <box flexDirection="column">
-          <text
-            fg={tokens.warning}
-            content="Over the limit. Reduce the queue or raise maxSizeGB in .sweeprc."
-          />
-          <text
-            fg={tokens.warning}
-            content={
-              onOverrideSizeLimit
-                ? "Choose Override size ceiling for this review, then confirm."
-                : "Restart override: --force-large --yes"
-            }
-          />
-        </box>
-      ) : null}
-      <text content="" />
-      {dryRun ? (
-        <text content={t`${fg(tokens.textDim)("Preview only. No files will be removed.")}`} />
-      ) : dangerous ? (
-        <text
-          content={t`${fg(trash ? tokens.warning : tokens.danger)(
-            trash
-              ? `⚠ ${dangerousCount} dangerous item${dangerousCount === 1 ? "" : "s"} leave the working tree.`
-              : `⚠ ${dangerousCount} dangerous item${dangerousCount === 1 ? "" : "s"} selected. This cannot be undone.`,
-          )}`}
-        />
-      ) : trash ? (
-        <text
-          content={t`${fg(tokens.textDim)("Local trash; restore manually. Storage remains occupied.")}`}
-        />
-      ) : (
-        <text
-          content={t`${fg(tokens.textDim)("No items classified as dangerous. Permanent deletion has no undo.")}`}
-        />
-      )}
-    </Modal>
-  );
-}
-
-/**
- * Per-candidate detail - the "why" behind a row. Reasons, entry type and the
- * full (sanitized) path never fit the list row; the list is for triage, this
- * is for trust.
- */
-function InspectOverlay({
-  tokens,
-  candidate,
-  queued,
-  targetDir,
-  onClose,
-  onReview,
-}: {
-  tokens: ThemeTokens;
-  candidate: ScanCandidate;
-  queued: boolean;
-  targetDir: string;
-  onClose: () => void;
-  onReview: () => void;
-}) {
-  const { width } = useTerminalDimensions();
-  const compact = width < 48;
-  const rel = relativePath(targetDir, candidate.path);
-  const riskGlyphColor = {
-    safe: tokens.positive,
-    caution: tokens.warning,
-    dangerous: tokens.danger,
-    blocked: tokens.blocked,
-  }[candidate.riskTier];
-
-  const field = (label: string, value: string | StyledText) => (
-    <box flexDirection={compact ? "column" : "row"} width="100%" flexShrink={0}>
-      <text content={t`${fg(tokens.textDim)(label.padEnd(9))} `} wrapMode="none" />
-      {typeof value === "string" ? (
-        <text
-          content={t`${fg(tokens.text)(value)}`}
-          flexGrow={1}
-          flexShrink={1}
-          minWidth={0}
-          wrapMode="char"
-        />
-      ) : (
-        <text content={value} flexGrow={1} flexShrink={1} minWidth={0} wrapMode="char" />
-      )}
-    </box>
-  );
-
-  return (
-    <Modal
-      tokens={tokens}
-      title=" artifact "
-      width={64}
-      height={22}
-      footer={
-        <box flexDirection="row" flexWrap="wrap" gap={1}>
-          <ActionButton
-            tokens={tokens}
-            label="x Review removal"
-            onPress={onReview}
-            disabled={candidate.riskTier === "blocked"}
-          />
-          <ActionButton tokens={tokens} label="Esc Close" onPress={onClose} />
-        </box>
-      }
-    >
-      <box flexDirection="column">
-        <text
-          content={t`${fg(riskGlyphColor)(riskGlyph[candidate.riskTier])} ${bold(fg(tokens.text)(sanitizeTerminalText(candidate.name)))} ${fg(tokens.textMuted)(candidate.kind)}`}
-          wrapMode="char"
-        />
-        <text content="" />
-        {field("root", sanitizeTerminalText(targetDir))}
-        {field("path", sanitizeTerminalText(rel.length > 0 ? rel : candidate.name))}
-        {field(
-          "size",
-          `${formatBytes(candidate.estimatedBytes)}${candidate.bytesKnown === false ? " (partial - unreadable subtree)" : ""}`,
-        )}
-        {field(
-          "risk",
-          t`${fg(riskGlyphColor)(candidate.riskTier)}${queued ? fg(tokens.accent)("  · queued") : ""}`,
-        )}
-        {field(
-          "type",
-          candidate.isSymlink
-            ? `${candidate.entryType} (link only, target never scanned)`
-            : candidate.entryType,
-        )}
-        <text
-          content={
-            candidate.isSymlink
-              ? "Only the link is removed. Its destination stays."
-              : candidate.kind === "node_modules"
-                ? "Dependencies will need reinstalling. Check for local changes inside this folder."
-                : candidate.kind === "target"
-                  ? "Generated Cargo output can be rebuilt. The next build may take longer."
-                  : "Check that you can recreate these contents before removing them."
-          }
-          fg={tokens.textSecondary}
-          wrapMode="word"
-        />
-        {candidate.reasons.length > 0 ? (
-          <>
-            <text content="" />
-            <text content={t`${fg(tokens.textDim)("why it was flagged:")}`} wrapMode="none" />
-            {candidate.reasons.map((reason) => (
-              <text
-                key={reason}
-                content={t`  ${fg(tokens.textDim)("·")} ${fg(tokens.textSecondary)(sanitizeTerminalText(reason))}`}
-                wrapMode="char"
-              />
-            ))}
-          </>
-        ) : null}
-        <text content="" />
-      </box>
-    </Modal>
-  );
-}
-
-/** `~/x` for the calm header. */
-function displayTargetPath(path: string): string {
-  const home = process.env.HOME;
-  if (home && path === home) return "~";
-  if (home && path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
-  return path;
-}
-
-/** The calm view's one line of hints: only what applies right now. */
-function calmHintItems(context: {
-  scanning: boolean;
-  idleBytes: number;
-  queued: boolean;
-  width: number;
-}): FooterHint[] {
-  const parts: FooterHint[] = [
-    { key: "space", label: "queue", press: { name: "space" } },
-    // With a queue, reviewing it is the next step and clearing it the way
-    // back: neither falls off the end. Without one, `a` queues everything
-    // removable at once (never dangerous items).
-    ...(context.queued
-      ? [
-          { key: "c", label: "review", press: { name: "c" }, next: true },
-          { key: "u", label: "clear", press: { name: "u" } },
-        ]
-      : [{ key: "a", label: "queue all", press: { name: "a" } }]),
-    { key: "x", label: "remove", press: { name: "x" } },
-    { key: "enter", label: "open", press: { name: "return" } },
-  ];
-  if (!context.scanning && context.idleBytes > 0)
-    parts.push({
-      key: "i",
-      label: `queue idle ${formatBytes(context.idleBytes)}`,
-      press: { name: "i" },
-    });
-  parts.push(
-    { key: "/", label: "search", press: { name: "/" } },
-    { key: "b", label: "full view", press: { name: "b" } },
-  );
-  // `? keys` is the way out for anyone lost: its room is held first, and it
-  // always ends the line, however narrow the terminal.
-  const help: FooterHint = { key: "?", label: "keys", press: { name: "?" } };
-  const cost = (part: FooterHint) => part.key.length + part.label.length + 4;
-  let budget = context.width - 4 - cost(help);
-  const kept: FooterHint[] = [];
-  for (const part of parts) {
-    if (cost(part) > budget) break;
-    kept.push(part);
-    budget -= cost(part);
-  }
-  return [...kept, help];
 }
 
 export function SweepApp({
@@ -956,21 +183,15 @@ export function SweepApp({
   const [jumpCursor, setJumpCursor] = useState(0);
   const jumpCursorRef = useRef(0);
   const [jumpError, setJumpError] = useState<string | null>(null);
-  type ConfigSave = { path: string; delta: ProjectSweeprcDelta; revision: string };
-  const [configSave, setConfigSave] = useState<ConfigSave | null>(null);
-  const configSaveRef = useRef<ConfigSave | null>(null);
+  const [configSave, setConfigSave] = useState<ConfigSaveState | null>(null);
+  const configSaveRef = useRef<ConfigSaveState | null>(null);
   const configSaveReadyRef = useRef(false);
   const [patternInfo, setPatternInfo] = useState<string | null>(null);
   useEffect(() => {
     configSaveReadyRef.current = configSave !== null;
   }, [configSave]);
 
-  const [folderInfo, setFolderInfo] = useState<{
-    path: string;
-    count: number;
-    queued: number;
-    scanning: boolean;
-  } | null>(null);
+  const [folderInfo, setFolderInfo] = useState<FolderInfoState | null>(null);
   const [menuCursor, setMenuCursor] = useState(0);
   const menuCursorRef = useRef(0);
   const [menuQuery, setMenuQuery] = useState("");
@@ -987,6 +208,7 @@ export function SweepApp({
       motionEnabled,
     });
   }, [state.themeMode, state.sortBy, motionEnabled, onPreferencesChange]);
+
   const [pendingApply, setPendingApplyState] = useState(false);
   const [reviewedApply, setReviewedApply] = useState<ScanPlan | null>(null);
   const reviewedApplyRef = useRef<ScanPlan | null>(null);
@@ -1050,18 +272,6 @@ export function SweepApp({
    * underneath it, letting an unseen `y` delete. The mask is written in the
    * setter call itself, so a second open in the same drain sees the first.
    */
-  type ModalKind =
-    | "help"
-    | "confirm"
-    | "inspect"
-    | "scanError"
-    | "applying"
-    | "menu"
-    | "jump"
-    | "filter"
-    | "folderInfo"
-    | "configSave"
-    | "patternInfo";
   const openModalsRef = useRef(new Set<ModalKind>());
   const openModal = (kind: ModalKind): boolean => {
     if (openModalsRef.current.size > 0) return false;
@@ -1077,38 +287,22 @@ export function SweepApp({
   // Commit arms it; dismissal always remains available during a slow frame.
   const confirmReadyRef = useRef(false);
 
-  const generationRef = useRef(0);
-  const abortRef = useRef<AbortController | null>(null);
-  const [scanCommitToken, setScanCommitToken] = useState(0);
-  const scanCommitSequence = useRef(0);
-  const scanCommitWaiters = useRef(new Map<number, () => void>());
-  useLayoutEffect(() => {
-    for (const [token, release] of scanCommitWaiters.current) {
-      if (token <= scanCommitToken) release();
-    }
-  }, [scanCommitToken]);
-  // Engine the next scan generation runs (E flips it); the `engine` prop only
-  // seeds the first generation. Timing per engine lives in scanDurationsRef
-  // so the notice can compare backends on the same tree.
-  const [activeEngine, setActiveEngine] = useState<"js" | "rust">(engine ?? "js");
-  // Mirror in a ref - startScan is a useCallback and reads the engine at
-  // start() time, so the E-toggle's setState must not race the closure.
-  const activeEngineRef = useRef(activeEngine);
-  const scanStartRef = useRef(0);
-  // Ref carries the authoritative map (readable mid-callback); state mirrors
-  // it so the header chip re-renders when a run's duration lands.
-  const scanDurationsRef = useRef<Partial<Record<"js" | "rust", number>>>({});
-  const [scanDurations, setScanDurations] = useState(scanDurationsRef.current);
-  // Coarse ticker - the scanning strip's elapsed readout ticks at 4Hz while a
-  // scan runs, independent of progress-event cadence (a slow dir would
-  // otherwise freeze the readout).
-  const [, setScanTick] = useState(0);
-  const scanningNow = state.scanning;
   const stateRef = useRef(state);
   // The measured artifact-pane height, reported by the list's layout event.
   // Pageup/pagedown step real pages once known; the estimate below seeds it.
   const viewportRowsRef = useRef<number | null>(null);
   stateRef.current = state;
+
+  /**
+   * Commit queued reducer mutations, then read post-commit state. Under
+   * ConcurrentRoot a dispatch only applies at the next render, so handlers
+   * that branch on state (which row is focused, is a scan running) must
+   * flush first or a same-drain burst decides on stale rows.
+   */
+  const readFreshState = (): SweepUiState => {
+    flushSync();
+    return stateRef.current;
+  };
 
   // Modal setters keep the ref mask in sync. Key-opened overlays
   // (help/inspect/confirm) refuse when another overlay is live so a burst
@@ -1201,166 +395,21 @@ export function SweepApp({
     setApplyingState(verb);
   };
 
-  /**
-   * Commit queued reducer mutations, then read post-commit state. Under
-   * ConcurrentRoot a dispatch only applies at the next render, so handlers
-   * that branch on state (which row is focused, is a scan running) must
-   * flush first or a same-drain burst decides on stale rows.
-   */
-  const readFreshState = (): SweepUiState => {
-    flushSync();
-    return stateRef.current;
-  };
-
-  // Live-scan lifecycle: boot into the first generation, restart on rescan.
-  const startScan = useCallback(() => {
-    if (!scan) return;
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const gen = ++generationRef.current;
-    const engineForRun = activeEngineRef.current;
-    const startedAt = performance.now();
-    scanStartRef.current = startedAt;
-    setScanError(null);
-    dispatch({ type: "mutate", fn: (s) => setScanning(s, true) });
-    // Deliberately floating: a rejecting UiScanControl still becomes an
-    // unhandled rejection - funnel it through the same path as onError.
-    void Promise.resolve()
-      .then(() => {
-        if (gen !== generationRef.current || controller.signal.aborted) return;
-        return scan.start(
-          {
-            waitForCommit: () => {
-              if (gen !== generationRef.current || controller.signal.aborted)
-                return Promise.resolve();
-              const token = ++scanCommitSequence.current;
-              const receipt = new Promise<void>((resolve) => {
-                const release = () => {
-                  scanCommitWaiters.current.delete(token);
-                  controller.signal.removeEventListener("abort", release);
-                  resolve();
-                };
-                scanCommitWaiters.current.set(token, release);
-                controller.signal.addEventListener("abort", release, { once: true });
-              });
-              setScanCommitToken(token);
-              return receipt;
-            },
-            onBatch: (candidates) => {
-              if (gen !== generationRef.current || controller.signal.aborted) return;
-              dispatch({ type: "mutate", fn: (s) => upsertCandidates(s, candidates) });
-            },
-            onProgress: ({ scannedDirs, skippedDirs, currentDir, sizedCount }) => {
-              if (gen !== generationRef.current || controller.signal.aborted) return;
-              dispatch({
-                type: "mutate",
-                fn: (s) => ({
-                  ...setScanCurrentDir(
-                    setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
-                    currentDir ?? null,
-                  ),
-                  scanSizedCount: sizedCount ?? s.scanSizedCount,
-                }),
-              });
-            },
-            onDone: ({ scannedDirs, skippedDirs, plan: finalPlan }) => {
-              if (gen !== generationRef.current || controller.signal.aborted) return;
-              // Monotonic elapsed for this generation - excludes UI idle time and
-              // any earlier aborted run, so js-vs-rust comparisons stay honest.
-              const elapsedMs = Math.max(0, performance.now() - startedAt);
-              scanDurationsRef.current = { ...scanDurationsRef.current, [engineForRun]: elapsedMs };
-              setScanDurations(scanDurationsRef.current);
-              // The scan chip quietly flipping to NORMAL is the only signal today
-              // - say what landed so the end of a long scan is legible at a
-              // glance, with the engine comparison the E-toggle is for.
-              const found = finalPlan?.candidates.length;
-              const base =
-                found !== undefined
-                  ? `scan complete: ${found.toLocaleString()} artifact${found === 1 ? "" : "s"} · ${scannedDirs.toLocaleString()} dirs`
-                  : `scan complete: ${scannedDirs.toLocaleString()} dirs`;
-              setNotice(
-                `${base}${skippedDirs > 0 ? ` · ${skippedDirs} skipped (partial scan)` : ""} · ${engineTimingLabel(engineForRun, scanDurationsRef.current)}${isColdRequested() ? " · cold" : ""}`,
-                skippedDirs > 0 ? "warning" : "success",
-              );
-              dispatch({
-                type: "mutate",
-                fn: (s) =>
-                  finalizeScan(
-                    setSkippedDirs(setScannedDirs(s, scannedDirs), skippedDirs),
-                    finalPlan,
-                  ),
-              });
-            },
-            onError: (error) => {
-              if (gen !== generationRef.current || controller.signal.aborted) return;
-              dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
-              setScanError(error instanceof Error ? error.message : String(error));
-            },
-          },
-          controller.signal,
-        );
-      })
-      .catch((error: unknown) => {
-        if (gen !== generationRef.current || controller.signal.aborted) return;
-        dispatch({ type: "mutate", fn: (s) => setScanning(s, false) });
-        setScanError(error instanceof Error ? error.message : String(error));
-      });
-  }, [scan, activeEngine]);
-
-  useEffect(() => {
-    if (scan && initiallyScanning) startScan();
-    return () => {
-      abortRef.current?.abort();
-    };
-    // Boot-only effect; rescans are triggered explicitly via r.
-  }, []);
-
-  // 4Hz elapsed ticker, live only while a scan runs - progress events already
-  // re-render the strip, this keeps the readout honest through a slow dir.
-  useEffect(() => {
-    if (!scanningNow) return;
-    const id = setInterval(() => setScanTick((n) => n + 1), 250);
-    return () => clearInterval(id);
-  }, [scanningNow]);
-
-  const requestRescan = useCallback(() => {
-    if (!scan) return;
-    // Flush queued mutations (pattern toggles in the same input burst) so the
-    // rescan actually scans what the user just toggled - otherwise r applies
-    // the pre-burst pattern set while the UI already shows the new one.
-    const { disabledPatterns, extraPatterns } = rescanConfigFromState(readFreshState());
-    scan.syncPatterns(disabledPatterns, extraPatterns);
-    dispatch({ type: "mutate", fn: resetForRescan });
-    startScan();
-  }, [scan, startScan]);
-
-  // E: swap scan engines and rescan the same tree - the completion notice
-  // reports the new engine's time against any prior run so the faster backend
-  // is legible at a glance, no benchmark harness required.
-  const toggleEngine = useCallback(() => {
-    if (!scan) {
-      setNotice("engine switch needs a live scan - run `sweep ui`");
-      return;
-    }
-    const next = activeEngine === "rust" ? "js" : "rust";
-    if (!scan.setEngine(next)) {
-      setNotice(`${next} engine unavailable - no sweep-engine binary resolved`);
-      return;
-    }
-    // Ref first - startScan reads it synchronously; the setState is render
-    // scheduling only.
-    activeEngineRef.current = next;
-    setActiveEngine(next);
-    const { disabledPatterns, extraPatterns } = rescanConfigFromState(readFreshState());
-    scan.syncPatterns(disabledPatterns, extraPatterns);
-    dispatch({ type: "mutate", fn: resetForRescan });
-    startScan();
-  }, [scan, activeEngine, startScan]);
+  const { activeEngine, scanStartRef, scanDurations, requestRescan, toggleEngine, abortScan } =
+    useLiveScan({
+      scan,
+      initiallyScanning,
+      engine,
+      scanningNow: state.scanning,
+      dispatch,
+      readFreshState,
+      setScanError,
+      setNotice,
+    });
 
   // The terminal's own background, asked once: the canvas adopts it (colour,
   // opacity) and every tint is mixed from it. Unanswered, the brand canvas stays.
-  const paletteRenderer = useRenderer();
+  const renderer = useRenderer();
   const [terminalBackground, setTerminalBackground] = useState<string | null>(
     knownBackground ?? null,
   );
@@ -1369,7 +418,7 @@ export function SweepApp({
     if (knownBackground !== undefined) return;
     let live = true;
     try {
-      paletteRenderer
+      renderer
         .getPalette({ timeout: 300 })
         .then((palette) => {
           const background = palette.defaultBackground;
@@ -1383,7 +432,7 @@ export function SweepApp({
     return () => {
       live = false;
     };
-  }, [paletteRenderer, knownBackground]);
+  }, [renderer, knownBackground]);
   const tokens = useMemo(
     () => resolveTheme(state.themeMode, terminalBackground),
     [state.themeMode, terminalBackground],
@@ -1403,53 +452,23 @@ export function SweepApp({
     dimensions.width >= 140 ? 48 : dimensions.width >= 110 ? 38 : dimensions.width >= 90 ? 32 : 26;
   const showSidebar = dimensions.width >= 72;
 
-  const mutate = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
-    // Every user-input mutation funnels here: keymap actions AND mouse paths
-    // (row clicks, wheel, scrollbar drag via onSeek). While an overlay is
-    // live, input belongs to it - a captured scrollbar drag surviving a
-    // modal open would otherwise keep moving a cursor nobody can see, and
-    // the next destructive key would land on the wrong row. Async dispatches
-    // (scan batches, apply merges) use `dispatch` directly and stay ungated.
-    if (openModalsRef.current.size > 0) return;
-    setNotice(null);
-    dispatch({ type: "mutate", fn });
-  }, []);
+  const mutate = useCallback(
+    (fn: (s: SweepUiState) => SweepUiState) => {
+      // Every user-input mutation funnels here: keymap actions AND mouse paths
+      // (row clicks, wheel, scrollbar drag via onSeek). While an overlay is
+      // live, input belongs to it - a captured scrollbar drag surviving a
+      // modal open would otherwise keep moving a cursor nobody can see, and
+      // the next destructive key would land on the wrong row. Async dispatches
+      // (scan batches, apply merges) use `dispatch` directly and stay ungated.
+      if (openModalsRef.current.size > 0) return;
+      setNotice(null);
+      dispatch({ type: "mutate", fn });
+    },
+    [setNotice],
+  );
 
   const visibleItems = useMemo(() => getVisibleCandidates(state), [state]);
 
-  // ── The projects view: one row per project, grouped by idle time ──────
-  const [view, setView] = useState(initialView);
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
-  const [openSections, setOpenSections] = useState<ReadonlySet<ProjectSection>>(() => new Set());
-  const [allArtifacts, setAllArtifacts] = useState<ReadonlySet<string>>(() => new Set());
-  const [projectCursorState, setProjectCursorState] = useState(0);
-  const projects = useMemo(
-    () => buildProjects(visibleItems, state.selectedIds, state.targetDir),
-    [visibleItems, state.selectedIds, state.targetDir],
-  );
-  const byCost = useMemo(
-    () => reclaimByCost(projects, state.selectedIds),
-    [projects, state.selectedIds],
-  );
-  const projectRows = useMemo(
-    () => buildProjectRows(projects, expandedProjects, openSections, allArtifacts),
-    [projects, expandedProjects, openSections, allArtifacts],
-  );
-  const projectCursor = settleCursor(projectRows, projectCursorState);
-  // Keys in one stdin burst (j j Enter) must each see the previous key's
-  // effect: the handler reads these refs, not this render's values.
-  const projectRowsRef = useRef(projectRows);
-  projectRowsRef.current = projectRows;
-  const projectCursorRef = useRef(projectCursor);
-  projectCursorRef.current = projectCursor;
-  const expandedRef = useRef(expandedProjects);
-  expandedRef.current = expandedProjects;
-  const setProjectCursor = (index: number) => {
-    projectCursorRef.current = index;
-    setProjectCursorState(index);
-  };
   // The volume as it was before the last apply: `disk` only re-reads after a
   // scan or an apply, so during one it still holds the earlier reading.
   const diskRef = useRef<DiskSpace | null>(null);
@@ -1464,171 +483,6 @@ export function SweepApp({
   }, [state.targetDir, state.scanning, receipt]);
   diskRef.current = disk;
 
-  /**
-   * Keys the projects view owns. Everything else (search, help, actions,
-   * review, quit) falls through to the shared keymap. Keys that act on the
-   * folder view's hidden cursor (x, d, y, v, p) are answered, not passed on.
-   */
-  const handleProjectKey = (key: {
-    name: string;
-    ctrl?: boolean;
-    meta?: boolean;
-    shift?: boolean;
-  }) => {
-    if (key.ctrl || key.meta) {
-      if (key.name === "d" || key.name === "u") {
-        const page = Math.max(1, dimensions.height - 10) * (key.name === "d" ? 1 : -1);
-        setProjectCursor(moveProjectCursor(projectRowsRef.current, projectCursorRef.current, page));
-        return true;
-      }
-      return false;
-    }
-    const rows = projectRowsRef.current;
-    const row = rows[projectCursorRef.current];
-    const move = (delta: number) => {
-      setProjectCursor(moveProjectCursor(projectRowsRef.current, projectCursorRef.current, delta));
-      return true;
-    };
-    const openSection = (section: ProjectSection) => {
-      const next = new Set(openSections);
-      next.add(section);
-      projectRowsRef.current = buildProjectRows(projects, expandedRef.current, next, allArtifacts);
-      setOpenSections(next);
-      return true;
-    };
-    const showAllArtifacts = (projectKey: string) => {
-      const next = new Set(allArtifacts);
-      next.add(projectKey);
-      projectRowsRef.current = buildProjectRows(projects, expandedRef.current, openSections, next);
-      setAllArtifacts(next);
-      return true;
-    };
-    const setOpen = (keyName: string, open: boolean) => {
-      const next = new Set(expandedRef.current);
-      if (open) next.add(keyName);
-      else next.delete(keyName);
-      expandedRef.current = next;
-      // Rows change shape now, so the next key in this burst sees them.
-      projectRowsRef.current = buildProjectRows(projects, next, openSections, allArtifacts);
-      setExpandedProjects(next);
-    };
-    switch (key.name) {
-      case "escape": {
-        // The innermost layer first: an opened project, then an opened
-        // section. Only then does esc reach the filters and the quit hint.
-        if (expandedRef.current.size > 0 || openSections.size > 0 || allArtifacts.size > 0) {
-          const cursorKey = row && "project" in row ? row.project.key : null;
-          const closeOne = cursorKey !== null && expandedRef.current.has(cursorKey);
-          const nextExpanded = closeOne
-            ? new Set([...expandedRef.current].filter((k) => k !== cursorKey))
-            : new Set<string>();
-          const closeAll = !closeOne && expandedRef.current.size > 0;
-          const clearSections = !closeOne && !closeAll;
-          const nextSections = clearSections ? new Set<ProjectSection>() : openSections;
-          const nextArtifacts =
-            closeOne || closeAll
-              ? new Set([...allArtifacts].filter((k) => nextExpanded.has(k)))
-              : allArtifacts;
-          const nextRows = buildProjectRows(projects, nextExpanded, nextSections, nextArtifacts);
-          expandedRef.current = nextExpanded;
-          projectRowsRef.current = nextRows;
-          setExpandedProjects(nextExpanded);
-          setOpenSections(nextSections);
-          setAllArtifacts(nextArtifacts);
-          // Land on the project that was just closed, not on whatever moved up.
-          const parent =
-            cursorKey === null
-              ? -1
-              : nextRows.findIndex((r) => r.kind === "project" && r.project.key === cursorKey);
-          if (parent >= 0) setProjectCursor(parent);
-          return true;
-        }
-        return false;
-      }
-      case "up":
-      case "k":
-        return move(-1);
-      case "down":
-      case "j":
-        return move(1);
-      case "pageup":
-        return move(-Math.max(1, dimensions.height - 10));
-      case "pagedown":
-        return move(Math.max(1, dimensions.height - 10));
-      case "home":
-        return move(-Number.MAX_SAFE_INTEGER);
-      case "end":
-        return move(Number.MAX_SAFE_INTEGER);
-      case "g":
-        return move(key.shift ? Number.MAX_SAFE_INTEGER : -Number.MAX_SAFE_INTEGER);
-      case "G":
-        return move(Number.MAX_SAFE_INTEGER);
-      case "space":
-        if (row?.kind === "more") return openSection(row.section);
-        if (row?.kind === "moreArtifacts") return showAllArtifacts(row.project.key);
-        if (row?.kind === "project") mutate((s) => toggleIdsSelection(s, row.project.queueable));
-        else if (row?.kind === "artifact") {
-          if (row.candidate.riskTier === "blocked")
-            setNotice("blocked: git-tracked or a project file, never removable");
-          else mutate((s) => toggleSelectionById(s, row.candidate.id));
-        }
-        return true;
-      case "return":
-      case "enter":
-      case "right":
-      case "l":
-        if (row?.kind === "more") return openSection(row.section);
-        if (row?.kind === "moreArtifacts") return showAllArtifacts(row.project.key);
-        if (row?.kind === "project")
-          setOpen(
-            row.project.key,
-            !(key.name === "return" || key.name === "enter") ||
-              !expandedProjects.has(row.project.key),
-          );
-        else if (row?.kind === "artifact" && (key.name === "return" || key.name === "enter"))
-          setInspect(true, row.candidate.id);
-        return true;
-      case "left":
-      case "h":
-        if (row?.kind === "artifact" || row?.kind === "moreArtifacts") {
-          const parent = rows.findIndex(
-            (candidate) =>
-              candidate.kind === "project" && candidate.project.key === row.project.key,
-          );
-          setOpen(row.project.key, false);
-          if (parent >= 0) setProjectCursor(parent);
-        } else if (row?.kind === "project") setOpen(row.project.key, false);
-        return true;
-      case "i":
-        if (state.scanning) {
-          setNotice("idle times arrive when the scan finishes");
-          return true;
-        }
-        if (idleSafe.length === 0) {
-          setNotice(`no safe items in projects idle ${IDLE_WINDOW_DAYS}+ days`);
-          return true;
-        }
-        mutate(selectIdleSafe);
-        setNotice(
-          `queued ${idleSafe.length.toLocaleString()} items in idle projects · ${formatBytes(idleSafeBytes)}`,
-          "success",
-        );
-        return true;
-      case "x":
-      case "d":
-        // Remove without queueing: the row's own confirm, nothing else in it.
-        if (row?.kind === "artifact") requestSingleApply(row.candidate.id);
-        else if (row?.kind === "project") requestProjectApply(row.project);
-        return true;
-      case "y":
-      case "v":
-      case "p":
-        setNotice("press b for the full view: copy, ranges and patterns live there");
-        return true;
-      default:
-        return false;
-    }
-  };
   // Facet counts describe the current folder scope, before any filter, so
   // they hold still while options are toggled.
   const scopeCandidates = useMemo(
@@ -1665,10 +519,10 @@ export function SweepApp({
     (outcome: SweepUiOutcome) => {
       if (finalizedRef.current) return;
       finalizedRef.current = true;
-      abortRef.current?.abort();
+      abortScan();
       onDone(operations.outcome(outcome));
     },
-    [onDone, operations],
+    [abortScan, onDone, operations],
   );
 
   const requestApply = () => {
@@ -1702,13 +556,16 @@ export function SweepApp({
    * React's default-lane render - only a dispatch inside `flushSync` commits in
    * time for the following key to see it.
    */
-  const commitMutation = useCallback((fn: (s: SweepUiState) => SweepUiState) => {
-    if (openModalsRef.current.size > 0) return;
-    flushSync(() => {
-      setNotice(null);
-      dispatch({ type: "mutate", fn });
-    });
-  }, []);
+  const commitMutation = useCallback(
+    (fn: (s: SweepUiState) => SweepUiState) => {
+      if (openModalsRef.current.size > 0) return;
+      flushSync(() => {
+        setNotice(null);
+        dispatch({ type: "mutate", fn });
+      });
+    },
+    [setNotice],
+  );
 
   const focusPanel = useCallback(
     (focus: SweepUiState["focus"]) => {
@@ -1745,6 +602,9 @@ export function SweepApp({
     sizeLimitOverrideRef.current = !sizeLimitOverrideRef.current;
     setSizeLimitOverridden(sizeLimitOverrideRef.current);
   };
+
+  // Forward ref to viewRef for runInSessionApply closure (populated below by useProjectsController).
+  const currentViewRef = useRef<"projects" | "folders">(initialView);
 
   const runInSessionApply = useCallback(
     (scopedPlan: ScanPlan, name: string, explicitSingleSelection = false) => {
@@ -1828,7 +688,7 @@ export function SweepApp({
           const clean = !stopped && merged.failed === 0;
           // The calm view says a clean result in its answer line; the notice
           // stays for anything that went wrong, and in the full view.
-          if (!clean || viewRef.current !== "projects")
+          if (!clean || currentViewRef.current !== "projects")
             setNotice(
               applyNotice({
                 removed: merged.removedIds.length,
@@ -1872,7 +732,7 @@ export function SweepApp({
         }
       })();
     },
-    [scan, finalize, dryRun, operations],
+    [scan, finalize, dryRun, operations, setNotice],
   );
 
   const applyPlan = useCallback(() => {
@@ -1955,6 +815,40 @@ export function SweepApp({
     if (!setPendingApply(true)) setPendingSingleId(null);
   };
 
+  const idleSafe = useMemo(
+    () => idleSafeCandidates({ candidates: state.candidates }),
+    [state.candidates],
+  );
+  const idleSafeBytes = idleSafe.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
+
+  const {
+    view,
+    viewRef,
+    setView,
+    projects,
+    byCost,
+    projectRows,
+    projectCursor,
+    handleProjectKey,
+    handleProjectCursorDelta,
+    handleProjectRowPress,
+  } = useProjectsController({
+    initialView,
+    visibleItems,
+    selectedIds: state.selectedIds,
+    targetDir: state.targetDir,
+    scanning: state.scanning,
+    viewportHeight: dimensions.height,
+    idleSafeCount: idleSafe.length,
+    idleSafeBytes,
+    mutate,
+    setNotice,
+    setInspect,
+    requestSingleApply,
+    requestProjectApply,
+  });
+  currentViewRef.current = view;
+
   const confirmSingle = useCallback(() => {
     const id = pendingSingleIdRef.current;
     setPendingSingleId(null);
@@ -1979,7 +873,7 @@ export function SweepApp({
         singlePlan.candidates[0]!.name,
     );
     runInSessionApply(singlePlan, name, true);
-  }, [runInSessionApply]);
+  }, [runInSessionApply, setNotice]);
 
   const confirmReviewedApply = () => {
     if (renderer.width < 40 || renderer.height < 12) {
@@ -2074,8 +968,6 @@ export function SweepApp({
     };
   }, [abortApply, finalize]);
 
-  const renderer = useRenderer();
-
   const exportPlan = useCallback(() => {
     const s = readFreshState();
     if (s.scanning || s.scanIncomplete) {
@@ -2096,7 +988,7 @@ export function SweepApp({
       const reason = error instanceof Error ? error.message : String(error);
       setNotice(`couldn't save plan: ${sanitizeTerminalText(reason)}`);
     }
-  }, [plan]);
+  }, [plan, setNotice]);
 
   const yankPath = useCallback(() => {
     const s = readFreshState();
@@ -2112,7 +1004,7 @@ export function SweepApp({
         : "this terminal does not accept clipboard writes (OSC 52)",
       copied ? "success" : "warning",
     );
-  }, [renderer]);
+  }, [renderer, setNotice]);
 
   const applyVisual = useCallback(() => {
     // The reducer fn computes the transition on committed state - a queued
@@ -2134,31 +1026,34 @@ export function SweepApp({
     if (result.queued > 0) setNotice(`queued ${result.queued}${skipped}`, "success");
     else if (result.unqueued > 0) setNotice(`unqueued ${result.unqueued}${skipped}`, "neutral");
     else setNotice(`nothing queueable in that range${skipped}`);
-  }, []);
+  }, [setNotice]);
 
-  const applyScopeToggle = useCallback((scopeKey?: string | null) => {
-    if (openModalsRef.current.size > 0) return;
-    let result: ReturnType<typeof toggleSidebarScopeSelection> | undefined;
-    flushSync(() => {
-      dispatch({
-        type: "mutate",
-        fn: (s) => {
-          const r =
-            scopeKey === undefined
-              ? toggleSidebarScopeSelection(s)
-              : toggleScopeSelection(s, scopeKey);
-          result = r;
-          return r.state;
-        },
+  const applyScopeToggle = useCallback(
+    (scopeKey?: string | null) => {
+      if (openModalsRef.current.size > 0) return;
+      let result: ReturnType<typeof toggleSidebarScopeSelection> | undefined;
+      flushSync(() => {
+        dispatch({
+          type: "mutate",
+          fn: (s) => {
+            const r =
+              scopeKey === undefined
+                ? toggleSidebarScopeSelection(s)
+                : toggleScopeSelection(s, scopeKey);
+            result = r;
+            return r.state;
+          },
+        });
       });
-    });
-    if (!result) return;
-    const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
-    if (result.queued > 0) setNotice(`queued ${result.queued} in folder${skipped}`, "success");
-    else if (result.unqueued > 0)
-      setNotice(`unqueued ${result.unqueued} in folder${skipped}`, "neutral");
-    else setNotice(`nothing queueable in that folder${skipped}`);
-  }, []);
+      if (!result) return;
+      const skipped = result.skipped > 0 ? `, skipped ${result.skipped} dangerous or blocked` : "";
+      if (result.queued > 0) setNotice(`queued ${result.queued} in folder${skipped}`, "success");
+      else if (result.unqueued > 0)
+        setNotice(`unqueued ${result.unqueued} in folder${skipped}`, "neutral");
+      else setNotice(`nothing queueable in that folder${skipped}`);
+    },
+    [setNotice],
+  );
 
   /**
    * Enter on the pattern pane's add line. Validates through the same
@@ -2190,7 +1085,7 @@ export function SweepApp({
       fn: (s) => addCustomPattern(setPatternInput(s, null), draft),
     });
     setNotice(`added "${sanitizeTerminalText(draft)}" - r rescans with it`, "success");
-  }, []);
+  }, [setNotice]);
 
   const closeConfigSave = () => {
     configSaveReadyRef.current = false;
@@ -2257,180 +1152,55 @@ export function SweepApp({
     setInspect(false);
     requestSingleApply(id);
   };
+
   const editingPatterns = state.focus === "patterns" || state.focus === "patternInput";
-  const idleSafe = useMemo(
-    () => idleSafeCandidates({ candidates: state.candidates }),
-    [state.candidates],
-  );
-  const idleSafeBytes = idleSafe.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
-  const menuCommands = [
-    {
-      label: `Review queue (${summary.selectedCount})`,
-      shortcut: "c",
-      run: requestApply,
-      disabled: state.scanning || state.scanIncomplete || summary.selectedCount === 0,
+  const menuCommands = buildActionMenuCommands({
+    state,
+    summary,
+    editingPatterns,
+    idleSafeCount: idleSafe.length,
+    idleSafeBytes,
+    hasFolders: Boolean(folders),
+    hasScan: Boolean(scan),
+    motionEnabled,
+    requestApply,
+    setInspect,
+    requestSingleApply,
+    mutate,
+    setNotice,
+    focusPanel,
+    setJump,
+    openFolderInfo: () => {
+      if (!openModal("folderInfo")) return;
+      const fresh = readFreshState();
+      const visible = getVisibleCandidates(fresh);
+      setFolderInfo({
+        path:
+          fresh.scopeFilter === null || fresh.scopeFilter === ""
+            ? fresh.targetDir
+            : join(fresh.targetDir, fresh.scopeFilter),
+        count: visible.length,
+        queued: visible.filter((item) => fresh.selectedIds.has(item.id)).length,
+        scanning: fresh.scanning,
+      });
     },
-    {
-      label: "Inspect current item",
-      shortcut: "i",
-      run: () => setInspect(true),
-      disabled: editingPatterns || !getCurrentCandidate(state),
+    yankPath,
+    exportPlan,
+    writeSweeprc,
+    inspectPattern,
+    requestRescan,
+    openPatternsView: () => {
+      setView("folders");
+      focusPanel("patterns");
     },
-    {
-      label: "Review removal of current item",
-      shortcut: "x",
-      run: () => requestSingleApply(),
-      disabled:
-        state.scanning ||
-        state.scanIncomplete ||
-        editingPatterns ||
-        !getCurrentCandidate(state) ||
-        getCurrentCandidate(state)?.riskTier === "blocked",
+    toggleMotion: () => {
+      motionEnabledRef.current = !motionEnabledRef.current;
+      setMotionEnabled(motionEnabledRef.current);
     },
-    {
-      // The recommendation: what nobody is using, across the whole target.
-      label:
-        idleSafe.length > 0
-          ? `Queue safe items in projects idle ${IDLE_WINDOW_DAYS}+ days (${idleSafe.length.toLocaleString()} · ${formatBytes(idleSafeBytes)})`
-          : `Queue safe items in projects idle ${IDLE_WINDOW_DAYS}+ days`,
-      shortcut: "",
-      run: () => {
-        mutate(selectIdleSafe);
-        setNotice(
-          `queued ${idleSafe.length.toLocaleString()} items in idle projects · ${formatBytes(idleSafeBytes)}`,
-          "success",
-        );
-      },
-      disabled: editingPatterns || state.scanning || idleSafe.length === 0,
-    },
-    {
-      label: "Queue safe items in this view",
-      shortcut: "s",
-      run: () => mutate(selectSafeOnly),
-      disabled: editingPatterns,
-    },
-    {
-      label: "Clear whole queue",
-      shortcut: "u",
-      run: () => mutate(clearSelection),
-      disabled: summary.selectedCount === 0,
-    },
-    {
-      label: "Clear queue in this view",
-      shortcut: "Shift+U",
-      run: () => mutate(clearVisibleSelection),
-      disabled: editingPatterns || summary.visibleSelectedCount === 0,
-    },
-    {
-      label: "Queue safe and caution items in this view",
-      shortcut: "a",
-      run: () => mutate((s) => selectVisible(s, false)),
-      disabled: editingPatterns,
-    },
-    { label: "Filter items", shortcut: "/", run: () => focusPanel("search"), disabled: false },
-    {
-      label: "Clear search and risk filters",
-      shortcut: "",
-      run: () => mutate((s) => setFilter(setRiskFilter(s, "all"), "")),
-      disabled: false,
-    },
-    {
-      label: "Switch to another folder…",
-      shortcut: "ctrl+o",
-      run: () => setJump(true),
-      disabled: !folders,
-    },
-    {
-      label: "Browse all folders",
-      shortcut: "",
-      run: () => mutate((s) => setScopeFilter(s, null)),
-      disabled: false,
-    },
-    {
-      label: "Current folder details",
-      shortcut: "",
-      run: () => {
-        if (!openModal("folderInfo")) return;
-        const fresh = readFreshState();
-        const visible = getVisibleCandidates(fresh);
-        setFolderInfo({
-          path:
-            fresh.scopeFilter === null || fresh.scopeFilter === ""
-              ? fresh.targetDir
-              : join(fresh.targetDir, fresh.scopeFilter),
-          count: visible.length,
-          queued: visible.filter((item) => fresh.selectedIds.has(item.id)).length,
-          scanning: fresh.scanning,
-        });
-      },
-      disabled: false,
-    },
-    {
-      label: "Copy current item path",
-      shortcut: "y",
-      run: yankPath,
-      disabled: editingPatterns || !getCurrentCandidate(state),
-    },
-    {
-      label: "Save queue as a plan",
-      shortcut: "Shift+S",
-      run: exportPlan,
-      disabled: state.scanning || state.scanIncomplete || summary.selectedCount === 0,
-    },
-    {
-      label: "Save cleanup patterns",
-      shortcut: "w",
-      run: writeSweeprc,
-      disabled:
-        !editingPatterns || (state.focus === "patternInput" && state.patternInputMode === "add"),
-    },
-    {
-      label: "Inspect current pattern",
-      shortcut: "i",
-      run: () => inspectPattern(),
-      disabled: !editingPatterns || !patternAtCursor(state),
-    },
-    { label: "Scan again", shortcut: "r", run: requestRescan, disabled: !scan },
-    {
-      label: "Edit cleanup patterns",
-      shortcut: "p",
-      // The pattern list lives on the folder screen. Opening it from the
-      // projects view has to switch, or the keys edit a pane that is not there.
-      run: () => {
-        setView("folders");
-        focusPanel("patterns");
-      },
-      disabled: false,
-    },
-    {
-      label: `Sort by ${state.sortBy === "size" ? "name" : state.sortBy === "name" ? "oldest first" : "largest first"}`,
-      shortcut: "o",
-      run: () => mutate(toggleSortBy),
-      disabled: false,
-    },
-    {
-      label: `Use ${cycleThemeMode(state.themeMode)} theme`,
-      shortcut: "t",
-      run: () => mutate((s) => setThemeMode(s, cycleThemeMode(s.themeMode))),
-      disabled: false,
-    },
-    {
-      label: `Activity animation: ${motionEnabled ? "on" : "paused"}`,
-      shortcut: "m",
-      run: () => {
-        motionEnabledRef.current = !motionEnabledRef.current;
-        setMotionEnabled(motionEnabledRef.current);
-      },
-      disabled: false,
-    },
-    { label: "Help and shortcuts", shortcut: "?", run: () => setShowHelp(true), disabled: false },
-    {
-      label: "Filter by risk, kind, size or age",
-      shortcut: "f",
-      run: () => setFilterPicker(true),
-      disabled: false,
-    },
-  ];
+    setShowHelp,
+    setFilterPicker,
+  });
+
   const matchingCommands = (query: string) => {
     const terms = query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
     return menuCommands.filter((command) => {
@@ -2735,6 +1505,11 @@ export function SweepApp({
     return rankConfirmPreview(reviewedApply.candidates, reviewedApply.targetDir);
   }, [pendingApply, pendingSingleId, reviewedApply]);
 
+  const engineChip =
+    scanDurations[activeEngine] !== undefined
+      ? `${activeEngine}·${formatScanMs(scanDurations[activeEngine]!)}`
+      : activeEngine;
+
   const headerStats = buildHeaderStats(
     plan,
     summary,
@@ -2744,9 +1519,7 @@ export function SweepApp({
     trashMode,
     // Compact chip: `rust·263ms` once timed; the full js-vs-rust verdict lives
     // in the completion notice, the header just needs the current backend.
-    scanDurations[activeEngine] !== undefined
-      ? `${activeEngine}·${formatScanMs(scanDurations[activeEngine]!)}`
-      : activeEngine,
+    engineChip,
   );
 
   const headerStatsLean = buildHeaderStats(
@@ -2756,9 +1529,7 @@ export function SweepApp({
     dryRun,
     dimensions.width,
     trashMode,
-    scanDurations[activeEngine] !== undefined
-      ? `${activeEngine}·${formatScanMs(scanDurations[activeEngine]!)}`
-      : activeEngine,
+    engineChip,
     true,
   );
 
@@ -2920,36 +1691,8 @@ export function SweepApp({
             }
             onFilterInput={(value) => mutate((s) => setFilter(s, value))}
             onFilterSubmit={() => focusPanel("list")}
-            onCursorDelta={(delta) =>
-              setProjectCursor(
-                moveProjectCursor(projectRowsRef.current, projectCursorRef.current, delta),
-              )
-            }
-            onRowPress={(index, onMark) => {
-              const row = projectRows[index];
-              setProjectCursor(index);
-              if (!row || row.kind === "section" || row.kind === "spacer") return;
-              if (row.kind === "more") {
-                setOpenSections((current) => new Set([...current, row.section]));
-                return;
-              }
-              if (row.kind === "moreArtifacts") {
-                setAllArtifacts((current) => new Set([...current, row.project.key]));
-                return;
-              }
-              if (onMark) {
-                if (row.kind === "project")
-                  mutate((s) => toggleIdsSelection(s, row.project.queueable));
-                else mutate((s) => toggleSelectionById(s, row.candidate.id));
-              } else if (row.kind === "project") {
-                setExpandedProjects((current) => {
-                  const next = new Set(current);
-                  if (next.has(row.project.key)) next.delete(row.project.key);
-                  else next.add(row.project.key);
-                  return next;
-                });
-              }
-            }}
+            onCursorDelta={handleProjectCursorDelta}
+            onRowPress={handleProjectRowPress}
           />
         ) : (
           <>
@@ -3130,193 +1873,38 @@ export function SweepApp({
           />
         ) : null}
         {!foregroundOverlay && folderInfo ? (
-          <Modal
-            tokens={tokens}
-            title=" Current folder "
-            width={64}
-            height={14}
-            footer={<ActionButton tokens={tokens} label="Esc Close" onPress={closeFolderInfo} />}
-          >
-            <text
-              content={sanitizeTerminalText(folderInfo.path)}
-              wrapMode="char"
-              fg={tokens.text}
-            />
-            <text
-              content={`${folderInfo.count} items in this view · ${folderInfo.queued} queued here`}
-              fg={tokens.textSecondary}
-              wrapMode="word"
-            />
-            <text
-              content="Folder, search and risk filters determine this view. Browsing does not change your queue."
-              fg={tokens.textMuted}
-              wrapMode="word"
-            />
-            {folderInfo.scanning ? (
-              <text
-                content="Scan is running; these are a snapshot of discovered items."
-                fg={tokens.warning}
-                wrapMode="word"
-              />
-            ) : null}
-          </Modal>
+          <FolderInfoModal tokens={tokens} folderInfo={folderInfo} onClose={closeFolderInfo} />
         ) : null}
         {!foregroundOverlay && patternInfo !== null ? (
-          <Modal
-            tokens={tokens}
-            title=" Pattern details "
-            width={60}
-            footer={<ActionButton tokens={tokens} label="Esc Close" onPress={closePatternInfo} />}
-          >
-            <text content={sanitizeTerminalText(patternInfo)} fg={tokens.text} wrapMode="word" />
-            <text
-              content="Matches artifact names inside the scanned tree."
-              fg={tokens.textMuted}
-              wrapMode="word"
-            />
-          </Modal>
+          <PatternInfoModal tokens={tokens} pattern={patternInfo} onClose={closePatternInfo} />
         ) : null}
         {!foregroundOverlay && configSave ? (
-          <Modal
+          <ConfigSaveModal
             tokens={tokens}
-            title=" Save cleanup patterns? "
-            width={60}
-            height={20}
-            footer={
-              <box flexDirection="row" flexWrap="wrap" gap={1}>
-                <ActionButton
-                  tokens={tokens}
-                  label="y Save patterns"
-                  disabled={dimensions.width < 40 || dimensions.height < 12}
-                  onPress={confirmConfigSave}
-                />
-                <ActionButton tokens={tokens} label="n / Esc Cancel" onPress={closeConfigSave} />
-              </box>
-            }
-          >
-            <text
-              content={sanitizeTerminalText(configSave.path)}
-              fg={tokens.text}
-              wrapMode="word"
-            />
-            <text
-              content="Updates patterns and disabledPatterns only. Other settings are kept."
-              fg={tokens.textMuted}
-              wrapMode="word"
-            />
-            <text content="Extra patterns:" fg={tokens.text} />
-            {configSave.delta.patterns.length ? (
-              configSave.delta.patterns.map((pattern) => (
-                <text
-                  key={`on-${pattern}`}
-                  content={sanitizeTerminalText(pattern)}
-                  fg={tokens.textSecondary}
-                  wrapMode="word"
-                />
-              ))
-            ) : (
-              <text content="None; built-in defaults remain." fg={tokens.textSecondary} />
-            )}
-            <text content="Disabled defaults:" fg={tokens.text} />
-            {configSave.delta.disabledPatterns.length ? (
-              configSave.delta.disabledPatterns.map((pattern) => (
-                <text
-                  key={`off-${pattern}`}
-                  content={sanitizeTerminalText(pattern)}
-                  fg={tokens.textSecondary}
-                  wrapMode="word"
-                />
-              ))
-            ) : (
-              <text content="None." fg={tokens.textSecondary} />
-            )}
-            {dimensions.width < 40 || dimensions.height < 12 ? (
-              <text content="Resize to 40 columns and 12 rows to review." fg={tokens.warning} />
-            ) : null}
-          </Modal>
+            configSave={configSave}
+            canConfirm={dimensions.width >= 40 && dimensions.height >= 12}
+            onConfirm={confirmConfigSave}
+            onCancel={closeConfigSave}
+          />
         ) : null}
         {!foregroundOverlay && showMenu ? (
-          <Modal
+          <ActionMenuModal
             tokens={tokens}
-            title=" Search actions "
-            width={58}
-            height={22}
-            footer={
-              <>
-                <text
-                  content={
-                    menuFits
-                      ? "↑↓ choose · Enter open · Esc close"
-                      : "Resize the terminal to use actions · Esc close"
-                  }
-                  fg={tokens.textMuted}
-                />
-                <box flexDirection="row" flexWrap="wrap" gap={1}>
-                  <ActionButton
-                    tokens={tokens}
-                    label="Previous"
-                    disabled={!menuFits || menuTop === 0}
-                    onPress={() => moveMenuPage(-1)}
-                  />
-                  <ActionButton
-                    tokens={tokens}
-                    label="Next"
-                    disabled={!menuFits || menuTop + menuPageSize >= filteredCommands.length}
-                    onPress={() => moveMenuPage(1)}
-                  />
-                  <ActionButton tokens={tokens} label="Close" onPress={() => setMenu(false)} />
-                </box>
-              </>
-            }
-          >
-            <input
-              focused
-              value={menuQuery}
-              maxLength={128}
-              placeholder="Type an action or shortcut…"
-              backgroundColor={tokens.surfaceInset}
-              focusedBackgroundColor={tokens.surfaceInset}
-              textColor={tokens.text}
-              cursorColor={tokens.accent}
-              onInput={updateMenuQuery}
-            />
-            {menuFits ? (
-              <text
-                content={
-                  filteredCommands.length === 0
-                    ? "No matching actions. Clear the search to try again."
-                    : `${menuTop + 1}–${Math.min(filteredCommands.length, menuTop + menuPageSize)} of ${filteredCommands.length} actions`
-                }
-                fg={tokens.textMuted}
-              />
-            ) : (
-              <text content="Resize to use actions" fg={tokens.textMuted} />
-            )}
-            {menuFits
-              ? filteredCommands
-                  .slice(menuTop, menuTop + menuPageSize)
-                  .map((command, localIndex) => (
-                    <ActionButton
-                      key={command.label}
-                      tokens={tokens}
-                      active={menuCursor === menuTop + localIndex}
-                      disabled={command.disabled}
-                      label={`${command.label}${command.shortcut ? ` · ${command.shortcut}` : ""}`}
-                      onPress={() => runMenuCommand(menuTop + localIndex)}
-                    />
-                  ))
-              : null}
-          </Modal>
+            query={menuQuery}
+            fits={menuFits}
+            cursor={menuCursor}
+            top={menuTop}
+            pageSize={menuPageSize}
+            commands={filteredCommands}
+            onInput={updateMenuQuery}
+            onMovePage={moveMenuPage}
+            onRunCommand={runMenuCommand}
+            onClose={() => setMenu(false)}
+          />
         ) : null}
         {!foregroundOverlay && pendingApply ? (
           pendingSingleId !== null && !pendingSingleCandidate ? (
-            <Modal tokens={tokens} title=" item unavailable " width={60}>
-              <text
-                content="The reviewed artifact is no longer present. Nothing will be removed."
-                fg={tokens.text}
-              />
-              <text content="n / esc close" fg={tokens.textMuted} />
-            </Modal>
+            <UnavailableItemModal tokens={tokens} />
           ) : pendingSingleCandidate ? (
             <ConfirmOverlay
               tokens={tokens}
@@ -3430,20 +2018,7 @@ export function SweepApp({
             />
           )
         ) : null}
-        {scanError ? (
-          <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
-            <text
-              // Engine errors arrive prefixed ("error: ...") - redundant inside a
-              // dialog already titled "scan error".
-              content={sanitizeTerminalText(scanError.replace(/^[Ee]rror:\s*/, ""))}
-              fg={tokens.text}
-            />
-            <text content="" />
-            <text
-              content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("esc"))} ${fg(tokens.textMuted)("dismiss")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
-            />
-          </Modal>
-        ) : null}
+        {scanError ? <ScanErrorModal tokens={tokens} message={scanError} /> : null}
         {applying !== null ? (
           <ApplyOverlay
             tokens={tokens}

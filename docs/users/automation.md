@@ -42,7 +42,11 @@ sweep scan . --json-stream
 
 Each stdout line is one JSON event. Human errors are written separately.
 The scan starts with `scan_started`, then emits `scan_progress`, `candidate_found`
-and `candidate_updated`. A successful scan ends with `scan_completed`.
+and `candidate_updated`. Before `scan_completed`, Sweep emits final
+`candidate_updated` events carrying post-enrichment risk tiers and metadata
+(git-tracked blocking, tool-home and marker checks, workspace stubs, project
+activity, and linked worktree state) so the final candidate state matches
+`sweep scan --json`. A successful scan ends with `scan_completed`.
 
 A consumer should:
 

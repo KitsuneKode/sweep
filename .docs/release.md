@@ -27,7 +27,11 @@ fast instead of stranding partial publishes on an unregistered name), and
 confirms all seven are queryable at the exact release version before promoting
 `@kitsunekode/sweep`.
 
-`scripts/publish-release.ts` also waits for successful push CI on the exact
+`scripts/publish-release.ts` first checks whether every target package version
+is already published on npm. When nothing is unpublished, it verifies (or creates
+only under the `gitHead` rules below) the scoped tag and exits 0 with
+`nothing to publish` without requiring push CI on a no-op commit. Whenever any
+package version is unpublished, it waits for successful push CI on the exact
 `GITHUB_SHA` before any registry write. Failed, cancelled, skipped or missing
 qualification refuses publication; a different commit's pass is insufficient.
 This read-only gate requires GitHub CLI access and has a 30-minute deadline.
@@ -101,12 +105,16 @@ bun run bootstrap:npm-trust -- --publish --trust # apply (prompts 2FA)
 
 That publishes a binary-free placeholder at `0.0.1` for any missing package -
 deliberately below any shipping version, because the CLI pins its engines to an
-exact version - and then registers the trusted publisher for every package via
-`npm trust github`, so no clicking through npmjs.com. It skips packages that
-already exist, so re-run it whenever a platform is added to `NATIVE_PLATFORMS`.
+exact version - and then checks `npm trust list <pkg> --json` before calling
+`npm trust github ... --allow-publish`, skipping packages that already carry a
+matching `KitsuneKode/sweep` + `release.yml` trusted publisher with publish
+allowed so you are not prompted for 2FA once per already-configured package. It
+skips packages that already exist on npm, falls back to configuring if
+`npm trust list` fails or is unsupported, and prints a summary at the end, so
+re-run it whenever a platform is added to `NATIVE_PLATFORMS`.
 
-Every npm write on this account requires 2FA, including `npm trust list`, so
-this has to be run by a human; CI cannot do it.
+Every npm write on this account requires 2FA, so this has to be run by a human;
+CI cannot do it.
 
 ## 2. Standalone binaries (GitHub releases)
 
