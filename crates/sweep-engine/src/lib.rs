@@ -12,8 +12,7 @@ use std::collections::HashMap;
 use std::sync::{mpsc, Mutex};
 use sweep_errors::EngineError;
 use sweep_fs::{
-    apply_size_estimates_with_budget, walk_matched_entries_with_budget, ResourceBudget, WalkConfig,
-    WalkEntry, WalkHooks,
+    walk_matched_entries_with_budget, ResourceBudget, WalkConfig, WalkEntry, WalkHooks,
 };
 use sweep_types::{
     ApplyReport, EntryType, RiskTier, ScanCandidate, ScanPlan, ScanPlanSummary, SelectionMode,
@@ -107,6 +106,7 @@ pub fn scan_to_plan_with_config(
         .flatten()
         .map(sweep_fs::FileIdentity::snapshot);
     let budget = ResourceBudget::new(options.limits);
+    let hardlinks = sweep_fs::HardlinkTracker::new(budget.sizing_caps().0);
     let on_entry = options.hooks.on_entry;
     let on_progress = options.hooks.on_progress;
     let on_entry_sized = options.hooks.on_entry_sized;
@@ -132,12 +132,14 @@ pub fn scan_to_plan_with_config(
             let shared_ref = &shared;
             let exact = options.exact;
             let budget = &budget;
+            let hardlinks_ref = &hardlinks;
             Some(scope.spawn(move || {
-                sweep_fs::size_entries_progressively_with_budget(
+                sweep_fs::size_entries_progressively_with_tracker(
                     entry_rx,
                     exact,
                     &|entry, size| record_sized(shared_ref, entry, size),
                     budget,
+                    Some(hardlinks_ref),
                 )
             }))
         } else {
@@ -151,8 +153,10 @@ pub fn scan_to_plan_with_config(
                     entry,
                     sweep_fs::SubtreeSize {
                         bytes: 0,
+                        unique_bytes: 0,
                         complete: false,
                     },
+                    false,
                 );
                 // The filesystem walker charged the path/object. Account for
                 // protocol strings before publishing or enqueueing any sizing.
@@ -218,7 +222,12 @@ pub fn scan_to_plan_with_config(
     if progressive {
         apply_progressive_sizes(&mut entries, &shared)?;
     } else {
-        apply_size_estimates_with_budget(&mut entries, options.exact, &budget);
+        sweep_fs::apply_size_estimates_with_tracker(
+            &mut entries,
+            options.exact,
+            &budget,
+            Some(&hardlinks),
+        );
     }
 
     if let Some(message) = budget.error() {
@@ -231,11 +240,19 @@ pub fn scan_to_plan_with_config(
                 &entry,
                 sweep_fs::SubtreeSize {
                     bytes: entry.estimated_bytes,
+                    unique_bytes: entry.unique_bytes,
                     complete: entry.bytes_known,
                 },
+                true,
             )
         })
         .collect();
+
+    let has_partial_candidate = candidates
+        .iter()
+        .any(|c| c.entry.bytes_known == Some(false));
+    let unique_bytes_partial =
+        hardlinks.is_capped() || (has_partial_candidate && hardlinks.has_multi_link());
 
     build_plan(
         target_dir.as_str(),
@@ -245,6 +262,8 @@ pub fn scan_to_plan_with_config(
         skipped_dirs,
         selection_policy,
         options.exact,
+        Some(hardlinks.unique_total_bytes()),
+        unique_bytes_partial.then_some(true),
     )
 }
 
@@ -269,7 +288,7 @@ fn record_sized(shared: &SizerShared, entry: &WalkEntry, size: sweep_fs::Subtree
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(entry.path.as_str().to_owned(), size);
     if let Some(emit) = shared.emit_sized {
-        emit(to_candidate(entry, size));
+        emit(to_candidate(entry, size, true));
     }
 }
 
@@ -286,6 +305,7 @@ fn apply_progressive_sizes(
                 message: format!("sizer did not report {}", entry.path),
             })?;
         entry.estimated_bytes = size.bytes;
+        entry.unique_bytes = size.unique_bytes;
         entry.bytes_known = size.complete;
     }
     Ok(())
@@ -317,6 +337,7 @@ pub use apply::{
     apply_plan_controlled_with_progress,
 };
 
+#[allow(clippy::too_many_arguments)]
 fn build_plan(
     target_dir: &str,
     target_identity: Option<sweep_types::FilesystemIdentity>,
@@ -325,6 +346,8 @@ fn build_plan(
     skipped_dirs: u32,
     selection_policy: &SelectionPolicy,
     exact: bool,
+    unique_total_bytes: Option<u64>,
+    unique_bytes_partial: Option<bool>,
 ) -> Result<ScanPlan, EngineError> {
     let selected_candidate_ids = compile_selected_candidate_ids(&candidates, selection_policy);
     let estimated_total_bytes = candidates
@@ -362,6 +385,8 @@ fn build_plan(
         summary: ScanPlanSummary {
             candidate_count,
             estimated_total_bytes,
+            unique_total_bytes,
+            unique_bytes_partial,
             scanned_dirs,
             skipped_dirs,
             exact,
@@ -424,7 +449,7 @@ fn candidate_field_chars(candidate: &ScanCandidate) -> usize {
         + candidate.reasons.iter().map(|r| chars(r)).sum::<usize>()
 }
 
-fn to_candidate(entry: &WalkEntry, size: sweep_fs::SubtreeSize) -> ScanCandidate {
+fn to_candidate(entry: &WalkEntry, size: sweep_fs::SubtreeSize, sized: bool) -> ScanCandidate {
     let path = entry.path.as_str().to_owned();
     let id = format!("cand_{}", hash_string(&format!("{}:{}", path, entry.name)));
     let kind = candidate_kind_from_name(&entry.name);
@@ -437,6 +462,7 @@ fn to_candidate(entry: &WalkEntry, size: sweep_fs::SubtreeSize) -> ScanCandidate
             path,
             name: entry.name.clone(),
             estimated_bytes: size.bytes,
+            unique_bytes: sized.then_some(size.unique_bytes),
             bytes_known: Some(size.complete),
             modified_ms: entry.modified_ms,
             is_symlink: entry.is_symlink,
@@ -913,6 +939,7 @@ mod tests {
                 path: "/root/🦊".to_owned(),
                 name: "🦊".to_owned(),
                 estimated_bytes: 0,
+                unique_bytes: None,
                 bytes_known: Some(false),
                 modified_ms: None,
                 is_symlink: false,
@@ -983,5 +1010,72 @@ mod tests {
         let now = iso_timestamp_now();
         assert_eq!(now.len(), 24, "{now}");
         assert!(now.ends_with('Z') && now.as_bytes()[10] == b'T' && now.as_bytes()[19] == b'.');
+    }
+
+    #[test]
+    fn scan_marks_unique_bytes_partial_when_hardlink_cap_is_hit() {
+        let root_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("fixture: {e}"));
+        let store = root_dir.path().join("store");
+        let work = root_dir.path().join("work");
+        let nm = work.join("app").join("node_modules");
+        std::fs::create_dir_all(&store).unwrap_or_else(|e| panic!("store: {e}"));
+        std::fs::create_dir_all(&nm).unwrap_or_else(|e| panic!("nm: {e}"));
+
+        // 60 hardlinks * 128 B = 7680 B > 6 KiB retained cap (48 identities max),
+        // while discovery of 2 dirs + 1 candidate fits comfortably inside 6 KiB.
+        for i in 0..60 {
+            let src = store.join(format!("pkg-{i}.js"));
+            std::fs::write(&src, vec![b'x'; 256]).unwrap_or_else(|e| panic!("write: {e}"));
+            std::fs::hard_link(&src, nm.join(format!("pkg-{i}.js")))
+                .unwrap_or_else(|e| panic!("hard_link: {e}"));
+        }
+        std::fs::write(nm.join("own.js"), vec![b'o'; 128]).unwrap_or_else(|e| panic!("write: {e}"));
+
+        let work_utf8 = Utf8Path::from_path(&work).unwrap_or_else(|| panic!("utf8"));
+
+        // Tight max_identities caps the hardlink tracker -> unique_bytes_partial: Some(true).
+        let capped = scan_to_plan_with_config(
+            work_utf8,
+            &WalkConfig::default(),
+            &SelectionPolicy::default(),
+            ScanOptions {
+                limits: sweep_types::ScanLimits {
+                    max_identities: 6,
+                    ..sweep_types::ScanLimits::default()
+                },
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("capped scan: {e}"));
+        assert_eq!(capped.summary.unique_bytes_partial, Some(true));
+        assert_eq!(capped.summary.unique_total_bytes, Some(128));
+
+        // Low-memory-style tight max_retained_bytes saturating sizing_identity() also marks partial.
+        let low_mem_capped = scan_to_plan_with_config(
+            work_utf8,
+            &WalkConfig::default(),
+            &SelectionPolicy::default(),
+            ScanOptions {
+                limits: sweep_types::ScanLimits {
+                    max_retained_bytes: 1024 * 6,
+                    max_combined_bytes: 1024 * 12,
+                    ..sweep_types::ScanLimits::default()
+                },
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("low-mem scan: {e}"));
+        assert_eq!(low_mem_capped.summary.unique_bytes_partial, Some(true));
+
+        // Default profile fits all 12 hardlinks -> unique_bytes_partial omitted (None).
+        let uncapped = scan_to_plan_with_config(
+            work_utf8,
+            &WalkConfig::default(),
+            &SelectionPolicy::default(),
+            ScanOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("uncapped scan: {e}"));
+        assert_eq!(uncapped.summary.unique_bytes_partial, None);
+        assert_eq!(uncapped.summary.unique_total_bytes, Some(128));
     }
 }

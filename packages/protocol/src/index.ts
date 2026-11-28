@@ -112,6 +112,12 @@ export interface ScanEntry {
   name: string;
   estimatedBytes: number;
   /**
+   * Bytes belonging to inodes exclusive to this candidate (deduped by dev+ino,
+   * bounded). Excludes files hardlinked to external stores (pnpm/Bun) or other
+   * candidates. Absent on older plans or before sizing finishes.
+   */
+  uniqueBytes?: number;
+  /**
    * `false` when sizing hit unreadable inodes — `estimatedBytes` is then a
    * partial lower bound, not the subtree's real size. Absent on plans from
    * producers that predate the field (treated as complete). Found events in a
@@ -134,6 +140,18 @@ export interface ScanResult {
   targetIdentity?: FilesystemIdentity | undefined;
   entries: ScanEntry[];
   estimatedTotalBytes: number;
+  /**
+   * Scan-wide unique-inode bytes across all entries, deduped by `(dev, ino)`
+   * with bounded tracking (excludes inodes with links outside scanned candidates,
+   * such as pnpm/Bun global stores).
+   */
+  uniqueTotalBytes?: number;
+  /**
+   * `true` when bounded hardlink tracking hit its cap or a candidate with
+   * shared hardlinks could not be fully sized, so `uniqueTotalBytes` is a
+   * partial count. Omitted when hardlink tracking completed within bounds.
+   */
+  uniqueBytesPartial?: boolean;
   scannedDirs: number;
   /** Directories the walker could not read or had already visited via another path. */
   skippedDirs: number;
@@ -336,6 +354,10 @@ export interface ScanCompletedEvent {
   summary: {
     candidateCount: number;
     estimatedTotalBytes: number;
+    /** Scan-wide unique-inode bytes deduped by dev+ino (bounded) - absent on older producers. */
+    uniqueTotalBytes?: number;
+    /** `true` when bounded hardlink tracking hit its cap or was partial. */
+    uniqueBytesPartial?: boolean;
     scannedDirs: number;
     /** Unreadable / deduped directories - absent on older producers. */
     skippedDirs?: number;
@@ -397,6 +419,16 @@ export interface StatusSummary {
   complete: boolean;
   /** Safe and caution bytes: what removal could give back. Never counts dangerous or blocked. */
   reclaimableBytes: number;
+  /**
+   * Estimated freed bytes accounting for shared hardlinks (pnpm/Bun stores),
+   * bounded by dev+ino tracking. Absent when candidate unique sizes are unavailable.
+   */
+  uniqueReclaimableBytes?: number;
+  /**
+   * `true` when bounded hardlink tracking hit its cap or was incomplete;
+   * surfaces should show apparent bytes with a qualifier instead of a smaller total.
+   */
+  uniqueBytesPartial?: boolean;
   safeBytes: number;
   cautionBytes: number;
   /** Dangerous and blocked items: found, never offered as space to free. */
@@ -455,6 +487,17 @@ export interface ScanPlan {
   summary: {
     candidateCount: number;
     estimatedTotalBytes: number;
+    /**
+     * Plan-wide unique-inode bytes across all candidates, deduped by `(dev, ino)`
+     * with bounded tracking. Excludes hardlinked store files whose links remain
+     * outside the scanned candidates. Absent on older plans.
+     */
+    uniqueTotalBytes?: number;
+    /**
+     * `true` when bounded hardlink tracking hit its cap or a candidate with
+     * shared hardlinks could not be fully sized. Omitted when complete.
+     */
+    uniqueBytesPartial?: boolean;
     scannedDirs: number;
     /** Unreadable / deduped directories - absent on plans written before v1.x. */
     skippedDirs?: number;

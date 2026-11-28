@@ -31,6 +31,7 @@ function candidateChangedAfterEnrichment(prev: ScanCandidate, next: ScanCandidat
     prev.riskTier !== next.riskTier ||
     prev.selectedByDefault !== next.selectedByDefault ||
     prev.estimatedBytes !== next.estimatedBytes ||
+    prev.uniqueBytes !== next.uniqueBytes ||
     prev.bytesKnown !== next.bytesKnown ||
     prev.projectRoot !== next.projectRoot ||
     prev.projectActiveMs !== next.projectActiveMs ||
@@ -118,6 +119,10 @@ export async function handleScan(
         summary: {
           candidateCount: plan.summary.candidateCount,
           estimatedTotalBytes: plan.summary.estimatedTotalBytes,
+          ...(plan.summary.uniqueTotalBytes !== undefined
+            ? { uniqueTotalBytes: plan.summary.uniqueTotalBytes }
+            : {}),
+          ...(plan.summary.uniqueBytesPartial ? { uniqueBytesPartial: true } : {}),
           scannedDirs: plan.summary.scannedDirs,
           // Sparse - same convention as ScanPlan.summary.skippedDirs.
           ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),

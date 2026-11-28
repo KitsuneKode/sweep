@@ -101,6 +101,9 @@ pub struct WalkEntry {
     pub is_symlink: bool,
     pub entry_type: WalkEntryType,
     pub estimated_bytes: u64,
+    /// Bytes belonging to inodes exclusive to this entry (deduped by dev+ino,
+    /// bounded). Excludes hardlinks shared with external stores or other entries.
+    pub unique_bytes: u64,
     /// `false` once sizing ran and part of the subtree was unreadable - the
     /// byte count is a partial sum (protocol `bytesKnown`). Stays `false` on
     /// discovery stubs: "not sized yet" is not "known".
@@ -842,6 +845,7 @@ fn scan_dir_entries(
                 is_symlink,
                 entry_type,
                 estimated_bytes: 0,
+                unique_bytes: 0,
                 bytes_known: false,
                 modified_ms,
                 has_project_marker,
@@ -1082,6 +1086,7 @@ fn sizing_pool() -> Option<&'static rayon::ThreadPool> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubtreeSize {
     pub bytes: u64,
+    pub unique_bytes: u64,
     pub complete: bool,
 }
 
@@ -1098,13 +1103,125 @@ impl SubtreeSize {
                 self.complete = false;
             }
         }
+        match self
+            .unique_bytes
+            .checked_add(other.unique_bytes)
+            .filter(|&n| n <= 9_007_199_254_740_991)
+        {
+            Some(unique) => self.unique_bytes = unique,
+            None => {
+                self.unique_bytes = u64::MAX;
+                self.complete = false;
+            }
+        }
         self.complete &= other.complete;
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SharedInode {
+    size: u64,
+    nlink: u64,
+    seen: u64,
+}
+
+#[derive(Default)]
+struct HardlinkTrackerState {
+    single_link_bytes: u64,
+    shared: HashMap<(u64, u64), SharedInode>,
+    capped: bool,
+    has_multi_link: bool,
+}
+
+/// Bounded scan-wide hardlink deduplicator (by `(dev, ino)`).
+///
+/// Tracks single-link files directly and multi-link inodes in a capped map so
+/// pnpm/Bun store hardlinks (`seen < nlink`) are excluded from freed totals
+/// while hardlinks whose links all lie inside scanned candidates (`seen >= nlink`)
+/// are counted once.
+pub struct HardlinkTracker {
+    cap: usize,
+    state: Mutex<HardlinkTrackerState>,
+}
+
+impl HardlinkTracker {
+    pub fn new(cap: usize) -> Self {
+        Self {
+            cap,
+            state: Mutex::new(HardlinkTrackerState::default()),
+        }
+    }
+
+    pub fn record_single_link(&self, size: u64) {
+        if size == 0 {
+            return;
+        }
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.single_link_bytes = state
+            .single_link_bytes
+            .saturating_add(size)
+            .min(9_007_199_254_740_991);
+    }
+
+    pub fn record_multi_link(&self, dev: u64, ino: u64, size: u64, nlink: u64) {
+        if size == 0 {
+            return;
+        }
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.has_multi_link = true;
+        if ino == 0 {
+            state.capped = true;
+            return;
+        }
+        if let Some(entry) = state.shared.get_mut(&(dev, ino)) {
+            entry.seen = entry.seen.saturating_add(1);
+            return;
+        }
+        if state.shared.len() >= self.cap {
+            state.capped = true;
+            return;
+        }
+        state.shared.insert(
+            (dev, ino),
+            SharedInode {
+                size,
+                nlink,
+                seen: 1,
+            },
+        );
+    }
+
+    pub fn mark_capped(&self) {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).capped = true;
+    }
+
+    pub fn has_multi_link(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .has_multi_link
+    }
+
+    pub fn unique_total_bytes(&self) -> u64 {
+        let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut total = state.single_link_bytes;
+        for entry in state.shared.values() {
+            if entry.seen >= entry.nlink {
+                total = total.saturating_add(entry.size).min(9_007_199_254_740_991);
+            }
+        }
+        total
+    }
+
+    pub fn is_capped(&self) -> bool {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).capped
     }
 }
 
 struct SizeContext<'a> {
     budget: &'a ResourceBudget,
     cancelled: Option<&'a AtomicBool>,
+    tracker: Option<&'a HardlinkTracker>,
     exact: bool,
     parallel: bool,
     /// Per-job caps on the transient dedup sets and pending queue. These sets
@@ -1113,7 +1230,7 @@ struct SizeContext<'a> {
     pending_cap: usize,
     pending: AtomicUsize,
     path_bytes: AtomicUsize,
-    links: Mutex<HashSet<(u64, u64)>>,
+    links: Mutex<HashMap<(u64, u64), SharedInode>>,
     dirs: Mutex<HashSet<(u64, u64)>>,
 }
 
@@ -1169,61 +1286,115 @@ fn price_sizing_inode(
     let exact = ctx.exact;
     let links = &ctx.links;
     let mut complete = true;
-    if exact {
+    // GNU du's usable_st_size excludes directories and special inodes; exact
+    // mode counts regular files only.
+    let raw_bytes = if exact {
+        if meta.is_file() {
+            meta.len()
+        } else {
+            0
+        }
+    } else if meta.is_dir() || (!meta.is_file() && !meta.is_symlink()) {
+        0
+    } else {
+        meta.len()
+    };
+    if meta.is_dir() || (!meta.is_file() && !meta.is_symlink()) || (exact && !meta.is_file()) {
         return SubtreeSize {
-            bytes: if meta.is_file() { meta.len() } else { 0 },
-            complete,
+            bytes: 0,
+            unique_bytes: 0,
+            complete: true,
         };
     }
-    // GNU du's usable_st_size excludes directories and special inodes.
-    let mut bytes = meta.len();
-    if meta.is_dir() || (!meta.is_file() && !meta.is_symlink()) {
-        bytes = 0;
-    } else {
-        #[cfg(unix)]
-        let identity = {
-            use std::os::unix::fs::MetadataExt;
-            let _ = path;
-            if meta.nlink() > 1 {
-                file_identity(Path::new(""), meta)
-            } else {
-                Ok(None)
+
+    #[cfg(unix)]
+    let identity = {
+        use std::os::unix::fs::MetadataExt;
+        let _ = path;
+        if meta.nlink() > 1 {
+            file_identity(Path::new(""), meta)
+        } else {
+            Ok(None)
+        }
+    };
+    #[cfg(not(unix))]
+    let identity = file_identity(&path(), meta);
+
+    let identity = match identity {
+        Ok(identity) => identity,
+        Err(_) => {
+            if let Some(tracker) = ctx.tracker {
+                tracker.mark_capped();
             }
-        };
-        #[cfg(not(unix))]
-        let identity = file_identity(&path(), meta);
-        let identity = match identity {
-            Ok(identity) => identity,
-            Err(_) => {
-                return SubtreeSize {
-                    bytes,
-                    complete: false,
-                }
-            }
-        };
-        #[cfg(windows)]
-        if identity.is_none() {
             return SubtreeSize {
-                bytes,
+                bytes: raw_bytes,
+                unique_bytes: 0,
                 complete: false,
             };
         }
-        let Some(identity) = identity.filter(|id| id.links > 1) else {
-            return SubtreeSize { bytes, complete };
-        };
-        let mut seen = links.lock().unwrap_or_else(|p| p.into_inner());
-        let key = (identity.device, identity.inode);
-        if seen.contains(&key) {
-            bytes = 0;
-        } else if seen.len() >= ctx.dedup_cap || !ctx.budget.sizing_identity() {
-            // Set at cap: count the link anyway (overcount, flagged partial)
-            // rather than undercounting zero or killing the scan.
-            complete = false;
-        } else {
-            seen.insert(key);
+    };
+    #[cfg(windows)]
+    if identity.is_none() {
+        if let Some(tracker) = ctx.tracker {
+            tracker.mark_capped();
         }
+        return SubtreeSize {
+            bytes: raw_bytes,
+            unique_bytes: 0,
+            complete: false,
+        };
     }
-    SubtreeSize { bytes, complete }
+
+    let Some(identity) = identity.filter(|id| id.links > 1) else {
+        if let Some(tracker) = ctx.tracker {
+            tracker.record_single_link(raw_bytes);
+        }
+        return SubtreeSize {
+            bytes: raw_bytes,
+            unique_bytes: raw_bytes,
+            complete,
+        };
+    };
+
+    if let Some(tracker) = ctx.tracker {
+        tracker.record_multi_link(identity.device, identity.inode, raw_bytes, identity.links);
+    }
+
+    let mut seen = links.lock().unwrap_or_else(|p| p.into_inner());
+    let key = (identity.device, identity.inode);
+    let bytes = if let Some(entry) = seen.get_mut(&key) {
+        entry.seen = entry.seen.saturating_add(1);
+        if exact {
+            raw_bytes
+        } else {
+            0
+        }
+    } else if seen.len() >= ctx.dedup_cap || !ctx.budget.sizing_identity() {
+        // Set at cap: count the link anyway (overcount, flagged partial)
+        // rather than undercounting zero or killing the scan.
+        if let Some(tracker) = ctx.tracker {
+            tracker.mark_capped();
+        }
+        complete = false;
+        raw_bytes
+    } else {
+        seen.insert(
+            key,
+            SharedInode {
+                size: raw_bytes,
+                nlink: identity.links,
+                seen: 1,
+            },
+        );
+        raw_bytes
+    };
+    // Multi-link inodes are folded into `unique_bytes` once the candidate walk
+    // finishes (if all `nlink` links live inside this candidate).
+    SubtreeSize {
+        bytes,
+        unique_bytes: 0,
+        complete,
+    }
 }
 
 const SIZE_DIR_BATCH: usize = 64;
@@ -1236,6 +1407,7 @@ fn size_children(
 ) -> SubtreeSize {
     let initial = SubtreeSize {
         bytes: 0,
+        unique_bytes: 0,
         complete: true,
     };
     let result = if ctx.parallel && depth < SIZE_PAR_DEPTH && children.len() >= 4 {
@@ -1268,6 +1440,7 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
     let mut pending = vec![root.to_path_buf()];
     let mut total = SubtreeSize {
         bytes: 0,
+        unique_bytes: 0,
         complete: true,
     };
     while let Some(dir) = pending.pop() {
@@ -1413,7 +1586,7 @@ pub fn measure_size_with_budget(
     exact: bool,
     budget: &ResourceBudget,
 ) -> SubtreeSize {
-    measure_size_with_budget_controlled(path, exact, budget, None)
+    measure_size_with_budget_controlled_tracked(path, exact, budget, None, None)
 }
 
 /// Cancel a read-only preflight inside large subtrees without poisoning the
@@ -1424,9 +1597,20 @@ pub fn measure_size_with_budget_controlled(
     budget: &ResourceBudget,
     cancelled: Option<&AtomicBool>,
 ) -> SubtreeSize {
+    measure_size_with_budget_controlled_tracked(path, exact, budget, cancelled, None)
+}
+
+pub fn measure_size_with_budget_controlled_tracked(
+    path: &Utf8Path,
+    exact: bool,
+    budget: &ResourceBudget,
+    cancelled: Option<&AtomicBool>,
+    tracker: Option<&HardlinkTracker>,
+) -> SubtreeSize {
     if budget.failed() || cancelled.is_some_and(|flag| flag.load(Ordering::Acquire)) {
         return SubtreeSize {
             bytes: 0,
+            unique_bytes: 0,
             complete: false,
         };
     }
@@ -1435,6 +1619,7 @@ pub fn measure_size_with_budget_controlled(
         Err(_) => {
             return SubtreeSize {
                 bytes: 0,
+                unique_bytes: 0,
                 complete: false,
             }
         }
@@ -1444,16 +1629,51 @@ pub fn measure_size_with_budget_controlled(
             budget.fail("byte counter overflow");
             return SubtreeSize {
                 bytes: 0,
+                unique_bytes: 0,
                 complete: false,
             };
         }
-        return SubtreeSize {
-            bytes: if exact && !meta.is_file() && !meta.is_symlink() {
-                0
+        let bytes = if exact && !meta.is_file() && !meta.is_symlink() {
+            0
+        } else {
+            meta.len()
+        };
+        #[cfg(unix)]
+        let identity = {
+            use std::os::unix::fs::MetadataExt;
+            if meta.nlink() > 1 {
+                file_identity(path.as_std_path(), &meta)
             } else {
-                meta.len()
-            },
-            complete: true,
+                Ok(None)
+            }
+        };
+        #[cfg(not(unix))]
+        let identity = file_identity(path.as_std_path(), &meta);
+
+        let (unique_bytes, complete) = match identity {
+            Ok(Some(id)) if id.links > 1 => {
+                if let Some(tracker) = tracker {
+                    tracker.record_multi_link(id.device, id.inode, bytes, id.links);
+                }
+                (0, true)
+            }
+            Ok(_) => {
+                if let Some(tracker) = tracker {
+                    tracker.record_single_link(bytes);
+                }
+                (bytes, true)
+            }
+            Err(_) => {
+                if let Some(tracker) = tracker {
+                    tracker.mark_capped();
+                }
+                (0, false)
+            }
+        };
+        return SubtreeSize {
+            bytes,
+            unique_bytes,
+            complete,
         };
     }
     // No admission charge: the walk already bounded this path globally. Sizing
@@ -1462,6 +1682,7 @@ pub fn measure_size_with_budget_controlled(
     if budget.failed() {
         return SubtreeSize {
             bytes: 0,
+            unique_bytes: 0,
             complete: false,
         };
     }
@@ -1470,26 +1691,50 @@ pub fn measure_size_with_budget_controlled(
     if !budget.sizing_directory(root_bytes) {
         return SubtreeSize {
             bytes: 0,
+            unique_bytes: 0,
             complete: false,
         };
     }
     let ctx = SizeContext {
         budget,
         cancelled,
+        tracker,
         exact,
         parallel: sizing_pool().is_some(),
         dedup_cap,
         pending_cap,
         pending: AtomicUsize::new(1),
         path_bytes: AtomicUsize::new(root_bytes),
-        links: Mutex::new(HashSet::new()),
+        links: Mutex::new(HashMap::new()),
         dirs: Mutex::new(HashSet::new()),
     };
     let run = || size_directories(path.as_std_path(), &ctx, 0);
-    match sizing_pool() {
+    let mut result = match sizing_pool() {
         Some(pool) => pool.install(run),
         None => run(),
+    };
+    // Any multi-link inode whose entire link set lives inside this candidate is
+    // freed when this candidate is removed.
+    let links = ctx.links.lock().unwrap_or_else(|p| p.into_inner());
+    for entry in links.values() {
+        if entry.seen >= entry.nlink {
+            match result
+                .unique_bytes
+                .checked_add(entry.size)
+                .filter(|&n| n <= 9_007_199_254_740_991)
+            {
+                Some(unique) => result.unique_bytes = unique,
+                None => {
+                    if let Some(tracker) = tracker {
+                        tracker.mark_capped();
+                    }
+                    result.unique_bytes = u64::MAX;
+                    result.complete = false;
+                }
+            }
+        }
     }
+    result
 }
 
 /// GNU du -sb apparent size on Linux, counting repeated hard links once.
@@ -1527,9 +1772,20 @@ pub fn apply_size_estimates_with_budget(
     exact: bool,
     budget: &ResourceBudget,
 ) {
+    apply_size_estimates_with_tracker(entries, exact, budget, None);
+}
+
+pub fn apply_size_estimates_with_tracker(
+    entries: &mut [WalkEntry],
+    exact: bool,
+    budget: &ResourceBudget,
+    tracker: Option<&HardlinkTracker>,
+) {
     let apply_one = |entry: &mut WalkEntry| {
-        let size = measure_size_with_budget(&entry.path, exact, budget);
+        let size =
+            measure_size_with_budget_controlled_tracked(&entry.path, exact, budget, None, tracker);
         entry.estimated_bytes = size.bytes;
+        entry.unique_bytes = size.unique_bytes;
         entry.bytes_known = size.complete;
     };
     match sizing_pool() {
@@ -1546,7 +1802,13 @@ pub fn size_entries_progressively(
     exact: bool,
     on_sized: &(dyn Fn(&WalkEntry, SubtreeSize) + Sync),
 ) {
-    size_entries_progressively_with_budget(receiver, exact, on_sized, &ResourceBudget::default());
+    size_entries_progressively_with_tracker(
+        receiver,
+        exact,
+        on_sized,
+        &ResourceBudget::default(),
+        None,
+    );
 }
 
 pub fn size_entries_progressively_with_budget(
@@ -1555,9 +1817,28 @@ pub fn size_entries_progressively_with_budget(
     on_sized: &(dyn Fn(&WalkEntry, SubtreeSize) + Sync),
     budget: &ResourceBudget,
 ) {
+    size_entries_progressively_with_tracker(receiver, exact, on_sized, budget, None);
+}
+
+pub fn size_entries_progressively_with_tracker(
+    receiver: std::sync::mpsc::Receiver<WalkEntry>,
+    exact: bool,
+    on_sized: &(dyn Fn(&WalkEntry, SubtreeSize) + Sync),
+    budget: &ResourceBudget,
+    tracker: Option<&HardlinkTracker>,
+) {
     let Some(pool) = sizing_pool() else {
         for entry in receiver {
-            on_sized(&entry, measure_size_with_budget(&entry.path, exact, budget));
+            on_sized(
+                &entry,
+                measure_size_with_budget_controlled_tracked(
+                    &entry.path,
+                    exact,
+                    budget,
+                    None,
+                    tracker,
+                ),
+            );
         }
         return;
     };
@@ -1581,7 +1862,16 @@ pub fn size_entries_progressively_with_budget(
                     }
                 }
                 let _permit = Permit(pending);
-                on_sized(&entry, measure_size_with_budget(&entry.path, exact, budget));
+                on_sized(
+                    &entry,
+                    measure_size_with_budget_controlled_tracked(
+                        &entry.path,
+                        exact,
+                        budget,
+                        None,
+                        tracker,
+                    ),
+                );
             });
         }
     });
@@ -1674,6 +1964,7 @@ mod tests {
                 measure_size_with_budget_controlled(root, exact, &budget, Some(&cancel)),
                 SubtreeSize {
                     bytes: 0,
+                    unique_bytes: 0,
                     complete: false
                 }
             );
@@ -1683,19 +1974,21 @@ mod tests {
             let ctx = SizeContext {
                 budget: &budget,
                 cancelled: Some(&cancel),
+                tracker: None,
                 exact,
                 parallel: false,
                 dedup_cap: 1,
                 pending_cap: 1,
                 pending: AtomicUsize::new(1),
                 path_bytes: AtomicUsize::new(bytes),
-                links: Mutex::new(HashSet::new()),
+                links: Mutex::new(HashMap::new()),
                 dirs: Mutex::new(HashSet::new()),
             };
             assert_eq!(
                 size_directories(root.as_std_path(), &ctx, 0),
                 SubtreeSize {
                     bytes: 0,
+                    unique_bytes: 0,
                     complete: false
                 }
             );
@@ -1711,6 +2004,7 @@ mod tests {
             measure_size_with_budget_controlled(root, false, &budget, Some(&cancel)),
             SubtreeSize {
                 bytes: 4,
+                unique_bytes: 4,
                 complete: true
             }
         );
@@ -1776,11 +2070,12 @@ mod tests {
             parallel: false,
             budget: &budget,
             cancelled: None,
+            tracker: None,
             dedup_cap,
             pending_cap,
             pending: AtomicUsize::new(0),
             path_bytes: AtomicUsize::new(0),
-            links: Mutex::new(HashSet::new()),
+            links: Mutex::new(HashMap::new()),
             dirs: Mutex::new(HashSet::new()),
         };
         assert_eq!(
@@ -1849,6 +2144,7 @@ mod tests {
             apparent_size(root),
             SubtreeSize {
                 bytes: 520,
+                unique_bytes: 520,
                 complete: true
             }
         );
@@ -1857,9 +2153,73 @@ mod tests {
             exact_size(root),
             SubtreeSize {
                 bytes: 14520,
+                unique_bytes: 520,
                 complete: true
             }
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hardlink_tracker_distinguishes_external_store_and_cross_candidate_links() {
+        let dir = tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+        let store = dir.path().join("pnpm-store");
+        let cand_a = dir.path().join("proj-a/node_modules");
+        let cand_b = dir.path().join("proj-b/node_modules");
+        fs::create_dir_all(&store).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        fs::create_dir_all(&cand_a).unwrap_or_else(|e| panic!("mkdir: {e}"));
+        fs::create_dir_all(&cand_b).unwrap_or_else(|e| panic!("mkdir: {e}"));
+
+        // External store file hardlinked into both candidates (nlink = 3; 2 inside scan).
+        let store_file = store.join("pkg.js");
+        fs::write(&store_file, vec![b's'; 4096]).unwrap_or_else(|e| panic!("write: {e}"));
+        fs::hard_link(&store_file, cand_a.join("pkg.js")).unwrap_or_else(|e| panic!("link: {e}"));
+        fs::hard_link(&store_file, cand_b.join("pkg.js")).unwrap_or_else(|e| panic!("link: {e}"));
+
+        // Cross-candidate file hardlinked only between cand_a and cand_b (nlink = 2; 2 inside scan).
+        let shared = cand_a.join("shared.js");
+        fs::write(&shared, vec![b'x'; 2048]).unwrap_or_else(|e| panic!("write: {e}"));
+        fs::hard_link(&shared, cand_b.join("shared.js")).unwrap_or_else(|e| panic!("link: {e}"));
+
+        // Unique local files (nlink = 1).
+        fs::write(cand_a.join("own.js"), vec![b'a'; 500]).unwrap_or_else(|e| panic!("write: {e}"));
+        fs::write(cand_b.join("own.js"), vec![b'b'; 300]).unwrap_or_else(|e| panic!("write: {e}"));
+
+        let budget = ResourceBudget::default();
+        let tracker = HardlinkTracker::new(budget.sizing_caps().0);
+        let path_a = Utf8Path::from_path(&cand_a).unwrap_or_else(|| panic!("utf8"));
+        let path_b = Utf8Path::from_path(&cand_b).unwrap_or_else(|| panic!("utf8"));
+        let size_a = measure_size_with_budget_controlled_tracked(
+            path_a,
+            false,
+            &budget,
+            None,
+            Some(&tracker),
+        );
+        let size_b = measure_size_with_budget_controlled_tracked(
+            path_b,
+            false,
+            &budget,
+            None,
+            Some(&tracker),
+        );
+
+        assert_eq!(size_a.bytes, 4096 + 2048 + 500);
+        assert_eq!(size_a.unique_bytes, 500);
+        assert_eq!(size_b.bytes, 4096 + 2048 + 300);
+        assert_eq!(size_b.unique_bytes, 300);
+        // Scan-wide unique bytes: both own files + cross-candidate shared.js once (NOT store pkg.js).
+        assert_eq!(tracker.unique_total_bytes(), 500 + 300 + 2048);
+        assert!(!tracker.is_capped());
+
+        // Bounded tracker caps cleanly without panicking or overcrediting overflow inodes.
+        let tiny = HardlinkTracker::new(1);
+        tiny.record_multi_link(1, 10, 1000, 2);
+        tiny.record_multi_link(1, 10, 1000, 2);
+        tiny.record_multi_link(1, 20, 5000, 2);
+        tiny.record_multi_link(1, 20, 5000, 2);
+        assert!(tiny.is_capped());
+        assert_eq!(tiny.unique_total_bytes(), 1000);
     }
 
     #[test]
@@ -1878,6 +2238,7 @@ mod tests {
             exact_size(root),
             SubtreeSize {
                 bytes: 900,
+                unique_bytes: 900,
                 complete: true
             }
         );

@@ -51,6 +51,14 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "uniqueTotalBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "uniqueBytesPartial": {
+          "type": "boolean"
+        },
         "scannedDirs": {
           "type": "integer",
           "minimum": 0,
@@ -153,6 +161,11 @@
           "type": "string"
         },
         "estimatedBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "uniqueBytes": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991

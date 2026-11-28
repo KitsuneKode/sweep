@@ -173,9 +173,31 @@ blindly retry an old plan as if no deletion happened.
 
 ## Sizes and disk space
 
-Displayed bytes describe a metadata estimate of matched contents. Sparse files,
-hardlinks, filesystem compression, snapshots and concurrent changes can make
-physical storage reclaimed differ substantially. History reports estimated
+Displayed bytes distinguish **apparent size** (`estimatedBytes`) from
+**unique-inode bytes** (`uniqueBytes` per candidate and `uniqueTotalBytes`
+across the scan). Package managers such as pnpm and Bun hardlink files from a
+global content-addressable store into each `node_modules` directory; deleting
+those `node_modules` directories removes only their directory links while the
+global store still holds the underlying inodes. Sweep deduplicates multi-link
+inodes by `(dev, ino)` using bounded memory tracking (matching across the JS
+and Rust engines) and excludes hardlinks whose link count exceeds links found
+inside the scanned candidates. When shared hardlinks reduce what removal can
+free, plan reports, `sweep status`, and `sweep ui` totals show `about X freed`
+alongside the apparent size so reclaimed space is not overstated.
+
+When bounded hardlink tracking hits its identity or memory cap (for example
+under `--resource-profile low-memory` on very large hardlink stores) or a
+candidate containing shared hardlinks cannot be fully sized, Sweep marks the
+plan and status summary with `uniqueBytesPartial: true` and human/TUI surfaces
+fall back to the apparent total with a `shared hardlinks not fully counted`
+qualifier instead of displaying a silently understated freed figure.
+
+Copy-on-write **reflinks / clones** (such as APFS clones on macOS or Btrfs/XFS
+reflinks on Linux) cannot be detected cheaply from file metadata (`lstat`
+reports `nlink = 1` and distinct inodes even when extents are shared on disk),
+so Sweep cannot discount reflinked files before deletion. Sparse files,
+reflinks, filesystem compression, snapshots, and concurrent changes can still
+make physical storage reclaimed differ substantially. History reports estimated
 removed or moved bytes, not a measured before/after free-space guarantee.
 
 ## Interrupted-process journals

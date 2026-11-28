@@ -169,6 +169,24 @@ export function formatScanReport(
   const hiddenStubs = plan.candidates.length - visible.length;
   const selected = plan.candidates.filter((c) => selectedIds.has(c.id));
   const selectedBytes = selected.reduce((sum, c) => sum + c.estimatedBytes, 0);
+  const unselectedBytes = plan.candidates
+    .filter((c) => !selectedIds.has(c.id))
+    .reduce((sum, c) => sum + c.estimatedBytes, 0);
+  const hasUniqueBytes =
+    plan.summary.uniqueTotalBytes !== undefined ||
+    selected.some((c) => c.uniqueBytes !== undefined);
+  const selectedUniqueSum = selected.reduce(
+    (sum, c) => sum + (c.uniqueBytes ?? c.estimatedBytes),
+    0,
+  );
+  const selectedUniqueBytes = hasUniqueBytes
+    ? unselectedBytes === 0 && plan.summary.uniqueTotalBytes !== undefined
+      ? Math.min(selectedBytes, Math.max(selectedUniqueSum, plan.summary.uniqueTotalBytes))
+      : Math.min(selectedBytes, selectedUniqueSum)
+    : selectedBytes;
+  const uniqueBytesPartial = plan.summary.uniqueBytesPartial === true;
+  const hasSharedHardlinks =
+    !uniqueBytesPartial && hasUniqueBytes && selectedUniqueBytes < selectedBytes;
 
   const meta = [
     `${plan.summary.scannedDirs} dirs`,
@@ -194,20 +212,26 @@ export function formatScanReport(
       ? ` from projects idle ${idleLabel(now - options.idleMs, now)}+`
       : "";
   lines.push(
-    ` ${pc.bold(pc.yellow(size(selectedBytes, approx)))} ${pc.bold(`to reclaim${idleScope}`)}` +
-      pc.dim(
-        `  ·  ${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`,
-      ),
+    hasSharedHardlinks
+      ? ` ${pc.bold(pc.yellow(`about ${formatBytes(selectedUniqueBytes)} freed`))}${idleScope}` +
+          pc.dim(
+            ` (${size(selectedBytes, approx)} apparent · shared hardlinks)  ·  ${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`,
+          )
+      : ` ${pc.bold(pc.yellow(size(selectedBytes, approx)))} ${pc.bold(`to reclaim${idleScope}`)}` +
+          pc.dim(
+            `${uniqueBytesPartial ? " (apparent · shared hardlinks not fully counted)" : ""}  ·  ${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`,
+          ),
   );
   // Disk context: what the cleanup means for the space actually left.
   const disk = options.disk === undefined ? readDisk(targetDir) : options.disk;
   if (disk && disk.total > 0) {
-    const after = Math.min(disk.total, disk.free + selectedBytes);
+    const expectedGain = hasSharedHardlinks ? selectedUniqueBytes : selectedBytes;
+    const after = Math.min(disk.total, disk.free + expectedGain);
     const tight = disk.free / disk.total < 0.1;
     lines.push(
       ` ${pc.dim("disk")} ${(tight ? pc.yellow : (text: string) => text)(formatBytes(disk.free))}` +
         pc.dim(` free of ${formatBytes(disk.total)}`) +
-        (selectedBytes > 0 ? pc.dim("  →  ") + pc.green(`up to ${formatBytes(after)} free`) : ""),
+        (expectedGain > 0 ? pc.dim("  →  ") + pc.green(`up to ${formatBytes(after)} free`) : ""),
     );
   }
 

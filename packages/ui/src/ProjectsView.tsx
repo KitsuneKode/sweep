@@ -27,6 +27,10 @@ export interface ProjectsViewProps {
   /** 0..1, already monotonic. */
   sizedLabel: string;
   reclaimableBytes: number;
+  /** Estimated freed bytes excluding shared hardlinks (pnpm/Bun stores). */
+  uniqueReclaimableBytes?: number | undefined;
+  /** True when bounded hardlink tracking hit its cap; fall back to apparent + qualifier. */
+  uniqueBytesPartial?: boolean | undefined;
   /** Dangerous and blocked bytes: found, never part of the total above. */
   guardedBytes?: number | undefined;
   /** Why each item of the last removal failed, by path; shown on its row. */
@@ -41,6 +45,8 @@ export interface ProjectsViewProps {
   idleBytes: number;
   projectCount: number;
   selectedBytes: number;
+  /** Estimated freed bytes for queued items excluding shared hardlinks. */
+  uniqueSelectedBytes?: number | undefined;
   selectedCount: number;
   selectedIds: ReadonlySet<string>;
   diskFree: number | null;
@@ -315,19 +321,43 @@ export function ProjectsView(props: ProjectsViewProps) {
   // A total is exact only once every size is measured and the scan finished
   // whole: until then it says "~" (or "so far"), and an incomplete scan says so.
   const approx = scanning || props.partial || props.incomplete ? "~" : "";
+  const uniquePartial = !scanning && props.uniqueBytesPartial === true;
+  const selectedHasShared =
+    !scanning &&
+    !uniquePartial &&
+    props.uniqueSelectedBytes !== undefined &&
+    props.uniqueSelectedBytes < props.selectedBytes;
+  const reclaimHasShared =
+    !scanning &&
+    !uniquePartial &&
+    props.uniqueReclaimableBytes !== undefined &&
+    props.uniqueReclaimableBytes < props.reclaimableBytes;
+  const partialQualifier = uniquePartial ? " (shared hardlinks not fully counted)" : "";
   const answer =
     props.selectedCount > 0
-      ? t`${bold(fg(tokens.accent)(formatBytes(props.selectedBytes)))}${fg(tokens.text)(
-          " queued",
-        )}${fg(tokens.textMuted)(`  ·  ${plural(props.selectedCount, "item")}  ·  `)}${fg(
-          tokens.text,
-        )("c")}${fg(tokens.textMuted)(" to review")}`
-      : props.reclaimableBytes > 0 || !scanning
-        ? t`${bold(fg(tokens.text)(`${approx}${formatBytes(props.reclaimableBytes)}`))}${fg(
-            tokens.text,
+      ? selectedHasShared
+        ? t`${bold(fg(tokens.accent)(`about ${formatBytes(props.uniqueSelectedBytes!)} freed`))}${fg(
+            tokens.textMuted,
           )(
-            scanning ? " so far" : " you can reclaim",
-          )}${fg(tokens.textMuted)(`  ·  ${plural(props.projectCount, "project")}`)}`
+            ` (${formatBytes(props.selectedBytes)} apparent)  ·  ${plural(props.selectedCount, "item")}  ·  `,
+          )}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" to review")}`
+        : t`${bold(fg(tokens.accent)(formatBytes(props.selectedBytes)))}${fg(tokens.text)(
+            " queued",
+          )}${fg(tokens.textMuted)(`${partialQualifier}  ·  ${plural(props.selectedCount, "item")}  ·  `)}${fg(
+            tokens.text,
+          )("c")}${fg(tokens.textMuted)(" to review")}`
+      : props.reclaimableBytes > 0 || !scanning
+        ? reclaimHasShared
+          ? t`${bold(fg(tokens.text)(`about ${formatBytes(props.uniqueReclaimableBytes!)} freed`))}${fg(
+              tokens.textMuted,
+            )(
+              ` (${approx}${formatBytes(props.reclaimableBytes)} apparent)  ·  ${plural(props.projectCount, "project")}`,
+            )}`
+          : t`${bold(fg(tokens.text)(`${approx}${formatBytes(props.reclaimableBytes)}`))}${fg(
+              tokens.text,
+            )(
+              scanning ? " so far" : " you can reclaim",
+            )}${fg(tokens.textMuted)(`${partialQualifier}  ·  ${plural(props.projectCount, "project")}`)}`
         : t`${fg(tokens.textMuted)("Looking for build output…")}`;
   // The easy win, named and one key away - only when it fits whole.
   const idleHint = t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.text)(

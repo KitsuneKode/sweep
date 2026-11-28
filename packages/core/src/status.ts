@@ -92,6 +92,8 @@ export function summarizeStatus(
   let protectedCount = 0;
   let protectedBytes = 0;
   let partialByteCount = 0;
+  let hasUniqueBytes = plan.summary.uniqueTotalBytes !== undefined;
+  let reclaimableUniqueSum = 0;
   const kinds = new Map<string, { bytes: number; count: number }>();
   const projects = new Map<string, ProjectBucket>();
 
@@ -102,6 +104,8 @@ export function summarizeStatus(
       protectedBytes += bytes;
       continue;
     }
+    if (candidate.uniqueBytes !== undefined) hasUniqueBytes = true;
+    reclaimableUniqueSum += candidate.uniqueBytes ?? bytes;
     if (candidate.bytesKnown === false) partialByteCount += 1;
     if (candidate.riskTier === "safe") safeBytes += bytes;
     else cautionBytes += bytes;
@@ -171,6 +175,14 @@ export function summarizeStatus(
   const skippedDirs = plan.summary.skippedDirs ?? 0;
   const bytesPartial = partialByteCount > 0;
 
+  const reclaimableBytes = safeBytes + cautionBytes;
+  const uniqueBytesPartial = plan.summary.uniqueBytesPartial === true;
+  const uniqueReclaimableBytes = hasUniqueBytes
+    ? protectedBytes === 0 && plan.summary.uniqueTotalBytes !== undefined
+      ? Math.min(reclaimableBytes, Math.max(reclaimableUniqueSum, plan.summary.uniqueTotalBytes))
+      : Math.min(reclaimableBytes, reclaimableUniqueSum)
+    : undefined;
+
   return {
     protocolVersion: PROTOCOL_VERSION,
     targetDir: plan.targetDir,
@@ -180,7 +192,9 @@ export function summarizeStatus(
     bytesPartial,
     partialByteCount,
     complete: skippedDirs === 0 && !bytesPartial,
-    reclaimableBytes: safeBytes + cautionBytes,
+    reclaimableBytes,
+    ...(uniqueReclaimableBytes !== undefined ? { uniqueReclaimableBytes } : {}),
+    ...(uniqueBytesPartial ? { uniqueBytesPartial: true } : {}),
     safeBytes,
     cautionBytes,
     protectedCount,

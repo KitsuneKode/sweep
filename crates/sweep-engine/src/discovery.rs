@@ -724,6 +724,7 @@ impl DiscoveryIndex {
                     inode: text.get(i[2]).to_owned(),
                 }),
                 estimated_bytes: record.bytes,
+                unique_bytes: None,
                 bytes_known: record.known,
                 modified_ms: record.modified,
                 is_symlink: record.symlink,

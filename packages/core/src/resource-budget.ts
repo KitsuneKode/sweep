@@ -47,6 +47,26 @@ export class ResourceBudget {
   private sizingDirs = 0;
   private sizingPaths = 0;
   private sizingBytes = 0;
+  private hardlinkIds = 0;
+  private hardlinkBytes = 0;
+
+  /**
+   * Non-fatal reservation for the scan-wide hardlink tracker. Saturation caps
+   * hardlink deduplication (marking unique bytes partial) without failing
+   * discovery or apparent sizing.
+   */
+  hardlinkIdentity(): boolean {
+    if (
+      this.hardlinkIds >= this.limits.maxIdentities ||
+      this.hardlinkBytes + 128 > this.limits.maxRetainedBytes ||
+      this.used.maxRetainedBytes + this.sizingBytes + this.hardlinkBytes + 128 >
+        this.limits.maxCombinedBytes
+    )
+      return false;
+    this.hardlinkIds++;
+    this.hardlinkBytes += 128;
+    return true;
+  }
 
   /** Live totals across all sizing jobs; saturation never poisons discovery. */
   sizingIdentity(): boolean {

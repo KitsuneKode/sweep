@@ -292,6 +292,7 @@ function scanResultFromPlan(plan: ScanPlan): ScanResult {
       path: candidate.path,
       name: candidate.name,
       estimatedBytes: candidate.estimatedBytes,
+      ...(candidate.uniqueBytes !== undefined ? { uniqueBytes: candidate.uniqueBytes } : {}),
       ...(candidate.modifiedMs !== undefined ? { modifiedMs: candidate.modifiedMs } : {}),
       // bytesKnown:false marks a lower-bound size - dropping it would let an
       // undercounted entry present as exact downstream.
@@ -300,6 +301,10 @@ function scanResultFromPlan(plan: ScanPlan): ScanResult {
       entryType: candidate.entryType,
     })),
     estimatedTotalBytes: plan.summary.estimatedTotalBytes,
+    ...(plan.summary.uniqueTotalBytes !== undefined
+      ? { uniqueTotalBytes: plan.summary.uniqueTotalBytes }
+      : {}),
+    ...(plan.summary.uniqueBytesPartial ? { uniqueBytesPartial: true } : {}),
     scannedDirs: plan.summary.scannedDirs,
     skippedDirs: plan.summary.skippedDirs ?? 0,
     exact: plan.summary.exact,
