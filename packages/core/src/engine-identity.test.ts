@@ -10,6 +10,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -83,8 +84,32 @@ test("rewriting the engine in place is a different engine", () => {
   const engine = join(root, "engine");
   writeFileSync(engine, "#!/bin/sh\nexit 0\n");
   const identity = captureEngineIdentity(engine);
-  writeFileSync(engine, "#!/bin/sh\nexit 1\n");
+  // A different length: the size shows it whatever the timestamp granularity.
+  writeFileSync(engine, "#!/bin/sh\nexit 10\n");
   expect(identityIssue(() => assertEngineUnchanged(identity))).toBe("changed");
+});
+
+test("a same-size rewrite with a new modification time is a different engine", () => {
+  const engine = join(root, "engine");
+  writeFileSync(engine, "#!/bin/sh\nexit 0\n");
+  const identity = captureEngineIdentity(engine);
+  writeFileSync(engine, "#!/bin/sh\nexit 1\n");
+  // Set explicitly: two writes inside one filesystem clock tick can share an mtime.
+  const later = new Date(Number(identity.mtimeNs / 1_000_000n) + 60_000);
+  utimesSync(engine, later, later);
+  expect(identityIssue(() => assertEngineUnchanged(identity))).toBe("changed");
+});
+
+test("a same-size rewrite inside one timestamp tick is refused before apply", () => {
+  // Within one tick of the filesystem clock (about 15.6 ms on Windows, one
+  // jiffy on Linux before multigrain timestamps) a same-size rewrite can keep
+  // size, mtime, ctime and file ID, so the metadata check may pass. The fresh
+  // digest that runs before every destructive spawn must still refuse it.
+  const engine = join(root, "engine");
+  writeFileSync(engine, "#!/bin/sh\nexit 0\n");
+  const identity = captureEngineIdentity(engine);
+  writeFileSync(engine, "#!/bin/sh\nexit 1\n");
+  expect(identityIssue(() => assertEngineContent(identity))).toBe("changed");
 });
 
 test("a removed engine fails closed", () => {
@@ -383,7 +408,7 @@ test("the pre-apply content check re-reads the bytes instead of trusting metadat
   // timestamps can look like. Only the fresh digest can tell.
   const forged = { ...identity, sha256: "0".repeat(64) };
   expect(identityIssue(() => assertEngineContent(forged))).toBe("changed");
-  // And a metadata change is caught before any read.
-  writeFileSync(engine, "#!/bin/sh\nexit 1\n");
+  // And a metadata change (here, the size) is caught before any read.
+  writeFileSync(engine, "#!/bin/sh\nexit 10\n");
   expect(identityIssue(() => assertEngineContent(identity))).toBe("changed");
 });
