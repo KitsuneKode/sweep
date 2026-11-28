@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { lastActiveMs } from "./age.js";
+import { compileFilter } from "./filter-query.js";
 import { magnitudeBar } from "./meter-draw.js";
 import { reclaimByCost, rebuildFor } from "./project-details.js";
 import { ARTIFACT_PREVIEW, buildProjectRows, buildProjects, diskGainedText } from "./projects.js";
+import { idleSafeCandidates } from "./state/store.js";
 
 function candidate(index: number, bytes: number): ScanCandidate {
   return {
@@ -195,5 +198,29 @@ describe("finished worktrees", () => {
       row.kind === "section" ? [row.section] : [],
     );
     expect(sections).toEqual(["finished", "idle", "recent"]);
+  });
+});
+
+describe("unknown project activity (D4)", () => {
+  const NOW = Date.parse("2026-11-18T12:00:00Z");
+  const DAY = 86_400_000;
+
+  test("unprovable activity stays unknown and never falls back to artifact modifiedMs", () => {
+    const unprovable = {
+      ...candidate(0, 1024),
+      id: "unprovable",
+      projectRoot: "/work/huge-app",
+      modifiedMs: NOW - 120 * DAY,
+      reasons: ["default-pattern"],
+    } as ScanCandidate;
+
+    expect(lastActiveMs(unprovable)).toBeUndefined();
+    const [project] = buildProjects([unprovable], new Set(), "/work", NOW);
+    expect(project?.section).toBe("unknown");
+    expect(project?.activeMs).toBeUndefined();
+    expect(idleSafeCandidates({ candidates: [unprovable] }, 30 * DAY, NOW)).toEqual([]);
+
+    const older = compileFilter("older:30d");
+    expect(older?.(unprovable, { selectedIds: new Set(), now: NOW })).toBe(false);
   });
 });

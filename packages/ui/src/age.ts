@@ -11,9 +11,11 @@ const MINUTE_MS = 60_000;
  * Every age the UI shows, sorts or filters on reads through this.
  */
 export function lastActiveMs(
-  candidate: Pick<ScanCandidate, "modifiedMs" | "projectActiveMs">,
+  candidate: Pick<ScanCandidate, "modifiedMs" | "projectActiveMs" | "projectRoot">,
 ): number | undefined {
-  return candidate.projectActiveMs ?? candidate.modifiedMs;
+  if (candidate.projectActiveMs !== undefined) return candidate.projectActiveMs;
+  if (candidate.projectRoot !== undefined) return undefined;
+  return candidate.modifiedMs;
 }
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;

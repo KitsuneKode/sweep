@@ -58,10 +58,13 @@ queued items outside that view.
 ## Projects first
 
 `sweep ui` opens on your projects, not on a wall of folders. Each row is one
-project (a git work tree, or the nearest folder with a manifest), grouped into
-**Finished worktrees**, **Idle 30+ days**, and **Worked on recently**, biggest
-first. The line at the top says how much you can reclaim, how much of it sits
-in idle projects, and once you queue something, how much is queued.
+project (a git work tree, or the nearest folder with a manifest; never your home
+folder), grouped into **Finished worktrees**, **Idle 30+ days**, **Worked on
+recently**, and **No activity found** (projects whose activity could not be
+proven), biggest first. Unknown-activity projects show `?` for idle time and
+are never queued by `i`. The line at the top says how much you can reclaim, how
+much of it sits in idle projects, and once you queue something, how much is
+queued.
 
 Linked git worktrees name their repository instead of the folder they sit in
 (`app · merged`, `app · worktree`, `app · branch missing`). A clean worktree
