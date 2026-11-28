@@ -1604,6 +1604,7 @@ export function SweepApp({
     modeWidth: statusModeWidth,
     hints: footerHints,
     tallyWidth: dimensions.width >= 72 ? styledWidth(tallyContent) : 0,
+    tallyPassive: summary.selectedCount === 0,
     ...(riskChipContent ? { riskChipWidth: styledWidth(riskChipContent) } : {}),
     ...(scopeChipContent ? { scopeChipWidth: styledWidth(scopeChipContent) } : {}),
   });

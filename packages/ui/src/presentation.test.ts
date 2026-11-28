@@ -523,6 +523,7 @@ describe("B1 & B11: statusline fitting and live-scan context line", () => {
         modeWidth: 14,
         hints,
         tallyWidth: 11,
+        tallyPassive: true,
       });
       const hintsWidth = fitted.hints.reduce(
         (sum, hint, idx) => sum + (idx > 0 ? 2 : 0) + footerHintWidth(hint),
@@ -531,6 +532,19 @@ describe("B1 & B11: statusline fitting and live-scan context line", () => {
       const tallyReserve = fitted.showTally ? 14 : 0;
       expect(14 + 1 + hintsWidth + tallyReserve).toBeLessThanOrEqual(totalWidth);
       expect(fitted.hints.some((h) => h.key === "esc")).toBe(true);
+    }
+    // Action hints outrank passive "queue empty": both / find and d del custom stay visible at 100 and 120 cols.
+    for (const totalWidth of [98, 118]) {
+      const fitted = fitStatusLine({
+        totalWidth,
+        modeWidth: 14,
+        hints,
+        tallyWidth: 11,
+        tallyPassive: true,
+      });
+      expect(fitted.showTally, `totalWidth=${totalWidth}`).toBe(false);
+      expect(fitted.hints.some((h) => h.key === "/" && h.label === "find")).toBe(true);
+      expect(fitted.hints.some((h) => h.key === "d" && h.label === "del custom")).toBe(true);
     }
     expect(fitFooterHints(hints, 30).every((h) => footerHintWidth(h) <= 30)).toBe(true);
   });

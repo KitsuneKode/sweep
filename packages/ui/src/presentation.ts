@@ -837,9 +837,9 @@ export function footerHintItems(
     case "patterns":
       return [
         h("space", "toggle", press("space"), 1),
-        h("/", "find", press("/"), 4),
-        h("a", "add", press("a"), 3),
-        h("d", "del custom", press("d"), 5),
+        h("/", "find", press("/"), 3),
+        h("a", "add", press("a"), 4),
+        h("d", "del custom", press("d"), 3),
         h("w", "save .sweeprc", press("w"), 2),
         h("r", options.patternsDirty ? "rescan*" : "rescan", press("r"), 1),
         h("esc", "back", press("escape"), 0),
@@ -924,6 +924,8 @@ export function fitStatusLine(options: {
   modeWidth: number;
   hints: readonly FooterHint[];
   tallyWidth: number;
+  /** Passive empty-queue text ("queue empty") yields before any key hint drops. */
+  tallyPassive?: boolean;
   riskChipWidth?: number;
   scopeChipWidth?: number;
   variant?: "caps" | "plain";
@@ -949,13 +951,16 @@ export function fitStatusLine(options: {
       0,
     );
 
+  const fullHintsWidth = listWidth(options.hints);
   const coreHints = options.hints.filter((hint) => (hint.priority ?? 2) <= 1);
   const coreWidth = listWidth(coreHints.length > 0 ? coreHints : options.hints.slice(0, 2));
 
-  const showTally = tallyReserve > 0 && innerBudget - tallyReserve >= coreWidth;
+  // Action hints outrank passive empty-queue status text: drop "queue empty"
+  // before dropping any key hint. Active queue tallies stay visible while core hints fit.
+  const minHintsForTally = options.tallyPassive ? fullHintsWidth : coreWidth;
+  const showTally = tallyReserve > 0 && innerBudget - tallyReserve >= minHintsForTally;
   let remaining = innerBudget - (showTally ? tallyReserve : 0);
 
-  const fullHintsWidth = listWidth(options.hints);
   let showRiskChip = false;
   let showScopeChip = false;
   if (riskReserve > 0 && fullHintsWidth + riskReserve <= remaining) {

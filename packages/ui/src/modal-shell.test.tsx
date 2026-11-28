@@ -341,6 +341,13 @@ describe("Batch 1 layout and trust bug fixes", () => {
       const statusLine = frame.replace(/\n$/, "").split("\n").at(-1) ?? "";
       expect(statusLine, `width=${width}`).toContain("PATTERNS");
       expect(statusLine, `width=${width}`).toContain(" esc  back");
+      // Action hints outrank passive "queue empty": at 100 and 120 cols with an empty queue,
+      // both `/ find` and `d del custom` remain visible without colliding.
+      if (width >= 100) {
+        expect(statusLine, `width=${width}`).toContain(" /  find");
+        expect(statusLine, `width=${width}`).toContain(" d  del custom");
+        expect(statusLine, `width=${width}`).not.toContain("queue empty");
+      }
       // Never collide left hints into right tally or clip .sweeprc mid-word.
       expect(frame, `width=${width}`).not.toContain("queuenem");
       expect(frame, `width=${width}`).not.toMatch(/save \.swe(?!eprc)/);
