@@ -109,18 +109,30 @@ const PatternRow = memo(function PatternRow({
   );
 });
 
+/** Longest pattern-pane helper sentence that fits whole without clipping `.sweeprc`. */
+function patternHelperHint(width: number): string {
+  const options = [
+    "Checkboxes edit patterns; saving updates .sweeprc.",
+    "Toggle patterns; w saves .sweeprc.",
+    "w saves .sweeprc",
+  ];
+  return options.find((line) => cellWidth(line) <= width) ?? "";
+}
+
 /** Pattern input and explicit mouse actions, separate from list windowing. */
 function PatternControls({
   state,
   tokens,
+  paneWidth,
   onMutate,
   onSubmitDraft,
   onSave,
   onInspect,
   selectedPattern,
-}: Omit<PatternPanelProps, "paneWidth"> & { selectedPattern: string | undefined }) {
+}: PatternPanelProps & { selectedPattern: string | undefined }) {
   const inputFocused = state.focus === "patternInput";
   const showInput = inputFocused || state.patternFilter.length > 0;
+  const helperHint = patternHelperHint(Math.max(0, paneWidth - 1));
   return (
     <>
       <box flexDirection="row" flexWrap="wrap" gap={1} flexShrink={0}>
@@ -192,10 +204,7 @@ function PatternControls({
         </box>
       ) : (
         <box width="100%" height={1} flexShrink={0} paddingLeft={1}>
-          <text
-            content={t`${fg(tokens.textDim)("Checkboxes edit patterns; saving updates .sweeprc.")}`}
-            wrapMode="none"
-          />
+          <text content={t`${fg(tokens.textDim)(helperHint)}`} wrapMode="none" />
         </box>
       )}
     </>
@@ -291,6 +300,7 @@ export function PatternPanel({
       <PatternControls
         state={state}
         tokens={tokens}
+        paneWidth={paneWidth}
         selectedPattern={selectedPattern}
         onMutate={onMutate}
         onSubmitDraft={onSubmitDraft}

@@ -156,7 +156,10 @@ export function ProjectDetails({
         wrapMode="none"
       />
       <text content="" />
-      {field("worked on", t`${fg(recent ? tokens.info : tokens.text)(age || "unknown")}`)}
+      {field(
+        "worked on",
+        t`${fg(project.activeMs === undefined ? tokens.textMuted : recent ? tokens.info : tokens.text)(age || "unknown")}`,
+      )}
       {facts.branch === null
         ? field("git", t`${fg(tokens.textMuted)("not a repository")}`)
         : field(

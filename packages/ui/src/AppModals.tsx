@@ -1,10 +1,9 @@
-import { bold, fg, t } from "@opentui/core";
 import type { ProjectSweeprcDelta } from "@kitsunekode/sweep-core/config";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { ActionButton } from "./ActionButton.js";
 import type { ActionMenuCommand } from "./action-menu.js";
 import type { ThemeTokens } from "./theme.js";
-import { Modal } from "./widgets.js";
+import { Modal, ModalFooter } from "./widgets.js";
 
 export interface ConfigSaveState {
   path: string;
@@ -31,10 +30,11 @@ export function FolderInfoModal({
   return (
     <Modal
       tokens={tokens}
-      title=" Current folder "
+      title="Folder details"
       width={64}
-      height={14}
-      footer={<ActionButton tokens={tokens} label="Esc Close" onPress={onClose} />}
+      footer={
+        <ModalFooter tokens={tokens} actions={[{ key: "esc", label: "close", onPress: onClose }]} />
+      }
     >
       <text content={sanitizeTerminalText(folderInfo.path)} wrapMode="char" fg={tokens.text} />
       <text
@@ -70,9 +70,11 @@ export function PatternInfoModal({
   return (
     <Modal
       tokens={tokens}
-      title=" Pattern details "
+      title="Pattern details"
       width={60}
-      footer={<ActionButton tokens={tokens} label="Esc Close" onPress={onClose} />}
+      footer={
+        <ModalFooter tokens={tokens} actions={[{ key: "esc", label: "close", onPress: onClose }]} />
+      }
     >
       <text content={sanitizeTerminalText(pattern)} fg={tokens.text} wrapMode="word" />
       <text
@@ -100,19 +102,22 @@ export function ConfigSaveModal({
   return (
     <Modal
       tokens={tokens}
-      title=" Save cleanup patterns? "
+      title="Save cleanup patterns?"
       width={60}
-      height={20}
       footer={
-        <box flexDirection="row" flexWrap="wrap" gap={1}>
-          <ActionButton
-            tokens={tokens}
-            label="y Save patterns"
-            disabled={!canConfirm}
-            onPress={onConfirm}
-          />
-          <ActionButton tokens={tokens} label="n / Esc Cancel" onPress={onCancel} />
-        </box>
+        <ModalFooter
+          tokens={tokens}
+          actions={[
+            {
+              key: "y",
+              label: "save patterns",
+              primary: true,
+              disabled: !canConfirm,
+              onPress: onConfirm,
+            },
+            { key: "n / esc", label: "cancel", onPress: onCancel },
+          ]}
+        />
       }
     >
       <text content={sanitizeTerminalText(configSave.path)} fg={tokens.text} wrapMode="word" />
@@ -182,7 +187,7 @@ export function ActionMenuModal({
   return (
     <Modal
       tokens={tokens}
-      title=" Search actions "
+      title="Search actions"
       width={58}
       height={22}
       footer={
@@ -254,30 +259,70 @@ export function ActionMenuModal({
   );
 }
 
-export function UnavailableItemModal({ tokens }: { tokens: ThemeTokens }) {
+export function UnavailableItemModal({
+  tokens,
+  onClose,
+}: {
+  tokens: ThemeTokens;
+  onClose?: () => void;
+}) {
   return (
-    <Modal tokens={tokens} title=" item unavailable " width={60}>
+    <Modal
+      tokens={tokens}
+      title="Item unavailable"
+      width={60}
+      footer={
+        <ModalFooter
+          tokens={tokens}
+          actions={[{ key: "n / esc", label: "close", onPress: onClose }]}
+        />
+      }
+    >
       <text
         content="The reviewed artifact is no longer present. Nothing will be removed."
         fg={tokens.text}
+        wrapMode="word"
       />
-      <text content="n / esc close" fg={tokens.textMuted} />
     </Modal>
   );
 }
 
-export function ScanErrorModal({ tokens, message }: { tokens: ThemeTokens; message: string }) {
+export function ScanErrorModal({
+  tokens,
+  message,
+  onRetry,
+  onDismiss,
+  onQuit,
+}: {
+  tokens: ThemeTokens;
+  message: string;
+  onRetry?: () => void;
+  onDismiss?: () => void;
+  onQuit?: () => void;
+}) {
   return (
-    <Modal tokens={tokens} title=" scan error " titleColor={tokens.danger} width={60}>
+    <Modal
+      tokens={tokens}
+      title="Scan failed"
+      titleColor={tokens.danger}
+      width={60}
+      footer={
+        <ModalFooter
+          tokens={tokens}
+          actions={[
+            { key: "r", label: "retry scan", primary: true, onPress: onRetry },
+            { key: "esc", label: "dismiss", onPress: onDismiss },
+            { key: "q", label: "quit", onPress: onQuit },
+          ]}
+        />
+      }
+    >
       <text
         // Engine errors arrive prefixed ("error: ...") - redundant inside a
-        // dialog already titled "scan error".
+        // dialog already titled "Scan failed".
         content={sanitizeTerminalText(message.replace(/^[Ee]rror:\s*/, ""))}
         fg={tokens.text}
-      />
-      <text content="" />
-      <text
-        content={t`${bold(fg(tokens.text)("r"))} ${fg(tokens.textMuted)("retry scan")}    ${bold(fg(tokens.text)("esc"))} ${fg(tokens.textMuted)("dismiss")}    ${bold(fg(tokens.text)("q"))}${fg(tokens.textMuted)(" quit")}`}
+        wrapMode="word"
       />
     </Modal>
   );

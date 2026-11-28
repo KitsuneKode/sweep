@@ -65,9 +65,11 @@ import {
   buildContextLine,
   buildHeaderStats,
   buildRiskTally,
+  fitStatusLine,
   footerHintItems,
   modeLabel,
   relativePath,
+  styledWidth,
   type FooterContext,
 } from "./presentation.js";
 import { rebuildSummary } from "./project-details.js";
@@ -1585,10 +1587,27 @@ export function SweepApp({
     ...(dimensions.width < 72 ? { compact: true } : dimensions.width < 108 ? { medium: true } : {}),
   });
   const tallyContent = buildRiskTally(summary, tokens);
-  // Below this width the tally and the risk/sort chips crowd the key hints out
-  // of the statusline entirely; the hints are the part that must survive.
-  const roomForTally = dimensions.width >= 84;
-  const roomForChips = dimensions.width >= 100;
+  const riskChipContent = riskFilterLabel
+    ? t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`
+    : null;
+  const scopeChipContent = scopeFilterLabel
+    ? t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`
+    : null;
+  const statusModeText = state.scanIncomplete
+    ? " INCOMPLETE "
+    : ` ${modeLabel(state.focus, false, visualActive)} `;
+  // ScanModeChip: paddingX(2) + "SCANNING"(8) + gap(1) + 5-dot strip(9) = 20.
+  // ModeChip: paddingX(4) + label.
+  const statusModeWidth = state.scanning ? 20 : statusModeText.length + 4;
+  const fittedStatus = fitStatusLine({
+    totalWidth: Math.max(0, dimensions.width - 2),
+    modeWidth: statusModeWidth,
+    hints: footerHints,
+    tallyWidth: dimensions.width >= 72 ? styledWidth(tallyContent) : 0,
+    tallyPassive: summary.selectedCount === 0,
+    ...(riskChipContent ? { riskChipWidth: styledWidth(riskChipContent) } : {}),
+    ...(scopeChipContent ? { scopeChipWidth: styledWidth(scopeChipContent) } : {}),
+  });
   const menuFits = dimensions.height >= 10 && dimensions.width >= 28;
   // Scan error and the delete overlay own the screen. Dialogs already open
   // stay in state (a pattern review comes back) but are not painted under them.
@@ -1815,23 +1834,24 @@ export function SweepApp({
                   tokens={tokens}
                 />
               )}
-              <box flexGrow={1} minWidth={0} flexShrink={1} paddingLeft={1} flexDirection="row">
-                <KeyHints hints={footerHints} tokens={tokens} onPress={pressKey} />
-                {roomForChips && riskFilterLabel ? (
-                  <text
-                    content={t`  ${fg(tokens.warning)(`· risk: ${riskFilterLabel}`)}`}
-                    wrapMode="none"
-                  />
+              <box
+                flexGrow={1}
+                minWidth={0}
+                flexShrink={1}
+                paddingLeft={1}
+                flexDirection="row"
+                overflow="hidden"
+              >
+                <KeyHints hints={fittedStatus.hints} tokens={tokens} onPress={pressKey} />
+                {fittedStatus.showRiskChip && riskChipContent ? (
+                  <text content={riskChipContent} wrapMode="none" />
                 ) : null}
-                {roomForChips && scopeFilterLabel ? (
-                  <text
-                    content={t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`}
-                    wrapMode="none"
-                  />
+                {fittedStatus.showScopeChip && scopeChipContent ? (
+                  <text content={scopeChipContent} wrapMode="none" />
                 ) : null}
               </box>
-              {roomForTally ? (
-                <box paddingLeft={2} paddingRight={1} flexShrink={1}>
+              {fittedStatus.showTally ? (
+                <box paddingLeft={2} paddingRight={1} flexShrink={0}>
                   <text content={tallyContent} wrapMode="none" />
                 </box>
               ) : null}
@@ -1924,7 +1944,7 @@ export function SweepApp({
         ) : null}
         {!foregroundOverlay && pendingApply ? (
           pendingSingleId !== null && !pendingSingleCandidate ? (
-            <UnavailableItemModal tokens={tokens} />
+            <UnavailableItemModal tokens={tokens} onClose={() => setPendingApply(false)} />
           ) : pendingSingleCandidate ? (
             <ConfirmOverlay
               tokens={tokens}
@@ -2038,7 +2058,18 @@ export function SweepApp({
             />
           )
         ) : null}
-        {scanError ? <ScanErrorModal tokens={tokens} message={scanError} /> : null}
+        {scanError ? (
+          <ScanErrorModal
+            tokens={tokens}
+            message={scanError}
+            onRetry={() => {
+              setScanError(null);
+              requestRescan?.();
+            }}
+            onDismiss={() => setScanError(null)}
+            onQuit={() => finalize({ type: "abort" })}
+          />
+        ) : null}
         {applying !== null ? (
           <ApplyOverlay
             tokens={tokens}

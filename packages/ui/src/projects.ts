@@ -154,7 +154,7 @@ export function buildProjects(
     const worktreeOf = artifacts.find((candidate) => candidate.worktreeOf)?.worktreeOf;
     const worktreeState = artifacts.find((candidate) => candidate.worktreeState)?.worktreeState;
     const section: ProjectSection =
-      activeMs === undefined || !known
+      activeMs === undefined
         ? "unknown"
         : worktreeState === "merged" && now - activeMs >= FINISHED_QUIET_MS
           ? "finished"

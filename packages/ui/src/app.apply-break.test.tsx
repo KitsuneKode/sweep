@@ -497,8 +497,8 @@ describe("adversarial: committed applying state", () => {
 
     expect(applyCalls.length).toBe(1);
     expect(outcomes).toEqual([]);
-    expect(setup.captureCharFrame()).toContain("applying");
-    expect(setup.captureCharFrame()).not.toContain("artifact detail");
+    expect(setup.captureCharFrame()).toContain("Removing artifacts");
+    expect(setup.captureCharFrame()).not.toContain("Artifact details");
   });
 
   test("in-flight apply shows elapsed time and backend completion counts", async () => {

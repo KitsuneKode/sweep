@@ -79,7 +79,7 @@ export function FilterPicker({
   return (
     <Modal
       tokens={tokens}
-      title=" filter "
+      title="Filter & sort"
       width={WIDTH}
       height={Math.min(height - 2, shown.length + 9)}
       footer={

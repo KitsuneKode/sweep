@@ -165,10 +165,10 @@ describe("sweep TUI render", () => {
     await paint();
     expect(readFileSync(path, "utf8")).toBe(newer);
     const lines = setup.captureCharFrame().split("\n");
-    const y = lines.findIndex((line) => line.includes("y Save patterns"));
+    const y = lines.findIndex((line) => line.includes(" y  save patterns"));
     expect(y).toBeGreaterThanOrEqual(0);
     await act(async () => {
-      await setup.mockMouse.click(lines[y]!.indexOf("y Save patterns") + 1, y);
+      await setup.mockMouse.click(lines[y]!.indexOf(" y  save patterns") + 1, y);
       await setup.flush();
     });
     await paint();
@@ -519,7 +519,7 @@ describe("sweep TUI render", () => {
     });
     await paint();
     const frame = setup.captureCharFrame();
-    expect(frame).toContain("artifact");
+    expect(frame).toContain("Artifact details");
     const pathRow = frame.split("\n").find((line) => /\bpath\s/.test(line));
     const displayed = createPlan().candidates.find((candidate) =>
       pathRow?.includes(candidate.name),
@@ -1159,7 +1159,7 @@ test("a synchronous scan startup failure renders an incomplete error instead of 
     });
   }
   expect(setup.captureCharFrame()).toContain("startup failed");
-  expect(setup.captureCharFrame()).toContain("scan error");
+  expect(setup.captureCharFrame()).toContain("Scan failed");
 });
 
 test("an explicitly reviewed trash flip off survives the exit apply outcome", async () => {
@@ -1230,7 +1230,7 @@ describe("folder switcher (ctrl-o)", () => {
     });
     await paint();
     let frame = setup.captureCharFrame();
-    expect(frame).toContain("switch folder");
+    expect(frame).toContain("Switch folder");
     expect(frame).toContain("other-app");
     expect(frame).toContain("parent");
 
@@ -1266,7 +1266,7 @@ describe("folder switcher (ctrl-o)", () => {
       await setup.flush();
       await setup.renderOnce();
     });
-    expect(setup.captureCharFrame()).not.toContain("switch folder");
+    expect(setup.captureCharFrame()).not.toContain("Switch folder");
   });
 });
 
