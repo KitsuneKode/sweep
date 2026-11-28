@@ -302,7 +302,8 @@ async function metadataSize(
   // not a cumulative total. The walk already charged these paths against the
   // scan-wide budget; sizing bounds itself with per-job caps derived from the
   // same limits. A scan-level failure still propagates via budget.check().
-  const dedupCap = budget.limits.maxIdentities;
+  const directoryDedupCap = budget.limits.maxIdentities;
+  const hardlinkDedupCap = budget.sizingHardlinkIdentityCap();
   const pendingCap = budget.limits.maxQueuedDirs;
   const links = new Map<string, SharedInode>();
   const dirs = new Set<string>();
@@ -332,7 +333,7 @@ async function metadataSize(
       if (exact) bytes = checkedBytes(bytes, rawSize);
       return;
     }
-    if (links.size >= dedupCap || !budget.sizingHardlinkIdentity()) {
+    if (links.size >= hardlinkDedupCap || !budget.sizingHardlinkIdentity()) {
       // Set at cap: count the link anyway (overcount, flagged partial)
       // rather than undercounting zero or killing the scan.
       localCapped = true;
@@ -365,7 +366,7 @@ async function metadataSize(
           const id = `${stat.dev}:${stat.ino}`;
           // Skip repeats and capped-set inserts alike - without the dedup
           // entry a hardlinked-dir cycle could recurse forever.
-          if (dirs.has(id) || dirs.size >= dedupCap || !budget.sizingDirectoryIdentity()) {
+          if (dirs.has(id) || dirs.size >= directoryDedupCap || !budget.sizingDirectoryIdentity()) {
             complete = false;
             continue;
           }

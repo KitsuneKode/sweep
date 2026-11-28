@@ -221,11 +221,26 @@ impl ResourceBudget {
         )
     }
 
+    /// Hardlink dedup is optional accuracy state: at most half of either byte
+    /// budget may be held by hardlink identities, preserving headroom for the
+    /// directory traversal needed to produce complete apparent sizes.
+    fn hardlink_byte_limit(&self) -> usize {
+        (self
+            .limits
+            .max_retained_bytes
+            .min(self.limits.max_combined_bytes) as usize)
+            / 2
+    }
+
+    pub fn sizing_hardlink_identity_cap(&self) -> usize {
+        (self.limits.max_identities as usize).min(self.hardlink_byte_limit() / 128)
+    }
+
     /// Live directory-cycle and hardlink sizing reservations use separate
-    /// identity lanes. Hardlink dedup is optional accuracy state and must not
-    /// consume the identities a walk needs for cycle safety; both lanes still
-    /// share the byte and combined-memory reservations. Failure is partial
-    /// sizing, not fatal discovery exhaustion.
+    /// count and byte lanes. Hardlink dedup is optional accuracy state and must
+    /// not consume the identities or memory a walk needs for cycle safety; both
+    /// lanes still share the total byte and combined-memory reservations.
+    /// Failure is partial sizing, not fatal discovery exhaustion.
     fn reserve_sizing_identity(&self, hardlink: bool) -> bool {
         let mut used = self.sizing.lock().unwrap_or_else(|p| p.into_inner());
         let identities = if hardlink {
@@ -233,7 +248,13 @@ impl ResourceBudget {
         } else {
             used.directory_identities
         };
-        if identities >= self.limits.max_identities as usize
+        let identity_cap = if hardlink {
+            self.sizing_hardlink_identity_cap()
+        } else {
+            self.limits.max_identities as usize
+        };
+        if identities >= identity_cap
+            || (hardlink && (used.hardlink_identities + 1) * 128 > self.hardlink_byte_limit())
             || used
                 .charges
                 .checked_add(128)
@@ -411,6 +432,41 @@ mod tests {
         assert_eq!(budget.combined.load(Ordering::Acquire), 0);
         assert!(!budget.failed());
     }
+
+    #[test]
+    fn hardlink_byte_share_preserves_directory_sizing_headroom() {
+        let budget = ResourceBudget::new(ScanLimits {
+            max_identities: 100,
+            max_retained_bytes: 1024,
+            max_combined_bytes: 2048,
+            ..ScanLimits::default()
+        });
+        assert_eq!(budget.sizing_hardlink_identity_cap(), 4);
+        for _ in 0..4 {
+            assert!(budget.sizing_hardlink_identity());
+        }
+        assert!(!budget.sizing_hardlink_identity());
+
+        // The saturated hardlink lane owns only half the retained-byte budget,
+        // so directory-cycle identities still have the other half available.
+        for _ in 0..4 {
+            assert!(budget.sizing_directory_identity());
+        }
+        assert!(!budget.sizing_directory_identity());
+        budget.release_sizing_hardlink_identities(4);
+        budget.release_sizing_directory_identities(4);
+        assert_eq!(budget.combined.load(Ordering::Acquire), 0);
+        assert!(!budget.failed());
+
+        let low_memory = ResourceBudget::new(ScanLimits {
+            max_identities: 65_536,
+            max_retained_bytes: 8 * 1024 * 1024,
+            max_combined_bytes: 16 * 1024 * 1024,
+            ..ScanLimits::default()
+        });
+        assert_eq!(low_memory.sizing_hardlink_identity_cap(), 32_768);
+    }
+
     #[test]
     fn queue_slots_reuse_but_first_failure_sticks() {
         let budget = ResourceBudget::new(ScanLimits {

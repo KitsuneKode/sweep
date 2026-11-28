@@ -1227,6 +1227,7 @@ struct SizeContext<'a> {
     /// Per-job caps on the transient dedup sets and pending queue. These sets
     /// die with the job, so they bound peak memory - not a cumulative total.
     dedup_cap: usize,
+    hardlink_dedup_cap: usize,
     pending_cap: usize,
     pending: AtomicUsize,
     path_bytes: AtomicUsize,
@@ -1370,7 +1371,7 @@ fn price_sizing_inode(
         } else {
             0
         }
-    } else if seen.len() >= ctx.dedup_cap || !ctx.budget.sizing_hardlink_identity() {
+    } else if seen.len() >= ctx.hardlink_dedup_cap || !ctx.budget.sizing_hardlink_identity() {
         // Set at cap: count the link anyway (overcount, flagged partial)
         // rather than undercounting zero or killing the scan.
         if let Some(tracker) = ctx.tracker {
@@ -1706,6 +1707,7 @@ pub fn measure_size_with_budget_controlled_tracked(
         exact,
         parallel: sizing_pool().is_some(),
         dedup_cap,
+        hardlink_dedup_cap: budget.sizing_hardlink_identity_cap(),
         pending_cap,
         pending: AtomicUsize::new(1),
         path_bytes: AtomicUsize::new(root_bytes),
@@ -1982,6 +1984,7 @@ mod tests {
                 exact,
                 parallel: false,
                 dedup_cap: 1,
+                hardlink_dedup_cap: 1,
                 pending_cap: 1,
                 pending: AtomicUsize::new(1),
                 path_bytes: AtomicUsize::new(bytes),
@@ -2076,6 +2079,7 @@ mod tests {
             cancelled: None,
             tracker: None,
             dedup_cap,
+            hardlink_dedup_cap: budget.sizing_hardlink_identity_cap(),
             pending_cap,
             pending: AtomicUsize::new(0),
             path_bytes: AtomicUsize::new(0),

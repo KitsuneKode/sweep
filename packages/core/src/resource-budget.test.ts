@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { SCAN_RESOURCE_PROFILES } from "@kitsunekode/sweep-protocol";
 import {
   ResourceBudget,
   checkedBytes,
@@ -66,6 +67,33 @@ test("hardlink sizing identities do not consume directory identity slots", () =>
   budget.releaseSizingHardlinkIdentities(2);
   budget.releaseSizingDirectoryIdentities(2);
   expect(() => budget.check()).not.toThrow();
+});
+
+test("hardlink byte share preserves directory sizing headroom", () => {
+  const budget = new ResourceBudget({
+    maxIdentities: 100,
+    maxRetainedBytes: 1024,
+    maxCombinedBytes: 2048,
+  });
+  expect(budget.sizingHardlinkIdentityCap()).toBe(4);
+  for (let i = 0; i < 4; i += 1) expect(budget.sizingHardlinkIdentity()).toBe(true);
+  expect(budget.sizingHardlinkIdentity()).toBe(false);
+
+  // The saturated hardlink lane owns only half the retained-byte budget, so
+  // directory-cycle identities still have the other half available.
+  for (let i = 0; i < 4; i += 1) expect(budget.sizingDirectoryIdentity()).toBe(true);
+  expect(budget.sizingDirectoryIdentity()).toBe(false);
+  budget.releaseSizingHardlinkIdentities(4);
+  budget.releaseSizingDirectoryIdentities(4);
+  expect(() => budget.check()).not.toThrow();
+});
+
+test("low-memory hardlink identity cap derives from the byte share", () => {
+  const budget = new ResourceBudget(SCAN_RESOURCE_PROFILES["low-memory"]);
+  expect(budget.sizingHardlinkIdentityCap()).toBe(32_768);
+  expect(budget.sizingHardlinkIdentityCap()).toBeLessThan(
+    SCAN_RESOURCE_PROFILES["low-memory"].maxIdentities,
+  );
 });
 
 test("queued paths are bounded and dequeued slots are reusable", () => {

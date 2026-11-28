@@ -70,15 +70,31 @@ export class ResourceBudget {
   }
 
   /**
+   * Hardlink dedup is optional accuracy state: at most half of either byte
+   * budget may be held by hardlink identities, preserving headroom for the
+   * directory traversal needed to produce complete apparent sizes.
+   */
+  private hardlinkByteLimit(): number {
+    return Math.floor(Math.min(this.limits.maxRetainedBytes, this.limits.maxCombinedBytes) / 2);
+  }
+
+  sizingHardlinkIdentityCap(): number {
+    return Math.min(this.limits.maxIdentities, Math.floor(this.hardlinkByteLimit() / 128));
+  }
+
+  /**
    * Live totals across all sizing jobs. Directory-cycle and hardlink dedup
-   * identities use separate lanes so optional hardlink accuracy cannot consume
-   * the identities traversal needs for cycle safety; both lanes still share the
-   * byte reservations. Saturation never poisons discovery.
+   * identities use separate count and byte lanes so optional hardlink accuracy
+   * cannot consume the identities or memory traversal needs for cycle safety;
+   * the lanes still share the total byte reservations. Saturation never
+   * poisons discovery.
    */
   private reserveSizingIdentity(hardlink: boolean): boolean {
     const identities = hardlink ? this.sizingHardlinkIds : this.sizingDirectoryIds;
+    const identityCap = hardlink ? this.sizingHardlinkIdentityCap() : this.limits.maxIdentities;
     if (
-      identities >= this.limits.maxIdentities ||
+      identities >= identityCap ||
+      (hardlink && (this.sizingHardlinkIds + 1) * 128 > this.hardlinkByteLimit()) ||
       this.sizingBytes + 128 > this.limits.maxRetainedBytes ||
       this.used.maxRetainedBytes + this.sizingBytes + this.hardlinkBytes + 128 >
         this.limits.maxCombinedBytes
