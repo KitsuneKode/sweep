@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  contrastRatio,
+  costColors,
+  darkAnsi16Theme,
   darkTheme,
+  detectColorDepth,
+  diskColors,
+  lightAnsi16Theme,
   lightTheme,
   mixHex,
   noticeColor,
@@ -13,24 +19,35 @@ import {
 describe("resolveTheme", () => {
   const original = process.env.COLORFGBG;
   const originalNoColor = process.env.NO_COLOR;
+  const originalTerm = process.env.TERM;
+  const originalColorterm = process.env.COLORTERM;
+  const originalForceColor = process.env.FORCE_COLOR;
+
   beforeEach(() => {
     delete process.env.NO_COLOR;
+    delete process.env.FORCE_COLOR;
+    process.env.COLORTERM = "truecolor";
+    process.env.TERM = "xterm-256color";
   });
 
   afterEach(() => {
     if (originalNoColor === undefined) delete process.env.NO_COLOR;
     else process.env.NO_COLOR = originalNoColor;
-    if (original === undefined) {
-      delete process.env.COLORFGBG;
-    } else {
-      process.env.COLORFGBG = original;
-    }
+    if (original === undefined) delete process.env.COLORFGBG;
+    else process.env.COLORFGBG = original;
+    if (originalTerm === undefined) delete process.env.TERM;
+    else process.env.TERM = originalTerm;
+    if (originalColorterm === undefined) delete process.env.COLORTERM;
+    else process.env.COLORTERM = originalColorterm;
+    if (originalForceColor === undefined) delete process.env.FORCE_COLOR;
+    else process.env.FORCE_COLOR = originalForceColor;
   });
 
   test("auto mode reads the terminal's own background and sits on it", () => {
     const onKanagawa = resolveTheme("auto", "#1f1f28");
     expect(onKanagawa.text).toBe(darkTheme.text);
     expect(onKanagawa.bg).toBe("transparent");
+    expect(onKanagawa.statusBg).toBe("transparent");
     // Tints are mixed from the terminal background, not the brand canvas.
     expect(onKanagawa.selectionSoftBg).not.toBe(darkTheme.selectionSoftBg);
     expect(resolveTheme("auto", "#fafaf5").text).toBe(lightTheme.text);
@@ -67,63 +84,147 @@ describe("resolveTheme", () => {
         expect(components[0], key).toBe(components[1]);
         expect(components[1], key).toBe(components[2]);
       }
-      expect(contrast(theme.textDim, theme.selectionSoftBg)).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(theme.selectionText, theme.selectionBg)).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(theme.borderFocus, theme.selectionBg)).toBeGreaterThanOrEqual(3);
-      expect(contrast(theme.accentContrast, theme.accent)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(theme.textDim, theme.selectionSoftBg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(theme.selectionText, theme.selectionBg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(theme.borderFocus, theme.selectionBg)).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(theme.accentContrast, theme.accent)).toBeGreaterThanOrEqual(4.5);
     }
     process.env.NO_COLOR = "";
     expect(resolveTheme("dark")).toBe(darkTheme);
   });
+
+  test("NO_COLOR in auto mode preserves transparent terminal background with zero hue", () => {
+    process.env.NO_COLOR = "1";
+    const autoColoredDark = resolveTheme("auto", "#263d55");
+    expect(autoColoredDark.bg).toBe("transparent");
+    expect(autoColoredDark.statusBg).toBe("transparent");
+    expect(autoColoredDark.accent).toBe("#d4d4d4");
+    for (const [key, color] of Object.entries(autoColoredDark)) {
+      if (color === "transparent") continue;
+      const components = color.slice(1, 7).match(/../g)!;
+      expect(components[0], `${key}=${color}`).toBe(components[1]);
+      expect(components[1], `${key}=${color}`).toBe(components[2]);
+    }
+
+    const autoColoredLight = resolveTheme("auto", "#e8f0ff");
+    expect(autoColoredLight.bg).toBe("transparent");
+    expect(autoColoredLight.statusBg).toBe("transparent");
+    expect(autoColoredLight.accent).toBe("#323232");
+    for (const [key, color] of Object.entries(autoColoredLight)) {
+      if (color === "transparent") continue;
+      const components = color.slice(1, 7).match(/../g)!;
+      expect(components[0], `${key}=${color}`).toBe(components[1]);
+      expect(components[1], `${key}=${color}`).toBe(components[2]);
+    }
+  });
+
+  test("color depth detection covers NO_COLOR, FORCE_COLOR, COLORTERM, and TERM", () => {
+    expect(detectColorDepth({ TERM: "linux" })).toBe("16");
+    expect(detectColorDepth({ TERM: "xterm" })).toBe("16");
+    expect(detectColorDepth({ TERM: "xterm-16color" })).toBe("16");
+    expect(detectColorDepth({ TERM: "xterm-256color" })).toBe("256");
+    expect(detectColorDepth({ TERM: "xterm-256color", COLORTERM: "truecolor" })).toBe("truecolor");
+    expect(detectColorDepth({ TERM: "xterm", COLORTERM: "24bit" })).toBe("truecolor");
+    expect(detectColorDepth({ TERM: "dumb" })).toBe("none");
+    expect(detectColorDepth({ TERM: "xterm-256color", FORCE_COLOR: "0" })).toBe("none");
+    expect(detectColorDepth({ TERM: "xterm-256color", FORCE_COLOR: "1" })).toBe("16");
+    expect(detectColorDepth({ TERM: "xterm-256color", FORCE_COLOR: "2" })).toBe("256");
+    expect(detectColorDepth({ TERM: "linux", FORCE_COLOR: "3" })).toBe("truecolor");
+    expect(
+      detectColorDepth({ TERM: "xterm-256color", COLORTERM: "truecolor", NO_COLOR: "1" }),
+    ).toBe("none");
+
+    delete process.env.COLORTERM;
+    process.env.TERM = "xterm-16color";
+    expect(resolveTheme("dark")).toEqual(darkAnsi16Theme);
+    expect(resolveTheme("light")).toEqual(lightAnsi16Theme);
+
+    expect(resolveTheme("dark", null, { colorDepth: "16" })).toEqual(darkAnsi16Theme);
+    expect(resolveTheme("light", null, { colorDepth: "16" })).toEqual(lightAnsi16Theme);
+  });
 });
 
-function channel(value: number): number {
-  const c = value / 255;
-  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
+describe("category hue separation", () => {
+  test.each([
+    ["dark", darkTheme],
+    ["light", lightTheme],
+  ] as [string, ThemeTokens][])(
+    "%s C+ palette keeps accent distinct from cost and disk hues",
+    (_name, theme) => {
+      const costs = Object.values(costColors(theme));
+      expect(new Set(costs).size).toBe(4);
+      for (const color of costs) {
+        expect(color).not.toBe(theme.accent);
+        expect(color).not.toBe(theme.danger);
+        expect(color).not.toBe(theme.warning);
+      }
 
-function luminance(hex: string): number {
-  const n = Number.parseInt(hex.slice(1, 7), 16);
-  return (
-    0.2126 * channel((n >> 16) & 255) + 0.7152 * channel((n >> 8) & 255) + 0.0722 * channel(n & 255)
+      const disks = Object.values(diskColors(theme));
+      expect(disks).toHaveLength(11);
+      expect(new Set(disks).size).toBe(11);
+      for (const color of disks) {
+        expect(color).not.toBe(theme.accent);
+        expect(color).not.toBe(theme.danger);
+        expect(color).not.toBe(theme.warning);
+      }
+    },
   );
-}
+});
 
-function contrast(foreground: string, background: string): number {
-  const [hi, lo] = [luminance(foreground), luminance(background)].sort((a, b) => b - a) as [
-    number,
-    number,
-  ];
-  return (hi + 0.05) / (lo + 0.05);
-}
+const CONTRAST_SUITES: [string, ThemeTokens][] = [
+  ["dark (C+)", darkTheme],
+  ["light (C+)", lightTheme],
+  ["dark (ANSI-16)", darkAnsi16Theme],
+  ["light (ANSI-16)", lightAnsi16Theme],
+  ["dark (NO_COLOR)", resolveTheme("dark", null, { colorDepth: "none" })],
+  ["light (NO_COLOR)", resolveTheme("light", null, { colorDepth: "none" })],
+];
 
-describe.each([
-  ["dark", darkTheme],
-  ["light", lightTheme],
-] as [string, ThemeTokens][])("%s theme contrast", (_name, theme) => {
-  test("informational text stays at WCAG AA on every surface", () => {
+describe.each(CONTRAST_SUITES)("%s WCAG 2.1 contrast", (_name, theme) => {
+  test("every text, semantic, cost, and disk token holds >= 4.5:1 on every surface", () => {
     const surfaces = [
-      theme.bg,
-      theme.surface,
-      theme.surfaceInset,
-      theme.hoverBg,
-      theme.selectionSoftBg,
-    ];
-    const informational = [
-      theme.text,
-      theme.textSecondary,
-      theme.textMuted,
-      theme.textDim,
-      theme.positive,
-      theme.warning,
-      theme.danger,
-      theme.info,
-      theme.accent,
-      theme.blocked,
-    ];
-    for (const surface of surfaces) {
-      for (const color of informational) {
-        expect(contrast(color, surface)).toBeGreaterThanOrEqual(4.5);
+      ["bg", theme.bg],
+      ["surface", theme.surface],
+      ["surfaceInset", theme.surfaceInset],
+      ["hoverBg", theme.hoverBg],
+      ["selectionSoftBg", theme.selectionSoftBg],
+      ["controlBg", theme.controlBg],
+    ] as const;
+
+    const foregrounds = [
+      ["text", theme.text],
+      ["headerText", theme.headerText],
+      ["textSecondary", theme.textSecondary],
+      ["textMuted", theme.textMuted],
+      ["textDim", theme.textDim],
+      ["positive", theme.positive],
+      ["warning", theme.warning],
+      ["danger", theme.danger],
+      ["info", theme.info],
+      ["accent", theme.accent],
+      ["blocked", theme.blocked],
+      ["costCache", theme.costCache],
+      ["costInstall", theme.costInstall],
+      ["costBuild", theme.costBuild],
+      ["costCustom", theme.costCustom],
+      ["diskDeveloper", theme.diskDeveloper],
+      ["diskApps", theme.diskApps],
+      ["diskPhotos", theme.diskPhotos],
+      ["diskVideos", theme.diskVideos],
+      ["diskMusic", theme.diskMusic],
+      ["diskDocs", theme.diskDocs],
+      ["diskDownloads", theme.diskDownloads],
+      ["diskSystem", theme.diskSystem],
+      ["diskCaches", theme.diskCaches],
+      ["diskTrash", theme.diskTrash],
+      ["diskOther", theme.diskOther],
+    ] as const;
+
+    for (const [surfaceName, surface] of surfaces) {
+      for (const [fgName, color] of foregrounds) {
+        expect(contrastRatio(color, surface), `${fgName} on ${surfaceName}`).toBeGreaterThanOrEqual(
+          4.5,
+        );
       }
     }
   });
@@ -131,27 +232,33 @@ describe.each([
   test("project size bars hold 3:1 on the page and on the cursor row", () => {
     for (const mix of [ROW_BAR_SOFT, ROW_BAR_STRONG]) {
       const bar = mixHex(theme.meterTrack, theme.textMuted, mix);
-      expect(contrast(bar, theme.bg)).toBeGreaterThanOrEqual(3);
-      expect(contrast(bar, theme.selectionSoftBg)).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(bar, theme.bg)).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(bar, theme.selectionSoftBg)).toBeGreaterThanOrEqual(3);
     }
   });
 
-  test("button labels and their shortcut hints read on the control fill", () => {
+  test("button labels and their shortcut hints read on the control fill and hover border", () => {
     for (const fill of [theme.controlBg, theme.border]) {
       for (const color of [theme.text, theme.textMuted, theme.danger]) {
-        expect(contrast(color, fill)).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(color, fill)).toBeGreaterThanOrEqual(4.5);
       }
     }
   });
 
   test("mode chip label is readable on the accent block", () => {
-    expect(contrast(theme.accentContrast, theme.accent)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(theme.accentContrast, theme.accent)).toBeGreaterThanOrEqual(4.5);
   });
 
   test("selected text and the focus rail remain readable", () => {
-    expect(contrast(theme.selectionText, theme.selectionBg)).toBeGreaterThanOrEqual(4.5);
-    for (const surface of [theme.bg, theme.surface, theme.hoverBg, theme.selectionBg]) {
-      expect(contrast(theme.borderFocus, surface)).toBeGreaterThanOrEqual(3);
+    expect(contrastRatio(theme.selectionText, theme.selectionBg)).toBeGreaterThanOrEqual(4.5);
+    for (const surface of [
+      theme.bg,
+      theme.surface,
+      theme.hoverBg,
+      theme.selectionBg,
+      theme.selectionSoftBg,
+    ]) {
+      expect(contrastRatio(theme.borderFocus, surface)).toBeGreaterThanOrEqual(3);
     }
   });
 });

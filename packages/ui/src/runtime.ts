@@ -1,9 +1,11 @@
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
+import { createColorDepthOutputStream } from "./ansi-color-depth.js";
 import { releaseMeterImages } from "./meter-draw.js";
 import { releaseUiCaches } from "./state/store.js";
 import type { SweepUiOutcome } from "./outcome.js";
 import { UiOperationSession } from "./operation-session.js";
+import { detectColorDepth } from "./theme.js";
 
 export interface UiSession {
   root: ReturnType<typeof createRoot>;
@@ -52,13 +54,33 @@ export function requestUiApplyCancellation(closeAfterApply = false): boolean {
  * renderer without aborting the scan subprocess, which leaves `sweep ui` hung.
  */
 export async function openUiSession(): Promise<UiSession> {
+  const colorDepth = detectColorDepth();
+  const wrappedStdout =
+    colorDepth === "truecolor"
+      ? undefined
+      : createColorDepthOutputStream(process.stdout, colorDepth);
+
   const renderer = await createCliRenderer({
+    ...(wrappedStdout ? { stdout: wrappedStdout } : {}),
     exitOnCtrlC: false,
     exitSignals: [],
     screenMode: "alternate-screen",
     useMouse: true,
     targetFps: 30,
   });
+
+  // OpenTUI attaches SIGWINCH automatically only when bound directly to
+  // process.stdout. Mirror that listener when using the color-depth filter.
+  const onSigwinch = () => {
+    const width = process.stdout.columns;
+    const height = process.stdout.rows;
+    if (width > 0 && height > 0) {
+      renderer.requestResize(width, height);
+    }
+  };
+  if (wrappedStdout) {
+    process.on("SIGWINCH", onSigwinch);
+  }
 
   // Ask the terminal for its background before anything is drawn, so the
   // first frame already wears the right theme: a frame in the fallback canvas
@@ -89,6 +111,9 @@ export async function openUiSession(): Promise<UiSession> {
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onTerminate);
     process.removeListener("SIGHUP", onTerminate);
+    if (wrappedStdout) {
+      process.removeListener("SIGWINCH", onSigwinch);
+    }
     process.stdin.off("data", onStdinData);
     try {
       root.unmount();
@@ -107,8 +132,17 @@ export async function openUiSession(): Promise<UiSession> {
   const finish = (outcome: SweepUiOutcome) => {
     if (finishing) return;
     finishing = true;
-    void operations.close(outcome).then((finalOutcome) => {
+    void operations.close(outcome).then(async (finalOutcome) => {
       cleanup();
+      if (wrappedStdout) {
+        // Wait briefly for NativeSession to flush terminal-restore sequences
+        // through the wrapped stdout stream before returning to the shell.
+        await Promise.race([
+          renderer.closed.catch(() => {}),
+          new Promise<void>((resolve) => setTimeout(resolve, 250)),
+        ]);
+        wrappedStdout.flushPending();
+      }
       resolveDone(finalOutcome);
     });
   };
