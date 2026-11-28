@@ -22,7 +22,7 @@ import {
   type IconMode,
 } from "./presentation.js";
 import { SECTION_TITLE, diskGainedText, type Project, type ProjectRow } from "./projects.js";
-import { cellWidth, clipCells, clipStart } from "./text-cells.js";
+import { cellWidth, clipCells, clipStart, clipWords } from "./text-cells.js";
 import { costColors, mixHex, ROW_BAR_SOFT, ROW_BAR_STRONG, type ThemeTokens } from "./theme.js";
 
 export interface ProjectsViewProps {
@@ -164,27 +164,44 @@ function ReceiptLine({
   receipt,
   diskFree,
   tokens,
+  width,
 }: {
   receipt: ProjectsReceipt;
   diskFree: number | null;
   tokens: ThemeTokens;
+  width: number;
 }) {
   const motion = useMotionEnabled();
   const counted = useCountUp(receipt.freedBytes, motion);
   const clean = receipt.failed === 0 && !receipt.stopped;
-  const mark = clean ? fg(tokens.positive)("✓ ") : fg(tokens.warning)("! ");
-  const verb = receipt.trash ? " moved to trash" : " freed";
-  const rest = [
-    plural(receipt.removed, "item"),
+  const verb = receipt.trash ? "moved to trash" : "freed";
+  const size = `~${formatBytes(Math.round(counted))}`;
+  const base = `${clean ? "✓" : "!"} ${size} ${verb} · ${plural(receipt.removed, "item")}`;
+  const attention = [
     receipt.failed > 0 ? `${receipt.failed} failed, still queued` : "",
     receipt.unattempted ? `${receipt.unattempted} not attempted` : "",
     receipt.stopped ? "stopped early" : "",
+  ].filter(Boolean);
+  const disk = [
     receipt.diskGained !== undefined && !receipt.trash ? diskGainedText(receipt) : "",
     diskFree !== null && !receipt.trash ? `${formatBytes(diskFree)} free now` : "",
   ].filter(Boolean);
+  const candidates = [
+    [base, ...attention, ...disk].join("  ·  "),
+    [base, ...attention, ...disk.slice(-1)].join("  ·  "),
+    [base, ...attention].join("  ·  "),
+    // At the tightest widths whole lower-priority phrases drop before any
+    // number, unit, or word can be sliced.
+    `${clean ? "✓" : "!"} ${size} ${verb}${attention.length > 0 ? ` · ${attention.join(" · ")}` : ""}`,
+    `${clean ? "✓" : "!"} ${size} ${verb}`,
+  ];
+  const line =
+    candidates.find((candidate) => cellWidth(candidate) <= width) ??
+    candidates[candidates.length - 1]!;
   return (
     <text
-      content={t`${mark}${bold(fg(clean ? tokens.positive : tokens.text)(`~${formatBytes(Math.round(counted))}`))}${fg(tokens.text)(verb)}${fg(tokens.textMuted)(`  ·  ${rest.join("  ·  ")}`)}`}
+      fg={clean ? tokens.positive : tokens.warning}
+      content={cellWidth(line) <= width ? line : clipWords(line, width)}
       wrapMode="none"
     />
   );
@@ -602,7 +619,7 @@ export function ProjectsView(props: ProjectsViewProps) {
     const failure = props.failures?.get(c.path);
     const failedTail = failure
       ? t`${barW > 0 ? "  " : ""}${fg(tokens.danger)(
-          `✗ ${clipCells(sanitizeTerminalText(failure), Math.max(8, detailW + IDLE_W - 2), true)}`,
+          `✗ ${clipCells(sanitizeTerminalText(failure), Math.max(8, detailW + IDLE_W - 2))}`,
         )}`
       : null;
     const nameStyled =
@@ -647,7 +664,12 @@ export function ProjectsView(props: ProjectsViewProps) {
           <text content={status} wrapMode="none" />
         </box>
         {props.receipt && props.selectedCount === 0 && !scanning ? (
-          <ReceiptLine receipt={props.receipt} diskFree={props.diskFree} tokens={tokens} />
+          <ReceiptLine
+            receipt={props.receipt}
+            diskFree={props.diskFree}
+            tokens={tokens}
+            width={cardInner}
+          />
         ) : (
           <text content={answerLine} wrapMode="none" />
         )}

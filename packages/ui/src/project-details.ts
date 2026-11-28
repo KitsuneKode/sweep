@@ -240,16 +240,15 @@ export function reclaimByCost(
   });
 }
 
-/**
- * One line for the confirm: what the queue costs to bring back, by kind of
- * cost, with the command for the biggest of each ("install 5.0 GiB (bun
- * install) · build 3.0 GiB (cargo build)"). Guarded items are not hidden here:
- * the confirm is about everything that will actually be removed.
- */
-export function rebuildSummary(
-  candidates: readonly ScanCandidate[],
-  format: (bytes: number) => string,
-): string {
+export interface RebuildCostShare {
+  cost: RebuildCost;
+  bytes: number;
+  /** How the largest artifact in this bucket comes back (`npm install`, `turbo refills it`). */
+  how: string;
+}
+
+/** Structured form of the confirm's rebuild-cost summary, cheapest first. */
+export function rebuildCostShares(candidates: readonly ScanCandidate[]): RebuildCostShare[] {
   const groups = new Map<RebuildCost, { bytes: number; how: string; top: number }>();
   for (const candidate of candidates) {
     const rebuild = rebuildFor(
@@ -267,8 +266,24 @@ export function rebuildSummary(
   }
   return COST_ORDER.flatMap((cost) => {
     const group = groups.get(cost);
-    if (!group || group.bytes <= 0) return [];
-    const label = cost === "unknown" ? "custom" : cost;
-    return [`${label} ${format(group.bytes)}${cost === "unknown" ? "" : ` (${group.how})`}`];
-  }).join(" · ");
+    return group && group.bytes > 0 ? [{ cost, bytes: group.bytes, how: group.how }] : [];
+  });
+}
+
+/**
+ * One line for the confirm: what the queue costs to bring back, by kind of
+ * cost, with the command for the biggest of each ("install 5.0 GiB (bun
+ * install) · build 3.0 GiB (cargo build)"). Guarded items are not hidden here:
+ * the confirm is about everything that will actually be removed.
+ */
+export function rebuildSummary(
+  candidates: readonly ScanCandidate[],
+  format: (bytes: number) => string,
+): string {
+  return rebuildCostShares(candidates)
+    .map((share) => {
+      const label = share.cost === "unknown" ? "custom" : share.cost;
+      return `${label} ${format(share.bytes)}${share.cost === "unknown" ? "" : ` (${share.how})`}`;
+    })
+    .join(" · ");
 }

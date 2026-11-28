@@ -216,7 +216,7 @@ describe("adversarial: same-drain bursts on the confirm dialog", () => {
       outcomes.push(o),
     );
     await openSingleConfirm();
-    expect(setup.captureCharFrame()).toContain("delete");
+    expect(setup.captureCharFrame()).toContain("Delete");
 
     await act(async () => {
       setup.mockInput.pressKey("n");
@@ -330,7 +330,7 @@ describe("adversarial: same-drain bursts on the queue confirm", () => {
     await settle();
     await new Promise((resolve) => setTimeout(resolve, 150));
     await settle();
-    expect(setup.captureCharFrame()).toContain("delete");
+    expect(setup.captureCharFrame()).toContain("Delete");
 
     await act(async () => {
       setup.mockInput.pressKey("n");
@@ -412,16 +412,16 @@ describe("adversarial: committed applying state", () => {
     fixture.candidates = [fixture.candidates[0]!];
     const { setup, settle, openSingleConfirm } = await mountWithApply(() => {}, undefined, fixture);
     await openSingleConfirm();
-    expect(setup.captureCharFrame()).toContain(" y Delete ");
-    expect(setup.captureCharFrame()).toContain(" n / Esc Cancel ");
+    expect(setup.captureCharFrame()).toContain("y  Delete");
+    expect(setup.captureCharFrame()).toContain("n / esc");
     await act(async () => {
       for (let i = 0; i < 5; i++) setup.mockInput.pressKey("\x1b[6~");
       await setup.flush();
     });
     await settle();
     expect(setup.captureCharFrame()).toContain("tail-marker");
-    expect(setup.captureCharFrame()).toContain(" y Delete ");
-    expect(setup.captureCharFrame()).toContain(" n / Esc Cancel ");
+    expect(setup.captureCharFrame()).toContain("y  Delete");
+    expect(setup.captureCharFrame()).toContain("n / esc");
   });
 
   test("confirmation owns the reviewed paths and metadata instead of live caller objects", async () => {
@@ -462,11 +462,11 @@ describe("adversarial: committed applying state", () => {
       await settle();
     };
     await clickLabel("Review queue");
-    expect(setup.captureCharFrame()).toContain("Permanently delete 1 item");
+    expect(setup.captureCharFrame()).toContain("Delete 1 item");
     expect(applyCalls).toHaveLength(0);
-    await clickLabel("y Delete", 2);
+    await clickLabel("y  Delete", 2);
     expect(applyCalls).toHaveLength(0);
-    await clickLabel("y Delete");
+    await clickLabel("y  Delete");
     expect(applyCalls).toHaveLength(1);
     expect(applyCalls[0]!.plan.selectedCandidateIds).toEqual(["cand_safe"]);
     expect(applyCalls[0]!.plan.candidates).toHaveLength(1);
@@ -509,8 +509,8 @@ describe("adversarial: committed applying state", () => {
       await setup.flush();
     });
     await settle();
-    expect(setup.captureCharFrame()).toContain("0 / 1 removals completed");
-    expect(setup.captureCharFrame()).toContain("counting targets");
+    expect(setup.captureCharFrame()).toContain("Completed 0 of 1");
+    expect(setup.captureCharFrame()).toContain("counting");
     await act(async () => {
       applyCalls[0]!.onProgress?.({
         stage: "applying",
@@ -524,8 +524,8 @@ describe("adversarial: committed applying state", () => {
       await setup.flush();
     });
     await settle();
-    expect(setup.captureCharFrame()).toContain("1,234 entries removed inside this item");
-    expect(setup.captureCharFrame()).toContain("0% of items");
+    expect(setup.captureCharFrame()).toContain("1,234 files removed");
+    expect(setup.captureCharFrame()).toContain("0%");
     await act(async () => {
       applyCalls[0]!.onProgress?.({
         stage: "applying",
@@ -538,10 +538,10 @@ describe("adversarial: committed applying state", () => {
       await setup.renderOnce();
     });
     await settle();
-    expect(setup.captureCharFrame()).toContain("1 / 1 removals completed");
+    expect(setup.captureCharFrame()).toContain("Completed 1 of 1");
     expect(setup.captureCharFrame()).toContain("4.3s");
-    expect(setup.captureCharFrame()).toContain("99% of items");
-    expect(setup.captureCharFrame()).toContain("report pending");
+    expect(setup.captureCharFrame()).toContain("99%");
+    expect(setup.captureCharFrame()).toContain("waiting for the final report");
   });
 
   test("preparation has its own percentage and stopping stays responsive", async () => {
@@ -565,7 +565,7 @@ describe("adversarial: committed applying state", () => {
       });
     });
     await settle();
-    expect(setup.captureCharFrame()).toContain("Size check · 50%");
+    expect(setup.captureCharFrame()).toContain("Checking sizes");
     await act(async () => {
       setup.mockInput.pressEscape();
       await new Promise((resolve) => setTimeout(resolve, 35));
@@ -658,9 +658,9 @@ describe("adversarial: committed applying state", () => {
     });
     await settle();
     const lines = setup.captureCharFrame().split("\n");
-    const y = lines.findIndex((line) => line.includes("click to stop"));
+    const y = lines.findIndex((line) => line.includes("Stop after current item"));
     expect(y).toBeGreaterThanOrEqual(0);
-    const x = lines[y]!.indexOf("Esc / Ctrl+C");
+    const x = lines[y]!.indexOf("esc");
     expect(x).toBeGreaterThanOrEqual(0);
     await act(async () => {
       await setup.mockMouse.click(x, y);
@@ -1014,8 +1014,8 @@ test("confirmation exposes the ceiling and explicit override instructions", asyn
   await openSingleConfirm();
   const frame = setup.captureCharFrame();
   expect(frame).toContain("Size ceiling: 0 GiB");
-  expect(frame).toContain("Override size ceiling");
-  expect(frame).toContain("Over the limit");
+  expect(frame).toContain("Override ceiling");
+  expect(frame).toContain("exceeds by");
 });
 
 test("size-ceiling override is explicit, captured in a burst and reset for the next review", async () => {
@@ -1047,7 +1047,7 @@ test("size-ceiling override is explicit, captured in a burst and reset for the n
   });
   await settle();
   await openSingleConfirm();
-  expect(setup.captureCharFrame()).toContain("Override size ceiling");
+  expect(setup.captureCharFrame()).toContain("Override ceiling");
   expect(setup.captureCharFrame()).not.toContain("overridden for this review");
   await act(async () => {
     setup.mockInput.pressKey("y");
@@ -1065,9 +1065,9 @@ test("uncapped confirmation remains explicit without inventing an over-limit ref
   });
   await openSingleConfirm();
   const frame = setup.captureCharFrame();
-  expect(frame).not.toContain("Override size ceiling");
+  expect(frame).not.toContain("Override ceiling");
   expect(frame).not.toContain("Over the limit");
-  expect(frame).toContain("Permanently delete");
+  expect(frame).toContain("permanent deletion");
 });
 
 test("pausing activity during apply keeps its scope and leaves cancellation responsive", async () => {

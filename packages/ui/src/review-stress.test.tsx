@@ -187,11 +187,11 @@ describe("native terminal worst-case review", () => {
         try {
           await setup.renderOnce();
           const frame = setup.captureCharFrame();
-          expect(frame).toContain("m resume animation");
-          expect(frame).toContain(width < 40 ? "Esc stop" : "Esc / Ctrl+C stop");
+          expect(frame).toContain("Resume motion");
+          expect(frame).toContain(width < 40 ? "Stop" : "Stop after current item");
           const lines = frame.split("\n");
-          const y = lines.findIndex((line) => line.includes("Esc"));
-          const x = lines[y]!.indexOf("Esc");
+          const y = lines.findIndex((line) => line.includes("esc"));
+          const x = lines[y]!.indexOf("esc");
           await act(async () => {
             await setup.mockMouse.click(x, y);
           });

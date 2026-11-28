@@ -72,8 +72,8 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
         viewed = inspected.group(1)
         output.clear()
         os.write(master, b"x")
-        wait_until(lambda: "Permanently delete" in text())
-        wait_until(lambda: re.search(rf"·\s*{viewed}/node_modules\b", text()) is not None)
+        wait_until(lambda: "permanent deletion" in text() and "y  Delete" in text())
+        wait_until(lambda: re.search(rf"[✓!✗]\s+{viewed}/node_modules\b", text()) is not None)
         if not all((root / name / "node_modules").exists() for name in ["alpha", "bravo"]):
             raise RuntimeError("removal occurred before confirmation")
         os.write(master, b"y")

@@ -202,16 +202,13 @@ describe("layout across terminal sizes", () => {
     const setup = await mount(120, 34);
     await send(setup, (mock) => mock.pressKey("\x1b[13;5u"));
     let frame = setup.captureCharFrame();
-    expect(frame).toContain("Permanently delete");
-    expect(frame).toContain("estimated size");
-    expect(frame).not.toContain("will be freed");
+    expect(frame).toContain("Delete 2 items");
     expect(frame).toContain("Move to trash instead");
 
     await press(setup, "t");
     frame = setup.captureCharFrame();
     expect(frame).toContain("Move to trash");
-    expect(frame).toContain("estimated size");
-    expect(frame).toContain("Delete permanently instead");
+    expect(frame).toContain("Delete permanently");
   });
 
   test("choosing trash in the dialog is reported in the apply outcome", async () => {

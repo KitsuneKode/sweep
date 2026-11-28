@@ -449,7 +449,7 @@ describe("sweep TUI render", () => {
     });
     await paint();
     expect(setup.captureCharFrame()).toContain("Review removal");
-    expect(setup.captureCharFrame()).not.toContain("Permanently delete");
+    expect(setup.captureCharFrame()).not.toContain("Delete 1 item");
     const click = async (label: string) => {
       const lines = setup.captureCharFrame().split("\n");
       const y = lines.findIndex((line) => line.includes(label));
@@ -466,8 +466,8 @@ describe("sweep TUI render", () => {
     await click("Queue safe");
     expect(setup.captureCharFrame()).toContain("Review queue (1)");
     await click("Review queue (1)");
-    expect(setup.captureCharFrame()).toContain("Permanently delete 1 item");
-    await click("n / Esc Cancel");
+    expect(setup.captureCharFrame()).toContain("Delete 1 item");
+    await click("n / esc");
     expect(setup.captureCharFrame()).toContain("Review queue (1)");
     expect(outcomes).toEqual([]);
   });
@@ -530,7 +530,7 @@ describe("sweep TUI render", () => {
       await setup.renderOnce();
     });
     await paint();
-    expect(setup.captureCharFrame()).toContain("Permanently delete");
+    expect(setup.captureCharFrame()).toContain("Delete 1 item");
     expect(outcomes).toEqual([]);
     await act(async () => {
       setup.mockInput.pressKey("y");
@@ -697,7 +697,7 @@ describe("sweep TUI render", () => {
       await setup.flush();
     });
     await settle();
-    expect(setup.captureCharFrame()).toContain("Permanently delete");
+    expect(setup.captureCharFrame()).toContain("Delete 1 item");
     expect(outcomes).toEqual([]);
   });
 
@@ -1186,7 +1186,7 @@ test("an explicitly reviewed trash flip off survives the exit apply outcome", as
   await act(async () => {
     await setup.renderOnce();
   });
-  expect(setup.captureCharFrame()).toContain("Permanently delete");
+  expect(setup.captureCharFrame()).toContain("Delete 1 item");
   await act(async () => {
     setup.mockInput.pressKey("y");
     await setup.flush();
@@ -1704,7 +1704,7 @@ test("the review says what the queue costs to bring back", async () => {
   await press(setup, "a");
   await press(setup, "c");
   const frame = setup.captureCharFrame();
-  expect(frame).toContain("comes back by");
   expect(frame).toContain("install");
   expect(frame).toContain("build");
+  expect(frame).toMatch(/\((npm|bun|pnpm) install\)|\(the project's build\)/);
 });

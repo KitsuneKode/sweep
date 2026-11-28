@@ -73,11 +73,19 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
         viewed = inspected.group(1)
         output.clear()
         os.write(master, b"x")
-        wait_until(lambda: "Permanently delete" in text())
-        wait_until(lambda: re.search(rf"·\s*{viewed}/node_modules\b", text()) is not None)
+        wait_until(lambda: "permanent deletion" in text() and "y  Delete" in text())
+        output.clear()
+        os.write(master, b"t")
+        wait_until(lambda: "move to trash" in text() and "Move to trash" in text())
+        os.write(master, b"t")
+        wait_until(lambda: "permanent deletion" in text() and "y  Delete" in text())
+        wait_until(lambda: re.search(rf"[✓!✗]\s+{viewed}/node_modules\b", text()) is not None)
         if not all((root / name / "node_modules").exists() for name in ["alpha", "bravo"]):
             raise RuntimeError("removal occurred before confirmation")
         if options.size_override:
+            compact = re.sub(r"[│\s]+", " ", text())
+            if not re.search(r"Size ceiling: 0 GiB · exceeds by 2 B · checked again before removal", compact):
+                raise RuntimeError(f"size-ceiling safety line missing or clipped: {compact[-1200:]}")
             os.write(master, b"y")
             wait_until(lambda: "Nothing removed" in text())
             if not all((root / name / "node_modules/file").exists() for name in ["alpha", "bravo"]):
@@ -86,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix="sweep-focused-pty-", dir=REPO / "target
                 raise RuntimeError("preflight refusal invalidated the scan")
             output.clear()
             os.write(master, b"x")
-            wait_until(lambda: "Permanently delete" in text())
+            wait_until(lambda: "permanent deletion" in text() and "y  Delete" in text())
             os.write(master, b"f")
             wait_until(lambda: "overridden for this review only" in text())
         os.write(master, b"y")
