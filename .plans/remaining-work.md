@@ -1,15 +1,21 @@
 Status: in_progress
 Scope: repo
 Created: 2026-10-15
-Updated: 2026-11-27
-Commit: t3/land-worktree-audit-fixes
+Updated: 2026-11-28
+Commit: uncommitted
 
 # Remaining work ledger
 
-Single source of truth for open work after checkpoint bfe1eab (9/9 local steps,
+Historical ledger of open work after checkpoint bfe1eab (9/9 local steps,
 8/8 hosted jobs). Older audit plans keep their history and evidence; their open
 items are mapped to the IDs below and tracked here. Update this file on every
 merge: move an item to "Closed" with its commit SHA, never delete it silently.
+
+For 0.6.0 execution order, release gates, issue mapping, rc process, promotion,
+and rollback, use [release-0.6.0.md](release-0.6.0.md) as the authoritative
+plan. Do not duplicate that sequencing here; update this ledger only with
+stable gate status and landed-commit evidence. Several rows below predate the
+November 28 audit merges and may be stale until W0-1 reconciles them.
 
 Nothing in this ledger has been published. A green checkpoint is a tested
 baseline, not 200–600 GiB readiness or full filesystem-race protection.
