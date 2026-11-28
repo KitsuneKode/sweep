@@ -48,8 +48,11 @@ sweep apply --plan sweep-plan.json
 
 Saved plans contain paths, candidate IDs, selections and provenance. Treat them
 as local operational data. Applying revalidates the filesystem; a saved plan is
-not permission to follow an arbitrary changed path. Inspecting is not a signature
-check or proof that a plan from another person is trustworthy.
+not permission to follow an arbitrary changed path. Without `--yes`, `sweep
+apply --plan` confirms interactively with the resolved target directory, item
+count, estimated size, and any dangerous-item count (and lists each dangerous
+path before the prompt). Inspecting is not a signature check or proof that a
+plan from another person is trustworthy.
 
 ## Frequently used options
 

@@ -24,6 +24,7 @@ import {
   assertDangerousConsent,
   assertOpenTuiAvailable,
   executePlanDeletion,
+  formatConfirmPlanPrompt,
   isOpenTuiAvailable,
   openTuiMissingMessage,
   resetEngineFallbackNoteForTest,
@@ -575,3 +576,33 @@ test.skipIf(!hasGit)(
     }
   },
 );
+
+test("formatConfirmPlanPrompt includes target, symlink resolution, and live-verified dangerous count for apply --plan", async () => {
+  const root = mkdtempSync(join(tmpdir(), "sweep-confirm-prompt-"));
+  roots.push(root);
+  const target = join(root, "proj");
+  mkdirSync(join(target, "node_modules"), { recursive: true });
+  mkdirSync(join(target, "target"), { recursive: true });
+  writeFileSync(join(target, "node_modules", "a.js"), "x".repeat(1024));
+  writeFileSync(join(target, "target", "keep.txt"), "y".repeat(2048));
+
+  const { plan } = await scanToPlan(target, DEFAULT_CONFIG, {
+    selectionPolicy: { mode: "all", includeDangerous: true },
+  });
+
+  // Even if a saved plan tampers with riskTier on unmarked `target`, live
+  // classification still flags it as dangerous in the confirmation prompt.
+  const tampered: ScanPlan = {
+    ...plan,
+    candidates: plan.candidates.map((c) => ({ ...c, riskTier: "safe" })),
+  };
+  const prompt = await formatConfirmPlanPrompt(tampered, { mode: "plan" });
+  expect(prompt).toContain("Apply plan with 2 items");
+  expect(prompt).toContain(target);
+  expect(prompt).toContain("· 1 dangerous");
+
+  const trashPrompt = await formatConfirmPlanPrompt(tampered, { mode: "plan", trash: true });
+  expect(trashPrompt).toContain("Move 2 plan items to .sweep-trash");
+  expect(trashPrompt).toContain(target);
+  expect(trashPrompt).toContain("· 1 dangerous");
+});
