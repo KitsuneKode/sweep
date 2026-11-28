@@ -125,7 +125,7 @@ export function ProjectsHelp({ tokens, width }: { tokens: ThemeTokens; width: nu
   const modalWidth = Math.min(bodyWidth + 10, Math.max(28, width - 4));
   const bodyLines = HELP_PROJECTS.length;
   return (
-    <Modal tokens={tokens} title=" keys " width={modalWidth} height={bodyLines + 2 + 4}>
+    <Modal tokens={tokens} title="Keyboard shortcuts" width={modalWidth} height={bodyLines + 2 + 4}>
       {helpColumn(HELP_PROJECTS, keyWidth, tokens)}
       <text content="" />
       <text
@@ -168,7 +168,7 @@ export function HelpOverlay({ tokens, width }: { tokens: ThemeTokens; width: num
   const modalHeight = bodyLines + 3 + 4; // syntax + exit lines, border + padding
 
   return (
-    <Modal tokens={tokens} title=" keys " width={modalWidth} height={modalHeight}>
+    <Modal tokens={tokens} title="Keyboard shortcuts" width={modalWidth} height={modalHeight}>
       {twoCol ? (
         <box flexDirection="row" gap={4}>
           {helpColumn(HELP_LEFT, keyWidth, tokens)}

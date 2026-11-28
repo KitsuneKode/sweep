@@ -58,7 +58,7 @@ export function InspectOverlay({
   return (
     <Modal
       tokens={tokens}
-      title=" artifact "
+      title="Artifact details"
       width={64}
       height={22}
       footer={

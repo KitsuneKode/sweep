@@ -224,3 +224,22 @@ describe("unknown project activity (D4)", () => {
     expect(older?.(unprovable, { selectedIds: new Set(), now: NOW })).toBe(false);
   });
 });
+
+describe("B4: unknown project activity never falls back to artifact mtime", () => {
+  test("a project with modifiedMs but no projectActiveMs stays unknown with activeMs undefined", () => {
+    const now = Date.parse("2026-11-28T12:00:00Z");
+    const [project] = buildProjects(
+      [
+        {
+          ...candidate(0, 4096),
+          modifiedMs: now - 5_000,
+        },
+      ],
+      new Set(),
+      "/work",
+      now,
+    );
+    expect(project?.section).toBe("unknown");
+    expect(project?.activeMs).toBeUndefined();
+  });
+});

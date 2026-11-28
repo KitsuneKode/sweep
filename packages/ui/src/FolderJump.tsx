@@ -87,7 +87,7 @@ export function FolderJump({
   return (
     <Modal
       tokens={tokens}
-      title=" switch folder "
+      title="Switch folder"
       width={WIDTH}
       height={Math.min(height - 2, room + 12)}
       footer={

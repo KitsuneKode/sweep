@@ -74,14 +74,12 @@ test.skipIf(process.platform === "win32")(
     const state = createUiState(
       planWith([make("literal", "/repo/a\\b/target"), make("nested", "/repo/a/b/target")]),
     );
-    // Two folders, never merged: each artifact stands alone under its own path.
+    // Two folders, never merged: each gets its own header and item row.
+    const rows = buildDisplayRows(state);
+    expect(rows.filter((row) => row.kind === "header")).toHaveLength(2);
+    expect(rows.filter((row) => row.kind === "item")).toHaveLength(2);
     expect(
-      buildDisplayRows(state).map((row) => (row.kind === "item" ? row.groupLabel : row.label)),
-    ).toHaveLength(2);
-    expect(
-      new Set(
-        buildDisplayRows(state).map((row) => (row.kind === "item" ? row.groupLabel : row.label)),
-      ).size,
+      new Set(rows.map((row) => (row.kind === "item" ? row.groupLabel : row.label))).size,
     ).toBe(2);
     const scoped = setScopeFilter(state, "a/b");
     expect(getVisibleCandidates(scoped).map((c) => c.id)).toEqual(["nested"]);
@@ -89,7 +87,7 @@ test.skipIf(process.platform === "win32")(
     expect([...queued.state.selectedIds]).toEqual(["nested"]);
     expect(queued.queued).toBe(1);
     expect(buildDisplayRows(scoped).filter((row) => row.kind === "item")).toEqual([
-      { kind: "item", candidateId: "nested", groupLabel: "a/b/", standalone: true },
+      { kind: "item", candidateId: "nested", groupLabel: "a/b/" },
     ]);
     const literal = setScopeFilter({ ...state, orderPinned: true }, "a\\b");
     expect(getVisibleCandidates(literal).map((c) => c.id)).toEqual(["literal"]);
@@ -120,7 +118,7 @@ function planWith(candidates: ScanPlan["candidates"]): ScanPlan {
 }
 
 describe("buildDisplayRows", () => {
-  test("lists a folder's only artifact as one standalone row naming its folder", () => {
+  test("emits a group header for every single-artifact folder so no orphan row floats under a neighbour (B5 / UX §9)", () => {
     const state = createUiState(
       planWith([
         {
@@ -150,16 +148,19 @@ describe("buildDisplayRows", () => {
       ]),
     );
 
-    // No header to repeat the folder: the row carries it, and header-relative
-    // keys see it as ungrouped rather than part of the group above.
     const rows = buildDisplayRows(state);
-    expect(rows.map((row) => row.kind)).toEqual(["item", "item"]);
-    expect(rows.every((row) => row.kind === "item" && row.standalone)).toBe(true);
-    expect(rows.map((row) => (row.kind === "item" ? row.groupLabel : "")).sort()).toEqual([
-      "apps/cli/",
-      "apps/docs/",
+    expect(rows.map((row) => row.kind)).toEqual(["header", "item", "header", "item"]);
+    expect(
+      rows
+        .filter((row) => row.kind === "header")
+        .map((row) => ({ label: row.label, itemCount: row.itemCount }))
+        .sort((x, y) => x.label.localeCompare(y.label)),
+    ).toEqual([
+      { label: "apps/cli/", itemCount: 1 },
+      { label: "apps/docs/", itemCount: 1 },
     ]);
-    expect(owningHeaderIndex(rows, 1)).toBe(-1);
+    expect(owningHeaderIndex(rows, 1)).toBe(0);
+    expect(owningHeaderIndex(rows, 3)).toBe(2);
   });
 
   test("keeps a heading when several artifacts share a parent", () => {
@@ -378,7 +379,7 @@ test("selection refreshes headers while reusing ordered item rows", () => {
   expect(after[0]).toMatchObject({ selectedCount: 1, bytes: 84 });
   const filtered = buildDisplayRows({ ...state, filter: "is:queued" });
   expect(filtered).toHaveLength(0);
-  // One queued artifact left in the folder: it stands alone.
+  // One queued artifact left in the folder: header + item row.
   const queued = buildDisplayRows({ ...state, filter: "is:queued", selectedIds: new Set(["a"]) });
-  expect(queued).toHaveLength(1);
+  expect(queued.map((row) => row.kind)).toEqual(["header", "item"]);
 });

@@ -96,6 +96,14 @@ describe("scope sidebar rows", () => {
     expect(narrow.showBytes).toBe(false);
     expect(narrow.maxLabelWidth).toBeGreaterThanOrEqual(6);
   });
+
+  test("B12: sidebarColumnLayout keeps room for 'All folders' (11 chars) at 100-col empty sidebar widths", () => {
+    // At 100 cols: sidebarWidth=32, paneWidth=28, inner width passed to layout = 25.
+    for (const width of [19, 22, 24, 25, 28, 31]) {
+      const layout = sidebarColumnLayout(width, 1, 6, 0);
+      expect(layout.maxLabelWidth, `width=${width}`).toBeGreaterThanOrEqual(11);
+    }
+  });
 });
 
 describe("column widths on large trees", () => {

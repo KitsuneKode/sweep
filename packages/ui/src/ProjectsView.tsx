@@ -522,8 +522,11 @@ export function ProjectsView(props: ProjectsViewProps) {
           : p.queueableBytes >= GIB
             ? tokens.text
             : tokens.textSecondary;
-      const idle = (p.section === "unknown" ? "?" : formatAge(p.activeMs, now)).padStart(IDLE_W);
-      const recent = p.activeMs !== undefined && now - p.activeMs < RECENT_WINDOW_MS;
+      const unknownIdle = p.section === "unknown" || p.activeMs === undefined;
+      const idle = (unknownIdle ? "?" : formatAge(p.activeMs, now)).padStart(IDLE_W);
+      const recent =
+        !unknownIdle && p.activeMs !== undefined && now - p.activeMs < RECENT_WINDOW_MS;
+      const idleColor = unknownIdle ? tokens.textDim : recent ? tokens.info : tokens.textMuted;
       const risk = riskLabel(p);
       const where = p.parent ? sanitizeTerminalText(p.parent) : "";
       const clipWhere = (maxW: number) =>
@@ -553,7 +556,7 @@ export function ProjectsView(props: ProjectsViewProps) {
               },
             }
           : {}),
-        tail: t`${barW > 0 ? "  " : ""}${fg(recent ? tokens.info : tokens.textMuted)(idle)}   ${fg(
+        tail: t`${barW > 0 ? "  " : ""}${fg(idleColor)(idle)}   ${fg(
           p.dangerous > 0 ? tokens.danger : tokens.warning,
         )(padCells(risk, riskColW))}${fg(tokens.textDim)(detail)}`,
       };

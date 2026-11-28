@@ -66,12 +66,16 @@ export function sidebarColumnLayout(
   const indent = Math.max(0, depth) * 2;
   // Disclosure marker, its space and two cells of wrap safety.
   const base = paneWidth - indent - 4;
-  const minLabel = 10;
+  // Reserve enough label room for short standard labels ("All folders",
+  // "Target root" = 11 cells) before keeping count/bytes columns, so a short
+  // label never truncates to "All f…ders".
+  const minLabel = 12;
+  const minLabelWithBytes = 11;
   let showCount = true;
   let showBytes = paneWidth >= 22;
   const label = () => base - (showCount ? countWidth + 2 : 0) - (showBytes ? bytesWidth + 2 : 0);
   if (label() < minLabel) showCount = false;
-  if (label() < 8 && showBytes) {
+  if (label() < minLabelWithBytes && showBytes) {
     showBytes = false;
     showCount = true;
     if (label() < minLabel) showCount = false;

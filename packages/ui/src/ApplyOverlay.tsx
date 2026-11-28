@@ -53,7 +53,7 @@ export function ApplyOverlay({
   return (
     <Modal
       tokens={tokens}
-      title=" applying "
+      title={stopping ? "Stopping removal" : trash ? "Moving to trash" : "Removing artifacts"}
       titleColor={tokens.info}
       width={72}
       height={17}

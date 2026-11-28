@@ -271,8 +271,7 @@ export function ArtifactList({
                 metrics={metrics}
                 tokens={tokens}
                 targetDir={targetDir}
-                // A standalone row names its own folder; grouped rows defer to the header.
-                groupLabel={row.standalone ? undefined : row.groupLabel}
+                groupLabel={row.groupLabel}
                 onSetCursor={onSetCursor}
                 onToggleSelection={onToggleSelection}
                 onHover={handleHover}

@@ -397,7 +397,7 @@ export function buildArtifactRow(
   return { content: joinStyled(parts), bar: rowBar };
 }
 
-function styledWidth(text: Pick<StyledText, "chunks">): number {
+export function styledWidth(text: Pick<StyledText, "chunks">): number {
   return text.chunks.reduce((sum, chunk) => sum + cellWidth(chunk.text), 0);
 }
 
@@ -674,6 +674,22 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
         t`  ${fg(tokens.textDim)(row.collapsed ? "· l/space expands" : "· h/space collapses")}`,
       );
     }
+    if (state.scanning) {
+      if (state.candidates.length === 0) {
+        const dirs =
+          state.scannedDirs > 0
+            ? ` · ${state.scannedDirs.toLocaleString()} folder${state.scannedDirs === 1 ? "" : "s"} checked`
+            : "";
+        return t`${fg(tokens.textMuted)(`Scanning for artifacts…${dirs}`)}`;
+      }
+      const hasNarrowing =
+        state.filter.length > 0 || state.riskFilter !== "all" || state.scopeFilter !== null;
+      return t`${fg(tokens.textMuted)(
+        hasNarrowing
+          ? `Scanning… no matches yet (${state.candidates.length.toLocaleString()} found)`
+          : `Scanning… ${state.candidates.length.toLocaleString()} found so far`,
+      )}`;
+    }
     return t`${fg(tokens.textDim)("No matching artifacts.")}`;
   }
 
@@ -733,6 +749,12 @@ export interface FooterHint {
   press?: KeyInput;
   /** The next step: drawn in the accent so it is found first. */
   next?: boolean;
+  /** Disabled hints stay visible in dimmed tones and ignore clicks. */
+  disabled?: boolean;
+  /** Semantic keycap fill for primary/destructive/warning modal actions. */
+  tone?: "accent" | "danger" | "warning";
+  /** Lower number = higher priority when fitting narrow statuslines (default 2). */
+  priority?: number;
 }
 
 const press = (name: string, ctrl = false): KeyInput => (ctrl ? { name, ctrl } : { name });
@@ -755,20 +777,24 @@ export function footerHintItems(
     queued?: boolean;
   } = {},
 ): FooterHint[] {
-  const h = (key: string, label: string, sent?: KeyInput): FooterHint =>
-    sent ? { key, label, press: sent } : { key, label };
-  const move = h("↑↓", "move");
-  const queue = h("space", "queue", press("space"));
-  const keys = h("?", "keys", press("?"));
-  const actions = h("Ctrl+K", "actions", press("k", true));
-  const quit = h("ctrl-c", "quit", press("c", true));
-  const review = options.queued ? [h("c", "review", press("c"))] : [];
+  const h = (key: string, label: string, sent?: KeyInput, priority?: number): FooterHint => ({
+    key,
+    label,
+    ...(sent ? { press: sent } : {}),
+    ...(priority !== undefined ? { priority } : {}),
+  });
+  const move = h("↑↓", "move", undefined, 2);
+  const queue = h("space", "queue", press("space"), 1);
+  const keys = h("?", "keys", press("?"), 0);
+  const actions = h("Ctrl+K", "actions", press("k", true), 2);
+  const quit = h("ctrl-c", "quit", press("c", true), 0);
+  const review = options.queued ? [h("c", "review", press("c"), 1)] : [];
 
   // Narrow terminals: never clip a hint mid-word - swap to a minimal set.
   // Modal hints are already short enough to survive, so this only rewrites
   // the long pane hint rows.
   // With a queue, the review key outranks "↑↓ move", which is only a description.
-  if (options.compact && context.kind === "pane")
+  if (options.compact && context.kind === "pane" && context.focus !== "patterns")
     return review.length > 0 ? [queue, ...review, keys] : [move, queue, keys];
   // Mid widths keep the actions palette, the way to everything else.
   if (options.medium && context.kind === "pane" && context.focus === "list")
@@ -778,31 +804,31 @@ export function footerHintItems(
     case "confirm":
       // One hint per distinct action - "n cancel · esc back" says one thing twice.
       return [
-        h("y", "confirm", press("y")),
-        h("n/esc", "cancel", press("escape")),
-        h("t", "trash", press("t")),
+        h("y", "confirm", press("y"), 0),
+        h("n/esc", "cancel", press("escape"), 0),
+        h("t", "trash", press("t"), 1),
         quit,
       ];
     case "configSave":
-      return [h("y", "save patterns", press("y")), h("n/esc", "cancel", press("escape"))];
+      return [h("y", "save patterns", press("y"), 0), h("n/esc", "cancel", press("escape"), 0)];
     case "help":
-      return [h("esc", "close", press("escape")), quit];
+      return [h("esc", "close", press("escape"), 0), quit];
     case "inspect":
-      return [h("i/esc", "close", press("escape")), quit];
+      return [h("i/esc", "close", press("escape"), 0), quit];
     case "visual":
       return [
-        h("↑↓", "extend"),
-        h("space", "queue range", press("space")),
-        h("v/esc", "cancel", press("escape")),
+        h("↑↓", "extend", undefined, 2),
+        h("space", "queue range", press("space"), 1),
+        h("v/esc", "cancel", press("escape"), 0),
       ];
     case "scanError":
       return [
-        h("r", "retry", press("r")),
-        h("esc", "dismiss", press("escape")),
-        h("q", "quit", press("q")),
+        h("r", "retry", press("r"), 0),
+        h("esc", "dismiss", press("escape"), 0),
+        h("q", "quit", press("q"), 1),
       ];
     case "applying":
-      return [h("ctrl-c", "stop scheduling - report still lands", press("c", true))];
+      return [h("ctrl-c", "stop scheduling - report still lands", press("c", true), 0)];
     case "pane":
       break;
   }
@@ -810,29 +836,29 @@ export function footerHintItems(
   switch (context.focus) {
     case "patterns":
       return [
-        h("space", "toggle", press("space")),
-        h("/", "find", press("/")),
-        h("a", "add", press("a")),
-        h("d", "del custom", press("d")),
-        h("w", "save .sweeprc", press("w")),
-        h("r", options.patternsDirty ? "rescan*" : "rescan", press("r")),
-        h("esc", "back", press("escape")),
+        h("space", "toggle", press("space"), 1),
+        h("/", "find", press("/"), 4),
+        h("a", "add", press("a"), 3),
+        h("d", "del custom", press("d"), 5),
+        h("w", "save .sweeprc", press("w"), 2),
+        h("r", options.patternsDirty ? "rescan*" : "rescan", press("r"), 1),
+        h("esc", "back", press("escape"), 0),
       ];
     case "patternInput":
-      return [h("enter", "done", press("return")), h("esc", "back", press("escape")), quit];
+      return [h("enter", "done", press("return"), 1), h("esc", "back", press("escape"), 0), quit];
     case "sidebar":
       return [
         move,
-        h("l/h", "expand/fold"),
-        h("enter", "browse", press("return")),
-        h("space", "queue folder", press("space")),
+        h("l/h", "expand/fold", undefined, 3),
+        h("enter", "browse", press("return"), 1),
+        h("space", "queue folder", press("space"), 1),
         keys,
       ];
     case "search":
       return [
-        h("enter", "list", press("return")),
-        h("esc", "clear", press("escape")),
-        h("tab", "panes", press("tab")),
+        h("enter", "list", press("return"), 1),
+        h("esc", "clear", press("escape"), 0),
+        h("tab", "panes", press("tab"), 2),
         quit,
       ];
     default:
@@ -840,11 +866,109 @@ export function footerHintItems(
         move,
         queue,
         ...review,
-        h("enter", "details", press("return")),
+        h("enter", "details", press("return"), 3),
         actions,
-        h("/", "filter", press("/")),
+        h("/", "filter", press("/"), 4),
       ];
   }
+}
+
+/** Rendered cell width of one keycap or plain footer hint. */
+export function footerHintWidth(hint: FooterHint, variant: "caps" | "plain" = "caps"): number {
+  const keyW = variant === "caps" ? cellWidth(hint.key) + 2 : cellWidth(hint.key);
+  return keyW + 1 + cellWidth(hint.label);
+}
+
+/**
+ * Fit hints into `maxWidth` cells by dropping whole lowest-priority hints
+ * first while keeping remaining hints in their natural display order.
+ */
+export function fitFooterHints(
+  hints: readonly FooterHint[],
+  maxWidth: number,
+  variant: "caps" | "plain" = "caps",
+): FooterHint[] {
+  if (hints.length === 0 || maxWidth <= 0) return [];
+  const gap = variant === "plain" ? 3 : 2;
+  const totalWidth = (list: readonly FooterHint[]) =>
+    list.reduce(
+      (sum, hint, index) => sum + (index > 0 ? gap : 0) + footerHintWidth(hint, variant),
+      0,
+    );
+
+  if (totalWidth(hints) <= maxWidth) return [...hints];
+
+  const kept = [...hints];
+  while (kept.length > 0 && totalWidth(kept) > maxWidth) {
+    let dropIndex = kept.length - 1;
+    let worstPriority = kept[dropIndex]!.priority ?? 2;
+    for (let i = kept.length - 2; i >= 0; i--) {
+      const priority = kept[i]!.priority ?? 2;
+      if (priority > worstPriority) {
+        worstPriority = priority;
+        dropIndex = i;
+      }
+    }
+    kept.splice(dropIndex, 1);
+  }
+  return kept;
+}
+
+/**
+ * Priority-tiered statusline fitting: guarantees the mode chip, left key hints,
+ * optional filter chips, and right-side queue tally never collide or clip
+ * mid-word. Whole segments drop by priority instead of overwriting each other.
+ */
+export function fitStatusLine(options: {
+  totalWidth: number;
+  modeWidth: number;
+  hints: readonly FooterHint[];
+  tallyWidth: number;
+  riskChipWidth?: number;
+  scopeChipWidth?: number;
+  variant?: "caps" | "plain";
+}): {
+  hints: FooterHint[];
+  showTally: boolean;
+  showRiskChip: boolean;
+  showScopeChip: boolean;
+} {
+  const variant = options.variant ?? "caps";
+  const gap = variant === "plain" ? 3 : 2;
+  // 1-cell left gap between the mode chip and the hints strip.
+  const innerBudget = Math.max(0, options.totalWidth - options.modeWidth - 1);
+  const tallyReserve = options.tallyWidth > 0 ? options.tallyWidth + 3 : 0; // paddingLeft=2, paddingRight=1
+  const riskReserve =
+    options.riskChipWidth && options.riskChipWidth > 0 ? options.riskChipWidth : 0;
+  const scopeReserve =
+    options.scopeChipWidth && options.scopeChipWidth > 0 ? options.scopeChipWidth : 0;
+
+  const listWidth = (list: readonly FooterHint[]) =>
+    list.reduce(
+      (sum, hint, index) => sum + (index > 0 ? gap : 0) + footerHintWidth(hint, variant),
+      0,
+    );
+
+  const coreHints = options.hints.filter((hint) => (hint.priority ?? 2) <= 1);
+  const coreWidth = listWidth(coreHints.length > 0 ? coreHints : options.hints.slice(0, 2));
+
+  const showTally = tallyReserve > 0 && innerBudget - tallyReserve >= coreWidth;
+  let remaining = innerBudget - (showTally ? tallyReserve : 0);
+
+  const fullHintsWidth = listWidth(options.hints);
+  let showRiskChip = false;
+  let showScopeChip = false;
+  if (riskReserve > 0 && fullHintsWidth + riskReserve <= remaining) {
+    showRiskChip = true;
+    remaining -= riskReserve;
+  }
+  if (scopeReserve > 0 && fullHintsWidth + scopeReserve <= remaining) {
+    showScopeChip = true;
+    remaining -= scopeReserve;
+  }
+
+  const hints = fitFooterHints(options.hints, remaining, variant);
+  return { hints, showTally, showRiskChip, showScopeChip };
 }
 
 /** The hints as one styled line: keys as keycaps, spacing between hints. */

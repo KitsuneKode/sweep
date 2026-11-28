@@ -24,12 +24,6 @@ export type UiDisplayRow =
        * parent path when it would just repeat this.
        */
       groupLabel: string;
-      /**
-       * A folder's only artifact, listed without a header. The row names its
-       * own folder, so it never reads as part of the group above, and
-       * header-relative keys (fold, sticky header) treat it as ungrouped.
-       */
-      standalone?: true;
     };
 
 function itemComparator(sortBy: UiSortBy): (a: ScanCandidate, b: ScanCandidate) => number {
@@ -265,20 +259,8 @@ function computeDisplayRows(state: SweepUiState): UiDisplayRow[] {
       state.selectedIds.has(candidate.id),
     ).length;
 
-    // A folder with one artifact is one row: a header would only repeat it.
-    // The row carries its folder path, so it cannot be mistaken for part of
-    // the group above. Live (pinned) scans keep every header - there a
-    // second artifact arriving would push a heading in above the cursor.
-    if (groupCandidates.length === 1) {
-      rows.push({
-        kind: "item",
-        candidateId: groupCandidates[0]!.id,
-        groupLabel: group.label,
-        standalone: true,
-      });
-      continue;
-    }
-
+    // Every folder group emits a header (UX principle §5a & §9) so a
+    // single-artifact folder never floats as an orphan beneath the group above.
     const collapsed = state.collapsedGroups.has(group.key);
     const bytes = groupCandidates.reduce((sum, candidate) => sum + candidate.estimatedBytes, 0);
     rows.push({
@@ -395,8 +377,6 @@ export function owningHeaderIndex(rows: UiDisplayRow[], rowIndex: number): numbe
   for (let i = Math.min(rowIndex, rows.length - 1); i >= 0; i--) {
     const row = rows[i];
     if (row?.kind === "header") return i;
-    // A standalone row belongs to no header; the one above is a neighbour's.
-    if (row?.kind === "item" && row.standalone) return -1;
   }
   return -1;
 }

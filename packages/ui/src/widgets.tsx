@@ -3,18 +3,78 @@ import type { ScrollBoxRenderable, TextChunk } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DOT_GRID, dotFrame, dotRamp, dotStrip, type DotPattern } from "./dot-matrix.js";
+import { KeyHints } from "./KeyHints.js";
+import type { FooterHint } from "./presentation.js";
 import type { ThemeTokens } from "./theme.js";
 import { useMotionEnabled } from "./motion.js";
+
+/** One action inside `<ModalFooter>`, rendered with the shared Direction C+ keycap component. */
+export interface ModalFooterAction {
+  key: string;
+  label: string;
+  onPress?: (() => void) | undefined;
+  /** Primary next step: rendered on the Clove accent fill (or semantic `tone`). */
+  primary?: boolean;
+  disabled?: boolean;
+  tone?: "accent" | "danger" | "warning";
+}
+
+/**
+ * Shared Direction C+ modal footer: a 1-row `tokens.border` hairline above
+ * content-sized keycap actions rendered through the same `KeyHints` component
+ * as the Projects footer. Wraps cleanly onto a second row on narrow terminals
+ * instead of clipping or stretching controls full-width.
+ */
+export function ModalFooter({
+  tokens,
+  actions,
+}: {
+  tokens: ThemeTokens;
+  actions: readonly ModalFooterAction[];
+}) {
+  const hints: FooterHint[] = actions.map((action, index) => ({
+    key: action.key,
+    label: action.label,
+    ...(action.primary ? { next: true } : {}),
+    ...(action.disabled ? { disabled: true } : {}),
+    ...(action.tone ? { tone: action.tone } : {}),
+    ...(action.onPress ? { press: { name: `modal-action-${index}` } } : {}),
+  }));
+  return (
+    <box
+      width="100%"
+      flexDirection="column"
+      alignItems="flex-start"
+      flexShrink={0}
+      marginTop={1}
+      border={["top"]}
+      borderStyle="single"
+      borderColor={tokens.border}
+    >
+      <KeyHints
+        variant="caps"
+        wrap
+        tokens={tokens}
+        hints={hints}
+        onPress={(pressed) => {
+          const match = /^modal-action-(\d+)$/.exec(pressed.name ?? "");
+          if (!match) return;
+          actions[Number(match[1])]?.onPress?.();
+        }}
+      />
+    </box>
+  );
+}
 
 /**
  * Full-screen scrim + centered dialog. Children render inside a rounded,
  * bordered card; the scrim dims and swallows attention behind it.
  *
- * The card is clamped to the viewport on both axes. A fixed-size box centered
- * in a terminal smaller than the box gets negative layout offsets on both
- * axes, and that combination crashes the native renderer outright - so the
- * clamp is a hard correctness requirement, not cosmetic. Content that does not
- * fit scrolls inside the card rather than overflowing it.
+ * When `height` is omitted, the card hugs its content vertically up to a
+ * viewport-clamped max height (`rows - 4` on standard terminals) and scrolls
+ * internally when content overflows. Fixed-size boxes centered in a terminal
+ * smaller than the box get negative layout offsets and crash the native
+ * renderer, so percent bounds clamp on both axes in every resize frame.
  */
 export function Modal({
   tokens,
@@ -29,7 +89,7 @@ export function Modal({
   title: string;
   titleColor?: string;
   width: number;
-  /** Explicit compact height; contents remain scrollable on smaller terminals. */
+  /** Explicit compact height; omit to hug content up to the viewport clamp. */
   height?: number;
   /** Consent/stop controls stay visible independently of scrollable details. */
   footer?: ReactNode;
@@ -40,13 +100,17 @@ export function Modal({
   // React's terminal-dimensions hook can commit. Fixed viewport-derived sizes
   // can briefly exceed a shrinking terminal and produce negative offsets.
   const modalWidth = Math.max(1, Math.min(width, Math.max(1, screenWidth - 2)));
-  const maxHeight = Math.max(1, screenHeight - 2);
+  const autoHeight = height === undefined;
+  const backdropPadY = screenHeight < 3 ? 0 : autoHeight && screenHeight >= 14 ? 2 : 1;
+  const maxHeight = Math.max(1, screenHeight - backdropPadY * 2);
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
   useKeyboard((key) => {
     const delta = key.name === "pagedown" ? 1 : key.name === "pageup" ? -1 : 0;
     if (delta && scrollRef.current)
       scrollRef.current.scrollBy({ x: 0, y: delta * Math.max(1, scrollRef.current.height - 1) });
   });
+
+  const cleanTitle = title.trim();
 
   return (
     <box
@@ -58,42 +122,54 @@ export function Modal({
       justifyContent="center"
       alignItems="center"
       paddingX={screenWidth < 3 ? 0 : 1}
-      paddingY={screenHeight < 3 ? 0 : 1}
+      paddingY={backdropPadY}
       backgroundColor={tokens.overlayBackdrop}
     >
       <box
         width="100%"
         maxWidth={width}
-        {...(height === undefined ? {} : { height: Math.max(1, height) })}
+        {...(autoHeight ? {} : { height: Math.max(1, height) })}
         maxHeight="100%"
         border
         borderStyle="rounded"
         borderColor={titleColor ?? tokens.borderFocus}
-        title={` ${title} `}
+        title={` ${cleanTitle} `}
         backgroundColor={tokens.surface}
         paddingX={modalWidth < 44 ? 1 : 2}
-        paddingY={maxHeight < 12 ? 0 : 1}
+        paddingY={maxHeight < 10 ? 0 : 1}
         flexDirection="column"
       >
         <scrollbox
           ref={scrollRef}
-          flexGrow={height === undefined ? 0 : 1}
-          // Auto-height cards hug content; compact fixed-height cards fill
-          // their viewport. Either mode scrolls when content exceeds it.
+          flexGrow={autoHeight ? 0 : 1}
+          // ScrollBoxRenderable defaults viewport to flexGrow=1 and content to
+          // minHeight="100%", which stretches auto-height cards to the full
+          // terminal. Overriding viewport/content lets short dialogs hug their
+          // content while long dialogs still cap at maxHeight and scroll.
           flexShrink={1}
           minHeight={0}
           width="100%"
           scrollX={false}
           stickyScroll={false}
+          {...(autoHeight
+            ? {
+                wrapperOptions: { flexGrow: 1, flexShrink: 1, minWidth: 0, minHeight: 0 },
+                viewportOptions: { flexGrow: 0, flexShrink: 1, minHeight: 0 },
+              }
+            : {})}
           // Reserve the scrollbar's column: content is laid out at the full
           // scrollbox width, so without this the last cells of every line sit
           // under the scrollbar and long rows clip instead of wrapping.
-          contentOptions={{ flexDirection: "column", paddingRight: 2 }}
+          contentOptions={{
+            flexDirection: "column",
+            paddingRight: 2,
+            ...(autoHeight ? { minHeight: 0 } : {}),
+          }}
         >
           {children}
         </scrollbox>
         {footer ? (
-          <box flexDirection="column" flexShrink={0}>
+          <box flexDirection="column" alignItems="flex-start" flexShrink={0} width="100%">
             {footer}
           </box>
         ) : null}
