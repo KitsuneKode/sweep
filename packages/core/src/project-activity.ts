@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, opendirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -16,9 +16,10 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
  * Build output, caches and dependency folders never count.
  *
  * Owner decision D4: if activity cannot be proven (a bounded check hits its
- * depth, directory, or entry cap, hits an unreadable directory, or finds no
- * readable signal), activity is `"unknown"` (`activeMs: undefined`) and is
- * never treated as idle or auto-selected for idle cleanup.
+ * depth, directory, entry, or time cap, hits an unreadable directory, skips a
+ * symlinked directory it will not follow, drops a future-dated signal, or
+ * finds no readable signal), activity is `"unknown"` (`activeMs: undefined`)
+ * and is never treated as idle or auto-selected for idle cleanup.
  */
 
 /** Files whose presence makes a folder a project root. */
@@ -83,6 +84,9 @@ const GIT_ACTIVITY_FILES = [
 const DEFAULT_MAX_SOURCE_DEPTH = 8;
 const DEFAULT_MAX_SOURCE_DIRS = 512;
 const DEFAULT_MAX_SOURCE_ENTRIES = 4096;
+const DEFAULT_TIME_BUDGET_MS = 100;
+/** Clock skew tolerated before an mtime counts as future-dated. */
+const FUTURE_TOLERANCE_MS = 60_000;
 
 export type ProjectActivityConfidence = "proven" | "unknown";
 
@@ -105,6 +109,10 @@ export interface ProjectActivityOptions {
   maxDirs?: number;
   /** Maximum non-ignored entries to inspect per project (default: 4096). */
   maxEntries?: number;
+  /** Wall-clock budget for one project's source walk, ms (default: 100). */
+  timeBudgetMs?: number;
+  /** Monotonic clock for the time budget (defaults to `performance.now`). */
+  clock?: () => number;
   /** Override home directory stop boundary (defaults to `os.homedir()`). */
   homeDir?: string;
 }
@@ -170,6 +178,8 @@ export class ProjectActivityIndex {
   private readonly maxDepth: number;
   private readonly maxDirs: number;
   private readonly maxEntries: number;
+  private readonly timeBudgetMs: number;
+  private readonly clock: () => number;
   private readonly home: string;
 
   /**
@@ -184,6 +194,8 @@ export class ProjectActivityIndex {
     this.maxDepth = Math.max(0, options.maxDepth ?? DEFAULT_MAX_SOURCE_DEPTH);
     this.maxDirs = Math.max(1, options.maxDirs ?? DEFAULT_MAX_SOURCE_DIRS);
     this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_SOURCE_ENTRIES);
+    this.timeBudgetMs = Math.max(0, options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
+    this.clock = options.clock ?? (() => performance.now());
     this.home = resolve(options.homeDir ?? homedir());
   }
 
@@ -260,8 +272,13 @@ export class ProjectActivityIndex {
     let newest: number | undefined;
     let complete = true;
     const consider = (value: number | undefined) => {
-      // A clock-skewed future mtime must not make a project look busy forever.
-      if (value === undefined || value > this.now + 60_000) return;
+      if (value === undefined) return;
+      // A clock-skewed future mtime must not make a project look busy forever,
+      // but dropping it leaves a newer signal unaccounted for: not provable.
+      if (value > this.now + FUTURE_TOLERANCE_MS) {
+        complete = false;
+        return;
+      }
       if (newest === undefined || value > newest) newest = value;
     };
 
@@ -269,6 +286,7 @@ export class ProjectActivityIndex {
     let cursor = 0;
     let dirsVisited = 0;
     let entriesVisited = 0;
+    const deadline = this.clock() + this.timeBudgetMs;
 
     walk: while (cursor < queue.length) {
       const current = queue[cursor++]!;
@@ -278,42 +296,73 @@ export class ProjectActivityIndex {
       }
       dirsVisited += 1;
 
-      let entries;
+      // Iterate instead of materializing the listing, so the entry and time
+      // caps stop reading a huge directory early.
+      let dir;
       try {
-        entries = readdirSync(current.dir, { withFileTypes: true });
+        dir = opendirSync(current.dir);
       } catch {
         complete = false;
         continue;
       }
-
-      for (const entry of entries) {
-        const name = entry.name;
-        if (IGNORED.has(name) || name.startsWith(".sweep-trash-")) continue;
-        const childPath = join(current.dir, name);
-        if (this.exclude.has(childPath)) continue;
-
-        entriesVisited += 1;
-        if (entriesVisited > this.maxEntries) {
-          complete = false;
-          break walk;
-        }
-
-        let stat;
-        try {
-          stat = lstatSync(childPath);
-        } catch {
-          complete = false;
-          continue;
-        }
-        consider(stat.mtimeMs);
-
-        if (stat.isDirectory() && !stat.isSymbolicLink()) {
-          if (current.depth >= this.maxDepth) {
+      try {
+        for (;;) {
+          if (this.clock() > deadline) {
             complete = false;
-          } else {
-            queue.push({ dir: childPath, depth: current.depth + 1 });
+            break walk;
+          }
+          let entry;
+          try {
+            entry = dir.readSync();
+          } catch {
+            complete = false;
+            break;
+          }
+          if (entry === null) break;
+
+          const name = entry.name;
+          if (IGNORED.has(name) || name.startsWith(".sweep-trash-")) continue;
+          const childPath = join(current.dir, name);
+          if (this.exclude.has(childPath)) continue;
+
+          entriesVisited += 1;
+          if (entriesVisited > this.maxEntries) {
+            complete = false;
+            break walk;
+          }
+
+          let stat;
+          try {
+            stat = lstatSync(childPath);
+          } catch {
+            complete = false;
+            continue;
+          }
+          consider(stat.mtimeMs);
+
+          if (stat.isSymbolicLink()) {
+            // Symlinks are never followed. A linked directory may hold newer
+            // edits we cannot see, so its project is not provable; a linked
+            // file's own mtime is one cheap stat away.
+            try {
+              const target = statSync(childPath);
+              if (target.isDirectory()) complete = false;
+              else consider(target.mtimeMs);
+            } catch (error) {
+              if (!isMissingError(error) && (error as NodeJS.ErrnoException).code !== "ELOOP") {
+                complete = false;
+              }
+            }
+          } else if (stat.isDirectory()) {
+            if (current.depth >= this.maxDepth) {
+              complete = false;
+            } else {
+              queue.push({ dir: childPath, depth: current.depth + 1 });
+            }
           }
         }
+      } finally {
+        dir.closeSync();
       }
     }
 

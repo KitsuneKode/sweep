@@ -95,8 +95,10 @@ HEAD, reflog, and merge/commit state) plus a bounded walk of the project's own
 non-generated source files, never its build output. A rebuild does not make a
 forgotten project look busy, and editing a nested source file keeps the project
 active. If a project's activity cannot be proven (for example, the bounded
-source check hits its depth, directory, or entry limit, hits an unreadable
-folder, or finds no readable signal), its idle time is shown as unknown (`?`),
+source check hits its depth, directory, entry, or time limit, hits an
+unreadable folder, meets a symlinked folder it will not follow, sees a
+future-dated file, or finds no readable signal), its idle time is shown as
+unknown (`?`),
 it is never treated as idle, and `--idle` never selects it. `--idle 30d` keeps
 the selection to projects proven untouched for 30 days; active and unknown
 projects stay listed, unselected. The scan report shows each project's idle
