@@ -1,101 +1,148 @@
 ---
 title: Troubleshooting
-description: Start from the error you see and recover without guessing what was deleted.
+description: Diagnose common install, scan, terminal UI, and apply errors.
 ---
 
-| Symptom                                     | What to do                                                                                                                                 |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sweep: command not found`                  | Check the package manager's global bin directory and PATH; open a new shell after installation                                             |
-| Rust engine unavailable                     | Run `sweep doctor .`; verify optional native dependencies and matching OS/architecture, or explicitly try `--engine js`                    |
-| Bun JS reader says Node is missing          | Install Node on PATH or use the Rust engine; do not replace the bounded reader with whole-directory arrays                                 |
-| UI needs Bun or OpenTUI                     | Use Bun with the optional `@opentui/core` dependency described in [Getting started](getting-started.md), or a qualified standalone release |
-| UI requires an interactive TTY              | Run it directly in a terminal; use `scan --json` for redirected output                                                                     |
-| `Scan resource limit exceeded`              | Treat the scan as incomplete; narrow the target and rescan                                                                                 |
-| Size shows `~`                              | Sizing was partial or approximate; investigate before cleanup, especially near the size ceiling                                            |
-| Item is blocked                             | Inspect the path and refusal; configuration cannot bypass protected-root/VCS checks                                                        |
-| Expected `dist` is missing                  | It is opt-in; review [Configuration](configuration.md) before enabling it                                                                  |
-| Expected matches are absent                 | Check inherited `.sweeprc`, disabled patterns, ignores and depth using `doctor`                                                            |
-| Apply refuses changed size/type/path        | The tree changed since planning; inspect it and create a fresh plan                                                                        |
-| Permission error                            | Review permissions and the specific path; avoid escalating an unreviewed cleanup to administrator                                          |
-| Interrupted apply                           | Read the final outcomes, then re-scan; cancellation is not rollback                                                                        |
-| Engine timeout or missing final report      | Outcome can be unknown; inspect the filesystem before retrying                                                                             |
-| Claimed bytes differ from free-space change | Check trash, hardlinks, snapshots, sparse/compressed files and estimates                                                                   |
-
-## The native engine is refused as untrusted
-
-On macOS and Linux, sweep runs the native engine only if nobody else can
-replace it. The engine file and every folder above it must be owned by you or
-by root, and must not be writable by a group or by everyone. `sweep doctor .`
-names the file or folder that failed.
-
-- **`--engine auto` (the default)** falls back to the JS engine and prints a
-  note. **`--engine rust`** refuses instead.
-- **Homebrew** setups whose folders are group-writable by `admin` hit this.
-  Tighten the prefix with `chmod g-w` on the folders `doctor` names, or keep
-  using the JS engine.
-- **`sudo sweep`** accepts an engine owned by root or by the user who ran
-  `sudo`. For any other elevated run, install sweep as root or use
-  `--engine js`.
-- **"The native engine changed after sweep checked it"** means the engine
-  file was replaced while sweep was running, for example by an update. Nothing
-  was removed. Restart sweep and review again.
-
-## Read-only diagnostics
+Start with read-only diagnostics:
 
 ```sh
-sweep --version
+sweep doctor .
 sweep doctor . --json
-sweep scan . --engine rust --json
 ```
 
-Use the last command only where Rust is installed. If you compare JS, repeat with
-`--engine js` on the same unchanged tree. Keep generated plans private until you
-have redacted absolute paths. A diagnostic scan can still take time on a large
-or slow filesystem; choose a small reproducer first.
+`doctor` does not modify the scan target. It checks configuration trust, target access, OpenTUI, the Rust engine, filesystem identity support, held apply locks, and a small scan preview. Exit `0` means no warnings, `5` means warnings, and another nonzero code means doctor itself failed.
 
-Report bugs at [GitHub issues](https://github.com/KitsuneKode/sweep/issues).
-Include expected behavior, actual behavior and whether any apply was attempted.
+## Install and startup
 
-## A row remains after cleanup
+### `sweep ui` says OpenTUI is unavailable
 
-Read the outcome first. `x` / `d` confirms removal of the focused or inspected
-artifact; **Review queue** or `c` opens confirmation for the queue.
-Enter opens item details. A single-item result can leave
-other queued items untouched. The cursor then moves to a surviving artifact,
-which may have the same name in another project. Compare full paths with `i`.
+`@opentui/core` is optional. CLI commands can install and run without it. Use one of these fixes:
 
-A symbolic-link artifact represents the link entry, not the directory it points
-to. Removing it leaves the linked contents intact. Package installs, builds and
-fixture generators can also recreate entries; pause them before cleanup and
-rescan to check what exists now. Sweep's own `fixtures:sync` command recreates
-the `tests/fixtures/risk-mix/target` test link.
+- install or run through Bun
+- use the standalone binary
+- reinstall with optional dependencies enabled in your package manager
 
-If the same full path remains in the current session after an authoritative
-deleted outcome, keep the report and report the discrepancy. Do not repeatedly
-confirm deletion to work around it. Include the command, engine, entry type,
-full-path comparison and any process writing to that tree; redact private paths
-before sharing them.
+`bunx @kitsunekode/sweep ui .` is the quickest no-install check. Do not use `npx ... ui` as the documented UI path when the optional dependency is missing.
 
-## Legal POSIX backslash names under Bun
+### Windows installer or executable is blocked
 
-Some Bun 1.4.2 `realpath` calls fail on a literal backslash in a POSIX name,
-even when the file is present. Sweep fails closed instead of substituting a
-path. Use the Node CLI with `--engine js` for trash moves in those trees, or the
-native engine for supported scan/permanent-delete workflows. The full-screen UI
-requires Bun; it does not bypass failed canonicalization.
+PowerShell execution policy can block `install.ps1`. Download and inspect it, then run it for one process:
 
-## Config and directory permissions
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
 
-On Linux/macOS, Sweep and `sweep doctor` reject automatically discovered
-`.sweeprc` files, global configs, and the resolved sweep config directory
-(`$SWEEP_CONFIG_DIR`, else `$XDG_CONFIG_HOME/sweep`, else `~/.config/sweep`,
-along with its `journals` subdirectory when present) that are owned by another
-user, world-writable, or group-writable by a group other than your primary
-group. Group-writable files and directories belonging to your own primary group
-(such as `0664` or `0775` under `umask 002`) are accepted, and a missing config
-directory passes `sweep doctor` because apply creates it with mode `0700`. To
-fix a refused file, run `chmod g-w .sweeprc` (or `chmod go-w .sweeprc` if
-world-writable), or pass `--config PATH` explicitly after reviewing it; for a
-refused config directory, run `chmod 700 <path>` (or `chmod go-w <path>`) on the
-absolute path reported by Sweep or `sweep doctor` (for example,
-`chmod 700 ~/.config/sweep` when using the default location).
+SmartScreen can warn because the executable is not broadly established. Verify the `.sha256` sidecar and release provenance before continuing. If corporate policy blocks user binaries, ask the machine owner which install location is allowed.
+
+### Linux musl standalone binary does not start
+
+Minimal musl systems can lack the standalone runtime libraries. On Alpine:
+
+```sh
+apk add libstdc++ libgcc
+```
+
+musl support is available from 0.5.4. If the machine is older than that release, upgrade rather than forcing a glibc asset onto musl.
+
+## Engine selection
+
+### Doctor reports the Rust engine is unavailable or untrusted
+
+First run `sweep doctor .` and read the exact `rust_engine` or `rust_apply_safety` detail. Common causes are a missing optional native package, a musl or glibc detection failure, a spawn error, or an install directory that fails ownership checks.
+
+`--engine auto` falls back to JavaScript and continues. `--engine rust` makes the problem a hard failure. Use `--engine js` temporarily if you want deterministic behavior while fixing the install.
+
+### Homebrew installs the native engine but Sweep uses JavaScript
+
+Homebrew prefixes commonly contain group-writable directories. Sweep does not trust an engine whose file or ancestor directories are writable by group or others. This is intentional. Tighten permissions only if you understand the effect on your package manager, or keep the JavaScript fallback.
+
+Running with `sudo` is not the fix. Sweep accepts the invoking user from `SUDO_UID` for a real sudo invocation, but it does not require or request elevated privileges. Fix ownership and writability of the install location instead.
+
+### `--engine rust` fails with `libc_unknown`
+
+Sweep could not prove whether the system uses glibc or musl. It refuses to guess. Repair the system `ldd` or dynamic loader setup, use the JavaScript engine, or install a standalone binary matched to the system.
+
+## Scan problems
+
+### Scan finds nothing
+
+Check that artifact names are enabled. Generic names such as `dist`, `build`, `out`, `coverage`, and `.venv` are opt-in. Run `sweep init .` or pass `--pattern dist` for one scan. Check `--ignore` rules and scan depth.
+
+### Scan is incomplete or hits a resource allowance
+
+A resource-limit failure exits `2` and cannot be applied. Narrow the scan target, exclude irrelevant trees, or use the default resource profile instead of `low-memory`. Depth-only pruning is incomplete coverage, not a hard resource failure, but it is still not a complete measurement.
+
+`~` means approximate or partial size. `sweep status` reports `bytesPartial`, `partialByteCount`, and skipped directories. Do not compare a partial result with a complete disk-usage number as if they measure the same tree.
+
+### A project is not marked idle even though it looks old
+
+Sweep uses proven activity evidence, not only the artifact timestamp. If git metadata and bounded project files cannot be read or do not prove activity, the project shows `?` and is excluded from idle selection. Correct file ownership and permissions, scan the project root rather than a generated folder, and let the scan finish.
+
+### A hardlinked store reports less space freed than apparent size
+
+That is correct. pnpm and Bun can hardlink one store file into many artifacts. Sweep counts shared inodes once and reports `about X freed` when unique-inode bytes differ from apparent bytes. `shared hardlinks not fully counted` means some shared content could not be measured completely, so the exact freed amount is unknown.
+
+## Apply and confirmation
+
+### `sweep clean` exits after `Declined. Nothing deleted.`
+
+The confirmation was answered with no, the prompt ended, or stdin closed. Nothing was removed. Exit `1` is an aborted operation, not a filesystem failure.
+
+### Apply says another cleanup is running
+
+CLI applies hold a cooperative lock. Wait for the active Sweep process to finish. Do not delete lock files based only on a missing or reused PID. Run `sweep recover --journal <path> --json` for the reported journal if you need evidence.
+
+### Apply refuses a plan or artifact
+
+The message names the guardrail. Common causes are a changed filesystem identity, git-tracked content, unknown tracked status, nested repositories, protected roots, symlink replacement, or an incomplete fresh size measurement. These refusals happen before removal for that request. Create a fresh scan and review the new state.
+
+### `--yes` still refuses dangerous artifacts
+
+That is intentional. `--yes` skips only the prompt. It does not authorize dangerous artifacts. Review the listed dangerous paths and pass `--allow-dangerous` only when they are intentionally included. Blocked paths cannot be authorized at all.
+
+### Apply progress looks stuck on one artifact
+
+A large directory can remain at `0 of 1` completed artifacts while its contents are being removed. Supported native Linux engines can show an entries-removed count inside the active artifact. That count is not a byte percentage. Cancellation remains available with Ctrl+C or Esc.
+
+### The process or terminal was interrupted
+
+Do not assume the operation completed or that nothing happened. Inspect the journal and disk:
+
+```sh
+sweep recover --journal <journal-path>
+sweep scan .
+```
+
+Recovery never retries, restores, or releases a lock. Completed removals are not rolled back. A lost native apply report is an unknown outcome even if some paths are already gone. Scan again before creating a new plan.
+
+## Configuration
+
+### Config is ignored or rejected as unsafe
+
+Automatically discovered `.sweeprc` files and global config must not be owned by another user or writable by unrelated users on POSIX systems. A file or directory writable by a non-primary group is rejected. Move config into an owner-controlled directory and reduce permissions. A missing operational config directory is okay because Sweep creates it with owner-only permissions when needed.
+
+### `maxSizeGB` behavior looks inconsistent
+
+There is no default ceiling. If config contains `maxSizeGB`, it remains active. `--max-size-gb <gib>` overrides it for one run. `--max-size-gb none` disables it for one run. `--force-large` requires `--yes` and overrides only the size ceiling, never path or identity checks. The terminal UI always confirms and offers a per-operation override.
+
+## Terminal display
+
+### Keys act differently in tmux or a terminal multiplexer
+
+Many terminals and tmux configurations send Ctrl+Enter as plain Enter. Use `c` to review the queue. It is the portable binding.
+
+### Colors look wrong or too bright
+
+Pass `--theme auto`, `--theme dark`, or `--theme light`, or press `t` in the UI. `NO_COLOR` disables colored output where supported. Symbols and labels still distinguish states.
+
+### Animation is distracting or costly
+
+Press `m` in the UI, or start with:
+
+```sh
+SWEEP_REDUCED_MOTION=1 sweep ui .
+```
+
+## Reporting a bug
+
+Run doctor and capture the exact command, terminal output, exit code, operating system, install method, and whether you used `--json` or a non-default engine. Do not attach private paths, file names, journals, or plan contents without reviewing them first.

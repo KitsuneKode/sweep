@@ -1,171 +1,121 @@
 # sweep
 
-> Clear the build output of projects you stopped working on. Nothing you wrote, and nothing you did not choose.
+> Clean build output from projects you no longer use, without removing your work.
 
 [![CI](https://github.com/KitsuneKode/sweep/actions/workflows/ci.yml/badge.svg)](https://github.com/KitsuneKode/sweep/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@kitsunekode/sweep)](https://www.npmjs.com/package/@kitsunekode/sweep)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-`sweep` finds `node_modules`, `target`, `.next`, `.turbo` and other build output
-across a folder of projects, tells you which projects nobody has touched in
-months, and removes only what you pick. A scan never changes your disk.
+Sweep finds `node_modules`, `target`, `.next`, caches, and other generated artifacts across a folder of projects. It shows which projects are idle, what each artifact costs to rebuild, and what you can reclaim. Scanning never writes to disk. Removal only happens after you choose artifacts and confirm them, and every path is checked again before it is removed.
 
-```bash
-npx @kitsunekode/sweep --dry-run ~/Projects   # see what it would clear; changes nothing
-```
+<!-- TODO(0.6.0): replace with C+ redesign screenshot when #167 merges. -->
 
-Or install it and review in the terminal UI with `sweep ui ~/Projects`:
-
-```
-  sweep  ~/Projects                                                         31.0 GiB free
-
-  57.4 GiB you can reclaim  ·  112 projects  ·  586 MiB idle 30+ days, i queues it
-
-  Idle 30+ days                                                26 projects  ·  586.3 MiB
-  › ○  template-nextjs-monorepo   244.7 MiB    30d   templates     .turbo · .next +1
-    ○  kata-machine               194.5 MiB    7mo   dsa           node_modules
-       + 18 more projects  ·  2.3 MiB
-
-  Worked on recently                                            86 projects  ·  56.9 GiB
-    ○  sweep                        4.9 GiB     3m   cli-tools     ! 23 caution  target +4
-```
-
-Space queues a project, Enter opens it, `i` queues every idle project,
-`c` (or the Ctrl+K menu) reviews the queue. Every removal is confirmed and ends in a receipt.
-
-## Why sweep
-
-- **It knows what you still use.** Each project's idle time comes from its git
-  history and its own files, never from its build output, so a reinstall does
-  not make a forgotten project look busy. `sweep --idle 30d` selects only
-  projects nobody has touched for a month.
-- **It will not remove your work.** Files tracked by any discoverable git
-  repository (at, above, or inside a candidate), project files (`src`,
-  manifests, lockfiles, `.env*`), version-control folders and system roots are
-  protected whatever a pattern or flag says. Each path is checked again right
-  before removal.
-- **It is fast.** A Rust engine finds and sizes 4,000 artifacts across 65,000
-  folders in under a second, and the terminal UI fills in while it scans.
-- **It fits scripts and agents.** Plans are JSON you can save, inspect and
-  apply later; exit codes are stable; [`llms.txt`](https://sweep.kitsunekode.in/llms.txt)
-  and an agent skill teach coding agents the same safe workflow.
+![Sweep terminal UI demo](assets/demo.gif)
 
 ## Install
 
-```bash
-brew install kitsunekode/tap/sweep     # macOS and Linux (with shell completions)
-curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
-npm install -g @kitsunekode/sweep      # commands on Node.js 22.12+
-bun add -g @kitsunekode/sweep          # commands and the terminal UI
-bunx @kitsunekode/sweep ui ~/Projects  # try the UI without a global install
+| Channel            | Command or asset                                                                                      | Notes                                                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| npm                | `npm install -g @kitsunekode/sweep`                                                                   | Node.js 22.12 or newer. CLI commands work without the optional UI dependency.                                                     |
+| Bun                | `bun add -g @kitsunekode/sweep`                                                                       | Installs the optional UI dependency in normal Bun installs.                                                                       |
+| bunx               | `bunx @kitsunekode/sweep ui .`                                                                        | Try the terminal UI without a global install.                                                                                     |
+| Homebrew           | `brew install kitsunekode/tap/sweep`                                                                  | Standalone macOS and Linux binary with shell completions.                                                                         |
+| Scoop (from 0.5.4) | `scoop bucket add kitsunekode https://github.com/KitsuneKode/scoop-bucket` then `scoop install sweep` | Windows x64.                                                                                                                      |
+| `install.sh`       | `curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh \| sh`                | Standalone macOS and Linux installer. Verifies the checksum and staged binary before replacing an existing install.               |
+| `install.ps1`      | `irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 \| iex`                     | Standalone Windows x64 installer. Download and inspect the script first if you prefer.                                            |
+| GitHub Releases    | [Release assets](https://github.com/KitsuneKode/sweep/releases)                                       | Standalone binaries for Linux glibc 2.17+ (x64, arm64), Linux musl (x64, arm64, from 0.5.4), macOS (x64, arm64), and Windows x64. |
+
+Release assets are available raw and as `.gz` archives, each with a `.sha256` sidecar. Verify the checksum before running a direct download:
+
+```sh
+sha256sum sweep-linux-x64.gz
+cat sweep-linux-x64.gz.sha256
 ```
 
-On Windows (PowerShell):
+Release binaries also carry GitHub build provenance attestations. Substitute `vX.Y.Z` with the release tag you downloaded:
 
-```powershell
-irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 | iex
-```
-
-Or download and inspect `install.ps1` first (respects execution policy):
-
-```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 -OutFile install.ps1
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
-
-Scoop (`kitsunekode/scoop-bucket`) and Linux musl standalone downloads will be
-available starting in `v0.5.4+`. Minimal Alpine installs need
-`apk add libstdc++ libgcc` before running `install.sh` (only the native musl
-engine is static; the musl standalone executable links those two C++ runtime
-libraries dynamically).
-
-Homebrew, `install.sh`, `install.ps1`, and the GitHub Releases assets (including
-`sweep-win-x64.exe` on Windows) provide one self-contained binary with the
-terminal UI built in (no Node or Bun needed). Homebrew, `install.sh`, and
-`install.ps1` verify SHA-256 checksums automatically; direct GitHub Releases
-downloads include checksum files you can verify yourself. Release binaries also
-carry GitHub build provenance attestations. Substitute `vX.Y.Z` with the release
-tag you downloaded:
-
-```bash
+```sh
 gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/vX.Y.Z
 ```
 
-From npm, scan and cleanup run on Node.js 22.12+. `sweep ui` runs on Bun;
-`@opentui/core` is an optional dependency installed automatically by Bun
-(`bun add -g`, `bunx`, including `bun install --production`) and Yarn 4. On Node
-older than 26.4, pnpm and Yarn 1 skip linking `@opentui/core` (Yarn 1 prints an
-engine warning), and npm leaves `@opentui/core` unmet and may still extract
-`@opentui/core-<platform>` unless `--omit=optional` is passed; in every case,
-`sweep` itself installs and runs CLI commands. Linux glibc (x64, arm64, glibc
-2.17+), Linux musl/Alpine (x64, arm64, from `v0.5.4+`), macOS (x64, arm64), and
-Windows (x64) are supported.
+The standalone binary includes the terminal UI and native engine. It does not need Node.js or Bun. The npm package runs CLI commands on Node.js 22.12+ and uses optional native engine packages when available. For package manager edge cases, musl notes, and Windows SmartScreen details, read [Getting started](https://sweep.kitsunekode.in/docs/users/getting-started) and [Platforms](https://sweep.kitsunekode.in/docs/users/platforms).
 
-For coding agents: `npx skills add KitsuneKode/sweep`.
+## Quick start
 
-## Use it
+| Command             | What it does                                                                  |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `sweep --dry-run .` | Scans the current folder and previews the removal without changing anything.  |
+| `sweep ui .`        | Opens the interactive projects view for review and selection.                 |
+| `sweep status`      | Shows reclaimable bytes, guarded artifacts, idle projects, and scan coverage. |
+| `sweep clean`       | Scans, asks for confirmation, then removes the selected artifacts.            |
+| `sweep init`        | Scans first, asks about opt-in patterns, then writes a `.sweeprc`.            |
+| `sweep doctor .`    | Checks configuration, engine trust, OpenTUI, and a read-only scan.            |
 
-```bash
-sweep ui ~/Projects          # review and choose, projects first
-sweep --dry-run              # see what a cleanup would remove; changes nothing
-sweep --idle 30d             # clean only projects idle for 30 days or more
-sweep --trash                # move to a local trash folder instead of deleting
-sweep init                   # look around, then write a .sweeprc from your answers
-```
-
-| Command                       | What it does                                               |
-| ----------------------------- | ---------------------------------------------------------- |
-| `sweep` / `sweep clean`       | Scan, show what would go, confirm, remove                  |
-| `sweep ui`                    | Interactive review; `--view full` opens the folder view    |
-| `sweep scan`                  | Scan only; `--json` for a plan, `--json-stream` for events |
-| `sweep status`                | What you could free now: sizes, idle projects; `--json`    |
-| `sweep plan`                  | Write a saved plan to stdout for a later `apply`           |
-| `sweep apply --plan <file>`   | Apply a saved plan after re-checking every path            |
-| `sweep inspect --plan <file>` | Show a plan's contents and totals without applying it      |
-| `sweep init`                  | Scan, ask about each opt-in pattern, write `.sweeprc`      |
-| `sweep stats`                 | Totals from your cleanup history                           |
-| `sweep doctor`                | Check config, tools and engine                             |
-| `sweep completions <shell>`   | Shell completions for bash, zsh or fish                    |
-
-Common options: `--dry-run`, `--trash`, `--idle <age>`, `--yes` (skip the
-prompt), `--pattern <name>`, `--ignore <name or path>`, `--json`. Removing
-dangerous items without a prompt also needs `--allow-dangerous`, and every one is
-named before it goes. [All commands and options](https://sweep.kitsunekode.in/docs/users/commands).
+For a disposable first run, use `sweep --trash` instead of permanent deletion. Local trash is a `.sweep-trash-<timestamp>` folder inside the scan target, not the operating system recycle bin.
 
 ## What it cleans
 
-On by default, because nobody writes these by hand: `node_modules`, `.next`,
-`.nuxt`, `.svelte-kit`, `.turbo`, `.vite`, `.parcel-cache`, `.nyc_output`,
-`target` (beside a `Cargo.toml`) and `*.tsbuildinfo`.
+Enabled by default because these names are machine-created and canonical: `node_modules`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.vite`, `.parcel-cache`, `.nyc_output`, `target` in Cargo projects, and `*.tsbuildinfo`.
 
-Opt in to generic names that can hold your own files (`dist`, `build`, `out`,
-`coverage`, `__pycache__`, `.venv`, `.gradle` and more) with `sweep init`, a
-`.sweeprc`, or `--pattern`. They are never pre-selected.
+Generic names stay opt-in because they can hold authored files: `dist`, `build`, `out`, `coverage`, `__pycache__`, `.venv`, `.gradle`, and others. Enable them with `sweep init`, `.sweeprc`, or `--pattern`. They are never pre-selected as safe.
 
-## Safety, in short
+## Safety in short
 
-- Scans, plans, dry runs and browsing in the terminal UI never write.
-- Blocked items cannot be queued at all; dangerous items only one at a time,
-  behind a red confirmation.
-- Every path is re-checked right before removal: a folder replaced, moved or
-  turned into a symlink since the scan is refused, not removed.
-- Symlinks are removed as links, never followed.
-- Ctrl+C stops scheduling new removals; the receipt lists completed, failed
-  and unattempted items separately.
+- Sweep never removes git-tracked files, project files such as manifests and `.env*`, version-control internals, operating-system roots, your home folder, or tool and package-manager homes. A directory candidate containing a git repository is at least dangerous and cannot be silently selected.
+- Scans, saved plans, dry runs, and browsing in the terminal UI do not write to the scanned tree. Real cleanup always confirms unless you deliberately pass `--yes` in automation.
+- Unknown is not selected. A project with unknown activity shows idle `?` and is excluded from `--idle`. A repository whose tracked status cannot be verified is never pre-selected and is checked again before removal.
+- `--trash` moves artifacts into local trash instead of permanently deleting them. It still uses disk space until you remove that trash folder.
+- There is no size ceiling by default. A configured ceiling is enforced against fresh measurements taken immediately before apply. Use `--max-size-gb <gib>` for one run or `--max-size-gb none` to remove a configured ceiling deliberately.
+- On macOS and Linux, the native engine and every directory above it must be owned by you or root and must not be group- or world-writable. Under `sudo`, the invoking user from `SUDO_UID` is also accepted. The engine content is fingerprinted and checked again before destructive use. If these checks fail, `--engine auto` falls back to the JavaScript engine. Homebrew prefixes with group-writable folders therefore use the JavaScript engine until their permissions are tightened.
 
-[The full safety model](https://sweep.kitsunekode.in/docs/users/safety).
+Read the full [safety model](https://sweep.kitsunekode.in/docs/users/safety).
+
+## Numbers you can trust
+
+Reclaimable means safe plus caution artifacts. Dangerous and blocked artifacts are shown separately as guarded and never added to reclaimable totals.
+
+A `~` prefix means sizing is partial or approximate. Scan coverage is explicit when folders were skipped or bytes are incomplete.
+
+Package managers such as pnpm and Bun can hardlink one store file into many `node_modules` directories. Sweep counts shared inodes once. When shared hardlinks reduce what removal can free, reports show `about X freed` beside the apparent size.
+
+## Automation and agents
+
+Use `sweep scan --json` or `sweep plan` for a saved plan, `sweep scan --json-stream` for progressive events, and `sweep apply --plan` after review. `sweep status --json` gives a compact summary. `sweep doctor --json` reports environment and trust checks. `sweep schema` exports the protocol schemas embedded in the installed CLI.
+
+Exit codes are stable: `0` success, `1` aborted, `2` guardrail refusal, `3` invalid config or plan, `4` failure, and `5` doctor warnings.
+
+`sweep widget --json` (0.6.0) will provide a bounded read-only snapshot for desktop widgets and panels. It is not available in 0.5.x.
+
+Read [Automation and streaming JSON](https://sweep.kitsunekode.in/docs/users/automation). Coding agents can install the project skill with `npx skills add KitsuneKode/sweep`.
+
+## Platforms
+
+| Platform          | Support                                                                                      |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| Linux x64 glibc   | glibc 2.17+                                                                                  |
+| Linux arm64 glibc | glibc 2.17+                                                                                  |
+| Linux x64 musl    | From 0.5.4. Minimal Alpine images need `apk add libstdc++ libgcc` for the standalone binary. |
+| Linux arm64 musl  | From 0.5.4. Minimal Alpine images need `apk add libstdc++ libgcc` for the standalone binary. |
+| macOS x64         | Standalone, npm, and Bun                                                                     |
+| macOS arm64       | Standalone, npm, and Bun                                                                     |
+| Windows x64       | Standalone, npm, and Bun. Windows ARM64 is not shipped.                                      |
+
+The interactive UI needs a real terminal. The npm UI path needs Bun with the optional OpenTUI dependency. The standalone binary embeds both the UI and native engine.
 
 ## Documentation
 
-[sweep.kitsunekode.in/docs](https://sweep.kitsunekode.in/docs) covers the
-terminal UI and its keys, configuration, automation and agents, trash and
-recovery, troubleshooting and the measured benchmarks.
+- [Getting started](https://sweep.kitsunekode.in/docs/users/getting-started)
+- [Terminal UI](https://sweep.kitsunekode.in/docs/users/terminal-ui)
+- [Commands and saved plans](https://sweep.kitsunekode.in/docs/users/commands)
+- [Safety and trash](https://sweep.kitsunekode.in/docs/users/safety)
+- [Automation](https://sweep.kitsunekode.in/docs/users/automation)
+- [Platforms and large trees](https://sweep.kitsunekode.in/docs/users/platforms)
+- [Troubleshooting](https://sweep.kitsunekode.in/docs/users/troubleshooting)
 
-## Exit codes
+## Contributing
 
-`0` success · `1` aborted · `2` refused by a guardrail · `3` invalid config or
-plan · `4` failure · `5` doctor warnings.
+Read [CONTRIBUTING](https://sweep.kitsunekode.in/docs/developer/contributing) for local setup, verification commands, and release rules. Report bugs in [GitHub issues](https://github.com/KitsuneKode/sweep/issues).
 
 ## License
 
-MIT
+[MIT](LICENSE)
