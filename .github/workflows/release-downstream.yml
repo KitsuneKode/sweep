@@ -1,0 +1,534 @@
+name: Release Downstream
+
+# Privileged release publication workflow loaded exclusively from canonical
+# `main` (never from a pushed tag).
+#
+# Triggered automatically via `workflow_run` when `CLI Binaries` completes for
+# a `v*` tag (attaches verified standalone binaries to the GitHub Release and
+# updates Homebrew + Scoop), or manually dispatched on `main` for downstream
+# retries against already-attached, independently verified release assets.
+#
+# Credential boundary:
+# - `qualify` runs with read-only permissions outside `release-downstream`.
+# - `attach` holds `contents: write` only on `workflow_run` after canonical
+#   `main` tag/npm/CI/Release qualification and strict 56-asset checksum checks.
+# - `update-homebrew` and `update-scoop` run inside the `main`-only
+#   `release-downstream` environment with minimal `contents: read` permissions.
+
+run-name: Release Downstream (${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }} / ${{ github.event_name == 'workflow_dispatch' && inputs.downstream || 'all' }})
+
+on:
+  workflow_run:
+    workflows: ["CLI Binaries"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish downstream (e.g. vX.Y.Z)"
+        required: true
+        type: string
+      downstream:
+        description: "Downstream channels to update for stable releases"
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - homebrew
+          - scoop
+
+concurrency:
+  group: release-downstream
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: qualify release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    if: |
+      github.repository == 'KitsuneKode/sweep' &&
+      github.ref == 'refs/heads/main' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_repository.full_name == 'KitsuneKode/sweep' &&
+          startsWith(github.event.workflow_run.head_branch, 'v')
+        )
+      )
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      tag_sha: ${{ steps.tag_sha.outputs.tag_sha }}
+      qualified: ${{ steps.qualify.outputs.qualified }}
+      should_attach: ${{ steps.gate.outputs.should_attach }}
+      source_run_id: ${{ steps.gate.outputs.source_run_id }}
+      homebrew_qualified: ${{ steps.gate.outputs.homebrew_qualified }}
+    steps:
+      - name: Resolve target release tag
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$RUN_HEAD_BRANCH"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Unsupported release tag: $tag"
+            exit 1
+          fi
+          version="${tag#v}"
+          prerelease="false"
+          [[ "$version" != *-* ]] || prerelease="true"
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Fetch canonical main ref and release tags
+        shell: bash
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          git fetch origin --tags
+
+      - name: Verify release tag commit matches workflow run
+        id: tag_sha
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          tag_sha="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
+          if [ "$EVENT_NAME" = "workflow_run" ] && [ "$RUN_HEAD_SHA" != "$tag_sha" ]; then
+            echo "::error::CLI Binaries run head_sha ($RUN_HEAD_SHA) does not match refs/tags/$TAG ($tag_sha)"
+            exit 1
+          fi
+          echo "tag_sha=$tag_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Qualify release tag against canonical main, npm gitHead, CI, and Release workflow
+        id: qualify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          bun run apps/cli/scripts/verify-release-tag.ts \
+            --repo "${{ github.repository }}" \
+            --ref "refs/tags/$TAG" \
+            --main-ref origin/main
+          echo "qualified=true" >> "$GITHUB_OUTPUT"
+
+      - name: Verify CLI Binaries jobs and attached release assets
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          TAG_SHA: ${{ steps.tag_sha.outputs.tag_sha }}
+          DOWNSTREAM: ${{ inputs.downstream }}
+        run: |
+          check_cli_binaries_run() {
+            local run_id="$1"
+            gh api "repos/${{ github.repository }}/actions/runs/$run_id/jobs?per_page=100" \
+              | bun -e '
+                const data = JSON.parse(await Bun.stdin.text());
+                const jobs = data.jobs ?? [];
+                const required = [
+                  "darwin-arm64",
+                  "darwin-x64",
+                  "linux-x64",
+                  "linux-x64-musl",
+                  "linux-arm64",
+                  "linux-arm64-musl",
+                  "win-x64",
+                  "qualify Homebrew formula",
+                ];
+                const ok = (name) =>
+                  jobs.some((j) => j.name === name && j.status === "completed" && j.conclusion === "success");
+                const missing = required.filter((name) => !ok(name));
+                if (missing.length > 0) {
+                  console.log("false " + missing.join(","));
+                } else {
+                  console.log("true ok");
+                }
+              '
+          }
+
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            read -r all_ok detail <<< "$(check_cli_binaries_run "$RUN_ID")"
+            if [ "$all_ok" != "true" ]; then
+              echo "::error::CLI Binaries run $RUN_ID missing passing required jobs: $detail"
+              exit 1
+            fi
+            {
+              echo "should_attach=true"
+              echo "source_run_id=$RUN_ID"
+              echo "homebrew_qualified=true"
+            } >> "$GITHUB_OUTPUT"
+          else
+            # Manual downstream retry: independently validate the GitHub Release,
+            # all 56 expected assets, SHA-256 checksums for the target channel(s),
+            # and a passing CLI Binaries qualification run for the exact tag commit.
+            release_json="$(gh api "repos/${{ github.repository }}/releases/tags/$TAG")"
+            printf '%s\n' "$release_json" | bun -e '
+              import { expectedReleaseAssets } from "./apps/cli/scripts/reconcile-release.ts";
+              const release = JSON.parse(await Bun.stdin.text());
+              if (release.draft) {
+                console.error("Release is still a draft");
+                process.exit(1);
+              }
+              const present = new Set((release.assets ?? []).map((a) => a.name));
+              const expected = expectedReleaseAssets();
+              const missing = expected.filter((name) => !present.has(name));
+              if (missing.length > 0) {
+                console.error("GitHub Release is missing expected assets: " + missing.join(", "));
+                process.exit(1);
+              }
+              console.log("verified all " + expected.length + " expected release assets are attached");
+            '
+
+            # Verify attached binary/archive digests match their .sha256 sidecars.
+            channel="${DOWNSTREAM:-all}"
+            verify_dir="$(mktemp -d)"
+            trap 'rm -rf "$verify_dir"' EXIT
+            patterns=()
+            if [ "$channel" = "all" ] || [ "$channel" = "homebrew" ]; then
+              patterns+=(
+                -p 'sweep-darwin-arm64.gz' -p 'sweep-darwin-arm64.gz.sha256'
+                -p 'sweep-darwin-x64.gz' -p 'sweep-darwin-x64.gz.sha256'
+                -p 'sweep-linux-arm64.gz' -p 'sweep-linux-arm64.gz.sha256'
+                -p 'sweep-linux-x64.gz' -p 'sweep-linux-x64.gz.sha256'
+              )
+            fi
+            if [ "$channel" = "all" ] || [ "$channel" = "scoop" ]; then
+              patterns+=(-p 'sweep-win-x64.exe' -p 'sweep-win-x64.exe.sha256')
+            fi
+            gh release download "$TAG" --repo "${{ github.repository }}" "${patterns[@]}" -D "$verify_dir"
+            (
+              cd "$verify_dir"
+              for sum in *.sha256; do
+                sha256sum -c "$sum"
+              done
+            )
+
+            # Confirm a fully passing CLI Binaries run exists for this exact tag commit.
+            run_ids="$(gh api "repos/${{ github.repository }}/actions/workflows/cli-binaries.yml/runs?per_page=20" \
+              | TAG="$TAG" TAG_SHA="$TAG_SHA" bun -e '
+                const data = JSON.parse(await Bun.stdin.text());
+                const matches = (data.workflow_runs ?? []).filter((r) =>
+                  r.status === "completed" &&
+                  r.conclusion === "success" &&
+                  r.head_branch === process.env.TAG &&
+                  r.head_sha === process.env.TAG_SHA
+                );
+                for (const r of matches) console.log(r.id);
+              ')"
+            hb_qualified="false"
+            for rid in $run_ids; do
+              read -r all_ok _ <<< "$(check_cli_binaries_run "$rid")"
+              if [ "$all_ok" = "true" ]; then
+                hb_qualified="true"
+                break
+              fi
+            done
+            if [ "$hb_qualified" != "true" ]; then
+              echo "::error::No completed passing CLI Binaries run (with all 7 targets and qualify Homebrew formula) found for $TAG ($TAG_SHA)"
+              exit 1
+            fi
+            {
+              echo "should_attach=false"
+              echo "source_run_id="
+              echo "homebrew_qualified=$hb_qualified"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+  attach:
+    name: attach binaries to release
+    needs: qualify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    if: |
+      github.repository == 'KitsuneKode/sweep' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_run' &&
+      needs.qualify.result == 'success' &&
+      needs.qualify.outputs.qualified == 'true' &&
+      needs.qualify.outputs.should_attach == 'true'
+    steps:
+      - name: Download build artifacts from CLI Binaries run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          run-id: ${{ needs.qualify.outputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: true
+          path: dist-bin
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          path: main-src
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Validate exact release asset inventory and SHA-256 checksums
+        shell: bash
+        run: |
+          bun -e '
+            import { readdirSync } from "node:fs";
+            import { expectedReleaseAssets } from "./main-src/apps/cli/scripts/reconcile-release.ts";
+            const expected = new Set(expectedReleaseAssets());
+            const actual = new Set(readdirSync("dist-bin"));
+            const missing = [...expected].filter((name) => !actual.has(name));
+            const unexpected = [...actual].filter((name) => !expected.has(name));
+            if (missing.length > 0 || unexpected.length > 0) {
+              console.error("Asset inventory mismatch", { missing, unexpected });
+              process.exit(1);
+            }
+            console.log("verified exact asset inventory (" + expected.size + " files)");
+          '
+          (
+            cd dist-bin
+            for sum in *.sha256; do
+              sha256sum -c "$sum"
+            done
+          )
+
+      # The release says what changed: its notes are this version's changelog
+      # section from the verified release commit, never an empty page.
+      - name: Release notes from the changelog
+        shell: bash
+        env:
+          VERSION: ${{ needs.qualify.outputs.version }}
+          TAG_SHA: ${{ needs.qualify.outputs.tag_sha }}
+        run: |
+          git -C main-src show "$TAG_SHA:apps/cli/CHANGELOG.md" \
+            | awk -v head="## $VERSION" '$0 == head { on = 1; next } /^## / && on { exit } on' \
+            > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::apps/cli/CHANGELOG.md at $TAG_SHA has no section for $VERSION"; exit 1
+          fi
+
+      - name: Attach to GitHub release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: ${{ needs.qualify.outputs.tag }}
+          files: dist-bin/*
+          body_path: release-notes.md
+          prerelease: ${{ needs.qualify.outputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew:
+    name: update Homebrew tap
+    needs: [qualify, attach]
+    environment: release-downstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    if: |
+      always() &&
+      github.repository == 'KitsuneKode/sweep' &&
+      github.ref == 'refs/heads/main' &&
+      needs.qualify.result == 'success' &&
+      needs.qualify.outputs.qualified == 'true' &&
+      needs.qualify.outputs.prerelease != 'true' &&
+      needs.qualify.outputs.homebrew_qualified == 'true' &&
+      (
+        (github.event_name == 'workflow_run' && needs.attach.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && needs.attach.result == 'skipped' && (inputs.downstream == '' || inputs.downstream == 'all' || inputs.downstream == 'homebrew'))
+      )
+    steps:
+      - name: Check for tap token
+        id: tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -n "${TAP_TOKEN:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::TAP_GITHUB_TOKEN not set; skipping Homebrew formula bump"
+          fi
+
+      # Always render templates and scripts from canonical `main`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.tap.outputs.present == 'true'
+        with:
+          ref: main
+          sparse-checkout: |
+            apps/cli/scripts/render-packaging.ts
+            packaging/homebrew/sweep.rb.tmpl
+          sparse-checkout-cone-mode: false
+          path: main-src
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: steps.tap.outputs.present == 'true'
+        with:
+          bun-version: 1.4.2
+
+      - name: Download release checksums
+        if: steps.tap.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.qualify.outputs.version }}
+        run: |
+          mkdir -p dist-bin
+          gh release download "v$VERSION" \
+            --repo KitsuneKode/sweep \
+            -p 'sweep-darwin-arm64.gz.sha256' \
+            -p 'sweep-darwin-x64.gz.sha256' \
+            -p 'sweep-linux-arm64.gz.sha256' \
+            -p 'sweep-linux-x64.gz.sha256' \
+            -D dist-bin
+
+      - name: Render and push Homebrew tap formula
+        if: steps.tap.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          VERSION: ${{ needs.qualify.outputs.version }}
+        run: |
+          version="$VERSION"
+          # Bind git push authentication to the repo-scoped GH_TOKEN without echoing it.
+          gh auth setup-git --hostname github.com
+          gh repo clone KitsuneKode/homebrew-tap tap -- --depth 1
+          bun run main-src/apps/cli/scripts/render-packaging.ts homebrew \
+            --version "$version" \
+            --dist-dir dist-bin \
+            --template main-src/packaging/homebrew/sweep.rb.tmpl \
+            --out tap/Formula/sweep.rb \
+            --reject-downgrade
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/sweep.rb
+          if git diff --cached --quiet; then
+            echo "formula already at $version"
+          else
+            git commit -m "sweep $version"
+            git push origin HEAD
+          fi
+
+  update-scoop:
+    name: update Scoop bucket
+    needs: [qualify, attach]
+    environment: release-downstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    if: |
+      always() &&
+      github.repository == 'KitsuneKode/sweep' &&
+      github.ref == 'refs/heads/main' &&
+      needs.qualify.result == 'success' &&
+      needs.qualify.outputs.qualified == 'true' &&
+      needs.qualify.outputs.prerelease != 'true' &&
+      (
+        (github.event_name == 'workflow_run' && needs.attach.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && needs.attach.result == 'skipped' && (inputs.downstream == '' || inputs.downstream == 'all' || inputs.downstream == 'scoop'))
+      )
+    steps:
+      - name: Check for Scoop bucket token
+        id: scoop
+        env:
+          SCOOP_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+        run: |
+          if [ -n "${SCOOP_TOKEN:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SCOOP_BUCKET_TOKEN not set; skipping Scoop bucket update"
+          fi
+
+      # Always render templates and scripts from canonical `main`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.scoop.outputs.present == 'true'
+        with:
+          ref: main
+          sparse-checkout: |
+            apps/cli/scripts/render-packaging.ts
+            packaging/scoop/sweep.json
+          sparse-checkout-cone-mode: false
+          path: main-src
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: steps.scoop.outputs.present == 'true'
+        with:
+          bun-version: 1.4.2
+
+      - name: Download Windows checksum
+        if: steps.scoop.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.qualify.outputs.version }}
+        run: |
+          mkdir -p dist-bin
+          gh release download "v$VERSION" \
+            --repo KitsuneKode/sweep \
+            -p 'sweep-win-x64.exe.sha256' \
+            -D dist-bin
+
+      - name: Render and push Scoop bucket manifest
+        if: steps.scoop.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          VERSION: ${{ needs.qualify.outputs.version }}
+        run: |
+          version="$VERSION"
+          # Bind git push authentication to the repo-scoped GH_TOKEN without echoing it.
+          gh auth setup-git --hostname github.com
+          gh repo clone KitsuneKode/scoop-bucket scoop -- --depth 1
+          mkdir -p scoop/bucket
+          bun run main-src/apps/cli/scripts/render-packaging.ts scoop \
+            --version "$version" \
+            --dist-dir dist-bin \
+            --template main-src/packaging/scoop/sweep.json \
+            --out scoop/bucket/sweep.json \
+            --reject-downgrade
+          cd scoop
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/sweep.json
+          if git diff --cached --quiet; then
+            echo "Scoop manifest already at $version"
+          else
+            git commit -m "sweep $version"
+            git push origin HEAD
+          fi

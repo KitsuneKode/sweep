@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NATIVE_PLATFORMS } from "@kitsunekode/sweep-core/native-platforms";
+import { nativePackageJson } from "../packages/engine-native/scripts/package-json.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CLI_PKG_PATH = join(REPO_ROOT, "apps/cli/package.json");
@@ -19,13 +20,12 @@ const cliPkg = JSON.parse(readFileSync(CLI_PKG_PATH, "utf8")) as {
 const version = cliPkg.version;
 const optionalDependencies: Record<string, string> = { ...cliPkg.optionalDependencies };
 
-for (const platform of NATIVE_PLATFORMS) {
+const sortedPlatforms = [...NATIVE_PLATFORMS].sort((a, b) => a.npmName.localeCompare(b.npmName));
+for (const platform of sortedPlatforms) {
   optionalDependencies[platform.npmName] = version;
 
   const templatePath = join(REPO_ROOT, "native-packages", platform.id, "package.json");
-  const template = JSON.parse(readFileSync(templatePath, "utf8")) as Record<string, unknown>;
-  template.version = version;
-  writeFileSync(templatePath, `${JSON.stringify(template, null, 2)}\n`);
+  writeFileSync(templatePath, nativePackageJson(platform, version));
 }
 
 cliPkg.optionalDependencies = optionalDependencies;

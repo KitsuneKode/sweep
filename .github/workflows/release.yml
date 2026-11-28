@@ -22,6 +22,7 @@ permissions:
 jobs:
   release-intent:
     name: detect release intent
+    if: github.repository == 'KitsuneKode/sweep' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -59,7 +60,11 @@ jobs:
   build-engine:
     name: build native engines
     needs: release-intent
-    if: needs.release-intent.outputs.needs_native_build == 'true'
+    if: github.repository == 'KitsuneKode/sweep' && github.ref == 'refs/heads/main' && needs.release-intent.outputs.needs_native_build == 'true'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/native-engine-release.yml
 
   release:
@@ -67,6 +72,8 @@ jobs:
     needs: [release-intent, build-engine]
     if: |
       always() &&
+      github.repository == 'KitsuneKode/sweep' &&
+      github.ref == 'refs/heads/main' &&
       needs.release-intent.result == 'success' &&
       (needs.release-intent.outputs.needs_native_build != 'true' || needs.build-engine.result == 'success')
     runs-on: ubuntu-latest
@@ -157,6 +164,10 @@ jobs:
         if: steps.changesets.outputs.run != 'true'
         run: echo "No pending changesets or version publish; skipping changesets action."
 
+      - name: Fetch canonical main ref
+        shell: bash
+        run: git fetch origin main:refs/remotes/origin/main
+
       - name: Create release PR or publish
         id: release
         if: steps.changesets.outputs.run == 'true'
@@ -172,25 +183,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SWEEP_RELEASE_REQUIRES_NATIVE: "true"
 
-      # Changesets uses package@version. Keep the public binary/download tag
-      # as vVERSION and dispatch explicitly: GITHUB_TOKEN pushes do not trigger
-      # another workflow. Refuse to move an existing version tag.
-      - name: Build standalone binaries for the tag
-        if: steps.release.outputs.published == 'true'
+      # Changesets uses package@version. Keep the public binary/download tag as
+      # vVERSION and reconcile idempotently: if npm already has this version
+      # but vVERSION or its release binaries are missing, tag the exact
+      # released commit (refusing a mismatched existing tag) and dispatch
+      # cli-binaries.yml (or release-downstream.yml on main for downstream-only retries).
+      - name: Reconcile release tag and standalone binaries
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          version="$(node -p "require('./apps/cli/package.json').version")"
-          package_tag="@kitsunekode/sweep@$version"
-          binary_tag="v$version"
-          commit="$(git rev-parse "$package_tag^{commit}")"
-          if [ "$commit" != "$(git rev-parse HEAD)" ]; then
-            echo "Package release tag does not match the checked-out release"; exit 1
-          fi
-          if git show-ref --verify --quiet "refs/tags/$binary_tag"; then
-            [ "$(git rev-parse "$binary_tag^{commit}")" = "$commit" ] || exit 1
-          else
-            git tag "$binary_tag" "$commit"
-          fi
-          git push origin "refs/tags/$binary_tag"
-          gh workflow run cli-binaries.yml --ref "$binary_tag"
+          git fetch origin main:refs/remotes/origin/main
+          bun run apps/cli/scripts/reconcile-release.ts \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.ref }}" \
+            --changesets-published "${{ steps.release.outputs.published == 'true' }}"

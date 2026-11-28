@@ -7,10 +7,10 @@ function header(id: string): Buffer {
   if (id.startsWith("linux")) {
     bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]);
     bytes.writeUInt16LE(3, 16);
-    bytes.writeUInt16LE(id.endsWith("arm64") ? 183 : 62, 18);
+    bytes.writeUInt16LE(id.includes("arm64") ? 183 : 62, 18);
   } else if (id.startsWith("darwin")) {
     bytes.writeUInt32LE(0xfeedfacf, 0);
-    bytes.writeUInt32LE(id.endsWith("arm64") ? 0x0100000c : 0x01000007, 4);
+    bytes.writeUInt32LE(id.includes("arm64") ? 0x0100000c : 0x01000007, 4);
     bytes.writeUInt32LE(2, 12);
   } else {
     bytes.writeUInt16LE(0x5a4d, 0);
@@ -23,11 +23,14 @@ function header(id: string): Buffer {
   return bytes;
 }
 
-test("native packaging rejects every foreign platform header, including explicit --binary payloads", () => {
+test("native packaging rejects every foreign OS/CPU header, including explicit --binary payloads", () => {
   for (const platform of NATIVE_PLATFORMS) {
     expect(() => assertBinaryFormat(header(platform.id), 512, platform)).not.toThrow();
-    for (const other of NATIVE_PLATFORMS.filter((other) => other.id !== platform.id))
+    for (const other of NATIVE_PLATFORMS.filter(
+      (other) => other.os !== platform.os || other.cpu !== platform.cpu,
+    )) {
       expect(() => assertBinaryFormat(header(other.id), 512, platform)).toThrow(/Expected/);
+    }
     expect(() => assertBinaryFormat(Buffer.from("arbitrary text"), 512, platform)).toThrow();
     expect(() => assertBinaryFormat(header(platform.id), 16, platform)).toThrow();
   }

@@ -124,6 +124,23 @@ describe("assertPublishable", () => {
     });
   });
 
+  test("preparePublishManifest embeds a valid 40-hex gitHead and ignores malformed values", () => {
+    const sha = "a".repeat(40);
+    const withSha = preparePublishManifest(
+      { name: "@kitsunekode/sweep", version: "0.5.4" },
+      catalogs,
+      { gitHead: sha },
+    );
+    expect(withSha.gitHead).toBe(sha);
+
+    const badSha = preparePublishManifest(
+      { name: "@kitsunekode/sweep", version: "0.5.4" },
+      catalogs,
+      { gitHead: "not-a-sha" },
+    );
+    expect(badSha.gitHead).toBeUndefined();
+  });
+
   test("accepts a fully resolved manifest", () => {
     expect(() =>
       assertPublishable({

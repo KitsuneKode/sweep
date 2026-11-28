@@ -52,26 +52,23 @@ function publishedVersion(name: string): string | null {
   }
 }
 
-function writePlaceholder(dir: string, name: string, os: string, cpu: string): void {
+function writePlaceholder(dir: string, name: string, os: string, cpu: string, libc?: string): void {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, "package.json"),
-    `${JSON.stringify(
-      {
-        name,
-        version: PLACEHOLDER_VERSION,
-        description: `Placeholder for the sweep-engine binary for ${os} ${cpu}. Reserves the package so npm trusted publishing can be configured; real builds are published by CI.`,
-        license: "MIT",
-        repository: { type: "git", url: `git+https://github.com/${REPO}.git` },
-        os: [os],
-        cpu: [cpu],
-        files: ["README.md"],
-        publishConfig: { access: "public" },
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  const manifest: Record<string, unknown> = {
+    name,
+    version: PLACEHOLDER_VERSION,
+    description: `Placeholder for the sweep-engine binary for ${os} ${cpu}${libc === "musl" ? " (musl)" : ""}. Reserves the package so npm trusted publishing can be configured; real builds are published by CI.`,
+    license: "MIT",
+    repository: { type: "git", url: `git+https://github.com/${REPO}.git` },
+    os: [os],
+    cpu: [cpu],
+  };
+  if (libc) {
+    manifest.libc = [libc];
+  }
+  manifest.files = ["README.md"];
+  manifest.publishConfig = { access: "public" };
+  writeFileSync(join(dir, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   writeFileSync(
     join(dir, "README.md"),
     `# ${name}
@@ -99,7 +96,7 @@ for (const platform of NATIVE_PLATFORMS) {
   }
   console.log(`missing  ${platform.npmName}`);
   const dir = join(staging, platform.id);
-  writePlaceholder(dir, platform.npmName, platform.os, platform.cpu);
+  writePlaceholder(dir, platform.npmName, platform.os, platform.cpu, platform.libc);
   missing.push({ name: platform.npmName, dir });
 }
 

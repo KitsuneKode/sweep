@@ -1,15 +1,19 @@
 name: CLI Binaries
 
 # Builds standalone `sweep` executables (Bun compile with embedded OpenTUI
-# native assets) and attaches them to the GitHub release for the tag.
-# Intentionally decoupled from release.yml's changesets/npm flow.
+# native assets and embedded Rust engine), qualifies the Homebrew formula
+# against the built archives, attests build provenance, and uploads workflow
+# artifacts with read-only contents permission.
+#
+# Privileged tag qualification, GitHub Release asset attachment (`contents: write`),
+# and downstream Homebrew/Scoop pushes run exclusively from canonical `main` in
+# `.github/workflows/release-downstream.yml` via `workflow_run`.
 
 on:
   push:
     tags:
       - "v*"
-      - "@kitsunekode/sweep@*"
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 concurrency:
   group: cli-binaries-${{ github.ref }}
@@ -23,20 +27,77 @@ jobs:
     name: ${{ matrix.id }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
         include:
           - id: darwin-arm64
             os: macos-latest
+            cargo_target: aarch64-apple-darwin
+            bun_target: ""
+            zigbuild: false
+            engine_abi_mode: ""
+            standalone_abi_mode: ""
+            embedded_so_mode: ""
+            container: ""
           - id: darwin-x64
             os: macos-15-intel
+            cargo_target: x86_64-apple-darwin
+            bun_target: ""
+            zigbuild: false
+            engine_abi_mode: ""
+            standalone_abi_mode: ""
+            embedded_so_mode: ""
+            container: ""
           - id: linux-x64
             os: ubuntu-latest
+            cargo_target: x86_64-unknown-linux-gnu
+            bun_target: bun-linux-x64
+            zigbuild: true
+            engine_abi_mode: glibc
+            standalone_abi_mode: glibc
+            embedded_so_mode: glibc-so
+            container: debian:11-slim
+          - id: linux-x64-musl
+            os: ubuntu-latest
+            cargo_target: x86_64-unknown-linux-musl
+            bun_target: bun-linux-x64-musl
+            zigbuild: false
+            engine_abi_mode: musl-static
+            standalone_abi_mode: musl-dynamic
+            embedded_so_mode: musl-so
+            container: alpine:3.21
           - id: linux-arm64
             os: ubuntu-24.04-arm
+            cargo_target: aarch64-unknown-linux-gnu
+            bun_target: bun-linux-arm64
+            zigbuild: true
+            engine_abi_mode: glibc
+            standalone_abi_mode: glibc
+            embedded_so_mode: glibc-so
+            container: debian:11-slim
+          - id: linux-arm64-musl
+            os: ubuntu-24.04-arm
+            cargo_target: aarch64-unknown-linux-musl
+            bun_target: bun-linux-arm64-musl
+            zigbuild: false
+            engine_abi_mode: musl-static
+            standalone_abi_mode: musl-dynamic
+            embedded_so_mode: musl-so
+            container: alpine:3.21
           - id: win-x64
             os: windows-latest
+            cargo_target: x86_64-pc-windows-msvc
+            bun_target: ""
+            zigbuild: false
+            engine_abi_mode: ""
+            standalone_abi_mode: ""
+            embedded_so_mode: ""
+            container: ""
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -51,17 +112,37 @@ jobs:
       # Rust must exist before any turbo invocation: turbo resolves cargo
       # workspaces via `cargo metadata` and the CLI build pulls in the engine
       # build task.
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: 1.99.1
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.cargo_target }}
+
+      - name: Setup Zig for glibc 2.17 floor
+        if: matrix.zigbuild
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.1
+
+      - name: Install cargo-zigbuild
+        if: matrix.zigbuild
+        uses: taiki-e/install-action@073e1fd0bc889c9aee68dbaaa927cde1b5653a83 # v2.90.11
+        with:
+          tool: cargo-zigbuild@0.24.1
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Bundle CLI + UI
         run: bunx turbo run build --filter=@kitsunekode/sweep
 
+      - name: Build embedded native engine (glibc 2.17 via cargo-zigbuild)
+        if: matrix.zigbuild
+        run: cargo zigbuild --release -p sweep-engine-cli --target ${{ matrix.cargo_target }}.2.17 --locked
+
       - name: Build embedded native engine
-        run: cargo build --release -p sweep-engine-cli --locked
+        if: ${{ !matrix.zigbuild }}
+        run: cargo build --release -p sweep-engine-cli --target ${{ matrix.cargo_target }} --locked
 
       - name: Compile standalone executable
         shell: bash
@@ -70,25 +151,81 @@ jobs:
             win-x64)
               out="sweep-${{ matrix.id }}.exe"
               engine_out="sweep-engine-${{ matrix.id }}.exe"
-              cp target/release/sweep-engine.exe "$engine_out"
+              engine_src="target/${{ matrix.cargo_target }}/release/sweep-engine.exe"
               ;;
             *)
               out="sweep-${{ matrix.id }}"
               engine_out="sweep-engine-${{ matrix.id }}"
-              cp target/release/sweep-engine "$engine_out"
+              engine_src="target/${{ matrix.cargo_target }}/release/sweep-engine"
               ;;
           esac
-          bun run scripts/build-standalone.ts "" "$out"
-          echo "OUT=$out" >> "$GITHUB_ENV"
-          echo "ENGINE_OUT=$engine_out" >> "$GITHUB_ENV"
+          metafile="build-${{ matrix.id }}.meta.json"
+          cp "$engine_src" "$engine_out"
+          bun run scripts/build-standalone.ts "${{ matrix.bun_target }}" "$out" \
+            --engine "$engine_src" \
+            --metafile "$metafile"
+          {
+            echo "OUT=$out"
+            echo "ENGINE_OUT=$engine_out"
+            echo "BUILD_METAFILE=$metafile"
+          } >> "$GITHUB_ENV"
 
-      - name: Smoke - embedded UI probe + version
+      - name: Verify Linux ELF ABI floor (standalone, embedded engine, and OpenTUI .so)
+        if: matrix.engine_abi_mode != ''
+        shell: bash
+        run: |
+          bun run packages/engine-native/scripts/check-elf-abi.ts \
+            --binary "./$ENGINE_OUT" \
+            --mode "${{ matrix.engine_abi_mode }}" \
+            --max-glibc 2.17
+          bun run packages/engine-native/scripts/check-elf-abi.ts \
+            --binary "./$OUT" \
+            --mode "${{ matrix.standalone_abi_mode }}" \
+            --max-glibc 2.17 \
+            --metafile "./$BUILD_METAFILE" \
+            --embedded-so-mode "${{ matrix.embedded_so_mode }}" \
+            --verify-embedded "./$ENGINE_OUT:${{ matrix.engine_abi_mode }}"
+
+      - name: Smoke - host standalone and engine
+        if: matrix.standalone_abi_mode != 'musl-dynamic'
         shell: bash
         run: |
           "./$OUT" --ui-probe
           "./$OUT" --version
           bun run scripts/smoke-standalone.ts "./$OUT"
           bun run packages/engine-native/scripts/verify-binary.ts --binary "./$ENGINE_OUT"
+
+      - name: Smoke - host static musl engine
+        if: matrix.standalone_abi_mode == 'musl-dynamic'
+        shell: bash
+        run: bun run packages/engine-native/scripts/verify-binary.ts --binary "./$ENGINE_OUT"
+
+      - name: Smoke - run standalone and engine in target Linux container
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          mkdir -p "$tmp/proj/node_modules"
+          printf 'container-smoke' > "$tmp/proj/node_modules/file"
+          docker run --rm \
+            -v "${{ github.workspace }}/$OUT:/usr/local/bin/sweep:ro" \
+            -v "${{ github.workspace }}/$ENGINE_OUT:/usr/local/bin/sweep-engine:ro" \
+            -v "$tmp/proj:/work/proj:ro" \
+            "${{ matrix.container }}" \
+            sh -eu -c '
+              /usr/local/bin/sweep-engine --version
+              eng="$(/usr/local/bin/sweep-engine scan /work/proj < /dev/null)"
+              printf "%s\n" "$eng" | grep -q "node_modules"
+              if command -v apk >/dev/null 2>&1; then
+                # Bun musl standalone executables dynamically link libstdc++/libgcc.
+                apk add --no-cache libstdc++ libgcc >/dev/null
+              fi
+              PATH="" /usr/local/bin/sweep --ui-probe
+              PATH="" /usr/local/bin/sweep --version
+              scan="$(PATH="" /usr/local/bin/sweep scan /work/proj --engine rust --json)"
+              printf "%s\n" "$scan" | grep -q "node_modules"
+            '
 
       - name: Generate checksum
         shell: bash
@@ -108,6 +245,15 @@ jobs:
           bun run apps/cli/scripts/compress-standalone.ts "$OUT"
           bun run apps/cli/scripts/compress-standalone.ts "$ENGINE_OUT"
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ env.OUT }}
+            ${{ env.OUT }}.gz
+            ${{ env.ENGINE_OUT }}
+            ${{ env.ENGINE_OUT }}.gz
+
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -122,96 +268,69 @@ jobs:
             ${{ env.ENGINE_OUT }}.gz
             ${{ env.ENGINE_OUT }}.gz.sha256
 
-  attach:
-    name: attach binaries to release
+  qualify-homebrew:
+    name: qualify Homebrew formula
     needs: binaries
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: write
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/@kitsunekode/sweep@')
     steps:
-      - name: Download all binaries
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Download release artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           merge-multiple: true
           path: dist-bin
 
-      - name: Resolve release version
-        id: version
+      - name: Smoke-install rendered formula from local tap with real .gz archive
         shell: bash
         env:
-          TAG: ${{ github.ref_name }}
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
         run: |
-          case "$TAG" in
-            @kitsunekode/sweep@*) version="${TAG#@kitsunekode/sweep@}" ;;
-            v*) version="${TAG#v}" ;;
-            *) echo "Unsupported release tag"; exit 1 ;;
-          esac
-          prerelease="false"
-          [[ "$version" != *-* ]] || prerelease="true"
-          echo "number=$version" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          version="$(node -p "require('./apps/cli/package.json').version")"
+          tmp="$(mktemp -d)"
+          server_pid=""
+          cleanup() {
+            if [ -n "$server_pid" ]; then
+              kill "$server_pid" 2>/dev/null || true
+            fi
+            brew uninstall --force local/sweep-smoke/sweep >/dev/null 2>&1 || true
+            brew untap local/sweep-smoke >/dev/null 2>&1 || true
+            rm -rf "$tmp"
+          }
+          trap cleanup EXIT
 
-      # The release says what changed: its notes are this version's changelog
-      # section, never an empty page beside the binaries.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: apps/cli/CHANGELOG.md
-          sparse-checkout-cone-mode: false
-          path: src
+          # Render using the exact repository template and built checksums.
+          bun run apps/cli/scripts/render-packaging.ts homebrew \
+            --version "$version" \
+            --dist-dir dist-bin \
+            --template packaging/homebrew/sweep.rb.tmpl \
+            --out "$tmp/sweep.rb"
 
-      - name: Release notes from the changelog
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.number }}
-        run: |
-          awk -v head="## $VERSION" '$0 == head { on = 1; next } /^## / && on { exit } on' \
-            src/apps/cli/CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "::error::apps/cli/CHANGELOG.md has no section for $VERSION"; exit 1
-          fi
+          # Serve the built .gz archive locally and point the formula URL at it.
+          python3 -m http.server 18765 --bind 127.0.0.1 --directory dist-bin >/dev/null 2>&1 &
+          server_pid=$!
+          sleep 1
 
-      - name: Attach to GitHub release
-        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
-        with:
-          files: dist-bin/*
-          body_path: release-notes.md
-          prerelease: ${{ steps.version.outputs.prerelease }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          brew tap-new --no-git local/sweep-smoke >/dev/null
+          tap_repo="$(brew --repository local/sweep-smoke)"
+          mkdir -p "$tap_repo/Formula"
+          sed "s|https://github.com/KitsuneKode/sweep/releases/download/v#{version}|http://127.0.0.1:18765|g" \
+            "$tmp/sweep.rb" > "$tap_repo/Formula/sweep.rb"
 
-      # The tap lives in a separate repo, so GITHUB_TOKEN cannot reach it -
-      # a fine-grained PAT with contents:write on homebrew-tap is required.
-      # Skip cleanly until the secret exists rather than failing the release.
-      - name: Check for tap token
-        id: tap
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-        run: |
-          if [ -n "${TAP_TOKEN:-}" ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::TAP_GITHUB_TOKEN not set; skipping Homebrew formula bump"
-          fi
-
-      - name: Bump Homebrew tap formula
-        if: steps.tap.outputs.present == 'true' && steps.version.outputs.prerelease != 'true' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.number }}
-        run: |
-          version="$VERSION"
-          gh repo clone KitsuneKode/homebrew-tap tap -- --depth 1
-          cd tap
-          bin/update-formula "$version"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/sweep.rb
-          if git diff --cached --quiet; then
-            echo "formula already at $version"
-          else
-            git commit -m "sweep $version"
-            git push
-          fi
+          brew style local/sweep-smoke/sweep
+          brew install --formula local/sweep-smoke/sweep
+          installed_ver="$("$(brew --prefix)/bin/sweep" --version)"
+          echo "brew installed sweep version: $installed_ver"
+          printf '%s\n' "$installed_ver" | grep -q "$version"
+          test -s "$(brew --prefix)/etc/bash_completion.d/sweep"
+          test -s "$(brew --prefix)/share/zsh/site-functions/_sweep"
+          test -s "$(brew --prefix)/share/fish/vendor_completions.d/sweep.fish"
+          brew test local/sweep-smoke/sweep

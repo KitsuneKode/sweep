@@ -5,6 +5,51 @@ description: Install Sweep and complete your first read-only review.
 
 ## Install
 
+### Standalone binary (no Node or Bun required)
+
+macOS and Linux (glibc 2.17+; Linux musl/Alpine downloads ship starting in
+`v0.5.4+`, where minimal Alpine images need `apk add libstdc++ libgcc` before
+`install.sh` because the musl standalone is dynamically linked):
+
+```sh
+brew install kitsunekode/tap/sweep
+# or:
+curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
+```
+
+Windows (x64, PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 | iex
+```
+
+Or download and inspect `install.ps1` first (respects execution policy):
+
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+[Scoop](https://scoop.sh) support (`https://github.com/KitsuneKode/scoop-bucket`)
+will be available starting in `v0.5.4+`:
+
+```powershell
+# Available from v0.5.4+:
+scoop bucket add kitsunekode https://github.com/KitsuneKode/scoop-bucket
+scoop install sweep
+```
+
+The standalone installers verify SHA-256 checksums and test `--version` on the
+staged binary before replacing any existing install. You can also verify GitHub
+build provenance attestations on any downloaded release binary or `.gz` archive
+with the GitHub CLI (substitute `vX.Y.Z` with the release tag you downloaded):
+
+```sh
+gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/vX.Y.Z
+```
+
+### npm or Bun
+
 For command-line scans and cleanup, use Node.js 22.12 or newer:
 
 ```sh
@@ -20,8 +65,10 @@ sweep --version
 ```
 
 The npm package includes bundled JavaScript and selects a matching optional Rust
-engine package for supported platforms. Keep optional dependencies enabled if you
-want the native engine. [Platforms](platforms.md) explains fallback requirements.
+engine package (including separate glibc and musl packages on Linux) for
+supported platforms. Keep optional dependencies enabled if you want the native
+engine. [Platforms](platforms.md) explains the Linux ABI floor and fallback
+requirements.
 
 The full-screen UI runs on Bun. `@opentui/core` is an optional dependency of
 `@kitsunekode/sweep`: Bun (`bun add -g @kitsunekode/sweep`,
@@ -30,9 +77,9 @@ older than 26.4, pnpm and Yarn 1 skip linking it (Yarn 1 prints an engine
 warning), and npm leaves `@opentui/core` unmet and may still extract a
 `@opentui/core-<platform>` package unless `--omit=optional` is passed. In every
 case, `sweep` installs and runs CLI commands (`sweep`, `sweep scan`,
-`sweep clean`, `sweep plan`, `sweep apply`) on Node.js 22.12+. A qualified
-standalone release embeds the UI with no Node or Bun required; see the release's
-checksum and platform instructions.
+`sweep clean`, `sweep plan`, `sweep apply`) on Node.js 22.12+. A standalone
+release embeds the UI and native engine in one executable with no Node or Bun
+required; see the release's checksum and platform instructions.
 
 ## Scan one project
 

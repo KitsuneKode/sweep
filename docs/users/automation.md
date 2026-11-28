@@ -113,7 +113,7 @@ it also includes two optional fields:
   - `config_dir`: `"other_user"`, `"world_writable"`, `"group_writable"`,
     `"symlink"`, `"not_directory"`, or `"unreadable"`.
   - `opentui`: `"missing"`, `"version_mismatch"`, `"missing_exports"`, or `"load_error"`.
-  - `rust_engine`: `"not_installed"`, `"spawn_error"`, `"probe_failed"`, or `"timeout"`.
+  - `rust_engine`: `"not_installed"`, `"libc_unknown"`, `"spawn_error"`, `"probe_failed"`, or `"timeout"`.
   - `rust_apply_safety`: `"engine_unavailable"` or `"capabilities_unsupported"`.
   - Other checks: `"lock_held"`, `"identity_unavailable"`, `"target_invalid"`,
     `"config_invalid"`, `"no_patterns"`, or `"scan_failed"`.

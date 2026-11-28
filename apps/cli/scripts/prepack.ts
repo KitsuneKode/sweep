@@ -13,6 +13,7 @@
  * `postpack.ts` restores the original manifest.
  */
 
+import { spawnSync } from "node:child_process";
 import {
   closeSync,
   copyFileSync,
@@ -128,6 +129,19 @@ export function assertPublishable(manifest: Record<string, unknown>): void {
   }
 }
 
+const SHA_RE = /^[a-f0-9]{40}$/;
+
+function readGitHead(repoRoot: string): string | undefined {
+  const proc = spawnSync("git", ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (proc.status !== 0) return undefined;
+  const sha = proc.stdout.trim();
+  return SHA_RE.test(sha) ? sha : undefined;
+}
+
 /**
  * Transform the workspace CLI manifest into the exact manifest that ships to npm.
  * Pure helper shared by `prepack.ts` and `preflight.ts`.
@@ -135,6 +149,7 @@ export function assertPublishable(manifest: Record<string, unknown>): void {
 export function preparePublishManifest(
   originalManifest: Record<string, unknown>,
   catalogs: Catalogs,
+  options?: { gitHead?: string },
 ): Record<string, unknown> {
   const manifest = structuredClone(originalManifest);
 
@@ -162,6 +177,12 @@ export function preparePublishManifest(
   delete manifest.devDependencies;
   delete manifest.scripts;
 
+  // Record the exact source commit SHA inside the packed tarball manifest so
+  // `npm publish <tarball>` always publishes authoritative `gitHead` metadata.
+  if (options?.gitHead && SHA_RE.test(options.gitHead)) {
+    manifest.gitHead = options.gitHead;
+  }
+
   assertPublishable(manifest);
   return manifest;
 }
@@ -186,9 +207,11 @@ function main(): void {
   }
 
   const catalogs = readCatalogs(REPO_ROOT);
+  const gitHead = readGitHead(REPO_ROOT);
   const manifest = preparePublishManifest(
     JSON.parse(original) as Record<string, unknown>,
     catalogs,
+    gitHead ? { gitHead } : undefined,
   );
   atomicWrite(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
 

@@ -12,6 +12,7 @@ import {
   type ConfigDirReasonKind,
 } from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
+import { detectLinuxLibc, type DetectedLinuxLibc } from "@kitsunekode/sweep-core/native-platforms";
 import { probeRustEngine } from "@kitsunekode/sweep-core/rust-engine";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { formatBytes, sanitizeTerminalText } from "@kitsunekode/sweep-display";
@@ -45,6 +46,7 @@ export type DoctorCheckReasonKind =
   | "missing_exports"
   | "load_error"
   | "not_installed"
+  | "libc_unknown"
   | "spawn_error"
   | "probe_failed"
   | "timeout"
@@ -61,6 +63,41 @@ export type DoctorCheck = {
   /** Concise human-readable reason sentence when a check warns. */
   reason?: string;
 };
+
+export interface MissingRustEngineDiagnosis {
+  detail: string;
+  reasonKind: "not_installed" | "libc_unknown";
+  reason: string;
+}
+
+export function diagnoseMissingRustEngine(
+  platform: string = process.platform,
+  linuxLibc: DetectedLinuxLibc = platform === "linux" ? detectLinuxLibc() : "unknown",
+  envEnginePath: string | null = process.env.SWEEP_ENGINE_PATH ?? null,
+): MissingRustEngineDiagnosis {
+  if (!envEnginePath && platform === "linux" && linuxLibc === "unknown") {
+    return {
+      detail:
+        "not found (Linux libc detection was inconclusive; no native engine package selected, falling back to JS — set SWEEP_ENGINE_PATH to override)",
+      reasonKind: "libc_unknown",
+      reason:
+        "Linux libc detection was inconclusive; no native engine package was selected, falling back to JS. Set SWEEP_ENGINE_PATH to override.",
+    };
+  }
+  return {
+    detail: "not found",
+    reasonKind: "not_installed",
+    reason: "Native Rust engine binary was not found.",
+  };
+}
+
+export function describeMissingRustEngine(
+  platform: string = process.platform,
+  linuxLibc: DetectedLinuxLibc = platform === "linux" ? detectLinuxLibc() : "unknown",
+  envEnginePath: string | null = process.env.SWEEP_ENGINE_PATH ?? null,
+): string {
+  return diagnoseMissingRustEngine(platform, linuxLibc, envEnginePath).detail;
+}
 
 function targetIsDirectory(targetDir: string): boolean {
   try {
@@ -144,6 +181,8 @@ export async function collectDoctorChecks(
   const targetOk = targetIsDirectory(targetDir);
   const configOk = configLoadError === undefined && configValidity.ok;
   const patternsOk = config !== null && config.patterns.length > 0;
+  const missingRust =
+    !rustOk && rustProbe.reasonKind === "not_installed" ? diagnoseMissingRustEngine() : null;
   return [
     {
       name: "apply_lock",
@@ -254,13 +293,17 @@ export async function collectDoctorChecks(
       ok: rustOk,
       detail: rustOk
         ? rustExecutable
-        : rustProbe.reasonKind === "not_installed"
-          ? "not found"
+        : missingRust
+          ? missingRust.detail
           : `${rustExecutable} (${rustProbe.reason ?? rustProbe.reasonKind})`,
       ...(!rustOk
         ? {
-            reasonKind: rustProbe.reasonKind ?? ("not_installed" as const),
-            reason: rustProbe.reason ?? "Native Rust engine binary was not found.",
+            reasonKind: missingRust
+              ? missingRust.reasonKind
+              : (rustProbe.reasonKind ?? ("not_installed" as const)),
+            reason: missingRust
+              ? missingRust.reason
+              : (rustProbe.reason ?? "Native Rust engine binary was not found."),
           }
         : {}),
     },

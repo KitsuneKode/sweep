@@ -78,7 +78,9 @@
     "@kitsunekode/sweep-engine-darwin-64": "0.5.3",
     "@kitsunekode/sweep-engine-darwin-arm64": "0.5.3",
     "@kitsunekode/sweep-engine-linux-64": "0.5.3",
+    "@kitsunekode/sweep-engine-linux-64-musl": "0.5.3",
     "@kitsunekode/sweep-engine-linux-arm64": "0.5.3",
+    "@kitsunekode/sweep-engine-linux-arm64-musl": "0.5.3",
     "@kitsunekode/sweep-engine-windows-64": "0.5.3",
     "@opentui/core": "catalog:"
   },

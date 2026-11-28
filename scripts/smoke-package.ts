@@ -5,6 +5,7 @@
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { currentNativePlatformId } from "@kitsunekode/sweep-core/native-platforms";
 
 const repo = resolve(import.meta.dir, "..");
 const owned = mkdtempSync(join(tmpdir(), "sweep-installed-smoke-"));
@@ -31,9 +32,8 @@ function packedName(output: string): string {
   return join(owned, files[0].filename);
 }
 try {
-  const platform = process.platform === "win32" ? "windows" : process.platform;
-  const arch = process.arch === "x64" ? "64" : process.arch;
-  const id = `${platform}-${arch}`;
+  const id = currentNativePlatformId();
+  if (!id) throw new Error(`unsupported host platform: ${process.platform}/${process.arch}`);
   nativeManifest = join(repo, "native-packages", id, "package.json");
   previousManifest = readFileSync(nativeManifest);
   await run(["bun", "run", "packages/engine-native/scripts/pack.ts", "--platform", id]);

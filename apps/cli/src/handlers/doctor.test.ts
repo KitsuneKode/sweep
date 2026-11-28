@@ -3,8 +3,67 @@ import { chmodSync, chownSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
-import { collectDoctorChecks } from "./doctor.js";
+import {
+  collectDoctorChecks,
+  describeMissingRustEngine,
+  diagnoseMissingRustEngine,
+} from "./doctor.js";
+import { resolveEngineBackend } from "./shared.js";
 import { registerUiModule, type SweepUiModule } from "./ui.js";
+
+describe("doctor missing rust engine diagnostics", () => {
+  test("reports inconclusive Linux libc reasonKind, reason, and detail when libc is unknown and no override is set", () => {
+    const diagnosis = diagnoseMissingRustEngine("linux", "unknown", null);
+    expect(diagnosis.reasonKind).toBe("libc_unknown");
+    expect(diagnosis.reason).toContain("inconclusive");
+    expect(diagnosis.reason).toContain("SWEEP_ENGINE_PATH");
+    expect(diagnosis.detail).toContain("inconclusive");
+    expect(diagnosis.detail).toContain("JS");
+    expect(diagnosis.detail).toContain("SWEEP_ENGINE_PATH");
+    expect(describeMissingRustEngine("linux", "unknown", null)).toBe(diagnosis.detail);
+  });
+
+  test("keeps not_installed diagnosis when libc is known, non-Linux, or SWEEP_ENGINE_PATH is explicitly set", () => {
+    for (const diagnosis of [
+      diagnoseMissingRustEngine("linux", "glibc", null),
+      diagnoseMissingRustEngine("linux", "musl", null),
+      diagnoseMissingRustEngine("darwin", "unknown", null),
+      diagnoseMissingRustEngine("linux", "unknown", "/custom/engine"),
+    ]) {
+      expect(diagnosis.detail).toBe("not found");
+      expect(diagnosis.reasonKind).toBe("not_installed");
+      expect(diagnosis.reason).toBe("Native Rust engine binary was not found.");
+    }
+    expect(describeMissingRustEngine("linux", "glibc", null)).toBe("not found");
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "auto engine mode falls back to JS when the selected native binary fails to start",
+    () => {
+      const root = mkdtempSync(join(tmpdir(), "sweep-auto-fallback-"));
+      const previous = process.env.SWEEP_ENGINE_PATH;
+      try {
+        const brokenBin = join(root, "sweep-engine");
+        // Non-runnable binary (simulates missing loader / incompatible glibc / bad exec).
+        writeFileSync(brokenBin, "#!/nonexistent/dynamic-loader\n");
+        chmodSync(brokenBin, 0o755);
+        process.env.SWEEP_ENGINE_PATH = brokenBin;
+        expect(resolveEngineBackend({ engine: "auto" }, { warnOnFallback: false })).toBe("js");
+
+        // Also verify non-zero exit on --version falls back to JS in auto mode.
+        const failingBin = join(root, "sweep-engine-fail");
+        writeFileSync(failingBin, "#!/bin/sh\nexit 127\n");
+        chmodSync(failingBin, 0o755);
+        process.env.SWEEP_ENGINE_PATH = failingBin;
+        expect(resolveEngineBackend({ engine: "auto" }, { warnOnFallback: false })).toBe("js");
+      } finally {
+        if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
+        else process.env.SWEEP_ENGINE_PATH = previous;
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+});
 
 function baseCliOpts(overrides: Partial<CliOptions> = {}): CliOptions {
   return {

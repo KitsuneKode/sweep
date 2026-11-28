@@ -1,0 +1,26 @@
+{
+  "version": "0.5.2",
+  "description": "Safe, fast artifact cleanup CLI for any project tree",
+  "homepage": "https://sweep.kitsunekode.in",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/KitsuneKode/sweep/releases/download/v0.5.2/sweep-win-x64.exe#/sweep.exe",
+      "hash": "d1c1b84d6251d74d6afaecd9b06e432acef205bb8153394b4d2de88ee9cb312b"
+    }
+  },
+  "bin": "sweep.exe",
+  "checkver": {
+    "github": "https://github.com/KitsuneKode/sweep"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/KitsuneKode/sweep/releases/download/v$version/sweep-win-x64.exe#/sweep.exe",
+        "hash": {
+          "url": "https://github.com/KitsuneKode/sweep/releases/download/v$version/sweep-win-x64.exe.sha256"
+        }
+      }
+    }
+  }
+}

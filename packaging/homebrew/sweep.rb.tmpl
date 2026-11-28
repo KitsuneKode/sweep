@@ -1,0 +1,40 @@
+class Sweep < Formula
+  desc "Artifact cleanup for project trees - scan, review, and reclaim disk space"
+  homepage "https://sweep.kitsunekode.in"
+  version "{{VERSION}}"
+  license "MIT"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/KitsuneKode/sweep/releases/download/v#{version}/sweep-darwin-arm64.gz"
+      sha256 "{{SHA256_DARWIN_ARM64_GZ}}"
+    end
+    on_intel do
+      url "https://github.com/KitsuneKode/sweep/releases/download/v#{version}/sweep-darwin-x64.gz"
+      sha256 "{{SHA256_DARWIN_X64_GZ}}"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/KitsuneKode/sweep/releases/download/v#{version}/sweep-linux-arm64.gz"
+      sha256 "{{SHA256_LINUX_ARM64_GZ}}"
+    end
+    on_intel do
+      url "https://github.com/KitsuneKode/sweep/releases/download/v#{version}/sweep-linux-x64.gz"
+      sha256 "{{SHA256_LINUX_X64_GZ}}"
+    end
+  end
+
+  def install
+    arch = Hardware::CPU.arm? ? "arm64" : "x64"
+    os = OS.mac? ? "darwin" : "linux"
+    bin.install "sweep-#{os}-#{arch}" => "sweep"
+    chmod 0755, bin/"sweep"
+    generate_completions_from_executable(bin/"sweep", "completions")
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/sweep --version")
+  end
+end

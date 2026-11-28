@@ -8,10 +8,11 @@ import type { NativePlatform } from "@kitsunekode/sweep-core/native-platforms";
  * be clean.
  */
 export function nativePackageJson(platform: NativePlatform, version: string): string {
-  const packageJson = {
+  const libcLabel = platform.libc === "musl" ? " (musl)" : "";
+  const packageJson: Record<string, unknown> = {
     name: platform.npmName,
     version,
-    description: `Native sweep-engine binary for ${platform.os} ${platform.cpu}`,
+    description: `Native sweep-engine binary for ${platform.os} ${platform.cpu}${libcLabel}`,
     license: "MIT",
     repository: {
       type: "git",
@@ -20,9 +21,12 @@ export function nativePackageJson(platform: NativePlatform, version: string): st
     files: ["bin"],
     os: [platform.os],
     cpu: [platform.cpu],
-    publishConfig: {
-      access: "public",
-    },
+  };
+  if (platform.libc) {
+    packageJson.libc = [platform.libc];
+  }
+  packageJson.publishConfig = {
+    access: "public",
   };
   return `${JSON.stringify(packageJson, null, 2)}\n`;
 }
