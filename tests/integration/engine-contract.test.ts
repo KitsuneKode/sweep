@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  linkSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -1170,6 +1171,79 @@ test.skipIf(!NATIVE_AVAILABLE)(
       }
     } finally {
       rmSync(fakeHome, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!NATIVE_AVAILABLE)(
+  "both engines report identical uniqueBytes and uniqueTotalBytes for pnpm/Bun hardlink stores",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-hardlink-parity-"));
+    try {
+      const store = join(root, "store");
+      const scanTarget = join(root, "work");
+      const nmA = join(scanTarget, "proj-a", "node_modules");
+      const nmB = join(scanTarget, "proj-b", "node_modules");
+      mkdirSync(store, { recursive: true });
+      mkdirSync(nmA, { recursive: true });
+      mkdirSync(nmB, { recursive: true });
+
+      // External pnpm/Bun store file hardlinked into both node_modules (nlink = 3; 2 in scan).
+      const storePkg = join(store, "pkg.js");
+      writeFileSync(storePkg, "s".repeat(4096));
+      linkSync(storePkg, join(nmA, "pkg.js"));
+      linkSync(storePkg, join(nmB, "pkg.js"));
+
+      // Cross-candidate hardlink only between proj-a and proj-b (nlink = 2; 2 in scan).
+      const cross = join(nmA, "cross.js");
+      writeFileSync(cross, "c".repeat(2048));
+      linkSync(cross, join(nmB, "cross.js"));
+
+      // Intra-candidate hardlink inside proj-a (nlink = 2; both in proj-a).
+      const intra = join(nmA, "intra-1.js");
+      writeFileSync(intra, "i".repeat(1024));
+      linkSync(intra, join(nmA, "intra-2.js"));
+
+      // Unique single-link files.
+      writeFileSync(join(nmA, "own-a.js"), "a".repeat(500));
+      writeFileSync(join(nmB, "own-b.js"), "b".repeat(300));
+
+      const jsPlan = (await scanToPlan(scanTarget, DEFAULT_CONFIG)).plan;
+      const rustPlan = await scanToPlanViaRust(scanTarget, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+      });
+      const rustStreamPlan = await scanToPlanViaRust(scanTarget, {
+        config: DEFAULT_CONFIG,
+        selectionPolicy: DEFAULT_SELECTION_POLICY,
+        onEntry: () => {},
+        onEntrySized: () => {},
+      });
+
+      const byRel = (plan: ScanPlan) =>
+        new Map(
+          plan.candidates.map((c) => [
+            c.path.slice(scanTarget.length + 1).replaceAll("\\", "/"),
+            { estimatedBytes: c.estimatedBytes, uniqueBytes: c.uniqueBytes },
+          ]),
+        );
+
+      for (const plan of [jsPlan, rustPlan, rustStreamPlan]) {
+        const map = byRel(plan);
+        expect(map.get("proj-a/node_modules")).toEqual({
+          estimatedBytes: 4096 + 2048 + 1024 + 500,
+          uniqueBytes: 1024 + 500,
+        });
+        expect(map.get("proj-b/node_modules")).toEqual({
+          estimatedBytes: 4096 + 2048 + 300,
+          uniqueBytes: 300,
+        });
+        expect(plan.summary.estimatedTotalBytes).toBe(4096 * 2 + 2048 * 2 + 1024 + 500 + 300);
+        // Unique across scan: intra (1024) + own-a (500) + own-b (300) + cross once (2048); storePkg (4096) excluded.
+        expect(plan.summary.uniqueTotalBytes).toBe(1024 + 500 + 300 + 2048);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   },
 );

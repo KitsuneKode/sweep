@@ -24,6 +24,7 @@ function entryFrom(candidate: ScanCandidate): ScanEntry {
     path: candidate.path,
     name: candidate.name,
     estimatedBytes: candidate.estimatedBytes,
+    ...(candidate.uniqueBytes === undefined ? {} : { uniqueBytes: candidate.uniqueBytes }),
     ...(candidate.bytesKnown === undefined ? {} : { bytesKnown: candidate.bytesKnown }),
     ...(candidate.modifiedMs === undefined ? {} : { modifiedMs: candidate.modifiedMs }),
     isSymlink: candidate.isSymlink,
@@ -173,6 +174,9 @@ export class RustScanStream {
       targetIdentity: this.targetIdentity,
       entries: [...this.candidates.values()].map(entryFrom),
       estimatedTotalBytes: this.summary.estimatedTotalBytes,
+      ...(this.summary.uniqueTotalBytes === undefined
+        ? {}
+        : { uniqueTotalBytes: this.summary.uniqueTotalBytes }),
       scannedDirs: this.summary.scannedDirs,
       skippedDirs: this.summary.skippedDirs ?? 0,
       exact: this.summary.exact ?? this.exact,

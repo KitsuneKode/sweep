@@ -137,18 +137,83 @@ function splitEntriesByPathBudget(entries: ScanEntry[]): ScanEntry[][] {
 
 interface SubtreeSize {
   bytes: number;
+  /** Bytes exclusive to this entry (excluding hardlinks shared outside it). */
+  uniqueBytes: number;
   /** `false` when part of the subtree could not be read - `bytes` is a floor. */
   complete: boolean;
 }
 
-function statFallback(entryPath: string): SubtreeSize {
+interface SharedInode {
+  size: number;
+  nlink: bigint;
+  seen: bigint;
+}
+
+/**
+ * Bounded scan-wide hardlink deduplicator (by `(dev, ino)`).
+ * Mirrors Rust `sweep_fs::HardlinkTracker` for exact engine parity.
+ */
+export class HardlinkTracker {
+  private singleLinkBytes = 0;
+  private readonly shared = new Map<string, SharedInode>();
+  private capped = false;
+
+  constructor(private readonly cap: number) {}
+
+  recordSingleLink(size: number): void {
+    if (size <= 0) return;
+    this.singleLinkBytes = Math.min(Number.MAX_SAFE_INTEGER, this.singleLinkBytes + size);
+  }
+
+  recordMultiLink(dev: bigint, ino: bigint, size: number, nlink: bigint): void {
+    if (size <= 0) return;
+    if (ino === 0n) {
+      this.capped = true;
+      return;
+    }
+    const key = `${dev}:${ino}`;
+    const existing = this.shared.get(key);
+    if (existing) {
+      existing.seen += 1n;
+      return;
+    }
+    if (this.shared.size >= this.cap) {
+      this.capped = true;
+      return;
+    }
+    this.shared.set(key, { size, nlink, seen: 1n });
+  }
+
+  uniqueTotalBytes(): number {
+    let total = this.singleLinkBytes;
+    for (const entry of this.shared.values()) {
+      if (entry.seen >= entry.nlink) {
+        total = Math.min(Number.MAX_SAFE_INTEGER, total + entry.size);
+      }
+    }
+    return total;
+  }
+
+  isCapped(): boolean {
+    return this.capped;
+  }
+}
+
+function statFallback(entryPath: string, tracker?: HardlinkTracker): SubtreeSize {
   try {
     // lstat, not stat: a symlink candidate's size is the link itself - stat
     // would report the target, misreporting freed bytes by the target's size.
-    return { bytes: checkedBytes(0, lstatSync(entryPath).size), complete: true };
+    const stat = lstatSync(entryPath, { bigint: true });
+    const bytes = checkedBytes(0, Number(stat.size));
+    if (stat.nlink > 1n) {
+      tracker?.recordMultiLink(stat.dev, stat.ino, bytes, stat.nlink);
+      return { bytes, uniqueBytes: 0, complete: true };
+    }
+    tracker?.recordSingleLink(bytes);
+    return { bytes, uniqueBytes: bytes, complete: true };
   } catch (error) {
     if (isFatalScanError(error)) throw error;
-    return { bytes: 0, complete: false };
+    return { bytes: 0, uniqueBytes: 0, complete: false };
   }
 }
 
@@ -165,8 +230,9 @@ export async function exactSizeDetailed(
   entryPath: string,
   signal?: AbortSignal,
   budget = new ResourceBudget(),
+  tracker?: HardlinkTracker,
 ): Promise<SubtreeSize> {
-  return metadataSize(entryPath, true, signal, budget);
+  return metadataSize(entryPath, true, signal, budget, tracker);
 }
 
 /** Per-artifact hard links are counted once in apparent mode. */
@@ -174,8 +240,9 @@ export async function apparentSizeDetailed(
   entryPath: string,
   signal?: AbortSignal,
   budget = new ResourceBudget(),
+  tracker?: HardlinkTracker,
 ): Promise<SubtreeSize> {
-  return metadataSize(entryPath, false, signal, budget);
+  return metadataSize(entryPath, false, signal, budget, tracker);
 }
 
 async function metadataSize(
@@ -183,8 +250,10 @@ async function metadataSize(
   exact: boolean,
   signal: AbortSignal | undefined,
   budget: ResourceBudget,
+  tracker?: HardlinkTracker,
 ): Promise<SubtreeSize> {
   let bytes = 0;
+  let uniqueBytes = 0;
   let complete = true;
   // The dedup sets and stack die with this job, so they bound peak memory -
   // not a cumulative total. The walk already charged these paths against the
@@ -192,30 +261,50 @@ async function metadataSize(
   // same limits. A scan-level failure still propagates via budget.check().
   const dedupCap = budget.limits.maxIdentities;
   const pendingCap = budget.limits.maxQueuedDirs;
-  const links = new Set<string>();
+  const links = new Map<string, SharedInode>();
   const dirs = new Set<string>();
   const stack: (string | Buffer)[] = [];
   const price = (stat: import("node:fs").BigIntStats | import("node:fs").Stats, root = false) => {
     if (!stat.isFile() && !(stat.isSymbolicLink() && (!exact || root))) return;
-    if (!exact && stat.nlink > 1n && stat.ino !== 0n) {
-      const id = `${stat.dev}:${stat.ino}`;
-      if (links.has(id)) return;
-      if (links.size >= dedupCap || !budget.sizingIdentity()) {
-        // Set at cap: count the link anyway (overcount, flagged partial)
-        // rather than undercounting zero or killing the scan.
-        complete = false;
-      } else {
-        links.add(id);
-      }
+    const rawSize = Number(stat.size);
+    const nlink = typeof stat.nlink === "bigint" ? stat.nlink : BigInt(stat.nlink);
+    if (nlink <= 1n) {
+      bytes = checkedBytes(bytes, rawSize);
+      uniqueBytes = checkedBytes(uniqueBytes, rawSize);
+      tracker?.recordSingleLink(rawSize);
+      return;
     }
-    bytes = checkedBytes(bytes, Number(stat.size));
+    const dev = typeof stat.dev === "bigint" ? stat.dev : BigInt(stat.dev);
+    const ino = typeof stat.ino === "bigint" ? stat.ino : BigInt(stat.ino);
+    tracker?.recordMultiLink(dev, ino, rawSize, nlink);
+    if (ino === 0n) {
+      complete = false;
+      bytes = checkedBytes(bytes, rawSize);
+      return;
+    }
+    const id = `${dev}:${ino}`;
+    const existing = links.get(id);
+    if (existing) {
+      existing.seen += 1n;
+      if (exact) bytes = checkedBytes(bytes, rawSize);
+      return;
+    }
+    if (links.size >= dedupCap || !budget.sizingIdentity()) {
+      // Set at cap: count the link anyway (overcount, flagged partial)
+      // rather than undercounting zero or killing the scan.
+      complete = false;
+      bytes = checkedBytes(bytes, rawSize);
+      return;
+    }
+    links.set(id, { size: rawSize, nlink, seen: 1n });
+    bytes = checkedBytes(bytes, rawSize);
   };
-  if (!budget.sizingDirectory(entryPath)) return { bytes: 0, complete: false };
+  if (!budget.sizingDirectory(entryPath)) return { bytes: 0, uniqueBytes: 0, complete: false };
   stack.push(entryPath);
   try {
     while (stack.length) {
       budget.check();
-      if (signal?.aborted) return { bytes, complete: false };
+      if (signal?.aborted) return { bytes, uniqueBytes, complete: false };
       const path = stack.pop()!;
       budget.releaseSizingDirectory(path);
       try {
@@ -261,7 +350,7 @@ async function metadataSize(
                 }
                 stack.push(child);
               } else {
-                if (!exact && childStat.nlink > 1) childStat = await lstat(child, { bigint: true });
+                if (childStat.nlink > 1) childStat = await lstat(child, { bigint: true });
                 price(childStat);
               }
             } catch (error) {
@@ -286,7 +375,14 @@ async function metadataSize(
       }
     }
     budget.check();
-    return { bytes, complete: complete && !signal?.aborted };
+    // Any multi-link inode whose entire link set lives inside this candidate is
+    // freed when this candidate is removed.
+    for (const entry of links.values()) {
+      if (entry.seen >= entry.nlink) {
+        uniqueBytes = checkedBytes(uniqueBytes, entry.size);
+      }
+    }
+    return { bytes, uniqueBytes, complete: complete && !signal?.aborted };
   } finally {
     budget.releaseSizingIdentities(links.size + dirs.size);
     for (const path of stack) budget.releaseSizingDirectory(path);
@@ -297,10 +393,11 @@ async function applyFallbackSizeAsync(
   entry: ScanEntry,
   signal?: AbortSignal,
   budget = new ResourceBudget(),
+  tracker?: HardlinkTracker,
 ): Promise<SubtreeSize> {
   return entry.entryType === "directory"
-    ? apparentSizeDetailed(entry.path, signal, budget)
-    : statFallback(entry.path);
+    ? apparentSizeDetailed(entry.path, signal, budget, tracker)
+    : statFallback(entry.path, tracker);
 }
 
 /** Minimal async counting semaphore for bounding subprocess concurrency. */
@@ -359,6 +456,7 @@ export class ProgressiveSizer {
       ...SCAN_RESOURCE_PROFILES[hooks.resourceProfile ?? "balanced"],
       ...hooks.limits,
     }),
+    private readonly tracker?: HardlinkTracker,
   ) {
     this.signal = signal
       ? AbortSignal.any([signal, this.controller.signal])
@@ -416,8 +514,14 @@ export class ProgressiveSizer {
           for (const entry of entries) {
             if (this.signal.aborted) break;
             try {
-              const size = await applyFallbackSizeAsync(entry, this.signal, this.budget);
+              const size = await applyFallbackSizeAsync(
+                entry,
+                this.signal,
+                this.budget,
+                this.tracker,
+              );
               entry.estimatedBytes = size.bytes;
+              entry.uniqueBytes = size.uniqueBytes;
               entry.bytesKnown = size.complete;
               this.hooks.onEntrySized?.(entry);
             } catch (fallbackError) {
@@ -441,8 +545,9 @@ export class ProgressiveSizer {
     try {
       if (this.signal?.aborted) return;
       await mapPool(batch, 2, async (entry) => {
-        const size = await apparentSizeDetailed(entry.path, this.signal, this.budget);
+        const size = await apparentSizeDetailed(entry.path, this.signal, this.budget, this.tracker);
         entry.estimatedBytes = size.bytes;
+        entry.uniqueBytes = size.uniqueBytes;
         entry.bytesKnown = size.complete;
         if (!this.signal.aborted) {
           this.hooks.onEntrySized?.(entry);
@@ -529,12 +634,13 @@ export async function scan(
     ...SCAN_RESOURCE_PROFILES[hooks.resourceProfile ?? "balanced"],
     ...hooks.limits,
   });
+  const hardlinks = new HardlinkTracker(budget.limits.maxIdentities);
   // Reparse-point/junction detection is a Windows-only concern; Dirent already
   // reports symlinks authoritatively on POSIX platforms.
   const needsReparseCheck = platform === "win32";
   // Apparent metadata sizing streams during discovery. Exact mode sizes
   // after discovery using the same resource budget.
-  const sizer = !exact ? new ProgressiveSizer(countingHooks, signal, budget) : null;
+  const sizer = !exact ? new ProgressiveSizer(countingHooks, signal, budget, hardlinks) : null;
 
   type Frame = { dir: string; depth: number };
 
@@ -785,7 +891,13 @@ export async function scan(
     if (sizer) {
       await sizer.finish();
     } else {
-      await applySizeEstimatesPostWalk(entries, exact, { ...countingHooks, signal }, budget);
+      await applySizeEstimatesPostWalk(
+        entries,
+        exact,
+        { ...countingHooks, signal },
+        budget,
+        hardlinks,
+      );
     }
     // Terminal emit lands sizedCount == found so a meter drawn from progress
     // events only reaches 100% when sizing actually finished.
@@ -795,6 +907,7 @@ export async function scan(
       targetIdentity,
       entries,
       estimatedTotalBytes: entries.reduce((sum, e) => checkedBytes(sum, e.estimatedBytes), 0),
+      uniqueTotalBytes: hardlinks.uniqueTotalBytes(),
       scannedDirs,
       skippedDirs,
       // A partial candidate cannot support an exact byte claim.
@@ -813,15 +926,17 @@ async function applySizeEstimatesPostWalk(
   exact: boolean,
   hooks: ScanHooks,
   budget: ResourceBudget,
+  tracker?: HardlinkTracker,
 ): Promise<void> {
   const signal = hooks.signal;
 
   await mapPool(entries, SIZE_CONCURRENCY, async (entry) => {
     if (signal?.aborted) return;
     const size = exact
-      ? await exactSizeDetailed(entry.path, signal, budget)
-      : await applyFallbackSizeAsync(entry, signal, budget);
+      ? await exactSizeDetailed(entry.path, signal, budget, tracker)
+      : await applyFallbackSizeAsync(entry, signal, budget, tracker);
     entry.estimatedBytes = size.bytes;
+    entry.uniqueBytes = size.uniqueBytes;
     entry.bytesKnown = size.complete;
     hooks.onEntrySized?.(entry);
     const pendingOutput = hooks.waitForConsumer?.();

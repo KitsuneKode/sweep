@@ -144,7 +144,7 @@ test("streaming sizing preserves filenames that are not valid UTF-8", async () =
   mkdirSync(artifact);
   writeFileSync(Buffer.concat([Buffer.from(`${artifact}/`), Buffer.from([0xff])]), "hello");
   for (const size of [exactSizeDetailed, apparentSizeDetailed])
-    expect(await size(artifact)).toEqual({ bytes: 5, complete: true });
+    expect(await size(artifact)).toEqual({ bytes: 5, uniqueBytes: 5, complete: true });
 });
 
 test("sparse sizing delivers a result while the traversal is still idle", async () => {
@@ -589,7 +589,7 @@ test("a full dedup set overcounts hardlinks but keeps the scan alive", async () 
   linkSync(join(target, "b"), join(target, "b2"));
   const budget = new ResourceBudget({ maxIdentities: 2 });
   const size = await apparentSizeDetailed(target, undefined, budget);
-  expect(size).toEqual({ bytes: 192, complete: false });
+  expect(size).toEqual({ bytes: 192, uniqueBytes: 64, complete: false });
   expect(budget.sizingIdentity()).toBe(true);
   expect(budget.sizingIdentity()).toBe(true);
   expect(budget.sizingIdentity()).toBe(false);

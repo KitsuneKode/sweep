@@ -62,4 +62,43 @@ describe("ProjectsView search box", () => {
     const malformedFrame = malformed.captureCharFrame();
     expect(malformedFrame).toContain("idle: isn't a filter");
   });
+
+  test("shows honest 'about X freed' alongside apparent size when hardlinks reduce unique bytes", async () => {
+    const view = await testRender(
+      <ProjectsView
+        tokens={darkTheme}
+        width={110}
+        height={24}
+        target="/tmp/projects"
+        rows={[]}
+        cursor={0}
+        now={Date.now()}
+        scanning={false}
+        sizedLabel=""
+        reclaimableBytes={20 * 1024 * 1024}
+        uniqueReclaimableBytes={2 * 1024 * 1024}
+        idleBytes={0}
+        projectCount={2}
+        selectedBytes={0}
+        selectedCount={0}
+        selectedIds={new Set<string>()}
+        diskFree={null}
+        filter=""
+        searchFocused={false}
+        footer={<text content="footer" />}
+        onFilterInput={() => {}}
+        onFilterSubmit={() => {}}
+        onRowPress={() => {}}
+        onCursorDelta={() => {}}
+      />,
+      { width: 110, height: 24 },
+    );
+    teardown = view.renderer.destroy.bind(view.renderer);
+    await act(async () => {
+      await view.renderOnce();
+    });
+    const frame = view.captureCharFrame();
+    expect(frame).toContain("about 2.0 MiB freed");
+    expect(frame).toContain("20.0 MiB apparent");
+  });
 });

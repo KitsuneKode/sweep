@@ -436,7 +436,20 @@ export function printStatusSummary(status: StatusSummary): void {
           } idle ${status.idle.days}+ days`,
         )
       : "";
-  console.log(`  ${pc.bold(pc.green(formatBytes(status.reclaimableBytes)))} you could free${idle}`);
+  const hasSharedHardlinks =
+    status.uniqueReclaimableBytes !== undefined &&
+    status.uniqueReclaimableBytes < status.reclaimableBytes;
+  if (hasSharedHardlinks) {
+    console.log(
+      `  ${pc.bold(pc.green(`about ${formatBytes(status.uniqueReclaimableBytes!)} freed`))} ` +
+        pc.dim(`(${formatBytes(status.reclaimableBytes)} apparent · shared hardlinks)`) +
+        idle,
+    );
+  } else {
+    console.log(
+      `  ${pc.bold(pc.green(formatBytes(status.reclaimableBytes)))} you could free${idle}`,
+    );
+  }
   if (status.protectedCount > 0) {
     console.log(
       pc.dim(`  ${status.protectedCount} protected item(s) found, never counted as space to free`),

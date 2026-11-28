@@ -11,6 +11,7 @@ fn snapshot(count: usize) -> ScanPlan {
                 path: format!("/owned/project/group-{}/dist", i),
                 name: "dist".to_owned(),
                 estimated_bytes: i as u64 * 128,
+                unique_bytes: None,
                 bytes_known: Some(i != 2),
                 modified_ms: (i != 1).then_some(i as u64 * 60_000),
                 is_symlink: false,

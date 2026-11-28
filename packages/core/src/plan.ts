@@ -214,6 +214,10 @@ export function validateScanEvent(value: unknown): ScanEvent {
       typeof c.estimatedBytes === "number" &&
       Number.isSafeInteger(c.estimatedBytes) &&
       c.estimatedBytes >= 0 &&
+      (c.uniqueBytes === undefined ||
+        (typeof c.uniqueBytes === "number" &&
+          Number.isSafeInteger(c.uniqueBytes) &&
+          c.uniqueBytes >= 0)) &&
       (c.bytesKnown === undefined || typeof c.bytesKnown === "boolean") &&
       (c.identity === undefined || validFilesystemIdentity(c.identity)) &&
       (c.modifiedMs === undefined ||
@@ -298,6 +302,9 @@ export function validateScanEvent(value: unknown): ScanEvent {
       const s = summary as Record<string, unknown>;
       if (!uint(s.candidateCount) || !uint(s.estimatedTotalBytes) || !uint(s.scannedDirs)) {
         fail("scan_completed.summary counters");
+      }
+      if (s.uniqueTotalBytes !== undefined && !uint(s.uniqueTotalBytes)) {
+        fail("scan_completed.summary.uniqueTotalBytes");
       }
       if (s.skippedDirs !== undefined && !uint(s.skippedDirs)) {
         fail("scan_completed.summary.skippedDirs");

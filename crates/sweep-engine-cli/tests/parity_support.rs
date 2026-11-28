@@ -138,6 +138,9 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
     }
     value["createdAt"] = Value::String("1970-01-01T00:00:00.000Z".to_owned());
     value["summary"]["estimatedTotalBytes"] = Value::Number(0.into());
+    if let Some(summary) = value.get_mut("summary").and_then(Value::as_object_mut) {
+        summary.remove("uniqueTotalBytes");
+    }
 
     let selected_paths: std::collections::HashSet<String> = value
         .get("candidates")
@@ -170,9 +173,10 @@ pub fn normalize_plan_value(plan: &ScanPlan, fixture_root: &Path) -> Value {
                 }
             }
             candidate["estimatedBytes"] = Value::Number(0.into());
-            // Filesystem timestamps differ per checkout, so goldens never carry them.
+            // Filesystem timestamps and byte sizes differ per checkout, so goldens never carry them.
             if let Some(object) = candidate.as_object_mut() {
                 object.remove("modifiedMs");
+                object.remove("uniqueBytes");
                 assert!(
                     object.remove("identity").is_some(),
                     "candidate identity is missing"

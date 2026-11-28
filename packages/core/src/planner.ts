@@ -66,6 +66,9 @@ export async function buildPlan(
       summary: {
         candidateCount: candidates.length,
         estimatedTotalBytes: result.estimatedTotalBytes,
+        ...(result.uniqueTotalBytes !== undefined
+          ? { uniqueTotalBytes: result.uniqueTotalBytes }
+          : {}),
         scannedDirs: result.scannedDirs,
         // Sparse field: absent means "nothing skipped" (or a pre-field plan).
         // Keeping zero implicit also keeps JS and Rust plans byte-identical -

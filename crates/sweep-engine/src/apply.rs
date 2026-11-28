@@ -1501,6 +1501,7 @@ mod tests {
                 path: path.to_owned(),
                 name: name.to_owned(),
                 estimated_bytes: 0,
+                unique_bytes: None,
                 bytes_known: None,
                 modified_ms: None,
                 is_symlink,
@@ -1540,6 +1541,7 @@ mod tests {
             summary: ScanPlanSummary {
                 candidate_count: 1,
                 estimated_total_bytes: 0,
+                unique_total_bytes: None,
                 scanned_dirs: 1,
                 skipped_dirs: 0,
                 exact: false,
@@ -1579,6 +1581,7 @@ mod tests {
                         path: outside_path.clone(),
                         name: "node_modules".to_owned(),
                         estimated_bytes: 0,
+                        unique_bytes: None,
                         bytes_known: None,
                         modified_ms: None,
                         is_symlink: false,
@@ -1598,6 +1601,7 @@ mod tests {
             summary: ScanPlanSummary {
                 candidate_count: 2,
                 estimated_total_bytes: 0,
+                unique_total_bytes: None,
                 scanned_dirs: 1,
                 skipped_dirs: 0,
                 exact: false,
@@ -1654,6 +1658,7 @@ mod tests {
             summary: ScanPlanSummary {
                 candidate_count: 1,
                 estimated_total_bytes: 0,
+                unique_total_bytes: None,
                 scanned_dirs: 1,
                 skipped_dirs: 0,
                 exact: false,
@@ -1701,6 +1706,7 @@ mod tests {
                 summary: ScanPlanSummary {
                     candidate_count: 1,
                     estimated_total_bytes: 0,
+                    unique_total_bytes: None,
                     scanned_dirs: 1,
                     skipped_dirs: 0,
                     exact: false,
@@ -1747,6 +1753,7 @@ mod tests {
             summary: ScanPlanSummary {
                 candidate_count: 1,
                 estimated_total_bytes: 0,
+                unique_total_bytes: None,
                 scanned_dirs: 1,
                 skipped_dirs: 0,
                 exact: false,
@@ -1789,6 +1796,7 @@ mod tests {
                 summary: ScanPlanSummary {
                     candidate_count: 1,
                     estimated_total_bytes: 0,
+                    unique_total_bytes: None,
                     scanned_dirs: 1,
                     skipped_dirs: 0,
                     exact: false,
@@ -1832,6 +1840,7 @@ mod tests {
                     path: git_path,
                     name: ".git".to_owned(),
                     estimated_bytes: 0,
+                    unique_bytes: None,
                     bytes_known: None,
                     modified_ms: None,
                     is_symlink: false,
@@ -1850,6 +1859,7 @@ mod tests {
             summary: ScanPlanSummary {
                 candidate_count: 1,
                 estimated_total_bytes: 0,
+                unique_total_bytes: None,
                 scanned_dirs: 1,
                 skipped_dirs: 0,
                 exact: false,
@@ -1894,6 +1904,7 @@ mod tests {
             summary: ScanPlanSummary {
                 candidate_count: 2,
                 estimated_total_bytes: 0,
+                unique_total_bytes: None,
                 scanned_dirs: 1,
                 skipped_dirs: 0,
                 exact: false,
@@ -1936,6 +1947,7 @@ mod tests {
             summary: ScanPlanSummary {
                 candidate_count: 2,
                 estimated_total_bytes: 140,
+                unique_total_bytes: None,
                 scanned_dirs: 2,
                 skipped_dirs: 0,
                 exact: false,

@@ -64,6 +64,7 @@ export function normalizePlan(plan: ScanPlan, fixtureRoot: string): ScanPlan {
           worktreeOf: _worktreeOf,
           worktreeState: _worktreeState,
           identity: _identity,
+          uniqueBytes: _uniqueBytes,
           ...candidate
         }) => ({
           ...candidate,
@@ -71,10 +72,13 @@ export function normalizePlan(plan: ScanPlan, fixtureRoot: string): ScanPlan {
           estimatedBytes: 0,
         }),
       ),
-      summary: {
-        ...plan.summary,
-        estimatedTotalBytes: 0,
-      },
+      summary: (() => {
+        const { uniqueTotalBytes: _uniqueTotalBytes, ...summary } = plan.summary;
+        return {
+          ...summary,
+          estimatedTotalBytes: 0,
+        };
+      })(),
     }),
   );
 }

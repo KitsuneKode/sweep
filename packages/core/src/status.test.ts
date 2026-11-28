@@ -130,4 +130,16 @@ describe("summarizeStatus", () => {
     expect(s.idle.projects).toBe(0);
     expect(s.scannedDirs).toBe(12);
   });
+
+  test("surfaces uniqueReclaimableBytes alongside apparent reclaimableBytes for hardlinked stores", () => {
+    const p = plan([
+      { ...candidate("node_modules", 10 * GB, "safe", "/p/a", 40), uniqueBytes: 1 * GB },
+      { ...candidate("node_modules", 10 * GB, "safe", "/p/b", 40), uniqueBytes: 1 * GB },
+    ]);
+    p.summary.estimatedTotalBytes = 20 * GB;
+    p.summary.uniqueTotalBytes = 2 * GB;
+    const s = summarizeStatus(p, NOW);
+    expect(s.reclaimableBytes).toBe(20 * GB);
+    expect(s.uniqueReclaimableBytes).toBe(2 * GB);
+  });
 });

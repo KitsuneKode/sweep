@@ -24,6 +24,9 @@ export function summarizeStatus(
   let safeBytes = 0;
   let cautionBytes = 0;
   let protectedCount = 0;
+  let hasUniqueBytes = plan.summary.uniqueTotalBytes !== undefined;
+  let reclaimableUniqueSum = 0;
+  let nonReclaimableBytes = 0;
   const kinds = new Map<string, { bytes: number; count: number }>();
   const projects = new Map<
     string,
@@ -31,11 +34,14 @@ export function summarizeStatus(
   >();
 
   for (const candidate of plan.candidates) {
+    const bytes = candidate.estimatedBytes || 0;
     if (candidate.riskTier === "dangerous" || candidate.riskTier === "blocked") {
       protectedCount += 1;
+      nonReclaimableBytes += bytes;
       continue;
     }
-    const bytes = candidate.estimatedBytes || 0;
+    if (candidate.uniqueBytes !== undefined) hasUniqueBytes = true;
+    reclaimableUniqueSum += candidate.uniqueBytes ?? bytes;
     if (candidate.riskTier === "safe") safeBytes += bytes;
     else cautionBytes += bytes;
 
@@ -83,12 +89,20 @@ export function summarizeStatus(
     }
   }
 
+  const reclaimableBytes = safeBytes + cautionBytes;
+  const uniqueReclaimableBytes = hasUniqueBytes
+    ? nonReclaimableBytes === 0 && plan.summary.uniqueTotalBytes !== undefined
+      ? Math.min(reclaimableBytes, Math.max(reclaimableUniqueSum, plan.summary.uniqueTotalBytes))
+      : Math.min(reclaimableBytes, reclaimableUniqueSum)
+    : undefined;
+
   return {
     protocolVersion: PROTOCOL_VERSION,
     targetDir: plan.targetDir,
     createdAt: plan.createdAt,
     scannedDirs: plan.summary.scannedDirs,
-    reclaimableBytes: safeBytes + cautionBytes,
+    reclaimableBytes,
+    ...(uniqueReclaimableBytes !== undefined ? { uniqueReclaimableBytes } : {}),
     safeBytes,
     cautionBytes,
     protectedCount,

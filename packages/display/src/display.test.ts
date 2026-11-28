@@ -298,4 +298,39 @@ describe("scan report", () => {
     expect(cut).toContain("…");
     expect(cut.endsWith("node_modules")).toBe(true);
   });
+
+  test("scan report surfaces honest 'about X freed' and disk gain when hardlinks inflate apparent bytes", () => {
+    const p = plan(
+      [
+        candidate({
+          id: "a",
+          name: "node_modules",
+          kind: "node_modules",
+          path: "/work/a/node_modules",
+          estimatedBytes: 10 * 1024 * 1024,
+          uniqueBytes: 1024 * 1024,
+        }),
+        candidate({
+          id: "b",
+          name: "node_modules",
+          kind: "node_modules",
+          path: "/work/b/node_modules",
+          estimatedBytes: 10 * 1024 * 1024,
+          uniqueBytes: 1024 * 1024,
+        }),
+      ],
+      ["a", "b"],
+    );
+    p.summary.uniqueTotalBytes = 2 * 1024 * 1024;
+    const lines = plain(
+      formatScanReport(p, "/work", {
+        columns: 110,
+        disk: { free: 100 * 1024 * 1024, total: 200 * 1024 * 1024 },
+      }),
+    );
+    const text = lines.join("\n");
+    expect(text).toContain("about 2.0 MiB freed");
+    expect(text).toContain("20.0 MiB apparent · shared hardlinks");
+    expect(text).toContain("up to 102.0 MiB free");
+  });
 });

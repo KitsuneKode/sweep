@@ -623,12 +623,20 @@ export async function applyPlanViaRust(
   let activityCount = 0;
   const progress = new Set<string>();
   const began = new Set<string>();
-  // Omit presentation-only worktree metadata from the native apply payload so
-  // older native engines (with `deny_unknown_fields`) accept v1 plans cleanly.
+  // Omit presentation-only worktree and unique-byte metadata from the native
+  // apply payload so older native engines (with `deny_unknown_fields`) accept
+  // v1 plans cleanly.
+  const { uniqueTotalBytes: _uniqueTotalBytes, ...applySummary } = plan.summary;
   const applyPayloadPlan: ScanPlan = {
     ...plan,
+    summary: applySummary,
     candidates: plan.candidates.map(
-      ({ worktreeOf: _worktreeOf, worktreeState: _worktreeState, ...candidate }) => candidate,
+      ({
+        worktreeOf: _worktreeOf,
+        worktreeState: _worktreeState,
+        uniqueBytes: _uniqueBytes,
+        ...candidate
+      }) => candidate,
     ),
   };
   try {

@@ -162,6 +162,14 @@ pub struct ScanEntry {
     pub name: String,
     #[serde(deserialize_with = "safe_integer")]
     pub estimated_bytes: u64,
+    /// Bytes belonging to inodes exclusive to this candidate (deduped by dev+ino,
+    /// bounded). Excludes hardlinks shared with external stores or other candidates.
+    #[serde(
+        default,
+        deserialize_with = "optional_safe_integer",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unique_bytes: Option<u64>,
     /// `Some(false)` when sizing hit unreadable inodes - `estimated_bytes` is
     /// a partial sum. `None` on wire means an old producer (treated as known).
     /// New scans always emit it.
@@ -227,6 +235,8 @@ struct CandidateInput {
     name: String,
     #[serde(deserialize_with = "safe_integer")]
     estimated_bytes: u64,
+    #[serde(default, deserialize_with = "optional_safe_integer")]
+    unique_bytes: Option<u64>,
     #[serde(default, deserialize_with = "present_value")]
     bytes_known: Option<bool>,
     #[serde(default, deserialize_with = "optional_safe_integer")]
@@ -291,6 +301,7 @@ impl From<CandidateInput> for ScanCandidate {
                 path: input.path,
                 name: input.name,
                 estimated_bytes: input.estimated_bytes,
+                unique_bytes: input.unique_bytes,
                 bytes_known: input.bytes_known,
                 modified_ms: input.modified_ms,
                 is_symlink: input.is_symlink,
@@ -328,6 +339,12 @@ pub struct ScanPlanSummary {
     pub candidate_count: u32,
     #[serde(deserialize_with = "safe_integer")]
     pub estimated_total_bytes: u64,
+    #[serde(
+        default,
+        deserialize_with = "optional_safe_integer",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unique_total_bytes: Option<u64>,
     pub scanned_dirs: u32,
     /// Unreadable or deduped directories. The JS engine omits the key at
     /// zero; `skip_serializing_if` keeps the wire shape identical.
@@ -367,6 +384,7 @@ impl ScanPlan {
             summary: ScanPlanSummary {
                 candidate_count: 0,
                 estimated_total_bytes: 0,
+                unique_total_bytes: None,
                 scanned_dirs: 0,
                 skipped_dirs: 0,
                 exact: true,

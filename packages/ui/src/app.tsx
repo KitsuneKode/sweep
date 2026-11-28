@@ -2864,6 +2864,18 @@ export function SweepApp({
             scanning={state.scanning}
             sizedLabel={`scanning  ${state.scanSizedCount.toLocaleString()} of ${state.candidates.length.toLocaleString()} sized`}
             reclaimableBytes={projects.reduce((sum, project) => sum + project.queueableBytes, 0)}
+            uniqueReclaimableBytes={(() => {
+              const allQueueable = projects.flatMap((p) =>
+                p.artifacts.filter((c) => c.riskTier === "safe" || c.riskTier === "caution"),
+              );
+              if (!allQueueable.some((c) => c.uniqueBytes !== undefined)) return undefined;
+              const sum = allQueueable.reduce(
+                (acc, c) => acc + (c.uniqueBytes ?? c.estimatedBytes),
+                0,
+              );
+              const apparent = allQueueable.reduce((acc, c) => acc + c.estimatedBytes, 0);
+              return Math.min(apparent, sum);
+            })()}
             guardedBytes={projects.reduce((sum, project) => sum + project.guardedBytes, 0)}
             byCost={byCost}
             partial={projects.some((project) => project.partial)}
@@ -2871,6 +2883,12 @@ export function SweepApp({
             projectCount={projects.length}
             idleBytes={idleSafeBytes}
             selectedBytes={summary.selectedBytes}
+            uniqueSelectedBytes={(() => {
+              const queued = state.candidates.filter((c) => state.selectedIds.has(c.id));
+              if (!queued.some((c) => c.uniqueBytes !== undefined)) return undefined;
+              const sum = queued.reduce((acc, c) => acc + (c.uniqueBytes ?? c.estimatedBytes), 0);
+              return Math.min(summary.selectedBytes, sum);
+            })()}
             selectedCount={summary.selectedCount}
             selectedIds={state.selectedIds}
             diskFree={disk?.free ?? null}

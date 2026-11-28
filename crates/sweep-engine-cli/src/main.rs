@@ -404,6 +404,8 @@ enum ScanStreamEvent {
 struct ScanCompletedSummary {
     candidate_count: u32,
     estimated_total_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unique_total_bytes: Option<u64>,
     scanned_dirs: u32,
     skipped_dirs: u32,
     exact: bool,
@@ -560,6 +562,7 @@ fn run_scan() -> Result<(), CliFailure> {
                 elapsed_ms: scan_started_at.elapsed().as_millis() as u64,
                 candidate_count: plan.summary.candidate_count,
                 estimated_total_bytes: plan.summary.estimated_total_bytes,
+                unique_total_bytes: plan.summary.unique_total_bytes,
                 scanned_dirs: plan.summary.scanned_dirs,
                 skipped_dirs: plan.summary.skipped_dirs,
                 exact: plan.summary.exact,
@@ -1146,6 +1149,7 @@ mod tests {
                 path: format!("/tmp/sweep-emitter/{name}"),
                 name: name.to_owned(),
                 estimated_bytes: 1,
+                unique_bytes: None,
                 bytes_known: Some(true),
                 modified_ms: None,
                 is_symlink: false,
