@@ -19,6 +19,7 @@ import {
   readSmallText,
   type GitIndexEntry,
 } from "./git-index.js";
+import { lookupExecutable } from "./executable-lookup.js";
 import { gitEnv, gitSafeArgs } from "./git-tracked.js";
 
 /**
@@ -201,8 +202,15 @@ function terminateChildBounded(proc: ChildProcess, onForceSettled?: () => void):
 }
 
 function createGitRawRunner(gitBinary = "git"): GitRawRunner {
+  // Spawn an absolute path only: Windows resolves a bare name against the
+  // working directory before PATH, and PATH may carry `.` or empty entries.
+  // Resolved on first use so a scan that never asks git never searches PATH.
+  let executable: string | null | undefined;
   return (gitDir, args, options) => {
     if (options?.signal?.aborted) return Promise.resolve(undefined);
+    executable ??= lookupExecutable(gitBinary).resolvedPath ?? null;
+    if (executable === null) return Promise.resolve(undefined);
+    const binary = executable;
     const timeout = Math.max(1, Math.min(TIMEOUT_MS, options?.timeoutMs ?? TIMEOUT_MS));
     const maxStdout = options?.maxStdoutBytes ?? MAX_GIT_STDOUT;
 
@@ -222,7 +230,7 @@ function createGitRawRunner(gitBinary = "git"): GitRawRunner {
 
       let proc: ChildProcess;
       try {
-        proc = spawn(gitBinary, gitArgs, {
+        proc = spawn(binary, gitArgs, {
           env: gitEnv(),
           stdio: [options?.stdin !== undefined ? "pipe" : "ignore", "pipe", "ignore"],
           detached: process.platform !== "win32",
