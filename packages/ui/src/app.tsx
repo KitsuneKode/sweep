@@ -1598,12 +1598,15 @@ export function SweepApp({
   const scopeChipContent = scopeFilterLabel
     ? t`  ${fg(tokens.info)(`· scope: ${sanitizeTerminalText(scopeFilterLabel)}`)}`
     : null;
-  const statusModeText = state.scanIncomplete
-    ? " INCOMPLETE "
-    : ` ${modeLabel(state.focus, false, visualActive)} `;
+  const passiveModeLabel = modeLabel(state.focus, false, visualActive);
+  const statusModeText = state.scanIncomplete ? " INCOMPLETE " : ` ${passiveModeLabel} `;
+  // Direction C+ has no vim-style NORMAL badge: ordinary browsing is the
+  // default state, not a mode worth a solid accent block. Scanning, incomplete
+  // scans, visual ranges, search and pane-specific modes still identify themselves.
+  const showModeChip = state.scanIncomplete || passiveModeLabel !== "NORMAL";
   // ScanModeChip: paddingX(2) + "SCANNING"(8) + gap(1) + 5-dot strip(9) = 20.
   // ModeChip: paddingX(4) + label.
-  const statusModeWidth = state.scanning ? 20 : statusModeText.length + 4;
+  const statusModeWidth = state.scanning ? 20 : showModeChip ? statusModeText.length + 4 : 0;
   const fittedStatus = fitStatusLine({
     totalWidth: Math.max(0, dimensions.width - 2),
     modeWidth: statusModeWidth,
@@ -1833,12 +1836,9 @@ export function SweepApp({
                 <ScanModeChip tokens={tokens} />
               ) : state.scanIncomplete ? (
                 <ModeChip label=" INCOMPLETE " tokens={tokens} />
-              ) : (
-                <ModeChip
-                  label={` ${modeLabel(state.focus, false, visualActive)} `}
-                  tokens={tokens}
-                />
-              )}
+              ) : passiveModeLabel !== "NORMAL" ? (
+                <ModeChip label={` ${passiveModeLabel} `} tokens={tokens} />
+              ) : null}
               <box
                 flexGrow={1}
                 minWidth={0}

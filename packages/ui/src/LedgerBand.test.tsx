@@ -271,7 +271,7 @@ describe("ledger band", () => {
       const frame = setup.captureCharFrame();
       const ruleRow = frame.split("\n")[2] ?? "";
       expect(frame, `padded=${padded}`).toContain("3 queued · 210.0 MiB");
-      expect(frame, `padded=${padded}`).toContain("Review queue (3)");
+      expect(frame, `padded=${padded}`).toContain("review (3)");
       expect(ruleRow, `padded=${padded}\n${frame}`).not.toMatch(/guarde(?!d\b)/);
       // Must show a whole untruncated label ("100% + 80 MiB guarded" or compact "100% + 80 MiB")
       expect(
@@ -345,7 +345,7 @@ describe("ledger band", () => {
     const manyRuleRow = manyFrame.split("\n")[2] ?? "";
     expect(manyRuleRow).toContain("100% + 80 MiB");
     expect(manyRuleRow).not.toMatch(/guarde(?!d\b)/);
-    expect(manyRuleRow).toContain("Review queue (11)");
+    expect(manyRuleRow).toContain("review (11)");
     manySetup.renderer.destroy();
   });
 });

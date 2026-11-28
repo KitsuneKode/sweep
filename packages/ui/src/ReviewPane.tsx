@@ -23,7 +23,7 @@ import { filterAdvice } from "./filter-query.js";
 import { activeFacetCount } from "./filter-facets.js";
 import { formatBytes } from "@kitsunekode/sweep-display";
 
-const FILTER_PLACEHOLDER = "name, kind:target, >100MB, older:30d, risk:caution";
+const FILTER_PLACEHOLDER = "name, kind:target, >100MiB, older:30d, risk:caution";
 import type { ThemeTokens } from "./theme.js";
 import { cellWidth, clipCells } from "./text-cells.js";
 

@@ -134,7 +134,7 @@ describe("column widths on large trees", () => {
   test("a large tree is measured without spreading it into arguments", () => {
     const rows = Array.from({ length: 50_000 }, (_, i) => row(i, i));
     expect(sidebarCountWidth(rows)).toBe(5);
-    expect(sidebarBytesWidth(rows)).toBe(6);
+    expect(sidebarBytesWidth(rows)).toBe(7);
   });
 });
 

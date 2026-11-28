@@ -87,7 +87,7 @@ describe("native terminal worst-case review", () => {
             // statusline below it.
             const lines = frame.split("\n");
             const cursorLine = lines.findIndex((line) => line.includes("\u258C"));
-            expect(lines[cursorLine + 2]).toContain("NORMAL");
+            expect(lines[cursorLine + 2]).toContain("space  queue");
             const pending: Renderable[] = [setup.renderer.root];
             let mounted = 0;
             while (pending.length) {

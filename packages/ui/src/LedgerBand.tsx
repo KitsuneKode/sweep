@@ -5,7 +5,8 @@ import { formatBytes } from "@kitsunekode/sweep-display";
 import { bold, fg, t, type StyledText } from "@opentui/core";
 import { useMemo } from "react";
 import { ActionButton } from "./ActionButton.js";
-import { ScanMeter } from "./Meter.js";
+import { KeyHints } from "./KeyHints.js";
+import { ScanMeter, StackBar } from "./Meter.js";
 import { buildBrandLine, concatStyled, riskGlyph } from "./presentation.js";
 import { compactBytesLabel } from "./sidebar.js";
 import type { SweepUiSummary } from "./state.js";
@@ -283,13 +284,42 @@ export function LedgerBand({
     }
   }
 
-  const reviewLabel = `Review queue (${summary.selectedCount})`;
-  const safeLabel = width >= 96 && safeBytes > 0 ? spacedBytes(safeBytes) : undefined;
-  const actionsBtnW = cellWidth(" Actions Ctrl+K ");
-  const safeBtnW = width >= 64 ? cellWidth(` Queue safe ${safeLabel ? `${safeLabel} ` : ""}`) : 0;
-  const reviewBtnW = width >= 54 ? cellWidth(` ${reviewLabel} `) : 0;
-  const buttonGaps = 1 + (width >= 64 ? 1 : 0) + (width >= 54 ? 1 : 0);
-  const buttonsTotalW = actionsBtnW + safeBtnW + reviewBtnW + buttonGaps;
+  const reviewLabel = `review (${summary.selectedCount})`;
+  const safeLabel = width >= 96 && safeBytes > 0 ? ` ${spacedBytes(safeBytes)}` : "";
+  const ledgerHints = [
+    {
+      key: "Ctrl+K",
+      label: "actions",
+      press: { name: "k", ctrl: true },
+    },
+    ...(width >= 64
+      ? [
+          {
+            key: "s",
+            label: `queue safe${safeLabel}`,
+            press: { name: "s" },
+            disabled: safeBytes <= 0 && visible.every((c) => c.riskTier !== "safe"),
+          },
+        ]
+      : []),
+    ...(width >= 54
+      ? [
+          {
+            key: "c",
+            label: reviewLabel,
+            press: { name: "c" },
+            next: queued,
+            disabled: scanning || incomplete || summary.selectedCount === 0,
+          },
+        ]
+      : []),
+  ];
+  const hintWidth = (hint: (typeof ledgerHints)[number]) =>
+    cellWidth(hint.key) + 2 + 1 + cellWidth(hint.label);
+  const keycapRowWidth =
+    ledgerHints.reduce((sum, hint) => sum + hintWidth(hint), 0) +
+    Math.max(0, ledgerHints.length - 1) * 2;
+  const buttonsTotalW = keycapRowWidth + 1; // row gap between meter and keycaps
   const ruleSlotBudget = Math.max(0, inner - buttonsTotalW);
 
   // Consistent with D3: ruler measures queued reclaimable (safe + caution)
@@ -398,40 +428,47 @@ export function LedgerBand({
             />
           </box>
         ) : (
-          <text
-            content={concatStyled(
-              buildQueueRule(
-                queuedBreakdown.reclaimableBytes,
-                ledger.reclaimable,
-                ruleWidth,
-                tokens.accent,
-                tokens.meterTrack,
-              ),
-              t`${fg(tokens.accent)(ruleLabel)}`,
-            )}
-            wrapMode="none"
-            flexGrow={1}
-          />
+          <box flexGrow={1} minWidth={0} height={1} flexDirection="row">
+            {ruleWidth > 0 ? (
+              <StackBar
+                width={ruleWidth}
+                segments={[
+                  {
+                    fraction:
+                      ledger.reclaimable > 0
+                        ? Math.min(1, queuedBreakdown.reclaimableBytes / ledger.reclaimable)
+                        : 0,
+                    color: tokens.accent,
+                  },
+                ]}
+                trackColor={tokens.meterTrack}
+                dimColor={tokens.textDim}
+                background={tokens.surface}
+                isNoColor={Boolean(process.env.NO_COLOR)}
+                variant="dots"
+              />
+            ) : null}
+            {ruleLabel ? (
+              <text content={t`${fg(tokens.accent)(ruleLabel)}`} wrapMode="none" />
+            ) : null}
+          </box>
         )}
-        <ActionButton tokens={tokens} label="Actions" hint="Ctrl+K" onPress={onMenu} />
-        {width >= 64 ? (
-          <ActionButton
-            tokens={tokens}
-            label="Queue safe"
-            hint={safeLabel}
-            disabled={safeBytes <= 0 && visible.every((c) => c.riskTier !== "safe")}
-            onPress={onQueueSafe}
-          />
-        ) : null}
-        {width >= 54 ? (
-          <ActionButton
-            tokens={tokens}
-            label={reviewLabel}
-            onPress={onReview}
-            primary
-            disabled={scanning || incomplete || summary.selectedCount === 0}
-          />
-        ) : null}
+        <KeyHints
+          tokens={tokens}
+          hints={ledgerHints}
+          onPress={(key) => {
+            if (key.ctrl && key.name === "k") onMenu();
+            else if (key.name === "s" && width >= 64) onQueueSafe();
+            else if (
+              key.name === "c" &&
+              width >= 54 &&
+              !scanning &&
+              !incomplete &&
+              summary.selectedCount > 0
+            )
+              onReview();
+          }}
+        />
       </box>
     </box>
   );

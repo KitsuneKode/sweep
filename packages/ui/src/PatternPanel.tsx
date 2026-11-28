@@ -4,9 +4,13 @@ import { bold, fg, StyledText, t } from "@opentui/core";
 import { useTerminalDimensions } from "@opentui/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActionButton } from "./ActionButton.js";
+import { KeyHints } from "./KeyHints.js";
+import { categoryGlyph } from "./presentation.js";
+import { rebuildFor } from "./project-details.js";
+import { costColors } from "./theme.js";
 import { SelectableRow } from "./SelectableRow.js";
 import { ScrollbarColumn, scrollbarModel } from "./ScrollbarColumn.js";
-import { cellWidth, clipCells } from "./text-cells.js";
+import { cellWidth, clipCells, clipWords } from "./text-cells.js";
 import { nextScrollTop } from "./scroll.js";
 import {
   patternPanelRows,
@@ -30,6 +34,13 @@ export interface PatternPanelProps {
   onSubmitDraft: () => void;
   onSave?: () => void;
   onInspect?: (pattern: string) => void;
+}
+
+function patternCost(pattern: string | undefined, targetDir: string) {
+  if (!pattern) return "unknown" as const;
+  // Catalog pattern strings are artifact names for the common cases; globby
+  // custom patterns deliberately fall back to the rose custom/unknown hue.
+  return rebuildFor(pattern as never, targetDir, pattern).cost;
 }
 
 /**
@@ -56,7 +67,7 @@ function patternRowContent(row: PatternPanelRow, tokens: ThemeTokens, width: num
   const safeNote = sanitizeTerminalText(row.note ?? "");
   const note =
     noteWidth > 4 && safeNote.length > 0
-      ? fg(tokens.textMuted)(`  ${clipCells(safeNote, noteWidth)}`)
+      ? fg(tokens.textMuted)(`  ${clipWords(safeNote, noteWidth)}`)
       : "";
   return t`${name}${tag}${note}`;
 }
@@ -69,6 +80,7 @@ const PatternRow = memo(function PatternRow({
   isHovered,
   tokens,
   width,
+  targetDir,
   onCursor,
   onToggle,
   onHover,
@@ -80,6 +92,7 @@ const PatternRow = memo(function PatternRow({
   isHovered: boolean;
   tokens: ThemeTokens;
   width: number;
+  targetDir: string;
   onCursor: (selectableIndex: number) => void;
   onToggle: (pattern: string) => void;
   onHover: (index: number, hovered: boolean) => void;
@@ -96,13 +109,19 @@ const PatternRow = memo(function PatternRow({
       <box width="100%" height={1} flexDirection="row" paddingLeft={1} overflow="hidden">
         <ActionButton
           tokens={tokens}
-          label={row.enabled ? "[x]" : "[ ]"}
+          label={row.enabled ? "●" : "○"}
+          color={row.enabled ? tokens.accent : tokens.textDim}
           framed={false}
           onPress={() => {
             if (row.pattern) onToggle(row.pattern);
           }}
         />
-        <text content=" " />
+        <text
+          content={t` ${fg(costColors(tokens)[patternCost(row.pattern, targetDir)])(
+            categoryGlyph(patternCost(row.pattern, targetDir)),
+          )} `}
+          wrapMode="none"
+        />
         <text content={patternRowContent(row, tokens, Math.max(1, width - 5))} wrapMode="none" />
       </box>
     </SelectableRow>
@@ -112,7 +131,7 @@ const PatternRow = memo(function PatternRow({
 /** Longest pattern-pane helper sentence that fits whole without clipping `.sweeprc`. */
 function patternHelperHint(width: number): string {
   const options = [
-    "Checkboxes edit patterns; saving updates .sweeprc.",
+    "Rings edit patterns; saving updates .sweeprc.",
     "Toggle patterns; w saves .sweeprc.",
     "w saves .sweeprc",
   ];
@@ -135,33 +154,42 @@ function PatternControls({
   const helperHint = patternHelperHint(Math.max(0, paneWidth - 1));
   return (
     <>
-      <box flexDirection="row" flexWrap="wrap" gap={1} flexShrink={0}>
-        <ActionButton
+      <box flexDirection="row" flexWrap="wrap" flexShrink={0}>
+        <KeyHints
+          wrap
           tokens={tokens}
-          label="Find"
-          onPress={() => onMutate((s) => setPatternInput(s, "filter"))}
-        />
-        <ActionButton
-          tokens={tokens}
-          label="Add"
-          disabled={inputFocused && state.patternInputMode === "add"}
-          onPress={() => onMutate((s) => setPatternInput(s, "add"))}
-        />
-        {onInspect ? (
-          <ActionButton
-            tokens={tokens}
-            label="Details"
-            disabled={!selectedPattern}
-            onPress={() => {
-              if (selectedPattern) onInspect(selectedPattern);
-            }}
-          />
-        ) : null}
-        <ActionButton
-          tokens={tokens}
-          label="Save"
-          disabled={!onSave || (inputFocused && state.patternInputMode === "add")}
-          onPress={() => onSave?.()}
+          hints={[
+            { key: "/", label: "find", press: { name: "pattern-find" } },
+            {
+              key: "a",
+              label: "add",
+              press: { name: "pattern-add" },
+              disabled: inputFocused && state.patternInputMode === "add",
+            },
+            ...(onInspect
+              ? [
+                  {
+                    key: "i",
+                    label: "details",
+                    press: { name: "pattern-details" },
+                    disabled: !selectedPattern,
+                  },
+                ]
+              : []),
+            {
+              key: "w",
+              label: "save",
+              press: { name: "pattern-save" },
+              disabled: !onSave || (inputFocused && state.patternInputMode === "add"),
+            },
+          ]}
+          onPress={(key) => {
+            if (key.name === "pattern-find") onMutate((s) => setPatternInput(s, "filter"));
+            else if (key.name === "pattern-add") onMutate((s) => setPatternInput(s, "add"));
+            else if (key.name === "pattern-details" && selectedPattern)
+              onInspect?.(selectedPattern);
+            else if (key.name === "pattern-save") onSave?.();
+          }}
         />
       </box>
       {showInput ? (
@@ -193,9 +221,16 @@ function PatternControls({
               else onMutate((s) => setPatternInput(s, null));
             }}
           />
-          <ActionButton
+          <KeyHints
             tokens={tokens}
-            label={state.patternInputMode === "add" ? "Add pattern" : "Done"}
+            hints={[
+              {
+                key: "enter",
+                label: state.patternInputMode === "add" ? "add" : "done",
+                press: { name: "pattern-submit" },
+                next: true,
+              },
+            ]}
             onPress={() => {
               if (state.patternInputMode === "add") onSubmitDraft();
               else onMutate((s) => setPatternInput(s, null));
@@ -360,6 +395,7 @@ export function PatternPanel({
                   isHovered={hovered === selectableIndex}
                   tokens={tokens}
                   width={paneWidth - (scrollbar ? 1 : 0)}
+                  targetDir={state.targetDir}
                   onCursor={(sel) => onMutate((s) => setPatternIndex(s, sel))}
                   onToggle={(pattern) => onMutate((s) => togglePattern(s, pattern))}
                   onHover={(i, h) => setHovered(h ? i : null)}

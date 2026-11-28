@@ -461,7 +461,7 @@ describe("adversarial: committed applying state", () => {
       });
       await settle();
     };
-    await clickLabel("Review queue");
+    await clickLabel("review (");
     expect(setup.captureCharFrame()).toContain("Delete 1 item");
     expect(applyCalls).toHaveLength(0);
     await clickLabel("y  Delete", 2);

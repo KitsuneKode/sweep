@@ -440,7 +440,7 @@ describe("buildHeaderStats queue counts", () => {
         30,
       ),
     );
-    expect(header).toContain("~600GiB");
+    expect(header).toContain("~600 GiB");
     expect(cellWidth(header)).toBeLessThanOrEqual(25);
   });
 

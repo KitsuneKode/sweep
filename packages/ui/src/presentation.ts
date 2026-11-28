@@ -15,9 +15,16 @@ import {
   patternAtCursor,
   visiblePatternRows,
 } from "./state.js";
-import { type CostCategory, type DiskCategory, type ThemeTokens, riskColor } from "./theme.js";
+import {
+  type CostCategory,
+  type DiskCategory,
+  type ThemeTokens,
+  costColors,
+  riskColor,
+} from "./theme.js";
 import type { KeyInput } from "./keymap.js";
 import { cellWidth, clipCells, clipWords, padCells } from "./text-cells.js";
+import { rebuildFor } from "./project-details.js";
 
 export type IconMode = "plain" | "nerd" | "letter";
 export type CategoryIconId = CostCategory | DiskCategory | "custom";
@@ -136,7 +143,7 @@ function toned(text: string, bytes: number, tokens: ThemeTokens): TextChunk {
 }
 
 /** Cursor, queue and risk each have a separate cell, followed by a gap. */
-export const ROW_NAME_OFFSET = 8;
+export const ROW_NAME_OFFSET = 10;
 const SIZE_COLUMN_WIDTH = 9;
 const SIZE_GAP = 2;
 /** Extra cells reserved so a scrollbar or wide glyph cannot wrap the row. */
@@ -319,6 +326,17 @@ export function buildArtifactRow(
         ? tokens.textDim
         : colors[candidate.riskTier],
   )(riskGlyph[candidate.riskTier]);
+  // The rebuild-cost hue is the same category language Projects View teaches:
+  // teal cache, violet install, amber build, rose custom/unknown. Under
+  // NO_COLOR the one-cell letter fallback keeps category identity readable.
+  const rebuild = rebuildFor(
+    candidate.kind,
+    candidate.projectRoot ?? root ?? candidate.path,
+    candidate.name,
+  );
+  const cost = fg(isCurrent ? tokens.selectionText : costColors(tokens)[rebuild.cost])(
+    categoryGlyph(rebuild.cost),
+  );
   // The parent path earns its column only when it says something the group
   // header above the row does not already say.
   const parent = root ? artifactParentLabel(root, candidate.path) : "";
@@ -355,7 +373,7 @@ export function buildArtifactRow(
       ? t`${fg(nameColor)(nameText)}${fg(parentColor)(parentText)}`
       : t`${fg(nameColor)(nameText)}`;
 
-  const parts = [t`${rail} ${mark} ${risk} `, nameStyled];
+  const parts = [t`${rail} ${mark} ${risk} ${cost} `, nameStyled];
   if (widths.ageWidth > 0) {
     // Touched within the week reads as "probably in use": the one age the
     // eye should catch before deleting.

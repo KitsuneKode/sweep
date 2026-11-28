@@ -91,10 +91,10 @@ export function sidebarColumnLayout(
   };
 }
 
-/** Compact byte label for dense sidebar columns (e.g. `1.2GiB`, `400MiB`). */
+/** Compact byte label for dense sidebar columns, with the same unit spacing as rows (`1.2 GiB`, `400 MiB`). */
 export function compactBytesLabel(bytes: number): string {
   if (!Number.isFinite(bytes)) return "unknown";
-  if (bytes <= 0) return "0B";
+  if (bytes <= 0) return "0 B";
   const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"] as const;
   let value = bytes;
   let unit = 0;
@@ -103,7 +103,7 @@ export function compactBytesLabel(bytes: number): string {
     unit += 1;
   }
   const rounded = value >= 10 || unit === 0 ? Math.round(value) : Math.round(value * 10) / 10;
-  return `${rounded}${units[unit]}`;
+  return `${rounded} ${units[unit]}`;
 }
 
 /**

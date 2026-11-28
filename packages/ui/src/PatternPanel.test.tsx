@@ -72,7 +72,7 @@ test("pattern names only focus; checkboxes require left release; save is availab
   await send(() => setup.mockMouse.click(x, y));
   expect(latest.disabledPatterns.has("node_modules")).toBe(false);
   lines = setup.captureCharFrame().split("\n");
-  const box = lines[y]!.indexOf("[x]") + 1;
+  const box = lines[y]!.indexOf("●");
   expect(box).toBeGreaterThan(0);
   await send(() => setup.mockMouse.pressDown(box, y));
   expect(latest.disabledPatterns.has("node_modules")).toBe(false);
@@ -82,9 +82,9 @@ test("pattern names only focus; checkboxes require left release; save is availab
   await send(() => setup.mockMouse.click(box, y, 1));
   expect(latest.disabledPatterns.has("node_modules")).toBe(true);
   lines = setup.captureCharFrame().split("\n");
-  const saveY = lines.findIndex((line) => line.includes("Save"));
+  const saveY = lines.findIndex((line) => line.includes("save"));
   expect(saveY).toBeGreaterThanOrEqual(0);
-  await send(() => setup.mockMouse.click(lines[saveY]!.indexOf("Save") + 1, saveY));
+  await send(() => setup.mockMouse.click(lines[saveY]!.indexOf("save") + 1, saveY));
   expect(saves).toBe(1);
 });
 
@@ -122,33 +122,39 @@ for (const width of [24, 50]) {
         await setup.flush();
         await setup.renderOnce();
       });
-    const click = async (label: string) => {
+    const click = async (label: string, occurrence: "first" | "last" = "first") => {
       const lines = setup.captureCharFrame().split("\n");
-      // Buttons are filled pills: the label sits between one cell of padding.
-      const y = lines.findIndex((line) => line.includes(` ${label} `));
-      expect(y).toBeGreaterThanOrEqual(0);
+      const matching = lines
+        .map((line, index) => ({ line, index }))
+        .filter(({ line }) => line.includes(label));
+      const row = occurrence === "last" ? matching[matching.length - 1] : matching[0];
+      expect(row).toBeDefined();
+      const y = row!.index;
+      const first = row!.line.indexOf(label);
+      const at = occurrence === "last" ? row!.line.lastIndexOf(label) : first;
+      expect(at).toBeGreaterThanOrEqual(0);
       await act(async () => {
-        await setup.mockMouse.click(lines[y]!.indexOf(` ${label} `) + 1, y);
+        await setup.mockMouse.click(at + 1, y);
         await setup.flush();
       });
       await paint();
     };
     await paint();
     expect(setup.captureCharFrame()).toContain("生成物");
-    await click("Details");
+    await click("details");
     expect(inspected).toBe(pattern);
-    await click("Add");
+    await click("add");
     await act(async () => {
       setup.mockInput.pressKey("draft");
       await setup.flush();
     });
     await paint();
     expect(latest.patternDraft).toBe("draft");
-    await click("Add");
+    await click("add");
     expect(latest.patternDraft).toBe("draft");
-    await click("Save");
+    await click("save");
     expect(saves).toBe(0);
-    await click("Add pattern");
+    await click("add", "last");
     expect(submits).toBe(1);
   });
 }

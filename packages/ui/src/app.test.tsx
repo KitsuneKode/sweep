@@ -376,7 +376,7 @@ describe("sweep TUI render", () => {
     });
     await paint();
     expect(setup.captureCharFrame()).not.toContain("Search actions");
-    expect(setup.captureCharFrame()).toContain("Review queue (0)");
+    expect(setup.captureCharFrame()).toContain("review (0)");
     expect(outcomes).toEqual([]);
   });
   test("narrow actions menu exposes every page by mouse and publishes appearance only", async () => {
@@ -428,7 +428,7 @@ describe("sweep TUI render", () => {
       "themeMode",
       "version",
     ]);
-    expect(setup.captureCharFrame()).toContain("Review queue (0)");
+    expect(setup.captureCharFrame()).toContain("review (0)");
     expect(outcomes).toEqual([]);
   });
   test("fresh UI is unselected and mouse actions guide selection, review and cancellation", async () => {
@@ -442,7 +442,7 @@ describe("sweep TUI render", () => {
         });
     };
     await paint();
-    expect(setup.captureCharFrame()).toContain("Review queue (0)");
+    expect(setup.captureCharFrame()).toContain("review (0)");
     await act(async () => {
       setup.mockInput.pressEnter();
       await setup.flush();
@@ -463,12 +463,12 @@ describe("sweep TUI render", () => {
       await paint();
     };
     await click("Esc Close");
-    await click("Queue safe");
-    expect(setup.captureCharFrame()).toContain("Review queue (1)");
-    await click("Review queue (1)");
+    await click("queue safe");
+    expect(setup.captureCharFrame()).toContain("review (1)");
+    await click("review (1)");
     expect(setup.captureCharFrame()).toContain("Delete 1 item");
     await click("n / esc");
-    expect(setup.captureCharFrame()).toContain("Review queue (1)");
+    expect(setup.captureCharFrame()).toContain("review (1)");
     expect(outcomes).toEqual([]);
   });
   test("inspect wraps a long path rather than hiding its final component", async () => {
@@ -551,7 +551,7 @@ describe("sweep TUI render", () => {
     expect(frame).toContain("sweep");
     expect(frame).toContain("found");
     expect(frame).toContain("queued");
-    expect(frame).toContain("Review queue (0)");
+    expect(frame).toContain("review (0)");
     expect(frame).toContain("nothing queued");
     // The tally carries the queue's risk mix - the header owns the bytes.
     expect(frame).toContain("queue empty");

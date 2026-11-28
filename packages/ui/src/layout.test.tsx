@@ -241,14 +241,14 @@ describe("triage keys", () => {
     await press(setup, "v");
     const frame = setup.captureCharFrame();
     expect(frame).not.toContain("VISUAL");
-    expect(frame).toContain("NORMAL");
+    expect(frame).not.toContain("NORMAL");
     expect(outcomes).toEqual([]);
   });
 
   test("a filter expression narrows the list and the header says how many are shown", async () => {
     const setup = await mount(120, 34);
     await press(setup, "/");
-    for (const character of ">100MB") await press(setup, character);
+    for (const character of ">100MiB") await press(setup, character);
     await send(setup, (mock) => mock.pressEnter());
 
     const frame = setup.captureCharFrame();
@@ -358,24 +358,28 @@ describe("scroll stability", () => {
     // The lane's bottom-most cell sits on the hit-grid boundary and does not
     // register in the test renderer, so seek one cell in from each edge.
     await mouse(setup, (m) => m.click(x, bottom - 1));
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○\s+✓ node_modules\s+(?:\S+\s+)?[0-9.]+ MiB/);
-    const mid = setup.captureCharFrame().match(/▌\s+○\s+✓ node_modules\s+(?:\S+\s+)?([0-9.]+) MiB/);
+    expect(setup.captureCharFrame()).toMatch(
+      /▌\s+○\s+✓\s+\S node_modules\s+(?:\S+\s+)?[0-9.]+ MiB/,
+    );
+    const mid = setup
+      .captureCharFrame()
+      .match(/▌\s+○\s+✓\s+\S node_modules\s+(?:\S+\s+)?([0-9.]+) MiB/);
     expect(Number(mid![1])).toBeLessThan(10);
 
     await mouse(setup, (m) => m.click(x, top));
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○\s+✓ node_modules\s+(?:\S+\s+)?30\.0 MiB/);
+    expect(setup.captureCharFrame()).toMatch(/▌\s+○\s+✓\s+\S node_modules\s+(?:\S+\s+)?30\.0 MiB/);
   });
 
   test("dragging the scrollbar thumb seeks continuously", async () => {
     const setup = await mountBig();
     const frame = setup.captureCharFrame();
     const { x, top, bottom } = scrollbarGeometry(frame);
-    expect(frame).toMatch(/▌\s+○\s+✓ node_modules\s+(?:\S+\s+)?30\.0 MiB/);
+    expect(frame).toMatch(/▌\s+○\s+✓\s+\S node_modules\s+(?:\S+\s+)?30\.0 MiB/);
 
     await mouse(setup, (m) => m.drag(x, top, x, bottom - 1));
     const landed = setup
       .captureCharFrame()
-      .match(/▌\s+○\s+✓ node_modules\s+(?:\S+\s+)?([0-9.]+) MiB/);
+      .match(/▌\s+○\s+✓\s+\S node_modules\s+(?:\S+\s+)?([0-9.]+) MiB/);
     expect(Number(landed![1])).toBeLessThan(10);
   });
 
@@ -390,6 +394,6 @@ describe("scroll stability", () => {
     // the old behavior - stops ~thumbHeight rows short of the last item.
     await mouse(setup, (m) => m.drag(x, top, x, bottom - 1));
     // Sorted desc by size: the last item is the 1.0 MiB row.
-    expect(setup.captureCharFrame()).toMatch(/▌\s+○\s+✓ node_modules\s+(?:\S+\s+)?1\.0 MiB/);
+    expect(setup.captureCharFrame()).toMatch(/▌\s+○\s+✓\s+\S node_modules\s+(?:\S+\s+)?1\.0 MiB/);
   });
 });
