@@ -98,6 +98,7 @@ export function buildQueueRule(
   track: string,
 ): StyledText {
   const cells = Math.max(0, width);
+  if (cells === 0) return t``;
   const ratio = total > 0 ? Math.min(1, Math.max(0, value / total)) : 0;
   // Any queued byte shows at least one cell; a full queue is never rounded short.
   const filled = value > 0 && total > 0 ? Math.max(1, Math.round(ratio * cells)) : 0;
@@ -245,7 +246,9 @@ export function LedgerBand({
   let legendWords = false;
   let showBlockedLegend = false;
   if (!scanning && !incomplete) {
-    const rowBudget = Math.max(0, width - rightWidth - 2);
+    // `inner` accounts for the app frame's 1-cell side padding so neither
+    // the middle ledger row nor the bottom rule row ever clips at 60 cols.
+    const rowBudget = Math.max(0, inner - rightWidth - 2);
     const baseW = cellWidth(headlineBaseText);
     const guardW = cellWidth(guardedSuffixText);
     const fullLegendW = legendWidthOf(true, true);
@@ -282,36 +285,49 @@ export function LedgerBand({
 
   const reviewLabel = `Review queue (${summary.selectedCount})`;
   const safeLabel = width >= 96 && safeBytes > 0 ? spacedBytes(safeBytes) : undefined;
-  const buttons =
-    cellWidth(" Actions Ctrl+K ") +
-    (width >= 64 ? 1 + cellWidth(` Queue safe ${safeLabel ? `${safeLabel} ` : ""}`) : 0) +
-    (width >= 54 ? 1 + cellWidth(` ${reviewLabel} `) : 0);
+  const actionsBtnW = cellWidth(" Actions Ctrl+K ");
+  const safeBtnW = width >= 64 ? cellWidth(` Queue safe ${safeLabel ? `${safeLabel} ` : ""}`) : 0;
+  const reviewBtnW = width >= 54 ? cellWidth(` ${reviewLabel} `) : 0;
+  const buttonGaps = 1 + (width >= 64 ? 1 : 0) + (width >= 54 ? 1 : 0);
+  const buttonsTotalW = actionsBtnW + safeBtnW + reviewBtnW + buttonGaps;
+  const ruleSlotBudget = Math.max(0, inner - buttonsTotalW);
 
   // Consistent with D3: ruler measures queued reclaimable (safe + caution)
   // against total reclaimable; any queued guarded (dangerous) bytes are noted
-  // explicitly rather than inflating the reclaimable percentage.
+  // explicitly rather than inflating the reclaimable percentage. Shed whole
+  // lower-priority words when narrow so labels never clip mid-word at 60 cols.
   const percent =
     ledger.reclaimable > 0
       ? Math.min(100, Math.round((queuedBreakdown.reclaimableBytes / ledger.reclaimable) * 100))
       : 0;
-  const guardedQueuedLabel =
+  const guardedCompact =
     queuedBreakdown.guardedBytes > 0
-      ? `${queuedBreakdown.guardedPartial ? "~" : ""}${spacedBytes(queuedBreakdown.guardedBytes)} guarded`
+      ? `${queuedBreakdown.guardedPartial ? "~" : ""}${spacedBytes(queuedBreakdown.guardedBytes)}`
       : "";
-  const ruleLabel = scanning
-    ? ""
-    : !queued
-      ? ""
+  const guardedQueuedLabel = guardedCompact ? `${guardedCompact} guarded` : "";
+  const reclaimShort = queuedBreakdown.reclaimablePartial ? "partial" : `${percent}%`;
+  const ruleCandidates: string[] =
+    scanning || !queued
+      ? []
       : queuedBreakdown.guardedBytes > 0
         ? queuedBreakdown.reclaimableBytes === 0
-          ? ` +${guardedQueuedLabel}`
-          : queuedBreakdown.reclaimablePartial
-            ? ` partial + ${guardedQueuedLabel}`
-            : ` ${percent}% + ${guardedQueuedLabel}`
+          ? [`+${guardedQueuedLabel}`, `+${guardedCompact}`]
+          : [
+              `${reclaimShort} + ${guardedQueuedLabel}`,
+              `${reclaimShort} + ${guardedCompact}`,
+              reclaimShort,
+            ]
         : queuedBreakdown.reclaimablePartial
-          ? " partial bytes"
-          : ` ${percent}% of bytes`;
-  const ruleWidth = Math.max(0, inner - buttons - 2 - cellWidth(ruleLabel));
+          ? ["partial bytes", "partial"]
+          : [`${percent}% of bytes`, `${percent}%`];
+  const chosenRuleText =
+    ruleCandidates.find((candidate) => cellWidth(candidate) <= ruleSlotBudget) ?? "";
+  const chosenW = cellWidth(chosenRuleText);
+  const ruleWidth =
+    chosenW === 0
+      ? ruleSlotBudget
+      : Math.max(0, ruleSlotBudget - chosenW - (ruleSlotBudget > chosenW ? 1 : 0));
+  const ruleLabel = chosenW === 0 ? "" : ruleWidth > 0 ? ` ${chosenRuleText}` : chosenRuleText;
 
   return (
     <box width="100%" flexShrink={0} flexDirection="column" backgroundColor={tokens.surface}>

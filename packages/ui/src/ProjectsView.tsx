@@ -47,7 +47,11 @@ export interface ProjectsViewProps {
   failures?: ReadonlyMap<string, string> | undefined;
   /** What the reclaimable bytes cost to bring back; the hero bar is drawn from it. */
   byCost?: readonly CostShare[] | undefined;
-  /** Some sizes are still being measured (a "~" on the total). */
+  /** Some reclaimable (safe + caution) sizes are still being measured (a "~" on the headline). */
+  reclaimablePartial?: boolean | undefined;
+  /** Some guarded (dangerous + blocked) sizes are still being measured (a "~" on "+guarded"). */
+  guardedPartial?: boolean | undefined;
+  /** Legacy alias for `reclaimablePartial` when callers pass a single flag. */
   partial?: boolean | undefined;
   /** The scan stopped short: whatever is shown is not the whole tree. */
   incomplete?: boolean | undefined;
@@ -364,7 +368,11 @@ export function ProjectsView(props: ProjectsViewProps) {
   )}`;
 
   // One bold tabular headline number per card (reclaimable = safe + caution only).
-  const approx = scanning || props.partial || props.incomplete ? "~" : "";
+  // Each subtotal carries "~" strictly from its own partial flag (aligned with LedgerBand).
+  const reclaimablePartial = props.reclaimablePartial ?? props.partial ?? false;
+  const guardedPartial = props.guardedPartial ?? false;
+  const approx = scanning || reclaimablePartial || props.incomplete ? "~" : "";
+  const guardedApprox = scanning || guardedPartial || props.incomplete ? "~" : "";
   const uniquePartial = !scanning && props.uniqueBytesPartial === true;
   const selectedHasShared =
     !scanning &&
@@ -416,7 +424,7 @@ export function ProjectsView(props: ProjectsViewProps) {
   const guardedHint =
     props.selectedCount === 0 && !scanning && (props.guardedBytes ?? 0) > 0
       ? t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.textDim)(
-          `+${formatBytes(props.guardedBytes ?? 0)} guarded`,
+          `+${guardedApprox}${formatBytes(props.guardedBytes ?? 0)} guarded`,
         )}`
       : null;
   const incompleteHint =
@@ -455,8 +463,11 @@ export function ProjectsView(props: ProjectsViewProps) {
     if (row.kind === "spacer") return { lead: t`` };
     if (row.kind === "section") {
       const label = SECTION_TITLE[row.section];
-      const size = formatBytes(row.bytes);
-      const guard = row.guardedBytes > 0 ? `  ·  +${formatBytes(row.guardedBytes)} guarded` : "";
+      const size = `${row.reclaimablePartial ? "~" : ""}${formatBytes(row.bytes)}`;
+      const guard =
+        row.guardedBytes > 0
+          ? `  ·  +${row.guardedPartial ? "~" : ""}${formatBytes(row.guardedBytes)} guarded`
+          : "";
       const fits = (text: string) => cellWidth(label) + 2 + cellWidth(text) <= listInner;
       const full = `${plural(row.count, "project")}  ·  ${size}`;
       const meta = fits(`${full}${guard}`)
@@ -501,7 +512,9 @@ export function ProjectsView(props: ProjectsViewProps) {
         : fg(tokens.textDim)("·");
       const nameText = padCells(clipCells(sanitizeTerminalText(p.name), nameW, true), nameW);
       const name = isCursor ? bold(fg(tokens.text)(nameText)) : fg(tokens.text)(nameText);
-      const size = `${p.partial ? "~" : ""}${formatBytes(p.queueableBytes)}`.padStart(SIZE_W);
+      const size = `${p.reclaimablePartial ? "~" : ""}${formatBytes(p.queueableBytes)}`.padStart(
+        SIZE_W,
+      );
       // One bold headline per card: row sizes use luminance hierarchy (bright for >= 1 GiB).
       const sizeColor =
         state === "all"

@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
+import { buildProjectRows, buildProjects } from "./projects.js";
 import { ProjectsView } from "./ProjectsView.js";
 import { categoryGlyph, type CategoryIconId } from "./presentation.js";
 import { cellWidth } from "./text-cells.js";
@@ -175,5 +177,119 @@ describe("C+ category glyphs", () => {
         expect(cellWidth(gNoColor), `${id}:nocolor`).toBeLessThanOrEqual(1);
       }
     }
+  });
+});
+
+describe("ProjectsView subtotal partial qualifiers", () => {
+  const mib = 1024 * 1024;
+  const now = Date.parse("2026-11-28T12:00:00Z");
+
+  function makeCandidates(reclaimableKnown: boolean, guardedKnown: boolean): ScanCandidate[] {
+    return [
+      {
+        id: "safe_1",
+        path: "/tmp/projects/app/node_modules",
+        name: "node_modules",
+        kind: "node_modules",
+        entryType: "directory",
+        isSymlink: false,
+        estimatedBytes: 100 * mib,
+        bytesKnown: reclaimableKnown,
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+        projectRoot: "/tmp/projects/app",
+        projectActiveMs: now - 40 * 86_400_000,
+      } as ScanCandidate,
+      {
+        id: "caution_1",
+        path: "/tmp/projects/app/.next",
+        name: ".next",
+        kind: ".next",
+        entryType: "directory",
+        isSymlink: false,
+        estimatedBytes: 30 * mib,
+        bytesKnown: true,
+        riskTier: "caution",
+        reasons: ["default-pattern"],
+        selectedByDefault: false,
+        projectRoot: "/tmp/projects/app",
+        projectActiveMs: now - 40 * 86_400_000,
+      } as ScanCandidate,
+      {
+        id: "blocked_1",
+        path: "/tmp/projects/app/target",
+        name: "target",
+        kind: "target",
+        entryType: "directory",
+        isSymlink: false,
+        estimatedBytes: 150 * mib,
+        bytesKnown: guardedKnown,
+        riskTier: "blocked",
+        reasons: ["tracked"],
+        selectedByDefault: false,
+        projectRoot: "/tmp/projects/app",
+        projectActiveMs: now - 40 * 86_400_000,
+      } as ScanCandidate,
+    ];
+  }
+
+  async function renderCard(candidates: ScanCandidate[]) {
+    const projects = buildProjects(candidates, new Set(), "/tmp/projects", now);
+    const rows = buildProjectRows(projects, new Set());
+    const setup = await testRender(
+      <ProjectsView
+        tokens={darkTheme}
+        width={120}
+        height={24}
+        target="/tmp/projects"
+        rows={rows}
+        cursor={1}
+        now={now}
+        scanning={false}
+        sizedLabel=""
+        reclaimableBytes={projects.reduce((sum, p) => sum + p.queueableBytes, 0)}
+        guardedBytes={projects.reduce((sum, p) => sum + p.guardedBytes, 0)}
+        reclaimablePartial={projects.some((p) => p.reclaimablePartial)}
+        guardedPartial={projects.some((p) => p.guardedPartial)}
+        idleBytes={100 * mib}
+        projectCount={projects.length}
+        selectedBytes={0}
+        selectedCount={0}
+        selectedIds={new Set()}
+        diskFree={null}
+        filter=""
+        searchFocused={false}
+        footer={<text content="" />}
+        onFilterInput={() => {}}
+        onFilterSubmit={() => {}}
+        onRowPress={() => {}}
+        onCursorDelta={() => {}}
+      />,
+      { width: 120, height: 24 },
+    );
+    teardown = setup.renderer.destroy.bind(setup.renderer);
+    await act(async () => {
+      await setup.renderOnce();
+    });
+    return { frame: setup.captureCharFrame(), projects };
+  }
+
+  test("exact reclaimable + partial guarded tildes only guarded", async () => {
+    const { frame, projects } = await renderCard(makeCandidates(true, false));
+    expect(projects[0]!.reclaimablePartial).toBe(false);
+    expect(projects[0]!.guardedPartial).toBe(true);
+    expect(frame).toContain("130.0 MiB you can reclaim");
+    expect(frame).not.toContain("~130.0 MiB");
+    expect(frame).toContain("+~150.0 MiB guarded");
+  });
+
+  test("partial reclaimable + exact guarded tildes only reclaimable", async () => {
+    const { frame, projects } = await renderCard(makeCandidates(false, true));
+    expect(projects[0]!.reclaimablePartial).toBe(true);
+    expect(projects[0]!.guardedPartial).toBe(false);
+    expect(frame).toContain("~130.0 MiB you can reclaim");
+    expect(frame).toContain("+150.0 MiB guarded");
+    expect(frame).not.toContain("+~150.0 MiB guarded");
   });
 });

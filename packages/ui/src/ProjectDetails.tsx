@@ -243,7 +243,13 @@ export function ProjectDetails({
       ) : null}
       {project.guardedBytes > 0 ? (
         <text
-          content={t`${fg(tokens.warning)(clipCells(`+${formatBytes(project.guardedBytes)} guarded (excluded)`, inner, true))}`}
+          content={t`${fg(tokens.warning)(
+            clipCells(
+              `+${project.guardedPartial ? "~" : ""}${formatBytes(project.guardedBytes)} guarded (excluded)`,
+              inner,
+              true,
+            ),
+          )}`}
           wrapMode="none"
         />
       ) : null}

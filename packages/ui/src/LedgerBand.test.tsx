@@ -105,6 +105,11 @@ describe("ledger facts", () => {
     expect(cells(1, 1_000_000)).toBe(`━${"─".repeat(9)}`);
     expect(cells(0, 100)).toBe("─".repeat(10));
     expect(cells(100, 100)).toBe("━".repeat(10));
+    expect(
+      buildQueueRule(100, 100, 0, "#fff", "#000")
+        .chunks.map((chunk) => chunk.text)
+        .join(""),
+    ).toBe("");
   });
 
   test("the receipt names what came back and every outcome that did not", () => {
@@ -221,5 +226,126 @@ describe("ledger band", () => {
       expect(frame, `width=${width}`).toContain("130.0 MiB reclaimable");
       setup.renderer.destroy();
     }
+  });
+
+  test("rule label budgets whole tokens and never clips mid-word at 60 columns", async () => {
+    const mib = 1024 * 1024;
+    const allQueuedPlan = plan(
+      ["safe", "caution", "dangerous", "blocked"],
+      [100 * mib, 30 * mib, 80 * mib, 70 * mib],
+    );
+    const state = {
+      ...createUiState(allQueuedPlan),
+      selectedIds: new Set(["cand_0", "cand_1", "cand_2"]),
+    };
+
+    // Test both direct 60-col render and app-framed (paddingLeft/Right=1) 60-col render.
+    for (const padded of [false, true]) {
+      const setup = await testRender(
+        <box width="100%" height="100%" paddingLeft={padded ? 1 : 0} paddingRight={padded ? 1 : 0}>
+          <LedgerBand
+            tokens={darkTheme}
+            width={60}
+            targetDir={state.targetDir}
+            candidates={state.candidates}
+            visible={getVisibleCandidates(state)}
+            selectedIds={state.selectedIds}
+            summary={getUiSummary(state)}
+            riskFilter={state.riskFilter}
+            scanning={state.scanning}
+            incomplete={state.scanIncomplete}
+            sizedCount={state.scanSizedCount}
+            stats={t`4 found`}
+            onMenu={() => {}}
+            onQueueSafe={() => {}}
+            onReview={() => {}}
+            onRiskFilter={() => {}}
+          />
+        </box>,
+        { width: 60, height: 4 },
+      );
+      await act(async () => {
+        await setup.renderOnce();
+        await setup.flush();
+      });
+      const frame = setup.captureCharFrame();
+      const ruleRow = frame.split("\n")[2] ?? "";
+      expect(frame, `padded=${padded}`).toContain("3 queued · 210.0 MiB");
+      expect(frame, `padded=${padded}`).toContain("Review queue (3)");
+      expect(ruleRow, `padded=${padded}\n${frame}`).not.toMatch(/guarde(?!d\b)/);
+      // Must show a whole untruncated label ("100% + 80 MiB guarded" or compact "100% + 80 MiB")
+      expect(
+        ruleRow.includes("100% + 80 MiB guarded") || ruleRow.includes("100% + 80 MiB"),
+        `padded=${padded}\n${frame}`,
+      ).toBe(true);
+      setup.renderer.destroy();
+    }
+
+    // Even with a double-digit queue count at 60 cols padded, it sheds "guarded" cleanly without clipping.
+    const manyPlan = plan(
+      [
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "caution",
+        "dangerous",
+      ],
+      [
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        20 * mib,
+        30 * mib,
+        80 * mib,
+      ],
+    );
+    const manyState = {
+      ...createUiState(manyPlan),
+      selectedIds: new Set(manyPlan.candidates.map((c) => c.id)),
+    };
+    const manySetup = await testRender(
+      <box width="100%" height="100%" paddingLeft={1} paddingRight={1}>
+        <LedgerBand
+          tokens={darkTheme}
+          width={60}
+          targetDir={manyState.targetDir}
+          candidates={manyState.candidates}
+          visible={getVisibleCandidates(manyState)}
+          selectedIds={manyState.selectedIds}
+          summary={getUiSummary(manyState)}
+          riskFilter={manyState.riskFilter}
+          scanning={manyState.scanning}
+          incomplete={manyState.scanIncomplete}
+          sizedCount={manyState.scanSizedCount}
+          stats={t`11 found`}
+          onMenu={() => {}}
+          onQueueSafe={() => {}}
+          onReview={() => {}}
+          onRiskFilter={() => {}}
+        />
+      </box>,
+      { width: 60, height: 4 },
+    );
+    await act(async () => {
+      await manySetup.renderOnce();
+      await manySetup.flush();
+    });
+    const manyFrame = manySetup.captureCharFrame();
+    const manyRuleRow = manyFrame.split("\n")[2] ?? "";
+    expect(manyRuleRow).toContain("100% + 80 MiB");
+    expect(manyRuleRow).not.toMatch(/guarde(?!d\b)/);
+    expect(manyRuleRow).toContain("Review queue (11)");
+    manySetup.renderer.destroy();
   });
 });
