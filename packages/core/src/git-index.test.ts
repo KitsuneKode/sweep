@@ -105,7 +105,7 @@ describe("git index parser hardening and bounds", () => {
     }
   });
 
-  test("rejects v4 path compression bomb within bounded memory", () => {
+  test("rejects v4 path compression bomb within decoded path-byte bound", () => {
     // 1 initial 60 KiB path + 1,500 3-byte delta entries would expand to ~90 MiB
     // from a ~160 KiB input without an aggregate decoded path-byte cap.
     const prefix = "a/".repeat(30_000);
@@ -116,18 +116,47 @@ describe("git index parser hardening and bounds", () => {
     const bomb = buildIndex(4, paths, [], 20);
     expect(bomb.length).toBeLessThan(300 * 1024);
 
-    const beforeHeap = process.memoryUsage().heapUsed;
-    const result = parseGitIndex(bomb, 20, { maxTotalPathBytes: 4 * 1024 * 1024 });
-    const afterHeap = process.memoryUsage().heapUsed;
-    expect(result.ok).toBe(false);
-    expect(afterHeap - beforeHeap).toBeLessThan(32 * 1024 * 1024);
+    // 4 MiB cap admits at most 69 entries of 60,004 bytes each, so the parser
+    // aborts with path-bytes-limit before the second 256-entry expiry check.
+    let expiryChecks = 0;
+    const result = parseGitIndex(bomb, 20, {
+      maxTotalPathBytes: 4 * 1024 * 1024,
+      isExpired: () => {
+        expiryChecks += 1;
+        return false;
+      },
+    });
+    expect(result).toEqual({ ok: false, reason: "path-bytes-limit" });
+    expect(expiryChecks).toBe(1);
+
+    // Exact boundary: N entries succeed at their exact decoded byte total and
+    // reject with path-bytes-limit one byte below it.
+    const smallPaths = paths.slice(0, 5);
+    const small = buildIndex(4, smallPaths, [], 20);
+    const exactBytes = smallPaths.reduce((sum, p) => sum + Buffer.byteLength(p, "utf8"), 0);
+
+    const atCap = parseGitIndex(small, 20, { maxTotalPathBytes: exactBytes });
+    expect(atCap.ok).toBe(true);
+    if (atCap.ok) {
+      expect(atCap.entries.length).toBe(smallPaths.length);
+      const decodedBytes = atCap.entries.reduce(
+        (sum, entry) => sum + Buffer.byteLength(entry.path, "utf8"),
+        0,
+      );
+      expect(decodedBytes).toBe(exactBytes);
+    }
+
+    expect(parseGitIndex(small, 20, { maxTotalPathBytes: exactBytes - 1 })).toEqual({
+      ok: false,
+      reason: "path-bytes-limit",
+    });
   });
 
-  test("rejects EWAH compression bombs in split-index link extensions in bounded memory and time", () => {
+  test("rejects EWAH compression bombs in split-index link extensions within parser bounds", () => {
     const baseOid = Buffer.alloc(20, 0x22);
     const emptyEwah = Buffer.alloc(12); // bitSize=0, wordCount=0, rlwPos=0
 
-    // Bomb 1: 1-bit run claiming 500,000 set bits from an 8-byte RLW.
+    // Bomb 1: 1-bit run claiming 100,000 words (6.4M bits) for a 500,000-bit bitmap.
     const onesBomb = Buffer.concat([baseOid, buildEwahRlw(500_000, true, 100_000), emptyEwah]);
     const idxOnes = buildIndex(2, ["a"], [["link", onesBomb]], 20);
 
@@ -135,13 +164,38 @@ describe("git index parser hardening and bounds", () => {
     const zerosBomb = Buffer.concat([baseOid, buildEwahRlw(100, false, 0x0fffffff), emptyEwah]);
     const idxZeros = buildIndex(2, ["a"], [["link", zerosBomb]], 20);
 
+    // Bomb 3: bitSize exceeding MAX_SPLIT_BITMAP_BITS (500,000).
+    const oversizedBits = Buffer.concat([baseOid, buildEwahRlw(500_001, true, 1), emptyEwah]);
+    const idxOversized = buildIndex(2, ["a"], [["link", oversizedBits]], 20);
+
     const start = performance.now();
-    const beforeHeap = process.memoryUsage().heapUsed;
-    expect(parseGitIndex(idxOnes, 20, { allowSplitIndex: true }).ok).toBe(false);
-    expect(parseGitIndex(idxZeros, 20, { allowSplitIndex: true }).ok).toBe(false);
-    const afterHeap = process.memoryUsage().heapUsed;
+    expect(parseGitIndex(idxOnes, 20, { allowSplitIndex: true })).toEqual({
+      ok: false,
+      reason: "bad-split-link",
+    });
+    expect(parseGitIndex(idxZeros, 20, { allowSplitIndex: true })).toEqual({
+      ok: false,
+      reason: "bad-split-link",
+    });
+    expect(parseGitIndex(idxOversized, 20, { allowSplitIndex: true })).toEqual({
+      ok: false,
+      reason: "bad-split-link",
+    });
     expect(performance.now() - start).toBeLessThan(500);
-    expect(afterHeap - beforeHeap).toBeLessThan(16 * 1024 * 1024);
+
+    // Exact bitmap bound: bitSize at maxEntries succeeds while maxEntries + 1 rejects.
+    const capped = Buffer.concat([baseOid, buildEwahRlw(128, true, 2), emptyEwah]);
+    const idxCapped = buildIndex(2, ["a"], [["link", capped]], 20);
+    const atCap = parseGitIndex(idxCapped, 20, { allowSplitIndex: true, maxEntries: 128 });
+    expect(atCap.ok).toBe(true);
+    if (atCap.ok) {
+      expect(atCap.splitLink?.deleteBitmap.bitSize).toBe(128);
+      expect(atCap.splitLink?.deleteBitmap.setCount).toBe(128);
+    }
+    expect(parseGitIndex(idxCapped, 20, { allowSplitIndex: true, maxEntries: 127 })).toEqual({
+      ok: false,
+      reason: "bad-split-link",
+    });
   });
 
   test("rejects unknown uppercase and lowercase extensions identically", () => {
@@ -267,15 +321,16 @@ describe("git index parser hardening and bounds", () => {
     },
   );
 
-  test("seeded fuzz corpus never throws and keeps memory bounded", () => {
+  test("seeded fuzz corpus never throws and respects parser bounds", () => {
     let seed = 0x5eed1234;
     const nextU32 = () => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       return seed;
     };
 
+    const maxEntries = 500_000;
+    const maxTotalPathBytes = 2 * 1024 * 1024;
     const baseline = buildIndex(4, ["a/b/c.ts", "a/b/d.ts", "z.txt"], [["TREE", Buffer.from("x")]]);
-    const startHeap = process.memoryUsage().heapUsed;
     const startMs = performance.now();
 
     for (let iter = 0; iter < 2000; iter++) {
@@ -316,13 +371,30 @@ describe("git index parser hardening and bounds", () => {
         for (let i = 0; i < linkLen; i++) linkBody[i] = nextU32() & 0xff;
         sample = buildIndex(2, ["x"], [["link", linkBody]], 20);
       }
-      parseGitIndex(sample, 20, { allowSplitIndex: true, maxTotalPathBytes: 2 * 1024 * 1024 });
-      parseGitIndex(sample, 32, { allowSplitIndex: true, maxTotalPathBytes: 2 * 1024 * 1024 });
+      for (const hashLen of [20, 32] as const) {
+        const result = parseGitIndex(sample, hashLen, {
+          allowSplitIndex: true,
+          maxEntries,
+          maxTotalPathBytes,
+        });
+        if (result.ok) {
+          expect(result.entries.length).toBeLessThanOrEqual(maxEntries);
+          const decodedPathBytes = result.entries.reduce(
+            (sum, entry) => sum + Buffer.byteLength(entry.path, "utf8"),
+            0,
+          );
+          expect(decodedPathBytes).toBeLessThanOrEqual(maxTotalPathBytes);
+          if (result.splitLink) {
+            expect(result.splitLink.deleteBitmap.bitSize).toBeLessThanOrEqual(maxEntries);
+            expect(result.splitLink.replaceBitmap.bitSize).toBeLessThanOrEqual(maxEntries);
+          }
+        } else {
+          expect(result.reason.length).toBeGreaterThan(0);
+        }
+      }
     }
 
     const elapsedMs = performance.now() - startMs;
-    const heapDelta = process.memoryUsage().heapUsed - startHeap;
     expect(elapsedMs).toBeLessThan(5_000);
-    expect(heapDelta).toBeLessThan(64 * 1024 * 1024);
   });
 });
