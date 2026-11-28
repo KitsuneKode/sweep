@@ -60,7 +60,7 @@ Running with `sudo` is not the fix. Sweep accepts the invoking user from `SUDO_U
 
 ### `--engine rust` fails with `libc_unknown`
 
-Sweep could not prove whether the system uses glibc or musl. It refuses to guess. Repair the system `ldd` or dynamic loader setup, use the JavaScript engine, or install a standalone binary matched to the system.
+Sweep could not prove whether the system uses glibc or musl. It refuses to guess. Use `--engine js`, or install a standalone binary matched to the system. If this happens on a standard Linux installation, report it with the doctor JSON.
 
 ## Scan problems
 

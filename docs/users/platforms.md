@@ -52,7 +52,7 @@ musl native engines are statically linked. The standalone binary itself is dynam
 apk add libstdc++ libgcc
 ```
 
-Sweep detects musl by reading the ELF interpreter or `ldd` output. It does not treat Alpine package files as proof of musl. If detection is uncertain, `--engine auto` conservatively uses JavaScript. `sweep doctor --json` reports `libc_unknown` when that happens.
+Sweep detects musl from the running executable's ELF interpreter, mapped runtime libraries, or glibc runtime evidence. It does not treat Alpine package files or `ldd` output as proof of musl. If detection is uncertain, `--engine auto` conservatively uses JavaScript. `sweep doctor --json` reports `libc_unknown` when that happens.
 
 ## macOS and Windows notes
 
