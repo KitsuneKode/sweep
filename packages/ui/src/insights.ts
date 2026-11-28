@@ -1,5 +1,7 @@
 import type { RiskTier, ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { IDLE_WINDOW_DAYS } from "@kitsunekode/sweep-protocol";
 import { lastActiveMs } from "./age.js";
+import { cellWidth } from "./text-cells.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -22,6 +24,52 @@ export interface Insights {
   stale: { bytes: number; count: number };
   /** False when no candidate carries an mtime, so "stale" would be a guess. */
   ageKnown: boolean;
+}
+
+/**
+ * Width-tiered insight copy (Direction C+ §5): `full` fits 100–120 col views,
+ * `short` stays <= 54 cells so insight lines never truncate with `…` at 80 cols.
+ */
+export interface TieredInsight {
+  full: string;
+  short: string;
+}
+
+/**
+ * Build the Storage Card insight sentence tying idle / finished-worktree space
+ * to the hero reclaimable total. Both variants are complete sentences.
+ */
+export function buildIdleInsight(
+  idleBytes: number,
+  idleProjects: number,
+  finishedWorktrees: number,
+  format: (bytes: number) => string,
+): TieredInsight {
+  const bytesLabel = format(idleBytes);
+  const parts: string[] = [];
+  if (idleProjects > 0) {
+    parts.push(
+      `${idleProjects.toLocaleString()} idle project${idleProjects === 1 ? "" : "s"} (${IDLE_WINDOW_DAYS}+ days)`,
+    );
+  }
+  if (finishedWorktrees > 0) {
+    parts.push(
+      `${finishedWorktrees.toLocaleString()} finished worktree${finishedWorktrees === 1 ? "" : "s"}`,
+    );
+  }
+  const full =
+    parts.length > 0
+      ? `${bytesLabel} in ${parts.join(" and ")}`
+      : `${bytesLabel} safe in projects idle ${IDLE_WINDOW_DAYS}+ days`;
+  const short = `${bytesLabel} idle ${IDLE_WINDOW_DAYS}+ days`;
+  return { full, short };
+}
+
+/** Pick the widest complete insight variant that fits `budget` without clipping. */
+export function pickInsight(insight: TieredInsight, budget: number): string {
+  if (cellWidth(insight.full) <= budget) return insight.full;
+  if (cellWidth(insight.short) <= budget) return insight.short;
+  return insight.short;
 }
 
 /**

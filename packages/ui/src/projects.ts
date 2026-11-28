@@ -46,6 +46,10 @@ export interface Project {
   queueableBytes: number;
   /** Dangerous and blocked bytes: found, never counted as space to free. */
   guardedBytes: number;
+  /** True when any safe or caution artifact in this project has `bytesKnown === false`. */
+  reclaimablePartial: boolean;
+  /** True when any dangerous or blocked artifact in this project has `bytesKnown === false`. */
+  guardedPartial: boolean;
   partial: boolean;
   artifacts: ScanCandidate[];
   /** Ids a project-level space queues: never dangerous or blocked. */
@@ -67,6 +71,8 @@ export type ProjectRow =
       /** Reclaimable (safe + caution) bytes of the members. */
       bytes: number;
       guardedBytes: number;
+      reclaimablePartial?: boolean;
+      guardedPartial?: boolean;
       count: number;
     }
   | { kind: "project"; project: Project }
@@ -158,6 +164,12 @@ export function buildProjects(
     const queueable = artifacts
       .filter((c) => c.riskTier === "safe" || c.riskTier === "caution")
       .map((c) => c.id);
+    const reclaimablePartial = artifacts.some(
+      (c) => (c.riskTier === "safe" || c.riskTier === "caution") && c.bytesKnown === false,
+    );
+    const guardedPartial = artifacts.some(
+      (c) => (c.riskTier === "dangerous" || c.riskTier === "blocked") && c.bytesKnown === false,
+    );
     const name = basename(key) || key;
     projects.push({
       key,
@@ -172,7 +184,9 @@ export function buildProjects(
       guardedBytes: artifacts
         .filter((c) => c.riskTier === "dangerous" || c.riskTier === "blocked")
         .reduce((sum, c) => sum + c.estimatedBytes, 0),
-      partial: artifacts.some((c) => c.bytesKnown === false),
+      reclaimablePartial,
+      guardedPartial,
+      partial: reclaimablePartial || guardedPartial,
       artifacts,
       queueable,
       selected: artifacts.filter((c) => selectedIds.has(c.id)).length,
@@ -207,6 +221,8 @@ export function buildProjectRows(
       section,
       bytes: members.reduce((sum, project) => sum + project.queueableBytes, 0),
       guardedBytes: members.reduce((sum, project) => sum + project.guardedBytes, 0),
+      reclaimablePartial: members.some((project) => project.reclaimablePartial),
+      guardedPartial: members.some((project) => project.guardedPartial),
       count: members.length,
     });
     // The biggest few first; the long tail of small projects waits behind one row.

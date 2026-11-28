@@ -82,11 +82,14 @@ async function render(
 }
 
 describe("ledger facts", () => {
-  test("blocked bytes are found but never reclaimable", () => {
-    const ledger = buildLedger(plan(["safe", "caution", "blocked"], [10, 20, 40]).candidates);
+  test("blocked and dangerous bytes are guarded, never reclaimable", () => {
+    const ledger = buildLedger(
+      plan(["safe", "caution", "dangerous", "blocked"], [10, 20, 35, 40]).candidates,
+    );
     expect(ledger.reclaimable).toBe(30);
+    expect(ledger.guarded).toBe(75);
     expect(ledger.bytes.blocked).toBe(40);
-    expect(ledger.counts).toEqual({ safe: 1, caution: 1, dangerous: 0, blocked: 1 });
+    expect(ledger.counts).toEqual({ safe: 1, caution: 1, dangerous: 1, blocked: 1 });
   });
 
   test("queue safe counts only listed safe items that are not queued yet", () => {
@@ -102,6 +105,11 @@ describe("ledger facts", () => {
     expect(cells(1, 1_000_000)).toBe(`━${"─".repeat(9)}`);
     expect(cells(0, 100)).toBe("─".repeat(10));
     expect(cells(100, 100)).toBe("━".repeat(10));
+    expect(
+      buildQueueRule(100, 100, 0, "#fff", "#000")
+        .chunks.map((chunk) => chunk.text)
+        .join(""),
+    ).toBe("");
   });
 
   test("the receipt names what came back and every outcome that did not", () => {
@@ -162,5 +170,182 @@ describe("ledger band", () => {
     setup = await render({ ...state, riskFilter: "caution" }, 120, (tier) => calls.push(tier));
     await click("caution");
     expect(calls).toEqual(["caution", "all"]);
+  });
+
+  test("queue ruler keeps numerator and denominator consistent with D3 when dangerous items are queued", async () => {
+    const mib = 1024 * 1024;
+    const mixed = plan(["safe", "caution", "dangerous"], [100 * mib, 30 * mib, 80 * mib]);
+    const initial = createUiState(mixed);
+
+    // Selecting only the dangerous item must NOT compute 80/130 = 62% of reclaimable bytes.
+    let setup = await render({ ...initial, selectedIds: new Set(["cand_2"]) }, 120);
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("1 queued · 80.0 MiB");
+    expect(frame).toContain("+80 MiB guarded");
+    expect(frame).not.toContain("62% of bytes");
+    expect(frame).not.toContain("━");
+    setup.renderer.destroy();
+
+    // Selecting all 3 shows 100% reclaimable + 80 MiB guarded, and 210.0 MiB total queued.
+    setup = await render({ ...initial, selectedIds: new Set(["cand_0", "cand_1", "cand_2"]) }, 120);
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("3 queued · 210.0 MiB");
+    expect(frame).toContain("100% + 80 MiB guarded");
+  });
+
+  test("partial-byte qualifiers apply strictly to the subtotal containing the unsized entry", async () => {
+    const mib = 1024 * 1024;
+    const p = plan(
+      ["safe", "caution", "dangerous", "blocked"],
+      [100 * mib, 30 * mib, 80 * mib, 70 * mib],
+    );
+    p.candidates[3] = { ...p.candidates[3]!, bytesKnown: false };
+    const ledger = buildLedger(p.candidates);
+    expect(ledger.reclaimablePartial).toBe(false);
+    expect(ledger.guardedPartial).toBe(true);
+
+    const setup = await render(createUiState(p), 140);
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("130.0 MiB reclaimable");
+    expect(frame).not.toContain("~130.0 MiB reclaimable");
+    expect(frame).toContain("+~150 MiB guarded");
+  });
+
+  test("right-side queue size never clips across 60, 80, 100, 120, and 160 columns with all 4 tiers", async () => {
+    const mib = 1024 * 1024;
+    const p = plan(
+      ["safe", "caution", "dangerous", "blocked"],
+      [100 * mib, 30 * mib, 80 * mib, 70 * mib],
+    );
+    const state = { ...createUiState(p), selectedIds: new Set(["cand_2"]) };
+
+    for (const width of [60, 80, 100, 120, 160]) {
+      const setup = await render(state, width);
+      const frame = setup.captureCharFrame();
+      expect(frame, `width=${width}`).toContain("1 queued · 80.0 MiB");
+      expect(frame, `width=${width}`).toContain("130.0 MiB reclaimable");
+      setup.renderer.destroy();
+    }
+  });
+
+  test("rule label budgets whole tokens and never clips mid-word at 60 columns", async () => {
+    const mib = 1024 * 1024;
+    const allQueuedPlan = plan(
+      ["safe", "caution", "dangerous", "blocked"],
+      [100 * mib, 30 * mib, 80 * mib, 70 * mib],
+    );
+    const state = {
+      ...createUiState(allQueuedPlan),
+      selectedIds: new Set(["cand_0", "cand_1", "cand_2"]),
+    };
+
+    // Test both direct 60-col render and app-framed (paddingLeft/Right=1) 60-col render.
+    for (const padded of [false, true]) {
+      const setup = await testRender(
+        <box width="100%" height="100%" paddingLeft={padded ? 1 : 0} paddingRight={padded ? 1 : 0}>
+          <LedgerBand
+            tokens={darkTheme}
+            width={60}
+            targetDir={state.targetDir}
+            candidates={state.candidates}
+            visible={getVisibleCandidates(state)}
+            selectedIds={state.selectedIds}
+            summary={getUiSummary(state)}
+            riskFilter={state.riskFilter}
+            scanning={state.scanning}
+            incomplete={state.scanIncomplete}
+            sizedCount={state.scanSizedCount}
+            stats={t`4 found`}
+            onMenu={() => {}}
+            onQueueSafe={() => {}}
+            onReview={() => {}}
+            onRiskFilter={() => {}}
+          />
+        </box>,
+        { width: 60, height: 4 },
+      );
+      await act(async () => {
+        await setup.renderOnce();
+        await setup.flush();
+      });
+      const frame = setup.captureCharFrame();
+      const ruleRow = frame.split("\n")[2] ?? "";
+      expect(frame, `padded=${padded}`).toContain("3 queued · 210.0 MiB");
+      expect(frame, `padded=${padded}`).toContain("Review queue (3)");
+      expect(ruleRow, `padded=${padded}\n${frame}`).not.toMatch(/guarde(?!d\b)/);
+      // Must show a whole untruncated label ("100% + 80 MiB guarded" or compact "100% + 80 MiB")
+      expect(
+        ruleRow.includes("100% + 80 MiB guarded") || ruleRow.includes("100% + 80 MiB"),
+        `padded=${padded}\n${frame}`,
+      ).toBe(true);
+      setup.renderer.destroy();
+    }
+
+    // Even with a double-digit queue count at 60 cols padded, it sheds "guarded" cleanly without clipping.
+    const manyPlan = plan(
+      [
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "safe",
+        "caution",
+        "dangerous",
+      ],
+      [
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        10 * mib,
+        20 * mib,
+        30 * mib,
+        80 * mib,
+      ],
+    );
+    const manyState = {
+      ...createUiState(manyPlan),
+      selectedIds: new Set(manyPlan.candidates.map((c) => c.id)),
+    };
+    const manySetup = await testRender(
+      <box width="100%" height="100%" paddingLeft={1} paddingRight={1}>
+        <LedgerBand
+          tokens={darkTheme}
+          width={60}
+          targetDir={manyState.targetDir}
+          candidates={manyState.candidates}
+          visible={getVisibleCandidates(manyState)}
+          selectedIds={manyState.selectedIds}
+          summary={getUiSummary(manyState)}
+          riskFilter={manyState.riskFilter}
+          scanning={manyState.scanning}
+          incomplete={manyState.scanIncomplete}
+          sizedCount={manyState.scanSizedCount}
+          stats={t`11 found`}
+          onMenu={() => {}}
+          onQueueSafe={() => {}}
+          onReview={() => {}}
+          onRiskFilter={() => {}}
+        />
+      </box>,
+      { width: 60, height: 4 },
+    );
+    await act(async () => {
+      await manySetup.renderOnce();
+      await manySetup.flush();
+    });
+    const manyFrame = manySetup.captureCharFrame();
+    const manyRuleRow = manyFrame.split("\n")[2] ?? "";
+    expect(manyRuleRow).toContain("100% + 80 MiB");
+    expect(manyRuleRow).not.toMatch(/guarde(?!d\b)/);
+    expect(manyRuleRow).toContain("Review queue (11)");
+    manySetup.renderer.destroy();
   });
 });

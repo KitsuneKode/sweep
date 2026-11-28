@@ -1650,7 +1650,8 @@ export function SweepApp({
             uniqueBytesPartial={state.uniqueBytesPartial}
             guardedBytes={projects.reduce((sum, project) => sum + project.guardedBytes, 0)}
             byCost={byCost}
-            partial={projects.some((project) => project.partial)}
+            reclaimablePartial={projects.some((project) => project.reclaimablePartial)}
+            guardedPartial={projects.some((project) => project.guardedPartial)}
             incomplete={state.scanIncomplete}
             projectCount={projects.length}
             idleBytes={idleSafeBytes}
@@ -1692,7 +1693,7 @@ export function SweepApp({
                   : {})}
             footer={
               <KeyHints
-                variant="plain"
+                variant="caps"
                 tokens={tokens}
                 onPress={pressKey}
                 hints={

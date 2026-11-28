@@ -329,4 +329,122 @@ describe("ProjectDetails terminal sanitization", () => {
       }
     }
   });
+
+  test("ProjectsView keeps compact per-row artifact kinds visible at 100 and 120 columns", async () => {
+    const now = Date.parse("2026-11-27T12:00:00Z");
+    const day = 86_400_000;
+    const candidates: ScanCandidate[] = [
+      {
+        id: "r1",
+        path: join(root, "api-server", "target"),
+        name: "target",
+        kind: "target",
+        entryType: "directory",
+        isSymlink: false,
+        estimatedBytes: 2 * 1024 ** 3,
+        bytesKnown: true,
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+        projectRoot: join(root, "api-server"),
+        projectActiveMs: now - 45 * day,
+      } as ScanCandidate,
+      {
+        id: "w1",
+        path: join(root, "web-app", "node_modules"),
+        name: "node_modules",
+        kind: "node_modules",
+        entryType: "directory",
+        isSymlink: false,
+        estimatedBytes: 900 * 1024 ** 2,
+        bytesKnown: true,
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+        projectRoot: join(root, "web-app"),
+        projectActiveMs: now - 5 * day,
+      } as ScanCandidate,
+      {
+        id: "w2",
+        path: join(root, "web-app", ".next"),
+        name: ".next",
+        kind: ".next",
+        entryType: "directory",
+        isSymlink: false,
+        estimatedBytes: 300 * 1024 ** 2,
+        bytesKnown: true,
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+        projectRoot: join(root, "web-app"),
+        projectActiveMs: now - 5 * day,
+      } as ScanCandidate,
+      {
+        id: "w3",
+        path: join(root, "web-app", ".turbo"),
+        name: ".turbo",
+        kind: ".turbo",
+        entryType: "directory",
+        isSymlink: false,
+        estimatedBytes: 50 * 1024 ** 2,
+        bytesKnown: true,
+        riskTier: "safe",
+        reasons: ["default-pattern"],
+        selectedByDefault: true,
+        projectRoot: join(root, "web-app"),
+        projectActiveMs: now - 5 * day,
+      } as ScanCandidate,
+    ];
+    const projects = buildProjects(candidates, new Set(), root, now);
+    const rows = buildProjectRows(projects, new Set());
+
+    for (const width of [100, 120]) {
+      let setup!: Awaited<ReturnType<typeof testRender>>;
+      await act(async () => {
+        setup = await testRender(
+          <ProjectsView
+            tokens={darkTheme}
+            width={width}
+            height={24}
+            target={root}
+            rows={rows}
+            cursor={1}
+            now={now}
+            scanning={false}
+            sizedLabel=""
+            reclaimableBytes={3_250 * 1024 ** 2}
+            idleBytes={2 * 1024 ** 3}
+            projectCount={2}
+            selectedBytes={0}
+            selectedCount={0}
+            selectedIds={new Set()}
+            diskFree={null}
+            filter=""
+            searchFocused={false}
+            footer={<text content="" />}
+            onFilterInput={() => {}}
+            onFilterSubmit={() => {}}
+            onRowPress={() => {}}
+            onCursorDelta={() => {}}
+          />,
+          { width, height: 24 },
+        );
+      });
+      try {
+        await setup.renderOnce();
+        const frame = setup.captureCharFrame();
+        const lines = frame.split("\n");
+        const listPart = (line: string) => (width >= 120 ? line.slice(0, 74) : line);
+        const listApi = lines.map(listPart).find((part) => part.includes("api-server")) ?? "";
+        const listWeb = lines.map(listPart).find((part) => part.includes("web-app")) ?? "";
+        expect(listApi, `width=${width}`).toContain("target");
+        expect(listWeb, `width=${width}`).toContain("node_modules");
+        expect(listWeb, `width=${width}`).toContain("+");
+      } finally {
+        await act(async () => {
+          setup.renderer.destroy();
+        });
+      }
+    }
+  });
 });

@@ -94,27 +94,29 @@ export function calmHintItems(context: {
       : [{ key: "a", label: "queue all", press: { name: "a" } }]),
     { key: "x", label: "remove", press: { name: "x" } },
     { key: "enter", label: "open", press: { name: "return" } },
+    { key: "b", label: "full view", press: { name: "b" } },
+    { key: "/", label: "search", press: { name: "/" } },
   ];
   if (!context.scanning && context.idleBytes > 0)
     parts.push({
       key: "i",
-      label: `queue idle ${formatBytes(context.idleBytes)}`,
+      label: `idle ${formatBytes(context.idleBytes)}`,
       press: { name: "i" },
     });
-  parts.push(
-    { key: "/", label: "search", press: { name: "/" } },
-    { key: "b", label: "full view", press: { name: "b" } },
-  );
   // `? keys` is the way out for anyone lost: its room is held first, and it
-  // always ends the line, however narrow the terminal.
+  // always ends the line, however narrow the terminal. Budget against the
+  // ProjectsView usable width with exact filled keycap widths (` key ` + ` label`)
+  // and 2-cell separators so hints never clip or crowd out `b full view`.
   const help: FooterHint = { key: "?", label: "keys", press: { name: "?" } };
-  const cost = (part: FooterHint) => part.key.length + part.label.length + 4;
-  let budget = context.width - 4 - cost(help);
+  const itemWidth = (part: FooterHint) => part.key.length + 3 + part.label.length;
+  const lineWidth = Math.min(116, Math.max(20, context.width - 6));
+  let budget = lineWidth - itemWidth(help);
   const kept: FooterHint[] = [];
   for (const part of parts) {
-    if (cost(part) > budget) break;
+    const needed = itemWidth(part) + 2; // includes the 2-cell gap before the next hint / help
+    if (needed > budget) continue;
     kept.push(part);
-    budget -= cost(part);
+    budget -= needed;
   }
   return [...kept, help];
 }

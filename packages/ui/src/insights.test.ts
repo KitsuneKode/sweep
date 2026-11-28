@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
-import { allocateBarCells, buildInsights } from "./insights.js";
+import { allocateBarCells, buildIdleInsight, buildInsights, pickInsight } from "./insights.js";
 
 const NOW = Date.UTC(2026, 8, 30);
 const DAY = 24 * 60 * 60 * 1000;
@@ -87,5 +87,18 @@ describe("allocateBarCells", () => {
   test("nothing to draw yields no cells", () => {
     expect(allocateBarCells([tier(0)], 10)).toEqual([0]);
     expect(allocateBarCells([tier(5)], 0)).toEqual([0]);
+  });
+});
+
+describe("width-tiered idle insights", () => {
+  test("never truncates at 80, 100, or 120 columns", () => {
+    const insight = buildIdleInsight(10.3 * 1024 ** 3, 26, 5, () => "10.3 GiB");
+    expect(insight.short.length).toBeLessThanOrEqual(54);
+    for (const width of [80, 100, 120]) {
+      const budget = width - 22;
+      const chosen = pickInsight(insight, budget);
+      expect(chosen).not.toContain("…");
+      expect(chosen.length).toBeLessThanOrEqual(budget);
+    }
   });
 });
