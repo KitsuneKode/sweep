@@ -47,6 +47,7 @@ export type DoctorCheckReasonKind =
   | "load_error"
   | "not_installed"
   | "libc_unknown"
+  | "untrusted"
   | "spawn_error"
   | "probe_failed"
   | "timeout"

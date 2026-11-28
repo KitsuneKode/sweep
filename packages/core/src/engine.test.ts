@@ -15,7 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyPlan, applyPlanWithBackend, scanToPlan } from "./engine.js";
-import { isRustEngineAvailable, resolveRustEngineBinary } from "./rust-engine.js";
+import { isRustEngineAvailable, probeRustEngine, resolveRustEngineBinary } from "./rust-engine.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import { loadPlan } from "./plan.js";
 import { readFilesystemIdentity } from "./filesystem-identity.js";
@@ -663,6 +663,126 @@ if (process.argv[2] === "--capabilities") {
     }
   },
 );
+
+/**
+ * A fake engine that passes every check. With `swapTo`, answering the
+ * capability check renames that file over its own path, so the file at the
+ * path is no longer the one that was checked when apply spawns it.
+ */
+function writeFakeEngine(path: string, marker: string, swapTo?: string): void {
+  writeFileSync(
+    path,
+    `#!/usr/bin/env bun
+import {renameSync, writeFileSync} from "node:fs";
+const arg = process.argv[2];
+if (arg === "--version") { process.stdout.write("sweep-engine 0.0.0\\n"); process.exit(0); }
+if (arg === "--capabilities") {
+  ${swapTo ? `renameSync(${JSON.stringify(swapTo)}, ${JSON.stringify(path)});` : ""}
+  process.stdout.write('{"applyControl":true,"planIdentity":true}\\n');
+  process.exit(0);
+}
+if (arg === "apply") writeFileSync(${JSON.stringify(marker)}, "apply started");
+process.exit(4);
+`,
+  );
+  chmodSync(path, 0o700);
+}
+
+async function withEngine<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  const previous = process.env.SWEEP_ENGINE_PATH;
+  process.env.SWEEP_ENGINE_PATH = path;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env.SWEEP_ENGINE_PATH;
+    else process.env.SWEEP_ENGINE_PATH = previous;
+  }
+}
+
+test.skipIf(process.platform === "win32")(
+  "rust: an engine replaced after its capability check never receives the plan",
+  async () => {
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const binary = dir("engine");
+    const replacement = dir("replacement");
+    const started = dir("started");
+    writeFakeEngine(replacement, started);
+    writeFakeEngine(binary, dir("checked-engine-started"), replacement);
+    await withEngine(binary, async () => {
+      const error = await applyPlanWithBackend(plan, "rust").catch((e: unknown) => e);
+      expect(error).toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "engine_unavailable",
+      });
+      expect((error as Error).message).toContain("changed after it was verified");
+      expect((error as Error).message).toContain("Nothing was removed");
+    });
+    expect(existsSync(started)).toBe(false);
+    expect(existsSync(dir("checked-engine-started"))).toBe(false);
+    expect(existsSync(dir("node_modules"))).toBe(true);
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "rust: an engine replaced after the auto-engine probe is refused at apply",
+  async () => {
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    const binary = dir("engine");
+    const started = dir("started");
+    writeFakeEngine(binary, started);
+    await withEngine(binary, async () => {
+      expect(probeRustEngine().available).toBe(true);
+      const replacement = dir("replacement");
+      writeFakeEngine(replacement, started);
+      renameSync(replacement, binary);
+      const error = await applyPlanWithBackend(plan, "rust").catch((e: unknown) => e);
+      expect(error).toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "engine_unavailable",
+      });
+      expect((error as Error).message).toContain("changed after sweep checked it");
+    });
+    expect(existsSync(started)).toBe(false);
+    expect(existsSync(dir("node_modules"))).toBe(true);
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "rust: an engine in a directory others can write is not run",
+  async () => {
+    mkdirSync(dir("node_modules"));
+    const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+    mkdirSync(dir("shared"));
+    const binary = dir("shared", "engine");
+    const started = dir("started");
+    writeFakeEngine(binary, started);
+    chmodSync(dir("shared"), 0o777);
+    await withEngine(binary, async () => {
+      const probe = probeRustEngine();
+      expect(probe.available).toBe(false);
+      expect(probe.reasonKind).toBe("untrusted");
+      expect(probe.reason).toContain("world-writable");
+      await expect(applyPlanWithBackend(plan, "rust")).rejects.toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "engine_unavailable",
+      });
+    });
+    chmodSync(dir("shared"), 0o700);
+    expect(existsSync(started)).toBe(false);
+    expect(existsSync(dir("node_modules"))).toBe(true);
+  },
+);
+
+test.skipIf(!NATIVE_AVAILABLE)("rust: an unchanged probed engine applies normally", async () => {
+  mkdirSync(dir("node_modules"));
+  const { plan } = await scanToPlan(tmpDir, DEFAULT_CONFIG);
+  expect(probeRustEngine().available).toBe(true);
+  const { report } = await applyPlanWithBackend(plan, "rust");
+  expect(report.deletedCount).toBe(1);
+  expect(existsSync(dir("node_modules"))).toBe(false);
+});
 
 test.skipIf(!NATIVE_AVAILABLE)(
   "rust: closed initial control channel cannot start deletion",

@@ -97,6 +97,12 @@ Root `optionalDependencies` on the CLI package are synced via `bun run sync-engi
 4. Installed optional `@kitsunekode/sweep-engine-{platform}-{arch}`
 5. `sweep-engine` on `PATH` (absolute directories only; empty, whitespace-only, `.`, and relative segments are skipped)
 
+Whatever the source, on POSIX the resolved engine file and every directory above
+it must be owned by the current user or root and not writable by other users
+(sticky directories such as `/tmp` excepted), the same rule as auto-discovered
+config. Otherwise the probe reports `untrusted` and `--engine auto` falls back
+to JS. See `.docs/architecture.md` for how apply pins the engine file.
+
 **Release CI:** `.github/workflows/release.yml` builds all five platforms, packs
 artifacts, then `scripts/publish-release.ts` publishes native packages before
 `@kitsunekode/sweep`. Reusable workflow: `native-engine-release.yml`.

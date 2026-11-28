@@ -279,6 +279,18 @@ Both engines re-validate before deleting:
   64 MB, then validates against the ScanPlan schema. Engine apply reports
   are validated against the ApplyReport schema for the same reason:
   `SWEEP_ENGINE_PATH` can point the subprocess at any binary.
+- **The engine that applies is the engine that was checked** - native apply
+  fingerprints the resolved engine file (real path, device/inode, size,
+  mtime/ctime, SHA-256 cached per identity) before its capability check, and
+  refuses (`engine_unavailable`, nothing removed, journal unattempted) when
+  that file differs from the one `--engine auto` probed, or changes before the
+  apply spawn. The spawn uses the real path; right after it, before any plan
+  is written, the path is re-checked and on Linux the child's
+  `/proc/<pid>/exe` must be the same file, else the child is killed. macOS and
+  Windows have no such process-image check, so their window is the spawn
+  call itself. `#!` script engines (dev/test only) skip the process-image
+  check because their image is the interpreter. Implemented in
+  `packages/core/src/engine-identity.ts`.
 - **Nested + duplicate candidates** - `deduplicateNestedEntries` drops any
   entry inside a retained parent (and exact-path repeats from crafted
   plans) so one path is never deleted or counted twice.

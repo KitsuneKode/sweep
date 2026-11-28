@@ -13,6 +13,15 @@ import type {
 import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
 import { isColdRequested } from "./cold.js";
 import {
+  assertEngineUnchanged,
+  assertSpawnedEngine,
+  captureEngineIdentity,
+  EngineIdentityError,
+  inspectEngineFile,
+  sameEngineFile,
+  type EngineIdentity,
+} from "./engine-identity.js";
+import {
   isExplicitBinaryPath,
   lookupExecutable,
   windowsShellFreeExtensions,
@@ -226,6 +235,11 @@ interface RunEngineOptions {
   signal?: AbortSignal | undefined;
   cooperativeApply?: boolean;
   waitForConsumer?: (() => Promise<void> | undefined) | undefined;
+  /**
+   * Runs synchronously right after spawn, before the child receives any input.
+   * Throwing kills the child and rejects with that error.
+   */
+  verifySpawned?: ((pid: number) => void) | undefined;
 }
 
 /** A plan with 100k candidates is ~20 MB; this bound leaves generous room. */
@@ -279,6 +293,19 @@ async function runEngineAsync(
     // Keep the child referenced and its pipes open; this is not a daemon.
     detached: options.cooperativeApply === true && process.platform !== "win32",
   });
+
+  if (options.verifySpawned && proc.pid !== undefined) {
+    try {
+      options.verifySpawned(proc.pid);
+    } catch (error) {
+      // Nothing has been written to stdin: the child never saw the request.
+      proc.on("error", () => {});
+      proc.stdin.on("error", () => {});
+      proc.kill("SIGKILL");
+      proc.stdin.destroy();
+      throw error;
+    }
+  }
 
   return await new Promise<string>((resolvePromise, rejectPromise) => {
     let stdout = "";
@@ -577,7 +604,21 @@ export async function applyPlanViaRust(
       "engine_unavailable",
     );
   }
-  const capabilities = spawnSync(executable, ["--capabilities"], {
+  // Pin the exact file that answers the capability check; every later spawn
+  // must run that same file (see engine-identity.ts).
+  let engine: EngineIdentity;
+  try {
+    engine = captureEngineIdentity(executable);
+    const probed = probedEngines.get(executable);
+    if (probed && !sameEngineFile(probed, engine))
+      throw new EngineIdentityError(
+        `The native engine at ${engine.path} changed after sweep checked it`,
+        "changed",
+      );
+  } catch (error) {
+    throw engineIdentityRefusal(error);
+  }
+  const capabilities = spawnSync(engine.path, ["--capabilities"], {
     encoding: "utf8",
     timeout: 1000,
     killSignal: "SIGKILL",
@@ -616,6 +657,11 @@ export async function applyPlanViaRust(
       "This Rust engine lacks saved-plan identity checks. Update the native package, then review again. Nothing was removed.",
       "engine_unavailable",
     );
+  try {
+    assertEngineUnchanged(engine);
+  } catch (error) {
+    throw engineIdentityRefusal(error);
+  }
   let report: ApplyReport | undefined;
   let refusal: ApplyRefusedError | undefined;
   let preparedCount = 0;
@@ -721,7 +767,18 @@ export async function applyPlanViaRust(
           report = validateApplyReport(event.report);
         } else throw new PlanValidationError("Invalid apply event");
       },
-      { signal, cooperativeApply: true, executable },
+      {
+        signal,
+        cooperativeApply: true,
+        executable: engine.path,
+        verifySpawned: (pid) => {
+          try {
+            assertSpawnedEngine(pid, engine);
+          } catch (error) {
+            throw engineIdentityRefusal(error);
+          }
+        },
+      },
     );
     if (refusal) throw refusal;
     if (!report?.outcomes || report.targetDir !== plan.targetDir)
@@ -772,8 +829,18 @@ export async function applyPlanViaRust(
   }
 }
 
+function engineIdentityRefusal(error: unknown): ApplyRefusedError {
+  const detail = error instanceof Error ? error.message : String(error);
+  const remedy =
+    error instanceof EngineIdentityError && error.issue === "changed"
+      ? "Review again so sweep re-checks the engine."
+      : "Repair or reinstall the native engine, or use --engine js, then review again.";
+  return new ApplyRefusedError(`${detail}. ${remedy} Nothing was removed.`, "engine_unavailable");
+}
+
 export type RustEngineUnavailableKind =
   | "not_installed"
+  | "untrusted"
   | "spawn_error"
   | "probe_failed"
   | "timeout";
@@ -803,6 +870,12 @@ function firstNonEmptyLine(text: string | undefined): string | undefined {
 // Cache only the last resolved binary; replacements and environment changes
 // invalidate the probe. Bound runtime/output even for user-supplied binaries.
 let availability: { key: string; result: RustEngineProbeResult } | undefined;
+/**
+ * The engine file each resolved path pointed at when it last passed the probe.
+ * Apply refuses when that file has since changed, so the engine that runs
+ * destructive work is the one `--engine auto` checked.
+ */
+const probedEngines = new Map<string, ReturnType<typeof inspectEngineFile>>();
 
 export function probeRustEngine(): RustEngineProbeResult {
   const explicitConfigured = Boolean(process.env.SWEEP_ENGINE_PATH);
@@ -829,20 +902,36 @@ export function probeRustEngine(): RustEngineProbeResult {
       availability = { key, result };
       return result;
     }
-    const stat = statSync(file, { bigint: true });
-    key += `:${file}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+    let inspected: ReturnType<typeof inspectEngineFile>;
+    try {
+      inspected = inspectEngineFile(file);
+    } catch (error) {
+      if (!(error instanceof EngineIdentityError) || error.issue !== "untrusted") throw error;
+      probedEngines.delete(file);
+      const result: RustEngineProbeResult = {
+        available: false,
+        binary,
+        resolvedPath: file,
+        reasonKind: "untrusted",
+        reason: error.message,
+      };
+      availability = undefined;
+      return result;
+    }
+    key += `:${file}:${inspected.path}:${inspected.dev}:${inspected.ino}:${inspected.size}:${inspected.mtimeNs}:${inspected.ctimeNs}`;
     // Cold runs pay the probe spawn every time - the memo would answer
     // instantly and make dev timings read warmer than a real cold start.
     if (!isColdRequested() && availability?.key === key) return availability.result;
 
-    // Spawn the exact resolved absolute file we just stat-checked, never the bare name.
-    const proc = spawnSync(file, ["--version"], {
+    // Spawn the exact resolved file we just inspected, never the bare name.
+    const proc = spawnSync(inspected.path, ["--version"], {
       encoding: "utf8",
       timeout: 1000,
       killSignal: "SIGKILL",
       maxBuffer: 4096,
     });
     if (!proc.error && proc.status === 0) {
+      probedEngines.set(file, inspected);
       const result: RustEngineProbeResult = {
         available: true,
         binary,
