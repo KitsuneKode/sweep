@@ -18,6 +18,8 @@ import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-10-26T12:00:00Z");
 let root: string;
+/** Windows needs elevation or developer mode for symlinks; skip there. */
+const canSymlink = process.platform !== "win32";
 const at = (path: string, daysAgo: number) => {
   const when = new Date(NOW - daysAgo * DAY);
   utimesSync(path, when, when);
@@ -190,31 +192,34 @@ describe("project activity", () => {
     });
   });
 
-  test("D4: a symlinked source directory is not followed, so activity is unknown", () => {
-    const shared = join(root, "shared", "src");
-    mkdirSync(shared, { recursive: true });
-    writeFileSync(join(shared, "lib.ts"), "export {};");
-    at(join(shared, "lib.ts"), 1); // the real edit, behind the link
-    at(shared, 90);
+  test.skipIf(!canSymlink)(
+    "D4: a symlinked source directory is not followed, so activity is unknown",
+    () => {
+      const shared = join(root, "shared", "src");
+      mkdirSync(shared, { recursive: true });
+      writeFileSync(join(shared, "lib.ts"), "export {};");
+      at(join(shared, "lib.ts"), 1); // the real edit, behind the link
+      at(shared, 90);
 
-    const project = join(root, "linked");
-    mkdirSync(join(project, "node_modules"), { recursive: true });
-    writeFileSync(join(project, "package.json"), "{}");
-    symlinkSync(join("..", "shared", "src"), join(project, "src"));
-    at(join(project, "package.json"), 90);
-    const linkTime = new Date(NOW - 90 * DAY);
-    lutimesSync(join(project, "src"), linkTime, linkTime);
+      const project = join(root, "linked");
+      mkdirSync(join(project, "node_modules"), { recursive: true });
+      writeFileSync(join(project, "package.json"), "{}");
+      symlinkSync(join("..", "shared", "src"), join(project, "src"));
+      at(join(project, "package.json"), 90);
+      const linkTime = new Date(NOW - 90 * DAY);
+      lutimesSync(join(project, "src"), linkTime, linkTime);
 
-    const artifact = join(project, "node_modules");
-    const activity = new ProjectActivityIndex(new Set([artifact]), NOW);
-    expect(activity.forArtifact(artifact)).toEqual({
-      root: project,
-      activeMs: undefined,
-      confidence: "unknown",
-    });
-  });
+      const artifact = join(project, "node_modules");
+      const activity = new ProjectActivityIndex(new Set([artifact]), NOW);
+      expect(activity.forArtifact(artifact)).toEqual({
+        root: project,
+        activeMs: undefined,
+        confidence: "unknown",
+      });
+    },
+  );
 
-  test("a symlinked file counts its target's mtime", () => {
+  test.skipIf(!canSymlink)("a symlinked file counts its target's mtime", () => {
     const real = join(root, "dotfiles", "tsconfig.json");
     mkdirSync(join(root, "dotfiles"));
     writeFileSync(real, "{}");
