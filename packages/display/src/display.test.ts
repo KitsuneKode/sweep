@@ -1,5 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
+import { stripVTControlCharacters } from "node:util";
+import {
+  PROTOCOL_VERSION,
+  type ScanCandidate,
+  type StatusSummary,
+} from "@kitsunekode/sweep-protocol";
 import { createProgressiveScanRenderer } from "./progressive.js";
 import {
   formatDeletionProgress,
@@ -383,13 +388,27 @@ describe("scan report", () => {
         targetDir: "/work",
         createdAt: "2026-01-01T00:00:00.000Z",
         scannedDirs: 10,
+        skippedDirs: 0,
+        bytesPartial: false,
+        partialByteCount: 0,
+        complete: true,
         reclaimableBytes: 20 * 1024 * 1024,
         uniqueReclaimableBytes: 2 * 1024 * 1024,
         uniqueBytesPartial: true,
         safeBytes: 20 * 1024 * 1024,
         cautionBytes: 0,
         protectedCount: 0,
-        idle: { days: 30, projects: 0, bytes: 0, kinds: [] },
+        protectedBytes: 0,
+        idle: {
+          days: 30,
+          windowMs: 30 * 86_400_000,
+          windowLabel: "30+ days",
+          projects: 0,
+          bytes: 0,
+          kinds: [],
+        },
+        finishedWorktrees: { projects: 0, bytes: 0, kinds: [], items: [] },
+        branchMissingWorktrees: { projects: 0, bytes: 0 },
         kinds: [{ kind: "node_modules", bytes: 20 * 1024 * 1024, count: 2 }],
         projects: [],
       });
@@ -400,5 +419,142 @@ describe("scan report", () => {
     expect(text).not.toContain("about 2.0 MiB freed");
     expect(text).toContain("20.0 MiB you could free");
     expect(text).toContain("shared hardlinks not fully counted");
+  });
+});
+
+function captureStatus(status: StatusSummary): string {
+  const lines: string[] = [];
+  const orig = console.log;
+  console.log = (...args: unknown[]) => {
+    lines.push(stripVTControlCharacters(args.map(String).join(" ")));
+  };
+  try {
+    printStatusSummary(status);
+  } finally {
+    console.log = orig;
+  }
+  return lines.join("\n");
+}
+
+function baseStatus(overrides: Partial<StatusSummary> = {}): StatusSummary {
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    targetDir: "/work",
+    createdAt: "2026-11-28T00:00:00.000Z",
+    scannedDirs: 10,
+    skippedDirs: 0,
+    bytesPartial: false,
+    partialByteCount: 0,
+    complete: true,
+    reclaimableBytes: 0,
+    safeBytes: 0,
+    cautionBytes: 0,
+    protectedCount: 0,
+    protectedBytes: 0,
+    idle: {
+      days: 30,
+      windowMs: 30 * 86_400_000,
+      windowLabel: "30+ days",
+      projects: 0,
+      bytes: 0,
+      kinds: [],
+    },
+    finishedWorktrees: {
+      projects: 0,
+      bytes: 0,
+      kinds: [],
+      items: [],
+    },
+    branchMissingWorktrees: {
+      projects: 0,
+      bytes: 0,
+    },
+    kinds: [],
+    projects: [],
+    ...overrides,
+  };
+}
+
+describe("printStatusSummary", () => {
+  test("distinguishes guarded-only trees from truly empty trees and keeps coverage warnings", () => {
+    const empty = captureStatus(baseStatus());
+    expect(empty).toContain("Nothing to free here.");
+
+    const guardedOnly = captureStatus(
+      baseStatus({
+        protectedCount: 2,
+        protectedBytes: 4096,
+        skippedDirs: 1,
+        complete: false,
+      }),
+    );
+    expect(guardedOnly).toContain("Nothing automatically reclaimable here.");
+    expect(guardedOnly).toContain("2 guarded item(s) found (4.0 KiB)");
+    expect(guardedOnly).toContain("incomplete scan: 1 folder could not be read");
+  });
+
+  test("renders partial bytes, exact sub-day idle duration, and worktree parity", () => {
+    const output = captureStatus(
+      baseStatus({
+        skippedDirs: 2,
+        bytesPartial: true,
+        partialByteCount: 1,
+        complete: false,
+        reclaimableBytes: 8192,
+        safeBytes: 8192,
+        kinds: [{ kind: "node_modules", bytes: 8192, count: 2 }],
+        idle: {
+          days: 1,
+          windowMs: 12 * 3_600_000,
+          windowLabel: "12+ hours",
+          projects: 1,
+          bytes: 4096,
+          kinds: [{ kind: "node_modules", bytes: 4096, count: 1 }],
+        },
+        finishedWorktrees: {
+          projects: 1,
+          bytes: 4096,
+          kinds: [{ kind: "node_modules", bytes: 4096, count: 1 }],
+          items: [
+            {
+              name: "done-wt",
+              path: "/work/app/.worktrees/done-wt",
+              bytes: 4096,
+              idleDays: 3,
+              idleMs: 3 * 86_400_000,
+              worktreeOf: "/work/app",
+              worktreeState: "merged",
+            },
+          ],
+        },
+        branchMissingWorktrees: {
+          projects: 1,
+          bytes: 4096,
+        },
+        projects: [
+          {
+            name: "gone-wt",
+            path: "/work/app/.worktrees/gone-wt",
+            bytes: 4096,
+            idleDays: 0,
+            idleMs: 14 * 3_600_000,
+            worktreeOf: "/work/app",
+            worktreeState: "upstream_gone",
+          },
+        ],
+      }),
+    );
+    expect(output).toContain("~8.0 KiB you could free");
+    expect(output).toContain("4.0 KiB in 1 finished worktree");
+    expect(output).toContain("4.0 KiB in 1 project idle 12+ hours");
+    expect(output).toContain("1 worktree with tracking branch missing (4.0 KiB) · check git");
+    expect(output).toContain(
+      "incomplete scan: 2 folders could not be read · 1 item partially sized",
+    );
+    expect(output).toContain("Finished worktrees");
+    expect(output).toContain("done-wt (app · merged)");
+    expect(output).toContain("Idle 12+ hours");
+    expect(output).toContain("gone-wt (app · branch missing)");
+    expect(output).toContain("14 hours");
   });
 });
