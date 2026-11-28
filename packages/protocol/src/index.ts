@@ -359,6 +359,25 @@ export type ScanEvent =
   | WarningEvent
   | ScanCompletedEvent;
 
+export interface StatusKindSummary {
+  kind: string;
+  bytes: number;
+  count: number;
+}
+
+export interface StatusProject {
+  name: string;
+  path: string;
+  bytes: number;
+  idleDays: number;
+  /** Exact elapsed time since the project's last proven activity, in milliseconds. */
+  idleMs: number;
+  /** Main repository path when this project is a linked git worktree. */
+  worktreeOf?: string;
+  /** Linked worktree status (`merged` or `upstream_gone`). */
+  worktreeState?: WorktreeState;
+}
+
 /**
  * What a scan comes to, without the candidates: the answer a status line, a
  * widget or a script wants. `sweep status --json` emits it.
@@ -368,27 +387,62 @@ export interface StatusSummary {
   targetDir: string;
   createdAt: string;
   scannedDirs: number;
+  /** Unreadable or skipped directories during the scan; 0 when no dirs were skipped. */
+  skippedDirs: number;
+  /** True when any counted reclaimable candidate had partial/unknown bytes (`bytesKnown === false`). */
+  bytesPartial: boolean;
+  /** Count of counted reclaimable candidates whose size was partial (`bytesKnown === false`). */
+  partialByteCount: number;
+  /** True when no directories were skipped and every reclaimable candidate was fully sized. */
+  complete: boolean;
   /** Safe and caution bytes: what removal could give back. Never counts dangerous or blocked. */
   reclaimableBytes: number;
   safeBytes: number;
   cautionBytes: number;
   /** Dangerous and blocked items: found, never offered as space to free. */
   protectedCount: number;
+  /** Apparent bytes of dangerous and blocked items; never added to `reclaimableBytes`. */
+  protectedBytes: number;
   /**
-   * Projects untouched for at least `days`, by their removable bytes. A project
-   * whose last activity could not be read is not idle: unknown is not idle.
+   * Projects untouched for at least `windowMs`, by their removable bytes. A project
+   * whose last activity could not be proven is not idle: unknown is not idle.
+   * Clean, proven-merged worktrees already listed under `finishedWorktrees` are
+   * excluded so totals are never double-counted.
    */
   idle: {
     days: number;
+    /** Exact idle threshold in milliseconds (e.g. `43_200_000` for `--idle 12h`). */
+    windowMs: number;
+    /** Human-readable threshold label (e.g. `"30+ days"`, `"12+ hours"`). */
+    windowLabel: string;
     projects: number;
     bytes: number;
     /** What the idle bytes are made of, largest first; sums to `bytes` unless the list was cut. */
-    kinds: { kind: string; bytes: number; count: number }[];
+    kinds: StatusKindSummary[];
+  };
+  /**
+   * Clean linked git worktrees whose commits are proven merged into a verified
+   * default branch and quiet for at least 24 hours (D5 parity with Projects view).
+   * Never includes `upstream_gone` worktrees.
+   */
+  finishedWorktrees: {
+    projects: number;
+    bytes: number;
+    kinds: StatusKindSummary[];
+    items: StatusProject[];
+  };
+  /**
+   * Linked git worktrees whose remote tracking branch is missing (`upstream_gone`).
+   * Never treated as finished; surfaced so users and scripts can check git first.
+   */
+  branchMissingWorktrees: {
+    projects: number;
+    bytes: number;
   };
   /** Removable bytes by kind, largest first (node_modules, target, .next...). */
-  kinds: { kind: string; bytes: number; count: number }[];
+  kinds: StatusKindSummary[];
   /** The idle projects holding the most, largest first. */
-  projects: { name: string; path: string; bytes: number; idleDays: number }[];
+  projects: StatusProject[];
 }
 
 export interface ScanPlan {
