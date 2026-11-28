@@ -48,16 +48,20 @@ Linked worktrees name their repository. `app · merged` means the worktree is pr
 | `i`                                    | Queue safe artifacts in projects idle 30+ days                              |
 | `x` or `d`                             | Request confirmation for only the focused artifact or project               |
 | `c` or Ctrl+Enter                      | Review the whole queue                                                      |
+| `s`                                    | Queue safe artifacts                                                        |
 | `a`                                    | Queue visible safe and caution artifacts                                    |
 | `u`                                    | Clear the whole queue                                                       |
 | `U`                                    | Clear visible queued artifacts and keep hidden selections                   |
 | `/`                                    | Filter artifacts                                                            |
 | `f`                                    | Open risk, kind, size, age, and queue filters                               |
 | `o`                                    | Cycle size, name, and age sort                                              |
+| `1` / `2` / `3` / `4`                  | Show all, safe, caution, or dangerous risk tiers                            |
+| `S`                                    | Save the queue as a plan                                                    |
 | `b`                                    | Switch to the full view                                                     |
 | `r`                                    | Rescan                                                                      |
 | `E`                                    | Switch between the JavaScript and Rust engines and rescan                   |
 | `t`                                    | Cycle dark, light, and auto themes                                          |
+| `m`                                    | Pause or resume activity animation                                          |
 | Ctrl+O                                 | Switch scan folder                                                          |
 | Ctrl+K or F2                           | Search actions and settings                                                 |
 | `?`                                    | Show help                                                                   |
