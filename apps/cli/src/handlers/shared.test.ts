@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -31,6 +31,16 @@ import {
   resolveEngineBackend,
   resolveScanTarget,
 } from "./shared.js";
+
+// Fake engines in this file are `#!` scripts, which need the development opt-in.
+const previousScriptEngineOptIn = process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+beforeAll(() => {
+  process.env.SWEEP_ALLOW_SCRIPT_ENGINE = "1";
+});
+afterAll(() => {
+  if (previousScriptEngineOptIn === undefined) delete process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+  else process.env.SWEEP_ALLOW_SCRIPT_ENGINE = previousScriptEngineOptIn;
+});
 
 const roots: string[] = [];
 const previousConfig = process.env.SWEEP_CONFIG_DIR;
@@ -159,6 +169,53 @@ test("an unavailable engine leaves a complete unattempted journal and releases i
     else process.env.SWEEP_ENGINE_PATH = previousEngine;
   }
 });
+
+test.skipIf(process.platform === "win32")(
+  "an engine replaced after its capability check leaves an unattempted journal",
+  async () => {
+    const plan = await fixture();
+    const root = dirname(plan.targetDir);
+    const engine = join(root, "engine");
+    const replacement = join(root, "replacement");
+    const started = join(root, "started");
+    const fake = (swap: boolean) => `#!/usr/bin/env bun
+import {renameSync, writeFileSync} from "node:fs";
+if (process.argv[2] === "--capabilities") {
+  ${swap ? `renameSync(${JSON.stringify(replacement)}, ${JSON.stringify(engine)});` : ""}
+  process.stdout.write('{"applyControl":true,"planIdentity":true}\\n');
+  process.exit(0);
+}
+if (process.argv[2] === "apply") writeFileSync(${JSON.stringify(started)}, "apply started");
+process.exit(4);
+`;
+    writeFileSync(replacement, fake(false));
+    writeFileSync(engine, fake(true));
+    chmodSync(replacement, 0o700);
+    chmodSync(engine, 0o700);
+    const previousEngine = process.env.SWEEP_ENGINE_PATH;
+    process.env.SWEEP_ENGINE_PATH = engine;
+    try {
+      await expect(executePlanDeletion(plan, "rust", { quiet: true })).rejects.toMatchObject({
+        applyOutcome: "not_started",
+        refusalCode: "engine_unavailable",
+      });
+      const journals = join(process.env.SWEEP_CONFIG_DIR!, "journals");
+      const { recoverApplyJournal } = await import("@kitsunekode/sweep-core/apply-session");
+      const recovered = recoverApplyJournal(join(journals, readdirSync(journals)[0]!));
+      expect(recovered.complete).toBe(true);
+      expect(recovered.candidates).toHaveLength(plan.selectedCandidateIds.length);
+      expect(recovered.candidates.every((candidate) => candidate.status === "unattempted")).toBe(
+        true,
+      );
+      expect(existsSync(started)).toBe(false);
+      expect(plan.candidates.every((candidate) => existsSync(candidate.path))).toBe(true);
+      expect(existsSync(join(process.env.SWEEP_CONFIG_DIR!, "apply.lock"))).toBe(false);
+    } finally {
+      if (previousEngine === undefined) delete process.env.SWEEP_ENGINE_PATH;
+      else process.env.SWEEP_ENGINE_PATH = previousEngine;
+    }
+  },
+);
 
 test("cancelling fresh sizing returns an authoritative unattempted partition", async () => {
   const plan = await fixture();

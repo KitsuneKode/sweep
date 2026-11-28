@@ -1,7 +1,6 @@
 import { readApplyLockStatus } from "@kitsunekode/sweep-core/apply-session";
 import { readFilesystemIdentity } from "@kitsunekode/sweep-core/filesystem-identity";
 import { statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
 import { PROTOCOL_VERSION } from "@kitsunekode/sweep-protocol";
@@ -13,7 +12,7 @@ import {
 } from "@kitsunekode/sweep-core/config";
 import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import { detectLinuxLibc, type DetectedLinuxLibc } from "@kitsunekode/sweep-core/native-platforms";
-import { probeRustEngine } from "@kitsunekode/sweep-core/rust-engine";
+import { probeRustEngine, readRustEngineCapabilities } from "@kitsunekode/sweep-core/rust-engine";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
 import { formatBytes, sanitizeTerminalText } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
@@ -47,6 +46,8 @@ export type DoctorCheckReasonKind =
   | "load_error"
   | "not_installed"
   | "libc_unknown"
+  | "untrusted"
+  | "changed"
   | "spawn_error"
   | "probe_failed"
   | "timeout"
@@ -119,19 +120,10 @@ export async function collectDoctorChecks(
   const rustExecutable = rustProbe.resolvedPath ?? rustProbe.binary;
   let rustSafetyOk = false;
   if (rustOk && rustProbe.resolvedPath) {
-    try {
-      const capabilities = JSON.parse(
-        execFileSync(rustProbe.resolvedPath, ["--capabilities"], {
-          encoding: "utf8",
-          timeout: 1000,
-          killSignal: "SIGKILL",
-          maxBuffer: 4096,
-        }),
-      );
-      rustSafetyOk = capabilities?.applyControl === true && capabilities?.planIdentity === true;
-    } catch {
-      /* Report an incompatible or broken engine rather than certifying it. */
-    }
+    // The same bound, trust-checked engine the probe selected; an incompatible
+    // or broken engine is reported rather than certified.
+    const capabilities = readRustEngineCapabilities();
+    rustSafetyOk = capabilities?.applyControl === true && capabilities?.planIdentity === true;
   }
   const engine = resolveEngineBackend(opts, { warnOnFallback: false });
   const embeddedUi = hasRegisteredUiModule();

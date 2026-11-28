@@ -64,7 +64,7 @@ Turbo wires this via `test` → `dependsOn: ["^build"]`.
 
 > [!WARNING]
 > Never run bare `tsc -b` in this repo. The package typecheck is `tsc
---noEmit`; a bare build emits `.js` next to each `.ts` source, Bun resolves
+> --noEmit`; a bare build emits `.js` next to each `.ts` source, Bun resolves
 > the stale `.js` over your edits, and `bun test` double-registers every
 > compiled `*.test.js`. Symptoms: changes "not taking" in tests, or test
 > counts doubling. Clean up by deleting untracked `.js` that have a `.ts`
@@ -115,7 +115,14 @@ cargo build -p sweep-engine-cli
 bun run dev -- scan . --engine rust
 ```
 
-Set `SWEEP_ENGINE_PATH` to point at a custom binary.
+Set `SWEEP_ENGINE_PATH` to point at a custom binary. Fake engines written as
+`#!` scripts are refused unless `SWEEP_ALLOW_SCRIPT_ENGINE=1` is set (tests
+that use them set it in `beforeAll` and restore it in `afterAll`). A test that
+replaces the engine at the same path inside one process must call
+`resetRustEngineBindingsForTest()`, because the first use binds the engine for
+the process. `python3 scripts/smoke-engine-binding-ui.py --mode ui-binds|cli-binds`
+(Linux PTY, needs `target/release/sweep-engine` and a built `apps/cli/dist`)
+checks that the packaged CLI and UI bundles share that binding.
 
 ### Engine A/B comparison
 

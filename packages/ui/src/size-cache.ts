@@ -57,12 +57,26 @@ export function loadSizeCache(root = sweepConfigDir()): SizeCache {
   const cache = new Map<string, Entry>();
   let fd: number | undefined;
   try {
+    // Same rules as view preferences: an owned private directory, a regular
+    // owned file, and a non-blocking open so a swapped-in FIFO cannot hang.
+    const dir = lstatSync(root);
+    if (!dir.isDirectory() || !owned(dir)) return cache;
     const path = join(root, FILE);
     const before = lstatSync(path);
     if (!before.isFile() || !owned(before) || before.size > MAX_BYTES) return cache;
-    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    fd = openSync(
+      path,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
     const meta = fstatSync(fd);
-    if (meta.dev !== before.dev || meta.ino !== before.ino || meta.size > MAX_BYTES) return cache;
+    if (
+      !meta.isFile() ||
+      !owned(meta) ||
+      meta.dev !== before.dev ||
+      meta.ino !== before.ino ||
+      meta.size > MAX_BYTES
+    )
+      return cache;
     const buffer = Buffer.alloc(meta.size);
     let read = 0;
     while (read < buffer.length) {

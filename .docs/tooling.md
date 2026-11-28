@@ -97,6 +97,16 @@ Root `optionalDependencies` on the CLI package are synced via `bun run sync-engi
 4. Installed optional `@kitsunekode/sweep-engine-{platform}-{arch}`
 5. `sweep-engine` on `PATH` (absolute directories only; empty, whitespace-only, `.`, and relative segments are skipped)
 
+Whatever the source, on POSIX the resolved engine file and every directory above
+it must be owned by the current user or root and must not be group- or
+world-writable (sticky directories such as `/tmp` excepted). This is stricter
+than the config rule: the primary group gets no exception. When running as
+root, the user named by a valid `SUDO_UID` also counts as an owner, so
+`sudo sweep` can use an engine that user installed; any other owner is still
+refused. Otherwise the probe reports `untrusted`, `--engine auto` falls back to
+JS, and `--engine rust` refuses. The first engine use binds the engine for the
+rest of the process. See `.docs/architecture.md`.
+
 **Release CI:** `.github/workflows/release.yml` builds all five platforms, packs
 artifacts, then `scripts/publish-release.ts` publishes native packages before
 `@kitsunekode/sweep`. Reusable workflow: `native-engine-release.yml`.

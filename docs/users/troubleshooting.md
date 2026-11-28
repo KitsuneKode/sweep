@@ -21,6 +21,25 @@ description: Start from the error you see and recover without guessing what was 
 | Engine timeout or missing final report      | Outcome can be unknown; inspect the filesystem before retrying                                                                             |
 | Claimed bytes differ from free-space change | Check trash, hardlinks, snapshots, sparse/compressed files and estimates                                                                   |
 
+## The native engine is refused as untrusted
+
+On macOS and Linux, sweep runs the native engine only if nobody else can
+replace it. The engine file and every folder above it must be owned by you or
+by root, and must not be writable by a group or by everyone. `sweep doctor .`
+names the file or folder that failed.
+
+- **`--engine auto` (the default)** falls back to the JS engine and prints a
+  note. **`--engine rust`** refuses instead.
+- **Homebrew** setups whose folders are group-writable by `admin` hit this.
+  Tighten the prefix with `chmod g-w` on the folders `doctor` names, or keep
+  using the JS engine.
+- **`sudo sweep`** accepts an engine owned by root or by the user who ran
+  `sudo`. For any other elevated run, install sweep as root or use
+  `--engine js`.
+- **"The native engine changed after sweep checked it"** means the engine
+  file was replaced while sweep was running, for example by an update. Nothing
+  was removed. Restart sweep and review again.
+
 ## Read-only diagnostics
 
 ```sh

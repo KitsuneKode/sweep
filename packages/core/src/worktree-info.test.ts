@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { canonicalPath } from "./git-index.js";
 import { GIT_ENV, gitEnv } from "./git-tracked.js";
-import { WorktreeIndex } from "./worktree-info.js";
+import { createGitRunner, WorktreeIndex } from "./worktree-info.js";
 
 const hasGit = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;
 
@@ -1408,3 +1408,28 @@ describe.skipIf(!hasGit)("worktree info", () => {
     },
   );
 });
+
+test.skipIf(process.platform === "win32")(
+  "the default git runner never runs a git from the working directory",
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sweep-bare-git-"));
+    const marker = join(dir, "planted-git-ran");
+    writeFileSync(join(dir, "git"), `#!/bin/sh\necho planted > "${marker}"\necho planted\n`);
+    chmodSync(join(dir, "git"), 0o755);
+    const previousCwd = process.cwd();
+    const previousPath = process.env.PATH;
+    // A relative PATH entry resolves against the working directory, which is
+    // how Windows treats every bare name before it searches PATH at all.
+    process.env.PATH = ".";
+    process.chdir(dir);
+    try {
+      expect(await createGitRunner()(join(dir, ".git"), ["--version"])).toBeUndefined();
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      process.chdir(previousCwd);
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);

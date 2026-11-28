@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { DEFAULT_CONFIG } from "./config.js";
 import {
   chmodSync,
@@ -20,10 +20,21 @@ import {
   isRustEngineAvailable,
   lookupExecutable,
   probeRustEngine,
+  resetRustEngineBindingsForTest,
   rustScanBlockedReason,
   scanToPlanViaRust,
   windowsShellFreeExtensions,
 } from "./rust-engine.js";
+
+// Fake engines in this file are `#!` scripts, which need the development opt-in.
+const previousScriptEngineOptIn = process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+beforeAll(() => {
+  process.env.SWEEP_ALLOW_SCRIPT_ENGINE = "1";
+});
+afterAll(() => {
+  if (previousScriptEngineOptIn === undefined) delete process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+  else process.env.SWEEP_ALLOW_SCRIPT_ENGINE = previousScriptEngineOptIn;
+});
 
 test("failed embedded extraction still tries the installed resolution chain", async () => {
   const source = `import {registerEmbeddedEngine, resolveRustEngineBinary} from ${JSON.stringify(join(import.meta.dir, "rust-engine.ts"))}; delete process.env.SWEEP_ENGINE_PATH; const expected=resolveRustEngineBinary(); registerEmbeddedEngine(()=>{throw new Error("extraction unavailable")}); if(resolveRustEngineBinary()!==expected) throw new Error("fallback changed"); process.exit(0);`;
@@ -181,6 +192,13 @@ test.skipIf(process.platform === "win32")(
         binary,
         "#!/bin/sh\necho \"/lib/x86_64-linux-gnu/libc.so.6: version 'GLIBC_2.39' not found\" >&2\nexit 127\n",
       );
+      // Within one operation, a replaced engine is never re-probed as a new one.
+      const replaced = probeRustEngine();
+      expect(replaced.available).toBe(false);
+      expect(replaced.reasonKind).toBe("changed");
+      expect(replaced.reason).toContain("changed after sweep checked it");
+      // A new operation (new process) checks the replacement on its own merits.
+      resetRustEngineBindingsForTest();
       const loaderErr = probeRustEngine();
       expect(loaderErr.available).toBe(false);
       expect(loaderErr.reasonKind).toBe("probe_failed");
@@ -190,6 +208,7 @@ test.skipIf(process.platform === "win32")(
       expect(loaderErr.reason).toContain("GLIBC_2.39");
 
       writeFileSync(binary, "#!/bin/sh\nkill -TERM $$\n");
+      resetRustEngineBindingsForTest();
       const signaled = probeRustEngine();
       expect(signaled.available).toBe(false);
       expect(signaled.reasonKind).toBe("probe_failed");
@@ -197,6 +216,7 @@ test.skipIf(process.platform === "win32")(
       expect(signaled.reason).toContain("SIGTERM");
 
       writeFileSync(binary, "#!/bin/sh\nexec sleep 30\n");
+      resetRustEngineBindingsForTest();
       const start = performance.now();
       const timedOut = probeRustEngine();
       expect(timedOut.available).toBe(false);
