@@ -53,7 +53,7 @@ test.skipIf(process.platform === "win32")(
     const realOpen = fs.openSync;
     const spy = spyOn(fs, "openSync").mockImplementation(((
       target: fs.PathLike,
-      flags?: fs.OpenMode,
+      flags: fs.OpenMode,
       mode?: fs.Mode,
     ) => {
       if (String(target) === path) {
