@@ -80,7 +80,8 @@ export class ResourceBudget {
     if (
       identities >= this.limits.maxIdentities ||
       this.sizingBytes + 128 > this.limits.maxRetainedBytes ||
-      this.used.maxRetainedBytes + this.sizingBytes + 128 > this.limits.maxCombinedBytes
+      this.used.maxRetainedBytes + this.sizingBytes + this.hardlinkBytes + 128 >
+        this.limits.maxCombinedBytes
     )
       return false;
     if (hardlink) this.sizingHardlinkIds++;
@@ -118,7 +119,8 @@ export class ResourceBudget {
       this.sizingDirs >= this.limits.maxQueuedDirs ||
       this.sizingPaths + bytes > this.limits.maxPathBytes ||
       this.sizingBytes + retained > this.limits.maxRetainedBytes ||
-      this.used.maxRetainedBytes + this.sizingBytes + retained > this.limits.maxCombinedBytes
+      this.used.maxRetainedBytes + this.sizingBytes + this.hardlinkBytes + retained >
+        this.limits.maxCombinedBytes
     )
       return false;
     this.sizingDirs++;

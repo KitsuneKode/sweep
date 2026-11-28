@@ -19,6 +19,17 @@ test("discovery and live sizing cannot each consume the combined allowance", () 
   expect(() => budget.identity()).toThrow("maxCombinedBytes");
 });
 
+test("scan-wide hardlink retention participates in the combined sizing allowance", () => {
+  const identities = new ResourceBudget({ maxRetainedBytes: 4096, maxCombinedBytes: 256 });
+  expect(identities.hardlinkIdentity()).toBe(true);
+  expect(identities.sizingDirectoryIdentity()).toBe(true);
+  expect(identities.sizingHardlinkIdentity()).toBe(false);
+
+  const directories = new ResourceBudget({ maxRetainedBytes: 4096, maxCombinedBytes: 256 });
+  expect(directories.hardlinkIdentity()).toBe(true);
+  expect(directories.sizingDirectory("abcd")).toBe(false);
+});
+
 test("live sizing reservations are shared, returned, and never poison discovery", () => {
   const budget = new ResourceBudget({
     maxIdentities: 1,
