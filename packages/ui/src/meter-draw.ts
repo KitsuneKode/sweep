@@ -298,6 +298,8 @@ export interface DotMatrixBarOptions {
   dimColor?: string | undefined;
   fillFraction?: number | undefined;
   isNoColor?: boolean | undefined;
+  /** Category seams are useful for composition bars, wrong for one continuous meter. */
+  withSeams?: boolean | undefined;
 }
 
 const NO_COLOR_BRAILLE = ["⣿", "⣶", "⣤", "⠒", "⠿", "⡇", "⡄", "⠄", "⠛", "⠶", "⠴"] as const;
@@ -339,7 +341,7 @@ export function dotMatrixPixels(
 
   const frac = options.fillFraction === undefined ? 1 : clamp01(options.fillFraction);
   const litCols = Math.round(cols * frac);
-  const allocated = allocateSegmentCells(nonZero, litCols, true);
+  const allocated = allocateSegmentCells(nonZero, litCols, options.withSeams !== false);
 
   const runs: {
     from: number;
@@ -423,7 +425,7 @@ export function dotMatrixLine(
   const frac = options.fillFraction === undefined ? 1 : clamp01(options.fillFraction);
   const activeW = Math.max(0, Math.min(width, Math.round(frac * width)));
   const unlitW = Math.max(0, width - activeW);
-  const alloc = allocateSegmentCells(segments, activeW, true);
+  const alloc = allocateSegmentCells(segments, activeW, options.withSeams !== false);
   if (alloc.length === 0) {
     return t`${fg(options.trackColor ?? "#2a2c32")("⣀".repeat(width))}`;
   }

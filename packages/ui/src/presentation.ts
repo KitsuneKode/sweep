@@ -17,7 +17,7 @@ import {
 } from "./state.js";
 import { type CostCategory, type DiskCategory, type ThemeTokens, riskColor } from "./theme.js";
 import type { KeyInput } from "./keymap.js";
-import { cellWidth, clipCells, padCells } from "./text-cells.js";
+import { cellWidth, clipCells, clipWords, padCells } from "./text-cells.js";
 
 export type IconMode = "plain" | "nerd" | "letter";
 export type CategoryIconId = CostCategory | DiskCategory | "custom";
@@ -1142,6 +1142,8 @@ export function applyNotice(result: {
   unattempted: number;
   stopped: boolean;
   firstFailure?: string | undefined;
+  /** Available terminal cells; whole lower-priority phrases drop before clipping. */
+  width?: number | undefined;
 }): string {
   const items =
     result.what ?? `${result.removed.toLocaleString()} item${result.removed === 1 ? "" : "s"}`;
@@ -1158,5 +1160,38 @@ export function applyNotice(result: {
     parts.push(`${result.failed} failed${result.firstFailure ? `: ${result.firstFailure}` : ""}`);
   if (result.unattempted > 0) parts.push(`${result.unattempted} not attempted`);
   if (result.stillQueued > 0) parts.push(`${result.stillQueued.toLocaleString()} still queued`);
-  return parts.join(" · ");
+  const full = parts.join(" · ");
+  const width = result.width ?? Number.POSITIVE_INFINITY;
+  if (cellWidth(full) <= width) return full;
+
+  const addFailureDetail = (base: string): string => {
+    if (!result.firstFailure) return base;
+    const room = width - cellWidth(base) - 2;
+    if (room < 12) return base;
+    // Room left after the complete counts belongs to the first failure's error
+    // class and as much of its path as fits; truncation is strictly on the right.
+    const detailed = `${base}: ${clipWords(result.firstFailure, room)}`;
+    return cellWidth(detailed) <= width ? detailed : base;
+  };
+
+  const withoutDetail = parts
+    .map((part) => (part.includes(": ") ? part.slice(0, part.indexOf(": ")) : part))
+    .join(" · ");
+  if (cellWidth(withoutDetail) <= width) return addFailureDetail(withoutDetail);
+
+  const first =
+    result.removed > 0
+      ? `${result.stopped ? "stopped" : "✓"} ${result.removed.toLocaleString()} ${verb} · ~${formatBytes(result.freedBytes)} ${result.trash ? "still on disk" : "freed"}`
+      : `${result.stopped ? "stopped" : ""}nothing ${verb}`;
+  const failed = result.failed > 0 ? `${result.failed} failed` : "";
+  const unattempted = result.unattempted > 0 ? `${result.unattempted} not attempted` : "";
+  const candidates = [
+    [first, failed, unattempted].filter(Boolean).join(" · "),
+    [first, failed].filter(Boolean).join(" · "),
+    [first, unattempted].filter(Boolean).join(" · "),
+    first,
+  ];
+  const compact = candidates.find((candidate) => cellWidth(candidate) <= width) ?? first;
+  if (cellWidth(compact) > width) return clipWords(compact, width);
+  return addFailureDetail(compact);
 }

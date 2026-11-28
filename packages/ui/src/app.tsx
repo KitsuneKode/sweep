@@ -10,7 +10,6 @@ import type { ApplyProgress, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { statfsSync } from "node:fs";
 import { basename, join } from "node:path";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
-import { formatBytes } from "@kitsunekode/sweep-display";
 import { writeProjectSweeprc, projectSweeprcRevision } from "@kitsunekode/sweep-core/config";
 import { assertSafePattern, isApplyRefusedError } from "@kitsunekode/sweep-core/guardrails";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -45,7 +44,7 @@ import {
   type Notice,
 } from "./app-helpers.js";
 import { candidateIndex } from "./candidate-index.js";
-import { rankConfirmPreview } from "./confirm-preview.js";
+import { rankConfirmPreviewItems } from "./confirm-preview.js";
 import {
   clearFacets,
   facetOptions,
@@ -72,7 +71,7 @@ import {
   styledWidth,
   type FooterContext,
 } from "./presentation.js";
-import { rebuildSummary } from "./project-details.js";
+import { rebuildCostShares } from "./project-details.js";
 import type { Project } from "./projects.js";
 import { captureReviewedApply } from "./reviewed-apply.js";
 import { buildDisplayRows } from "./rows.js";
@@ -704,6 +703,7 @@ export function SweepApp({
                 firstFailure: merged.firstFailure
                   ? sanitizeTerminalText(merged.firstFailure)
                   : undefined,
+                width: dimensions.width - 2,
               }),
               stopped || merged.failed > 0 ? "warning" : "success",
             );
@@ -1504,7 +1504,12 @@ export function SweepApp({
     if (!pendingApply || pendingSingleId || !reviewedApply) return [];
     // Only build a preview while it is visible. Dangerous paths lead, so a
     // small risky item is named even when three huge safe folders outrank it.
-    return rankConfirmPreview(reviewedApply.candidates, reviewedApply.targetDir);
+    return rankConfirmPreviewItems(reviewedApply.candidates, reviewedApply.targetDir);
+  }, [pendingApply, pendingSingleId, reviewedApply]);
+
+  const confirmCostShares = useMemo(() => {
+    if (!pendingApply || pendingSingleId || !reviewedApply) return [];
+    return rebuildCostShares(reviewedApply.candidates);
   }, [pendingApply, pendingSingleId, reviewedApply]);
 
   const engineChip =
@@ -1989,9 +1994,20 @@ export function SweepApp({
               lowerBound={pendingSingleCandidate.bytesKnown === false}
               selectedBytes={pendingSingleCandidate.estimatedBytes}
               dangerousCount={pendingSingleCandidate.riskTier === "dangerous" ? 1 : 0}
-              previewPaths={[
-                sanitizeTerminalText(relativePath(state.targetDir, pendingSingleCandidate.path)),
+              previewItems={[
+                {
+                  path: sanitizeTerminalText(
+                    relativePath(state.targetDir, pendingSingleCandidate.path),
+                  ),
+                  bytes: pendingSingleCandidate.estimatedBytes,
+                  riskTier: pendingSingleCandidate.riskTier,
+                  isSymlink: pendingSingleCandidate.isSymlink,
+                  ...(pendingSingleCandidate.bytesKnown !== undefined
+                    ? { bytesKnown: pendingSingleCandidate.bytesKnown }
+                    : {}),
+                },
               ]}
+              costShares={rebuildCostShares([pendingSingleCandidate])}
               {...(dryRun ? { dryRun: true } : {})}
               {...(trashModeRef.current ? { trash: true } : {})}
               onConfirm={confirmReviewedApply}
@@ -2046,8 +2062,8 @@ export function SweepApp({
               lowerBound={reviewedApply?.candidates.some((c) => c.bytesKnown === false) ?? false}
               selectedBytes={reviewedApply?.summary.estimatedTotalBytes ?? 0}
               dangerousCount={reviewedApply?.summary.riskCounts.dangerous ?? 0}
-              previewPaths={confirmPreview}
-              costLine={rebuildSummary(reviewedApply?.candidates ?? [], formatBytes)}
+              previewItems={confirmPreview}
+              costShares={confirmCostShares}
               {...(dryRun ? { dryRun: true } : {})}
               {...(trashModeRef.current ? { trash: true } : {})}
               onConfirm={confirmReviewedApply}
@@ -2078,6 +2094,16 @@ export function SweepApp({
             targetDir={state.targetDir}
             trash={trashMode}
             onCancel={abortApply}
+            onToggleMotion={() => {
+              motionEnabledRef.current = !motionEnabledRef.current;
+              setMotionEnabled(motionEnabledRef.current);
+              setNotice(
+                motionEnabledRef.current
+                  ? "Activity animation resumed"
+                  : "Activity animation paused · work continues",
+                "neutral",
+              );
+            }}
           />
         ) : null}
       </box>

@@ -257,6 +257,7 @@ export function StackBar({
   trackColor,
   dimColor,
   fillFraction = 1,
+  withSeams = true,
   isNoColor = Boolean(process.env.NO_COLOR),
   variant = "dots",
   thickness = 0.5,
@@ -267,6 +268,7 @@ export function StackBar({
   trackColor?: string | undefined;
   dimColor?: string | undefined;
   fillFraction?: number | undefined;
+  withSeams?: boolean | undefined;
   isNoColor?: boolean | undefined;
   variant?: "dots" | "capsule";
   thickness?: number;
@@ -285,13 +287,14 @@ export function StackBar({
     if (!kitty || pixelWidth < 8 || pixelHeight < 4) return null;
     if (variant === "dots") {
       return cachedImage(
-        `dots:${pixelWidth}x${pixelHeight}:${fillFraction.toFixed(3)}:${isNoColor}:${trackColor ?? ""}:${ground}:${key}`,
+        `dots:${pixelWidth}x${pixelHeight}:${fillFraction.toFixed(3)}:${withSeams}:${isNoColor}:${trackColor ?? ""}:${ground}:${key}`,
         () =>
           dotMatrixPixels(pixelWidth, pixelHeight, segments, {
             background: ground,
             trackColor,
             fillFraction,
             isNoColor,
+            withSeams,
           }),
         pixelWidth,
         pixelHeight,
@@ -312,6 +315,7 @@ export function StackBar({
     variant,
     thickness,
     fillFraction,
+    withSeams,
     isNoColor,
     trackColor,
     ground,
@@ -326,6 +330,7 @@ export function StackBar({
           dimColor,
           fillFraction,
           isNoColor,
+          withSeams,
         })}
         wrapMode="none"
       />

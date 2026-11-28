@@ -45,3 +45,23 @@ export function padCells(value: string, width: number, align: "left" | "right" =
   const padding = " ".repeat(Math.max(0, width - cellWidth(clipped)));
   return align === "right" ? padding + clipped : clipped + padding;
 }
+
+/**
+ * Clip prose at a word or phrase boundary whenever possible. Terminal chrome
+ * must never silently slice a number or a word in half; when the text is one
+ * unbreakable token (a path), fall back to ordinary cell clipping.
+ */
+export function clipWords(value: string, width: number): string {
+  if (width <= 0) return "";
+  if (cellWidth(value) <= width) return value;
+  if (width === 1) return "…";
+  const clipped = clipCells(value, width);
+  const body = clipped.slice(0, -1);
+  const lastSpace = body.lastIndexOf(" ");
+  const lastSeparator = body.lastIndexOf("·");
+  const cut = Math.max(lastSpace, lastSeparator);
+  if (cut >= Math.max(4, Math.floor(width * 0.45))) {
+    return `${body.slice(0, cut).trimEnd()}…`;
+  }
+  return clipped;
+}
