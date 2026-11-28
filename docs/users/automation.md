@@ -127,10 +127,54 @@ its `journals` subdirectory when present) with the same POSIX trust rule apply
 enforces. A missing directory reports `"ok"` because apply creates it with mode
 `0700`.
 
-`sweep schema` exports protocol version 1 and the plan, event, report and shared
-JSON Schemas. Register the shared schema by its `$id` before resolving the other
-schemas' references. These are the schemas embedded in the installed CLI, so an
-integration can validate against the version it is actually running.
+`sweep schema` exports protocol version 1 and the plan, event, report, shared,
+and widget (`widgetSnapshot`, `widgetEvent`, `widgetCache`) JSON Schemas.
+Register the shared schema by its `$id` before resolving plan/event/report
+references, and register `widgetSnapshot` by its `$id` before resolving
+`widgetEvent` or `widgetCache`. These are the schemas embedded in the installed
+CLI, so an integration can validate against the version it is actually running.
+
+## Desktop widget snapshots (`sweep widget`)
+
+```sh
+sweep widget ~/Projects --json
+sweep widget ~/Projects --cache-only --json
+sweep widget ~/Projects --refresh --resource-profile low-memory --json
+sweep widget ~/Projects --json-stream
+```
+
+`sweep widget` produces a small, bounded, strictly read-only summary
+(`widgetSchemaVersion: 1`, `readOnly: true`) for desktop panels and status
+surfaces. It never deletes anything, rejects protected roots including `~` and
+system directories with the same guardrails as `sweep scan`, and is rejected
+unconditionally if passed to `sweep apply --plan`.
+
+- **Reclaimable vs guarded:** `projectsSummary.reclaimableBytes` equals
+  `safeBytes + cautionBytes`. Dangerous and blocked items are reported
+  separately in `guardedBytes` and `protectedCount` and never inflate
+  `reclaimableBytes`, `byCost`, `topKinds`, `idle`, `worktrees`, or
+  `topProjects`.
+- **Bounded memory, runtime, and output:** Defaults to
+  `--resource-profile low-memory` (with `--timeout` defaulting to `45s` for
+  `low-memory` and `120s` for `balanced`). Output caps `byCost` at 4 rebuild
+  cost buckets, `topKinds` at 8 entries, and `topProjects` at 10 entries.
+- **Cheap cached polling (`--cache-only`):** Live scans atomically persist a
+  bounded multi-entry L4 cache (`0600`, max 8 roots, `< 64 KiB`) under
+  `$XDG_CACHE_HOME/sweep/widget-v1.json` (or `$SWEEP_CONFIG_DIR/cache/` when
+  isolated). `--cache-only` reads that cache without spawning a scan and
+  reports `ageMs`, `stale` (default `--stale-after 60m`), and `state`
+  (`"ok"`, `"empty"`, `"stale"`, or `"error"`). When no cache entry exists yet,
+  `--cache-only` exits `0` with `source: "cache"`, `stale: true`,
+  `state: "stale"`, and `projectsSummary: null`.
+- **Streaming progress (`--json-stream`):** Emits `widget_started`, coalesced
+  `widget_progress` frames (`<= 12 Hz`), and a final `widget_snapshot` (or
+  `widget_error` with a non-zero exit code). Error messages are plain,
+  path-free user-facing sentences drawn from the closed `error.code` enum
+  (`engine_missing`, `permission_denied`, `target_missing`, `target_refused`,
+  `config_invalid`, `timeout`, `scan_failed`). Refused targets (`~`, `/`,
+  `/etc`, `.git`) emit `target_refused` with exit code `2` in `--json`,
+  `--json-stream`, and `--cache-only --json`; malformed `.sweeprc` configs emit
+  `config_invalid` with exit code `3`.
 
 For JSON scan, inspect, stats, recover, doctor, apply and clean commands, fatal
 errors end stderr with a JSON error record containing `type`, `protocolVersion`,

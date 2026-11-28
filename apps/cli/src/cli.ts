@@ -1,11 +1,15 @@
 import { Command, InvalidArgumentError, Option } from "commander";
 import { parseIdleDuration } from "@kitsunekode/sweep-core/project-activity";
+import { parseWidgetDuration } from "@kitsunekode/sweep-core/widget";
 import {
   PROTOCOL_VERSION,
   SCAN_PLAN_SCHEMA,
   SCAN_EVENT_SCHEMA,
   APPLY_REPORT_SCHEMA,
   PROTOCOL_SHARED_SCHEMA,
+  WIDGET_SNAPSHOT_SCHEMA,
+  WIDGET_EVENT_SCHEMA,
+  WIDGET_CACHE_SCHEMA,
   sanitizeTerminalText,
 } from "@kitsunekode/sweep-protocol";
 import { writeJson, drainStdout } from "./handlers/shared.js";
@@ -23,6 +27,7 @@ import { handleStatus } from "./handlers/status.js";
 import { handleStats } from "./handlers/stats.js";
 import { handleRecover } from "./handlers/recover.js";
 import { handleUi } from "./handlers/ui.js";
+import { handleWidget, type WidgetCliOptions } from "./handlers/widget.js";
 
 // Injected at build time by apps/cli/scripts/build.ts via Bun.build define.
 // Falls back to package.json version for `bun run dev`.
@@ -225,6 +230,59 @@ export function makeProgram(): Command {
     });
 
   program
+    .command("widget")
+    .description("Bounded read-only summary for desktop widgets (with L4 cache)")
+    .argument("[path]", "Directory to summarize", ".")
+    .addOption(new Option("--view <view>", "Widget view").choices(["projects"]).default("projects"))
+    .option("--json-stream", "Emit NDJSON widget progress and snapshot events", false)
+    .option("--cache-only", "Read the cached widget snapshot without scanning", false)
+    .option("--refresh", "Force a live scan and refresh the widget cache", false)
+    .addOption(
+      new Option(
+        "--resource-profile <profile>",
+        "Scan resource allowance (logical memory, not RSS)",
+      )
+        .choices(["balanced", "low-memory"])
+        .default("low-memory"),
+    )
+    .option(
+      "--timeout <duration>",
+      "Hard wall-clock scan timeout (e.g. 45s, 2m)",
+      (text: string) => {
+        try {
+          const ms = parseWidgetDuration(text);
+          if (ms <= 0) throw new Error("timeout must be greater than 0");
+          return ms;
+        } catch (error) {
+          throw new InvalidArgumentError((error as Error).message);
+        }
+      },
+    )
+    .option(
+      "--stale-after <duration>",
+      "Cache age threshold before marking stale (e.g. 60m, 2h)",
+      (text: string) => {
+        try {
+          return parseWidgetDuration(text);
+        } catch (error) {
+          throw new InvalidArgumentError((error as Error).message);
+        }
+      },
+    )
+    .action(function (this: Command, pathArg: string) {
+      const merged = this.optsWithGlobals<WidgetCliOptions>();
+      const localProfileSource = this.getOptionValueSource("resourceProfile");
+      const parentProfileSource = this.parent?.getOptionValueSource("resourceProfile");
+      if (localProfileSource !== "cli" && parentProfileSource === "cli") {
+        const parentProfile = this.parent?.opts<CliOptions>().resourceProfile;
+        if (parentProfile !== undefined) {
+          merged.resourceProfile = parentProfile;
+        }
+      }
+      void handleWidget(pathArg, merged);
+    });
+
+  program
     .command("plan")
     .description("Scan and emit a saved plan document")
     .argument("[path]", "Directory to scan", ".")
@@ -285,7 +343,7 @@ export function makeProgram(): Command {
 
   program
     .command("schema")
-    .description("Export versioned plan, event and report JSON Schemas without scanning")
+    .description("Export versioned plan, event, report and widget JSON Schemas without scanning")
     .action(async () => {
       try {
         writeJson({
@@ -295,6 +353,9 @@ export function makeProgram(): Command {
             scanEvent: SCAN_EVENT_SCHEMA,
             applyReport: APPLY_REPORT_SCHEMA,
             shared: PROTOCOL_SHARED_SCHEMA,
+            widgetSnapshot: WIDGET_SNAPSHOT_SCHEMA,
+            widgetEvent: WIDGET_EVENT_SCHEMA,
+            widgetCache: WIDGET_CACHE_SCHEMA,
           },
         });
         await drainStdout();

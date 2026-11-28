@@ -14,6 +14,8 @@
     "./project-activity": "./src/project-activity.ts",
     "./worktree-info": "./src/worktree-info.ts",
     "./status": "./src/status.ts",
+    "./rebuild": "./src/rebuild.ts",
+    "./widget": "./src/widget.ts",
     "./guardrails": "./src/guardrails.ts",
     "./planner": "./src/planner.ts",
     "./plan": "./src/plan.ts",

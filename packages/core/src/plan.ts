@@ -74,6 +74,11 @@ function formatValidationErrors(errors: ErrorObject[] | null | undefined): strin
 
 /** Validate an unknown value against the ScanPlan JSON Schema. */
 export function validatePlan(value: unknown): ScanPlan {
+  if (typeof value === "object" && value !== null && "widgetSchemaVersion" in value) {
+    throw new PlanValidationError(
+      "Invalid scan plan: widget snapshots are read-only and cannot be applied",
+    );
+  }
   const validator = getValidator();
   if (validator(value)) {
     const plan = value as ScanPlan;

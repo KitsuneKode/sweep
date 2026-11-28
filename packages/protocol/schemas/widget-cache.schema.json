@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kitsunekode.dev/sweep/schemas/widget-cache.schema.json",
+  "title": "WidgetCacheEnvelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cacheVersion", "entries"],
+  "properties": {
+    "cacheVersion": { "const": 1 },
+    "entries": {
+      "type": "object",
+      "maxProperties": 8,
+      "additionalProperties": {
+        "$ref": "https://kitsunekode.dev/sweep/schemas/widget-snapshot.schema.json"
+      }
+    }
+  }
+}

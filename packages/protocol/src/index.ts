@@ -2,6 +2,9 @@ import APPLY_REPORT_SCHEMA_JSON from "../schemas/apply-report.schema.json";
 import PROTOCOL_SHARED_SCHEMA_JSON from "../schemas/shared.schema.json";
 import SCAN_EVENT_SCHEMA_JSON from "../schemas/scan-event.schema.json";
 import SCAN_PLAN_SCHEMA_JSON from "../schemas/scan-plan.schema.json";
+import WIDGET_CACHE_SCHEMA_JSON from "../schemas/widget-cache.schema.json";
+import WIDGET_EVENT_SCHEMA_JSON from "../schemas/widget-event.schema.json";
+import WIDGET_SNAPSHOT_SCHEMA_JSON from "../schemas/widget-snapshot.schema.json";
 
 export const PROTOCOL_VERSION = "1" as const;
 
@@ -97,6 +100,7 @@ export interface SweepConfig {
 
 export { candidateKindFromName, KNOWN_ARTIFACT_NAMES } from "./candidate.js";
 export { sanitizeTerminalText, sanitizeMultilineTerminalText } from "./text.js";
+export * from "./widget.js";
 
 /** Exact decimal identifiers; JSON numbers would lose large inode precision. */
 export interface FilesystemIdentity {
@@ -261,6 +265,9 @@ export const SCAN_PLAN_SCHEMA = SCAN_PLAN_SCHEMA_JSON;
 export const APPLY_REPORT_SCHEMA = APPLY_REPORT_SCHEMA_JSON;
 export const PROTOCOL_SHARED_SCHEMA = PROTOCOL_SHARED_SCHEMA_JSON;
 export const SCAN_EVENT_SCHEMA = SCAN_EVENT_SCHEMA_JSON;
+export const WIDGET_SNAPSHOT_SCHEMA = WIDGET_SNAPSHOT_SCHEMA_JSON;
+export const WIDGET_EVENT_SCHEMA = WIDGET_EVENT_SCHEMA_JSON;
+export const WIDGET_CACHE_SCHEMA = WIDGET_CACHE_SCHEMA_JSON;
 
 export const SCAN_EVENT_TYPES = [
   "scan_started",

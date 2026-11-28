@@ -61,7 +61,7 @@ export function ProjectDetails({
     cache: tokens.positive,
     install: tokens.info,
     build: tokens.textSecondary,
-    unknown: tokens.textMuted,
+    custom: tokens.textMuted,
   };
   const barColor = mixHex(tokens.meterTrack, tokens.textMuted, 0.6);
   const queuedCount = facts.groups.reduce((sum, group) => sum + group.queued, 0);
@@ -86,7 +86,7 @@ export function ProjectDetails({
   const fit = Math.max(1, Math.floor((height - fixed) / 2));
   const groups = facts.groups.slice(0, fit);
   // Cheapest to bring back first, so the left of the bar is the easy win.
-  const costOrder: RebuildCost[] = ["cache", "install", "build", "unknown"];
+  const costOrder: RebuildCost[] = ["cache", "install", "build", "custom"];
   const byCost = costOrder
     .map((cost) => ({
       cost,
@@ -95,9 +95,7 @@ export function ProjectDetails({
         .reduce((sum, group) => sum + group.bytes, 0),
     }))
     .filter((entry) => entry.bytes > 0);
-  const costKey = byCost.map(
-    (entry) => `${entry.cost === "unknown" ? "custom" : entry.cost} ${formatBytes(entry.bytes)}`,
-  );
+  const costKey = byCost.map((entry) => `${entry.cost} ${formatBytes(entry.bytes)}`);
   const hidden = facts.groups.length - groups.length;
   // Rest on a kind and its share of the bar is the one that stays lit.
   const focusCost = facts.groups.find((group) => group.name === focusName)?.rebuild.cost;
@@ -192,7 +190,7 @@ export function ProjectDetails({
               />
             </box>
             <text
-              content={t`${" ".repeat(BAR_W + 2)}${fg(costColor[group.rebuild.cost])(group.rebuild.cost === "unknown" ? "custom" : group.rebuild.cost)}${fg(
+              content={t`${" ".repeat(BAR_W + 2)}${fg(costColor[group.rebuild.cost])(group.rebuild.cost)}${fg(
                 tokens.textDim,
               )(
                 `  ${clipCells(

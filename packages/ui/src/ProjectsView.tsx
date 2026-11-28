@@ -109,7 +109,7 @@ function costLegend(
   let out = t``;
   let used = 0;
   for (const share of byCost) {
-    const label = share.cost === "unknown" ? "custom" : share.cost;
+    const label = share.cost;
     const text = `${label} ${formatBytes(share.bytes)}`;
     const cost = (used > 0 ? 2 : 0) + 2 + cellWidth(text);
     if (used + cost > width) break;
@@ -285,7 +285,7 @@ export function ProjectsView(props: ProjectsViewProps) {
     cache: tokens.positive,
     install: tokens.info,
     build: tokens.textSecondary,
-    unknown: tokens.textMuted,
+    custom: tokens.textMuted,
   };
   const barSoft = mixHex(tokens.meterTrack, tokens.textMuted, ROW_BAR_SOFT);
   const barStrong = mixHex(tokens.meterTrack, tokens.textMuted, ROW_BAR_STRONG);
