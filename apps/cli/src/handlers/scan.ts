@@ -1,4 +1,4 @@
-import type { CliOptions, ScanEvent } from "@kitsunekode/sweep-protocol";
+import type { CliOptions, ScanCandidate, ScanEvent } from "@kitsunekode/sweep-protocol";
 import { toCandidate } from "@kitsunekode/sweep-core/planner";
 import { GuardrailError } from "@kitsunekode/sweep-core/guardrails";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
@@ -17,6 +17,28 @@ import {
   writeJsonLine,
   waitForStdoutConsumer,
 } from "./shared.js";
+
+function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function candidateChangedAfterEnrichment(prev: ScanCandidate, next: ScanCandidate): boolean {
+  return (
+    prev.riskTier !== next.riskTier ||
+    prev.selectedByDefault !== next.selectedByDefault ||
+    prev.estimatedBytes !== next.estimatedBytes ||
+    prev.bytesKnown !== next.bytesKnown ||
+    prev.projectRoot !== next.projectRoot ||
+    prev.projectActiveMs !== next.projectActiveMs ||
+    prev.worktreeOf !== next.worktreeOf ||
+    prev.worktreeState !== next.worktreeState ||
+    !sameStringArray(prev.reasons, next.reasons)
+  );
+}
 
 export async function handleScan(
   pathArg: string,
@@ -43,7 +65,8 @@ export async function handleScan(
 
     if (opts.jsonStream) {
       const scanStartedAt = performance.now();
-      const { result } = await runScanToPlan(targetDir, config, {
+      const lastEmitted = new Map<string, ScanCandidate>();
+      const { result, plan } = await runScanToPlan(targetDir, config, {
         exact: false,
         waitForConsumer: waitForStdoutConsumer,
         selectionPolicy,
@@ -63,22 +86,42 @@ export async function handleScan(
         },
         onEntry: (entry) => {
           const candidate = toCandidate(entry);
+          lastEmitted.set(candidate.id, candidate);
           writeJsonLine({ type: "candidate_found", candidate } satisfies ScanEvent);
         },
         onEntrySized: (entry) => {
           const candidate = toCandidate(entry);
+          lastEmitted.set(candidate.id, candidate);
           writeJsonLine({ type: "candidate_updated", candidate } satisfies ScanEvent);
         },
       });
 
+      // Reconcile streamed candidates with the authoritative enriched plan so
+      // consumers observe post-enrichment risk tiers (git-tracked, worktree,
+      // tool-home, workspace-stub, symlink-alias) and project/worktree metadata
+      // identical to `sweep scan --json` before `scan_completed`.
+      for (const candidate of plan.candidates) {
+        const prior = lastEmitted.get(candidate.id);
+        if (!prior) {
+          const wait = waitForStdoutConsumer();
+          if (wait) await wait;
+          writeJsonLine({ type: "candidate_found", candidate } satisfies ScanEvent);
+        } else if (candidateChangedAfterEnrichment(prior, candidate)) {
+          const wait = waitForStdoutConsumer();
+          if (wait) await wait;
+          writeJsonLine({ type: "candidate_updated", candidate } satisfies ScanEvent);
+        }
+      }
+
       writeJsonLine({
         type: "scan_completed",
         summary: {
-          candidateCount: result.entries.length,
-          estimatedTotalBytes: result.estimatedTotalBytes,
-          scannedDirs: result.scannedDirs,
+          candidateCount: plan.summary.candidateCount,
+          estimatedTotalBytes: plan.summary.estimatedTotalBytes,
+          scannedDirs: plan.summary.scannedDirs,
           // Sparse - same convention as ScanPlan.summary.skippedDirs.
           ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),
+          exact: plan.summary.exact,
           // Wall time for the whole scan call - engine comparison without
           // instrumenting the consumer.
           elapsedMs: Math.round(performance.now() - scanStartedAt),
