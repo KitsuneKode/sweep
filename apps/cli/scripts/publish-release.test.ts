@@ -4,9 +4,11 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  collectPublishTargets,
   ensureScopedTagAtPublishedCommit,
   readNpmPackageRecord,
   resolveScopedTagTarget,
+  runPublishRelease,
 } from "../../../scripts/publish-release.js";
 
 function git(cwd: string, args: string[]): string {
@@ -195,4 +197,155 @@ describe("publish-release scoped tag identity", () => {
       }
     },
   );
+});
+
+describe("publish-release no-op gate vs strict CI requirement", () => {
+  const SHA_PUBLISHED = "c".repeat(40);
+
+  test("exits cleanly with nothing to publish and skips CI when all workspace packages are already published", async () => {
+    const logs: string[] = [];
+    let ciCalled = false;
+    let publishCalled = false;
+    let tagChecked = false;
+
+    const outcome = await runPublishRelease({
+      repoRoot: process.cwd(),
+      skipNative: false,
+      requiresNative: true,
+      version: "0.5.4",
+      isAlreadyPublished: () => true,
+      requireCi: async () => {
+        ciCalled = true;
+        throw new Error("CI failed for the publication commit; refusing publication");
+      },
+      ensureScopedTag: ({ gitTag, version }) => {
+        tagChecked = true;
+        expect(gitTag).toBe("@kitsunekode/sweep@0.5.4");
+        expect(version).toBe("0.5.4");
+        return { action: "noop", targetCommit: SHA_PUBLISHED };
+      },
+      executePublish: async () => {
+        publishCalled = true;
+      },
+      log: (msg) => logs.push(msg),
+    });
+
+    expect(outcome).toEqual({
+      status: "noop",
+      unpublished: [],
+      tagAction: "noop",
+      targetCommit: SHA_PUBLISHED,
+    });
+    expect(ciCalled).toBe(false);
+    expect(publishCalled).toBe(false);
+    expect(tagChecked).toBe(true);
+    expect(logs.join("\n")).toContain("nothing to publish");
+  });
+
+  test("no-op path still creates missing scoped tag only under existing gitHead rules and refuses invalid gitHead", async () => {
+    const logs: string[] = [];
+    let ciCalled = false;
+
+    const created = await runPublishRelease({
+      repoRoot: process.cwd(),
+      skipNative: false,
+      requiresNative: true,
+      version: "0.5.4",
+      isAlreadyPublished: () => true,
+      requireCi: async () => {
+        ciCalled = true;
+      },
+      ensureScopedTag: () => ({ action: "create", targetCommit: SHA_PUBLISHED }),
+      executePublish: async () => {
+        throw new Error("should not publish");
+      },
+      log: (msg) => logs.push(msg),
+    });
+
+    expect(ciCalled).toBe(false);
+    expect(created.status).toBe("noop");
+    if (created.status === "noop") {
+      expect(created.tagAction).toBe("create");
+    }
+    expect(logs.join("\n")).toContain("New tag:  @kitsunekode/sweep@0.5.4");
+    expect(logs.join("\n")).toContain("nothing to publish");
+
+    // Tag integrity failure (e.g. legacy missing gitHead) must still fail on no-op.
+    await expect(
+      runPublishRelease({
+        repoRoot: process.cwd(),
+        skipNative: false,
+        requiresNative: true,
+        version: "0.5.2",
+        isAlreadyPublished: () => true,
+        requireCi: async () => {
+          ciCalled = true;
+        },
+        ensureScopedTag: () => {
+          throw new Error("no gitHead metadata");
+        },
+        log: () => {},
+      }),
+    ).rejects.toThrow(/no gitHead metadata/);
+    expect(ciCalled).toBe(false);
+  });
+
+  test("requires strict CI before publishing whenever any package is unpublished (cancelled/failed CI still refuses)", async () => {
+    let ciCalled = false;
+    let publishCalled = false;
+
+    const targets = collectPublishTargets({
+      repoRoot: process.cwd(),
+      skipNative: false,
+      requiresNative: true,
+    });
+    expect(targets).toContain("@kitsunekode/sweep");
+    expect(targets).toContain("@kitsunekode/sweep-engine-linux-64-musl");
+
+    await expect(
+      runPublishRelease({
+        repoRoot: process.cwd(),
+        skipNative: false,
+        requiresNative: true,
+        version: "0.5.4",
+        isAlreadyPublished: (name) => name !== "@kitsunekode/sweep-engine-linux-64-musl",
+        requireCi: async () => {
+          ciCalled = true;
+          throw new Error("CI failed for the publication commit; refusing publication");
+        },
+        executePublish: async () => {
+          publishCalled = true;
+        },
+        log: () => {},
+      }),
+    ).rejects.toThrow(/CI failed for the publication commit; refusing publication/);
+
+    expect(ciCalled).toBe(true);
+    expect(publishCalled).toBe(false);
+  });
+
+  test("proceeds to publish after CI passes when packages are unpublished", async () => {
+    const order: string[] = [];
+
+    const outcome = await runPublishRelease({
+      repoRoot: process.cwd(),
+      skipNative: false,
+      requiresNative: true,
+      version: "0.5.4",
+      isAlreadyPublished: (name) => name !== "@kitsunekode/sweep",
+      requireCi: async () => {
+        order.push("ci");
+      },
+      executePublish: async () => {
+        order.push("publish");
+      },
+      log: () => {},
+    });
+
+    expect(order).toEqual(["ci", "publish"]);
+    expect(outcome).toEqual({
+      status: "published",
+      unpublished: ["@kitsunekode/sweep"],
+    });
+  });
 });
