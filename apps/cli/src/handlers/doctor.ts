@@ -14,7 +14,7 @@ import { assertSafeCwd } from "@kitsunekode/sweep-core/guardrails";
 import { detectLinuxLibc, type DetectedLinuxLibc } from "@kitsunekode/sweep-core/native-platforms";
 import { probeRustEngine, readRustEngineCapabilities } from "@kitsunekode/sweep-core/rust-engine";
 import type { SweepConfig } from "@kitsunekode/sweep-protocol";
-import { formatBytes, sanitizeTerminalText } from "@kitsunekode/sweep-display";
+import { formatBytes, printDoctorReport } from "@kitsunekode/sweep-display";
 import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   applyNoColor,
@@ -365,15 +365,12 @@ export async function handleDoctor(opts: DoctorHandlerOptions): Promise<void> {
       exitWith(hasWarnings ? EXIT.WARN : EXIT.OK);
     }
 
-    const quiet = opts.quiet ?? false;
-    const verbose = opts.verbose ?? false;
-
-    for (const check of checks) {
-      if (quiet && check.ok && !verbose) continue;
-
-      const status = check.ok ? "ok" : "warn";
-      console.log(`${status}\t${check.name}\t${sanitizeTerminalText(check.detail)}`);
-    }
+    printDoctorReport(checks, {
+      targetDir,
+      protocolVersion: PROTOCOL_VERSION,
+      quiet: opts.quiet ?? false,
+      verbose: opts.verbose ?? false,
+    });
 
     exitWith(hasWarnings ? EXIT.WARN : EXIT.OK);
   } catch (err) {

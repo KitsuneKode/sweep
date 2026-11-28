@@ -61,7 +61,7 @@ import {
 export type OutputOptions = Pick<CliOptions, "quiet" | "verbose">;
 
 export function applyNoColor(color: boolean | undefined): void {
-  if (!color) {
+  if (color === false) {
     process.env.NO_COLOR = "1";
   }
 }
@@ -528,13 +528,17 @@ export function assertDangerousConsent(
   });
   if (dangerous.length === 0) return;
   if (options.yes && !options.allowDangerous) {
+    const noun = dangerous.length === 1 ? "dangerous item" : "dangerous items";
+    const pron = dangerous.length === 1 ? "it" : "them";
     throw new GuardrailError(
-      `${dangerous.length} dangerous item(s) selected. An unattended run removes them only with --allow-dangerous; review them first with \`sweep ui\` or --dry-run.`,
+      `${dangerous.length} ${noun} selected. An unattended run removes ${pron} only with --allow-dangerous; review ${pron} first with \`sweep ui\` or --dry-run.`,
     );
   }
   // Named consent goes to stderr even for --json, so a script still sees
   // which paths an unattended run is about to remove. The report stays on stdout.
-  console.error(`${dangerous.length} dangerous item(s) will be removed:`);
+  console.error(
+    `${dangerous.length} ${dangerous.length === 1 ? "dangerous item" : "dangerous items"} will be removed:`,
+  );
   for (const candidate of dangerous) {
     console.error(`  ✗ ${sanitizeTerminalText(candidate.path)}  (${candidate.reasons.join(", ")})`);
   }
@@ -658,14 +662,14 @@ export async function executePlanDeletion(
     if (tracked.size > 0) {
       const first = sanitizeTerminalText([...tracked][0]!);
       throw new ApplyRefusedError(
-        `${tracked.size} queued item(s) contain git-tracked files (e.g. ${first}). Nothing was removed.`,
+        `${tracked.size} ${tracked.size === 1 ? "queued item contains" : "queued items contain"} git-tracked files (e.g. ${first}). Nothing was removed.`,
         "git_tracked",
       );
     }
     if (unknown.size > 0) {
       const first = sanitizeTerminalText([...unknown][0]!);
       throw new ApplyRefusedError(
-        `${unknown.size} queued item(s) could not be checked for git-tracked files (e.g. ${first}). Sweep refuses to remove repository items whose tracked status is unknown; nothing was removed.`,
+        `${unknown.size} ${unknown.size === 1 ? "queued item" : "queued items"} could not be checked for git-tracked files (e.g. ${first}). Sweep refuses to remove repository items whose tracked status is unknown; nothing was removed.`,
         "tracked_status_unknown",
       );
     }
@@ -674,7 +678,7 @@ export async function executePlanDeletion(
     if (containsGitRepo.size > 0 && !allowSingleRepoRemoval) {
       const first = sanitizeTerminalText([...containsGitRepo][0]!);
       throw new ApplyRefusedError(
-        `${containsGitRepo.size} queued item(s) contain a git repository (e.g. ${first}). Sweep refuses to remove items containing .git unless explicitly selected one at a time; nothing was removed.`,
+        `${containsGitRepo.size} ${containsGitRepo.size === 1 ? "queued item contains" : "queued items contain"} a git repository (e.g. ${first}). Sweep refuses to remove items containing .git unless explicitly selected one at a time; nothing was removed.`,
         "contains_git_repository",
       );
     }
