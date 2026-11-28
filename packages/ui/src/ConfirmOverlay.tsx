@@ -250,28 +250,22 @@ export function ConfirmOverlay({
       footer={
         <>
           {feedback ? (
-            <text
-              fg={tokens.warning}
-              content={clipWords(feedback, contentWidth)}
-              width={contentWidth}
-              wrapMode="word"
-            />
+            <text fg={tokens.warning} content={feedback} width={contentWidth} wrapMode="word" />
           ) : null}
           <text
             fg={overLimit ? tokens.warning : tokens.textMuted}
-            content={clipWords(ceilingText, contentWidth)}
+            content={ceilingText}
             width={contentWidth}
             wrapMode="word"
           />
           {overLimit ? (
             <text
               fg={tokens.warning}
-              content={clipWords(
+              content={
                 onOverrideSizeLimit
                   ? "Reduce the queue, raise maxSizeGB, or press f to override for this review."
-                  : "Reduce the queue or raise maxSizeGB in .sweeprc before confirming.",
-                contentWidth,
-              )}
+                  : "Reduce the queue or raise maxSizeGB in .sweeprc before confirming."
+              }
               width={contentWidth}
               wrapMode="word"
             />
@@ -331,11 +325,9 @@ export function ConfirmOverlay({
       {outsideViewCount > 0 ? (
         <text
           fg={tokens.info}
-          content={clipWords(
-            `${outsideViewCount} queued item${outsideViewCount === 1 ? " is" : "s are"} outside the current view.`,
-            contentWidth,
-          )}
-          wrapMode="none"
+          content={`${outsideViewCount} queued item${outsideViewCount === 1 ? " is" : "s are"} outside the current view.`}
+          width={contentWidth}
+          wrapMode="word"
         />
       ) : null}
       <text

@@ -152,11 +152,12 @@ export function ApplyOverlay({
         />
       )}
       <text
+        width={contentWidth}
         content={t`${fg(tokens.textDim)("Completed")} ${fg(tokens.text)(completedText)}${fg(
           tokens.textDim,
-        )("   ·   Freed ")}${bold(
+        )("  ·  Freed ")}${bold(
           fg(tokens.positive)(`~${formatBytes(progress?.estimatedBytesFreed ?? 0)}`),
-        )}${fg(tokens.textDim)(`   ·   Elapsed ${elapsed}s`)}`}
+        )}${fg(tokens.textDim)(`  ·  Elapsed ${elapsed}s`)}`}
         wrapMode="word"
       />
       {activePath ? keyValueLine("Active", activePath, tokens, contentWidth) : null}

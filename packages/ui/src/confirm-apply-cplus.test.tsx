@@ -85,6 +85,7 @@ describe("Direction C+ confirm dialog", () => {
       expect(frame).toContain("390.0 MiB across 2 items");
       expect(frame).toContain("npm install");
       expect(frame).toContain("Size ceiling");
+      expect(frame).not.toContain("before…");
       expect(frame).toContain("Move to trash instead");
       expect(frame).toContain("esc");
       if (width >= 80) {
@@ -143,6 +144,24 @@ describe("Direction C+ confirm dialog", () => {
       else process.env.NO_COLOR = previous;
     }
   });
+
+  for (const width of [80, 100] as const) {
+    test(`danger warning wraps in full at ${width} cols`, async () => {
+      const frame = await render(confirmNode({ dangerousCount: 1 }), width, 32);
+      const normalized = frame.replace(/[│\s]+/g, " ");
+      expect(normalized).toContain("⚠ 1 dangerous item selected · permanent deletion has no undo.");
+      expect(frame).not.toContain("has no…");
+    });
+  }
+
+  for (const width of [80, 100] as const) {
+    test(`size-ceiling safety note wraps in full at ${width} cols`, async () => {
+      const frame = await render(confirmNode({ applyPolicy: undefined }), width, 32);
+      const normalized = frame.replace(/[│\s]+/g, " ");
+      expect(normalized).toContain("No size ceiling · every path is checked again before removal.");
+      expect(frame).not.toContain("before…");
+    });
+  }
 
   test("16-colour rendering still exposes the decisive copy", async () => {
     const previous = process.env.FORCE_COLOR;
@@ -218,6 +237,32 @@ describe("Direction C+ apply overlay", () => {
     expect(frame).toContain("Stopping after current item");
     expect(frame).toContain("completed deletions stay removed");
     expect(frame).toContain("Stop requested");
+  });
+
+  test("completed backend operations stay pending until the authoritative final report", async () => {
+    const frame = await render(
+      <ApplyOverlay
+        tokens={darkTheme}
+        name="node_modules"
+        targetDir="/tmp/work"
+        trash={false}
+        progress={{
+          stage: "applying",
+          selectedCount: 1,
+          deletedCount: 1,
+          estimatedBytesFreed: 1024,
+          elapsedMs: 4_300,
+          activePath: "/tmp/work/node_modules",
+        }}
+        onCancel={() => {}}
+      />,
+      100,
+      32,
+    );
+    expect(frame).toContain("99%");
+    expect(frame).toContain("Completed 1 of 1");
+    expect(frame).toContain("waiting for the final report");
+    expect(frame).not.toContain("100%");
   });
 });
 

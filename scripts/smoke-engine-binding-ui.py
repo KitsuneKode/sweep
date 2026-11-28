@@ -121,7 +121,7 @@ with tempfile.TemporaryDirectory(prefix="sweep-engine-binding-", dir=REPO / "tar
             os.write(master, b"s")
             wait_until(lambda: "Review queue (2)" in text())
             os.write(master, b"x")
-            wait_until(lambda: "Permanently delete" in text())
+            wait_until(lambda: "permanent deletion" in text() and "y  Delete" in text())
             os.write(master, b"y")
             # A refused apply still commits its journal, with every entry unattempted.
             wait_until(lambda: (records := journal_records()) != [] and records[-1]["type"] == "complete")
