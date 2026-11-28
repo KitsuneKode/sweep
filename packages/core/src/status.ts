@@ -90,6 +90,7 @@ export function summarizeStatus(
   }
 
   const reclaimableBytes = safeBytes + cautionBytes;
+  const uniqueBytesPartial = plan.summary.uniqueBytesPartial === true;
   const uniqueReclaimableBytes = hasUniqueBytes
     ? nonReclaimableBytes === 0 && plan.summary.uniqueTotalBytes !== undefined
       ? Math.min(reclaimableBytes, Math.max(reclaimableUniqueSum, plan.summary.uniqueTotalBytes))
@@ -103,6 +104,7 @@ export function summarizeStatus(
     scannedDirs: plan.summary.scannedDirs,
     reclaimableBytes,
     ...(uniqueReclaimableBytes !== undefined ? { uniqueReclaimableBytes } : {}),
+    ...(uniqueBytesPartial ? { uniqueBytesPartial: true } : {}),
     safeBytes,
     cautionBytes,
     protectedCount,

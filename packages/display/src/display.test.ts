@@ -11,6 +11,7 @@ import {
   groupCandidatesByKind,
   riskBadgeLabel,
   printDeletionProgress,
+  printStatusSummary,
 } from "@kitsunekode/sweep-display";
 
 function candidate(
@@ -332,5 +333,72 @@ describe("scan report", () => {
     expect(text).toContain("about 2.0 MiB freed");
     expect(text).toContain("20.0 MiB apparent · shared hardlinks");
     expect(text).toContain("up to 102.0 MiB free");
+  });
+
+  test("scan report falls back to apparent with qualifier when uniqueBytesPartial is set", () => {
+    const p = plan(
+      [
+        candidate({
+          id: "a",
+          name: "node_modules",
+          kind: "node_modules",
+          path: "/work/a/node_modules",
+          estimatedBytes: 10 * 1024 * 1024,
+          uniqueBytes: 1024 * 1024,
+        }),
+        candidate({
+          id: "b",
+          name: "node_modules",
+          kind: "node_modules",
+          path: "/work/b/node_modules",
+          estimatedBytes: 10 * 1024 * 1024,
+          uniqueBytes: 1024 * 1024,
+        }),
+      ],
+      ["a", "b"],
+    );
+    p.summary.uniqueTotalBytes = 2 * 1024 * 1024;
+    p.summary.uniqueBytesPartial = true;
+    const lines = plain(
+      formatScanReport(p, "/work", {
+        columns: 110,
+        disk: { free: 100 * 1024 * 1024, total: 200 * 1024 * 1024 },
+      }),
+    );
+    const text = lines.join("\n");
+    expect(text).not.toContain("about 2.0 MiB freed");
+    expect(text).toContain("20.0 MiB");
+    expect(text).toContain("shared hardlinks not fully counted");
+    expect(text).toContain("up to 120.0 MiB free");
+  });
+
+  test("status summary falls back to apparent with qualifier when uniqueBytesPartial is set", () => {
+    const logged: string[] = [];
+    const spy = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logged.push(args.map(String).join(" "));
+    });
+    try {
+      printStatusSummary({
+        protocolVersion: "1",
+        targetDir: "/work",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        scannedDirs: 10,
+        reclaimableBytes: 20 * 1024 * 1024,
+        uniqueReclaimableBytes: 2 * 1024 * 1024,
+        uniqueBytesPartial: true,
+        safeBytes: 20 * 1024 * 1024,
+        cautionBytes: 0,
+        protectedCount: 0,
+        idle: { days: 30, projects: 0, bytes: 0, kinds: [] },
+        kinds: [{ kind: "node_modules", bytes: 20 * 1024 * 1024, count: 2 }],
+        projects: [],
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    const text = plain(logged).join("\n");
+    expect(text).not.toContain("about 2.0 MiB freed");
+    expect(text).toContain("20.0 MiB you could free");
+    expect(text).toContain("shared hardlinks not fully counted");
   });
 });

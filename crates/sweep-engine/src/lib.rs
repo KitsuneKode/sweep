@@ -248,6 +248,12 @@ pub fn scan_to_plan_with_config(
         })
         .collect();
 
+    let has_partial_candidate = candidates
+        .iter()
+        .any(|c| c.entry.bytes_known == Some(false));
+    let unique_bytes_partial =
+        hardlinks.is_capped() || (has_partial_candidate && hardlinks.has_multi_link());
+
     build_plan(
         target_dir.as_str(),
         target_identity,
@@ -257,6 +263,7 @@ pub fn scan_to_plan_with_config(
         selection_policy,
         options.exact,
         Some(hardlinks.unique_total_bytes()),
+        unique_bytes_partial.then_some(true),
     )
 }
 
@@ -340,6 +347,7 @@ fn build_plan(
     selection_policy: &SelectionPolicy,
     exact: bool,
     unique_total_bytes: Option<u64>,
+    unique_bytes_partial: Option<bool>,
 ) -> Result<ScanPlan, EngineError> {
     let selected_candidate_ids = compile_selected_candidate_ids(&candidates, selection_policy);
     let estimated_total_bytes = candidates
@@ -378,6 +386,7 @@ fn build_plan(
             candidate_count,
             estimated_total_bytes,
             unique_total_bytes,
+            unique_bytes_partial,
             scanned_dirs,
             skipped_dirs,
             exact,
@@ -1001,5 +1010,72 @@ mod tests {
         let now = iso_timestamp_now();
         assert_eq!(now.len(), 24, "{now}");
         assert!(now.ends_with('Z') && now.as_bytes()[10] == b'T' && now.as_bytes()[19] == b'.');
+    }
+
+    #[test]
+    fn scan_marks_unique_bytes_partial_when_hardlink_cap_is_hit() {
+        let root_dir = tempfile::tempdir().unwrap_or_else(|e| panic!("fixture: {e}"));
+        let store = root_dir.path().join("store");
+        let work = root_dir.path().join("work");
+        let nm = work.join("app").join("node_modules");
+        std::fs::create_dir_all(&store).unwrap_or_else(|e| panic!("store: {e}"));
+        std::fs::create_dir_all(&nm).unwrap_or_else(|e| panic!("nm: {e}"));
+
+        // 60 hardlinks * 128 B = 7680 B > 6 KiB retained cap (48 identities max),
+        // while discovery of 2 dirs + 1 candidate fits comfortably inside 6 KiB.
+        for i in 0..60 {
+            let src = store.join(format!("pkg-{i}.js"));
+            std::fs::write(&src, vec![b'x'; 256]).unwrap_or_else(|e| panic!("write: {e}"));
+            std::fs::hard_link(&src, nm.join(format!("pkg-{i}.js")))
+                .unwrap_or_else(|e| panic!("hard_link: {e}"));
+        }
+        std::fs::write(nm.join("own.js"), vec![b'o'; 128]).unwrap_or_else(|e| panic!("write: {e}"));
+
+        let work_utf8 = Utf8Path::from_path(&work).unwrap_or_else(|| panic!("utf8"));
+
+        // Tight max_identities caps the hardlink tracker -> unique_bytes_partial: Some(true).
+        let capped = scan_to_plan_with_config(
+            work_utf8,
+            &WalkConfig::default(),
+            &SelectionPolicy::default(),
+            ScanOptions {
+                limits: sweep_types::ScanLimits {
+                    max_identities: 6,
+                    ..sweep_types::ScanLimits::default()
+                },
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("capped scan: {e}"));
+        assert_eq!(capped.summary.unique_bytes_partial, Some(true));
+        assert_eq!(capped.summary.unique_total_bytes, Some(128));
+
+        // Low-memory-style tight max_retained_bytes saturating sizing_identity() also marks partial.
+        let low_mem_capped = scan_to_plan_with_config(
+            work_utf8,
+            &WalkConfig::default(),
+            &SelectionPolicy::default(),
+            ScanOptions {
+                limits: sweep_types::ScanLimits {
+                    max_retained_bytes: 1024 * 6,
+                    max_combined_bytes: 1024 * 12,
+                    ..sweep_types::ScanLimits::default()
+                },
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("low-mem scan: {e}"));
+        assert_eq!(low_mem_capped.summary.unique_bytes_partial, Some(true));
+
+        // Default profile fits all 12 hardlinks -> unique_bytes_partial omitted (None).
+        let uncapped = scan_to_plan_with_config(
+            work_utf8,
+            &WalkConfig::default(),
+            &SelectionPolicy::default(),
+            ScanOptions::default(),
+        )
+        .unwrap_or_else(|e| panic!("uncapped scan: {e}"));
+        assert_eq!(uncapped.summary.unique_bytes_partial, None);
+        assert_eq!(uncapped.summary.unique_total_bytes, Some(128));
     }
 }

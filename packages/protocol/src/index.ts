@@ -146,6 +146,12 @@ export interface ScanResult {
    * such as pnpm/Bun global stores).
    */
   uniqueTotalBytes?: number;
+  /**
+   * `true` when bounded hardlink tracking hit its cap or a candidate with
+   * shared hardlinks could not be fully sized, so `uniqueTotalBytes` is a
+   * partial count. Omitted when hardlink tracking completed within bounds.
+   */
+  uniqueBytesPartial?: boolean;
   scannedDirs: number;
   /** Directories the walker could not read or had already visited via another path. */
   skippedDirs: number;
@@ -350,6 +356,8 @@ export interface ScanCompletedEvent {
     estimatedTotalBytes: number;
     /** Scan-wide unique-inode bytes deduped by dev+ino (bounded) - absent on older producers. */
     uniqueTotalBytes?: number;
+    /** `true` when bounded hardlink tracking hit its cap or was partial. */
+    uniqueBytesPartial?: boolean;
     scannedDirs: number;
     /** Unreadable / deduped directories - absent on older producers. */
     skippedDirs?: number;
@@ -389,6 +397,11 @@ export interface StatusSummary {
    * bounded by dev+ino tracking. Absent when candidate unique sizes are unavailable.
    */
   uniqueReclaimableBytes?: number;
+  /**
+   * `true` when bounded hardlink tracking hit its cap or was incomplete;
+   * surfaces should show apparent bytes with a qualifier instead of a smaller total.
+   */
+  uniqueBytesPartial?: boolean;
   safeBytes: number;
   cautionBytes: number;
   /** Dangerous and blocked items: found, never offered as space to free. */
@@ -426,6 +439,11 @@ export interface ScanPlan {
      * outside the scanned candidates. Absent on older plans.
      */
     uniqueTotalBytes?: number;
+    /**
+     * `true` when bounded hardlink tracking hit its cap or a candidate with
+     * shared hardlinks could not be fully sized. Omitted when complete.
+     */
+    uniqueBytesPartial?: boolean;
     scannedDirs: number;
     /** Unreadable / deduped directories - absent on plans written before v1.x. */
     skippedDirs?: number;

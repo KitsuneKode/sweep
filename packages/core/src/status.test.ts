@@ -141,5 +141,20 @@ describe("summarizeStatus", () => {
     const s = summarizeStatus(p, NOW);
     expect(s.reclaimableBytes).toBe(20 * GB);
     expect(s.uniqueReclaimableBytes).toBe(2 * GB);
+    expect(s.uniqueBytesPartial).toBeUndefined();
+  });
+
+  test("propagates uniqueBytesPartial when bounded hardlink tracking hit its cap", () => {
+    const p = plan([
+      { ...candidate("node_modules", 10 * GB, "safe", "/p/a", 40), uniqueBytes: 1 * GB },
+      { ...candidate("node_modules", 10 * GB, "safe", "/p/b", 40), uniqueBytes: 1 * GB },
+    ]);
+    p.summary.estimatedTotalBytes = 20 * GB;
+    p.summary.uniqueTotalBytes = 2 * GB;
+    p.summary.uniqueBytesPartial = true;
+    const s = summarizeStatus(p, NOW);
+    expect(s.reclaimableBytes).toBe(20 * GB);
+    expect(s.uniqueReclaimableBytes).toBe(2 * GB);
+    expect(s.uniqueBytesPartial).toBe(true);
   });
 });

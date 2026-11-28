@@ -406,6 +406,8 @@ struct ScanCompletedSummary {
     estimated_total_bytes: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     unique_total_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unique_bytes_partial: Option<bool>,
     scanned_dirs: u32,
     skipped_dirs: u32,
     exact: bool,
@@ -563,6 +565,7 @@ fn run_scan() -> Result<(), CliFailure> {
                 candidate_count: plan.summary.candidate_count,
                 estimated_total_bytes: plan.summary.estimated_total_bytes,
                 unique_total_bytes: plan.summary.unique_total_bytes,
+                unique_bytes_partial: plan.summary.unique_bytes_partial,
                 scanned_dirs: plan.summary.scanned_dirs,
                 skipped_dirs: plan.summary.skipped_dirs,
                 exact: plan.summary.exact,

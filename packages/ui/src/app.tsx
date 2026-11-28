@@ -1647,6 +1647,7 @@ export function SweepApp({
               const apparent = allQueueable.reduce((acc, c) => acc + c.estimatedBytes, 0);
               return Math.min(apparent, sum);
             })()}
+            uniqueBytesPartial={state.uniqueBytesPartial}
             guardedBytes={projects.reduce((sum, project) => sum + project.guardedBytes, 0)}
             byCost={byCost}
             partial={projects.some((project) => project.partial)}

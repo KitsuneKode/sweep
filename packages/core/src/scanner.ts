@@ -144,51 +144,91 @@ interface SubtreeSize {
 }
 
 interface SharedInode {
+  dev: bigint;
+  ino: bigint;
   size: number;
   nlink: bigint;
   seen: bigint;
 }
 
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+
 /**
  * Bounded scan-wide hardlink deduplicator (by `(dev, ino)`).
  * Mirrors Rust `sweep_fs::HardlinkTracker` for exact engine parity.
+ *
+ * Uses per-device maps of numeric inode keys to dense parallel arrays so
+ * large pnpm/Bun stores avoid per-inode string keys and object allocations,
+ * and charges each retained inode to `ResourceBudget` when provided.
  */
 export class HardlinkTracker {
   private singleLinkBytes = 0;
-  private readonly shared = new Map<string, SharedInode>();
+  private readonly byDevice = new Map<bigint, Map<number | bigint, number>>();
+  private readonly sizes: number[] = [];
+  private readonly nlinks: number[] = [];
+  private readonly seens: number[] = [];
   private capped = false;
+  private hasMultiLink = false;
 
-  constructor(private readonly cap: number) {}
+  constructor(
+    private readonly cap: number,
+    private readonly budget?: ResourceBudget,
+  ) {}
 
   recordSingleLink(size: number): void {
     if (size <= 0) return;
     this.singleLinkBytes = Math.min(Number.MAX_SAFE_INTEGER, this.singleLinkBytes + size);
   }
 
-  recordMultiLink(dev: bigint, ino: bigint, size: number, nlink: bigint): void {
-    if (size <= 0) return;
+  recordMultiLink(dev: bigint, ino: bigint, size: number, nlink: bigint, count = 1n): void {
+    if (size <= 0 || count <= 0n) return;
+    this.hasMultiLink = true;
     if (ino === 0n) {
       this.capped = true;
       return;
     }
-    const key = `${dev}:${ino}`;
-    const existing = this.shared.get(key);
-    if (existing) {
-      existing.seen += 1n;
+    const inoKey: number | bigint = ino <= MAX_SAFE_BIGINT ? Number(ino) : ino;
+    const seenDelta = count > MAX_SAFE_BIGINT ? Number.MAX_SAFE_INTEGER : Number(count);
+    let deviceMap = this.byDevice.get(dev);
+    const existingSlot = deviceMap?.get(inoKey);
+    if (existingSlot !== undefined) {
+      this.seens[existingSlot] = Math.min(
+        Number.MAX_SAFE_INTEGER,
+        this.seens[existingSlot]! + seenDelta,
+      );
       return;
     }
-    if (this.shared.size >= this.cap) {
+    if (
+      this.sizes.length >= this.cap ||
+      (this.budget !== undefined && !this.budget.hardlinkIdentity())
+    ) {
       this.capped = true;
       return;
     }
-    this.shared.set(key, { size, nlink, seen: 1n });
+    if (!deviceMap) {
+      deviceMap = new Map<number | bigint, number>();
+      this.byDevice.set(dev, deviceMap);
+    }
+    const slot = this.sizes.length;
+    deviceMap.set(inoKey, slot);
+    this.sizes.push(size);
+    this.nlinks.push(nlink > MAX_SAFE_BIGINT ? Number.MAX_SAFE_INTEGER : Number(nlink));
+    this.seens.push(seenDelta);
+  }
+
+  markCapped(): void {
+    this.capped = true;
+  }
+
+  hasMultiLinkInodes(): boolean {
+    return this.hasMultiLink;
   }
 
   uniqueTotalBytes(): number {
     let total = this.singleLinkBytes;
-    for (const entry of this.shared.values()) {
-      if (entry.seen >= entry.nlink) {
-        total = Math.min(Number.MAX_SAFE_INTEGER, total + entry.size);
+    for (let i = 0; i < this.sizes.length; i += 1) {
+      if (this.seens[i]! >= this.nlinks[i]!) {
+        total = Math.min(Number.MAX_SAFE_INTEGER, total + this.sizes[i]!);
       }
     }
     return total;
@@ -253,8 +293,11 @@ async function metadataSize(
   tracker?: HardlinkTracker,
 ): Promise<SubtreeSize> {
   let bytes = 0;
+  let singleLinkBytes = 0;
   let uniqueBytes = 0;
   let complete = true;
+  let localCapped = false;
+  let finished = false;
   // The dedup sets and stack die with this job, so they bound peak memory -
   // not a cumulative total. The walk already charged these paths against the
   // scan-wide budget; sizing bounds itself with per-job caps derived from the
@@ -270,14 +313,14 @@ async function metadataSize(
     const nlink = typeof stat.nlink === "bigint" ? stat.nlink : BigInt(stat.nlink);
     if (nlink <= 1n) {
       bytes = checkedBytes(bytes, rawSize);
+      singleLinkBytes = checkedBytes(singleLinkBytes, rawSize);
       uniqueBytes = checkedBytes(uniqueBytes, rawSize);
-      tracker?.recordSingleLink(rawSize);
       return;
     }
     const dev = typeof stat.dev === "bigint" ? stat.dev : BigInt(stat.dev);
     const ino = typeof stat.ino === "bigint" ? stat.ino : BigInt(stat.ino);
-    tracker?.recordMultiLink(dev, ino, rawSize, nlink);
     if (ino === 0n) {
+      localCapped = true;
       complete = false;
       bytes = checkedBytes(bytes, rawSize);
       return;
@@ -292,11 +335,12 @@ async function metadataSize(
     if (links.size >= dedupCap || !budget.sizingIdentity()) {
       // Set at cap: count the link anyway (overcount, flagged partial)
       // rather than undercounting zero or killing the scan.
+      localCapped = true;
       complete = false;
       bytes = checkedBytes(bytes, rawSize);
       return;
     }
-    links.set(id, { size: rawSize, nlink, seen: 1n });
+    links.set(id, { dev, ino, size: rawSize, nlink, seen: 1n });
     bytes = checkedBytes(bytes, rawSize);
   };
   if (!budget.sizingDirectory(entryPath)) return { bytes: 0, uniqueBytes: 0, complete: false };
@@ -382,10 +426,18 @@ async function metadataSize(
         uniqueBytes = checkedBytes(uniqueBytes, entry.size);
       }
     }
-    return { bytes, uniqueBytes, complete: complete && !signal?.aborted };
+    finished = !signal?.aborted;
+    return { bytes, uniqueBytes, complete: complete && finished };
   } finally {
     budget.releaseSizingIdentities(links.size + dirs.size);
     for (const path of stack) budget.releaseSizingDirectory(path);
+    if (finished && tracker) {
+      tracker.recordSingleLink(singleLinkBytes);
+      for (const entry of links.values()) {
+        tracker.recordMultiLink(entry.dev, entry.ino, entry.size, entry.nlink, entry.seen);
+      }
+      if (localCapped) tracker.markCapped();
+    }
   }
 }
 
@@ -448,6 +500,8 @@ export class ProgressiveSizer {
   private readonly signal: AbortSignal;
   private stopped = false;
   private failure: unknown;
+  /** Candidates already committed into `tracker`, so batch fallback never double-counts. */
+  private readonly trackerRecorded = new Set<ScanEntry>();
 
   constructor(
     private readonly hooks: ScanHooks,
@@ -509,17 +563,20 @@ export class ProgressiveSizer {
           // A non-budget batch failure (a dying mount mid-job, a throwing
           // hook) must not sink the whole scan: size this batch's entries
           // with the per-entry stat fallback - the arm the dead `unsized`
-          // list never reached. Entries already sized get harmlessly
-          // re-answered; the fallback marks them bytesKnown as it resolves.
+          // list never reached. Entries already committed to `tracker` skip
+          // re-recording so scan-wide hardlink counts are never inflated.
           for (const entry of entries) {
             if (this.signal.aborted) break;
             try {
+              const useTracker =
+                this.tracker && !this.trackerRecorded.has(entry) ? this.tracker : undefined;
               const size = await applyFallbackSizeAsync(
                 entry,
                 this.signal,
                 this.budget,
-                this.tracker,
+                useTracker,
               );
+              if (useTracker) this.trackerRecorded.add(entry);
               entry.estimatedBytes = size.bytes;
               entry.uniqueBytes = size.uniqueBytes;
               entry.bytesKnown = size.complete;
@@ -545,7 +602,10 @@ export class ProgressiveSizer {
     try {
       if (this.signal?.aborted) return;
       await mapPool(batch, 2, async (entry) => {
-        const size = await apparentSizeDetailed(entry.path, this.signal, this.budget, this.tracker);
+        const useTracker =
+          this.tracker && !this.trackerRecorded.has(entry) ? this.tracker : undefined;
+        const size = await apparentSizeDetailed(entry.path, this.signal, this.budget, useTracker);
+        if (useTracker) this.trackerRecorded.add(entry);
         entry.estimatedBytes = size.bytes;
         entry.uniqueBytes = size.uniqueBytes;
         entry.bytesKnown = size.complete;
@@ -634,7 +694,7 @@ export async function scan(
     ...SCAN_RESOURCE_PROFILES[hooks.resourceProfile ?? "balanced"],
     ...hooks.limits,
   });
-  const hardlinks = new HardlinkTracker(budget.limits.maxIdentities);
+  const hardlinks = new HardlinkTracker(budget.limits.maxIdentities, budget);
   // Reparse-point/junction detection is a Windows-only concern; Dirent already
   // reports symlinks authoritatively on POSIX platforms.
   const needsReparseCheck = platform === "win32";
@@ -903,15 +963,19 @@ export async function scan(
     // events only reaches 100% when sizing actually finished.
     emitProgress(".", true);
 
+    const hasPartialCandidate = entries.some((e) => e.bytesKnown === false);
+    const uniqueBytesPartial =
+      hardlinks.isCapped() || (hasPartialCandidate && hardlinks.hasMultiLinkInodes());
     return {
       targetIdentity,
       entries,
       estimatedTotalBytes: entries.reduce((sum, e) => checkedBytes(sum, e.estimatedBytes), 0),
       uniqueTotalBytes: hardlinks.uniqueTotalBytes(),
+      ...(uniqueBytesPartial ? { uniqueBytesPartial: true } : {}),
       scannedDirs,
       skippedDirs,
       // A partial candidate cannot support an exact byte claim.
-      exact: exact && !entries.some((e) => e.bytesKnown === false),
+      exact: exact && !hasPartialCandidate,
     };
   } finally {
     signal?.removeEventListener("abort", wakeWaiters);

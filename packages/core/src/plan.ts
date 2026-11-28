@@ -306,6 +306,9 @@ export function validateScanEvent(value: unknown): ScanEvent {
       if (s.uniqueTotalBytes !== undefined && !uint(s.uniqueTotalBytes)) {
         fail("scan_completed.summary.uniqueTotalBytes");
       }
+      if (s.uniqueBytesPartial !== undefined && typeof s.uniqueBytesPartial !== "boolean") {
+        fail("scan_completed.summary.uniqueBytesPartial");
+      }
       if (s.skippedDirs !== undefined && !uint(s.skippedDirs)) {
         fail("scan_completed.summary.skippedDirs");
       }

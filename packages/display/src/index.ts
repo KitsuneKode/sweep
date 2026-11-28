@@ -196,8 +196,11 @@ function printScanTotals(
     return;
   }
 
+  const partialNote = plan.summary.uniqueBytesPartial
+    ? " · shared hardlinks not fully counted"
+    : "";
   console.log(
-    `sweep: ${plan.selectedCandidateIds.length} selected, ${plan.candidates.length} found (${sizePrefix}${formatBytes(selectedBytes)} ${totalLabel} selected size)`,
+    `sweep: ${plan.selectedCandidateIds.length} selected, ${plan.candidates.length} found (${sizePrefix}${formatBytes(selectedBytes)} ${totalLabel} selected size${partialNote})`,
   );
   if (hiddenStubCount > 0 && !verbose) {
     console.log(`sweep: ${hiddenStubCount} workspace node_modules stubs hidden`);
@@ -436,13 +439,21 @@ export function printStatusSummary(status: StatusSummary): void {
           } idle ${status.idle.days}+ days`,
         )
       : "";
+  const uniqueBytesPartial = status.uniqueBytesPartial === true;
   const hasSharedHardlinks =
+    !uniqueBytesPartial &&
     status.uniqueReclaimableBytes !== undefined &&
     status.uniqueReclaimableBytes < status.reclaimableBytes;
   if (hasSharedHardlinks) {
     console.log(
       `  ${pc.bold(pc.green(`about ${formatBytes(status.uniqueReclaimableBytes!)} freed`))} ` +
         pc.dim(`(${formatBytes(status.reclaimableBytes)} apparent · shared hardlinks)`) +
+        idle,
+    );
+  } else if (uniqueBytesPartial) {
+    console.log(
+      `  ${pc.bold(pc.green(formatBytes(status.reclaimableBytes)))} you could free ` +
+        pc.dim("(apparent · shared hardlinks not fully counted)") +
         idle,
     );
   } else {

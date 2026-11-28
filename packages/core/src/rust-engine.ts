@@ -626,7 +626,11 @@ export async function applyPlanViaRust(
   // Omit presentation-only worktree and unique-byte metadata from the native
   // apply payload so older native engines (with `deny_unknown_fields`) accept
   // v1 plans cleanly.
-  const { uniqueTotalBytes: _uniqueTotalBytes, ...applySummary } = plan.summary;
+  const {
+    uniqueTotalBytes: _uniqueTotalBytes,
+    uniqueBytesPartial: _uniqueBytesPartial,
+    ...applySummary
+  } = plan.summary;
   const applyPayloadPlan: ScanPlan = {
     ...plan,
     summary: applySummary,

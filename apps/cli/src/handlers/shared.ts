@@ -304,6 +304,7 @@ function scanResultFromPlan(plan: ScanPlan): ScanResult {
     ...(plan.summary.uniqueTotalBytes !== undefined
       ? { uniqueTotalBytes: plan.summary.uniqueTotalBytes }
       : {}),
+    ...(plan.summary.uniqueBytesPartial ? { uniqueBytesPartial: true } : {}),
     scannedDirs: plan.summary.scannedDirs,
     skippedDirs: plan.summary.skippedDirs ?? 0,
     exact: plan.summary.exact,

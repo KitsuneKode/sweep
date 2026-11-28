@@ -184,7 +184,9 @@ export function formatScanReport(
       ? Math.min(selectedBytes, Math.max(selectedUniqueSum, plan.summary.uniqueTotalBytes))
       : Math.min(selectedBytes, selectedUniqueSum)
     : selectedBytes;
-  const hasSharedHardlinks = hasUniqueBytes && selectedUniqueBytes < selectedBytes;
+  const uniqueBytesPartial = plan.summary.uniqueBytesPartial === true;
+  const hasSharedHardlinks =
+    !uniqueBytesPartial && hasUniqueBytes && selectedUniqueBytes < selectedBytes;
 
   const meta = [
     `${plan.summary.scannedDirs} dirs`,
@@ -217,7 +219,7 @@ export function formatScanReport(
           )
       : ` ${pc.bold(pc.yellow(size(selectedBytes, approx)))} ${pc.bold(`to reclaim${idleScope}`)}` +
           pc.dim(
-            `  ·  ${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`,
+            `${uniqueBytesPartial ? " (apparent · shared hardlinks not fully counted)" : ""}  ·  ${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`,
           ),
   );
   // Disk context: what the cleanup means for the space actually left.

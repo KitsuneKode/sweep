@@ -177,6 +177,7 @@ export class RustScanStream {
       ...(this.summary.uniqueTotalBytes === undefined
         ? {}
         : { uniqueTotalBytes: this.summary.uniqueTotalBytes }),
+      ...(this.summary.uniqueBytesPartial ? { uniqueBytesPartial: true } : {}),
       scannedDirs: this.summary.scannedDirs,
       skippedDirs: this.summary.skippedDirs ?? 0,
       exact: this.summary.exact ?? this.exact,

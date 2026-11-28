@@ -71,6 +71,8 @@ export interface SweepUiState {
   scanning: boolean;
   /** A failed or unfinished generation cannot be exported or applied. */
   scanIncomplete: boolean;
+  /** True when bounded hardlink tracking hit its cap or was partial. */
+  uniqueBytesPartial: boolean;
   scanSizedCount: number;
   /** Directories visited by the current/last scan (0 until the engine reports). */
   scannedDirs: number;
@@ -176,6 +178,7 @@ export function createUiState(plan: ScanPlan, init: SweepUiInitOptions = {}): Sw
     patternsDirty: false,
     scanning: false,
     scanIncomplete: false,
+    uniqueBytesPartial: plan.summary.uniqueBytesPartial === true,
     scanSizedCount: plan.candidates.length,
     scannedDirs: plan.summary.scannedDirs,
     scanCurrentDir: null,
@@ -712,6 +715,7 @@ export function finalizeScan(state: SweepUiState, plan: ScanPlan | undefined): S
     ...state,
     targetIdentity: plan.targetIdentity,
     scanIncomplete: false,
+    uniqueBytesPartial: plan.summary.uniqueBytesPartial === true,
     scanSizedCount: plan.candidates.length,
   };
 
@@ -848,6 +852,7 @@ export function resetForRescan(state: SweepUiState): SweepUiState {
     collapsedGroups: new Set<string>(),
     scanning: true,
     scanIncomplete: true,
+    uniqueBytesPartial: false,
     scanSizedCount: 0,
     orderPinned: true,
     scannedDirs: 0,

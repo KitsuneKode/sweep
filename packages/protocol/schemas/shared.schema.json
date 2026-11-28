@@ -175,6 +175,9 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "uniqueBytesPartial": {
+          "type": "boolean"
+        },
         "scannedDirs": {
           "type": "integer",
           "minimum": 0,

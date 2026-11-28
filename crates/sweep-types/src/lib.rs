@@ -345,6 +345,12 @@ pub struct ScanPlanSummary {
         skip_serializing_if = "Option::is_none"
     )]
     pub unique_total_bytes: Option<u64>,
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unique_bytes_partial: Option<bool>,
     pub scanned_dirs: u32,
     /// Unreadable or deduped directories. The JS engine omits the key at
     /// zero; `skip_serializing_if` keeps the wire shape identical.
@@ -385,6 +391,7 @@ impl ScanPlan {
                 candidate_count: 0,
                 estimated_total_bytes: 0,
                 unique_total_bytes: None,
+                unique_bytes_partial: None,
                 scanned_dirs: 0,
                 skipped_dirs: 0,
                 exact: true,

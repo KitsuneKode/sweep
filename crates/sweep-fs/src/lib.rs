@@ -1130,6 +1130,7 @@ struct HardlinkTrackerState {
     single_link_bytes: u64,
     shared: HashMap<(u64, u64), SharedInode>,
     capped: bool,
+    has_multi_link: bool,
 }
 
 /// Bounded scan-wide hardlink deduplicator (by `(dev, ino)`).
@@ -1167,6 +1168,7 @@ impl HardlinkTracker {
             return;
         }
         let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.has_multi_link = true;
         if ino == 0 {
             state.capped = true;
             return;
@@ -1187,6 +1189,17 @@ impl HardlinkTracker {
                 seen: 1,
             },
         );
+    }
+
+    pub fn mark_capped(&self) {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).capped = true;
+    }
+
+    pub fn has_multi_link(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .has_multi_link
     }
 
     pub fn unique_total_bytes(&self) -> u64 {
@@ -1310,15 +1323,21 @@ fn price_sizing_inode(
     let identity = match identity {
         Ok(identity) => identity,
         Err(_) => {
+            if let Some(tracker) = ctx.tracker {
+                tracker.mark_capped();
+            }
             return SubtreeSize {
                 bytes: raw_bytes,
                 unique_bytes: 0,
                 complete: false,
-            }
+            };
         }
     };
     #[cfg(windows)]
     if identity.is_none() {
+        if let Some(tracker) = ctx.tracker {
+            tracker.mark_capped();
+        }
         return SubtreeSize {
             bytes: raw_bytes,
             unique_bytes: 0,
@@ -1353,6 +1372,9 @@ fn price_sizing_inode(
     } else if seen.len() >= ctx.dedup_cap || !ctx.budget.sizing_identity() {
         // Set at cap: count the link anyway (overcount, flagged partial)
         // rather than undercounting zero or killing the scan.
+        if let Some(tracker) = ctx.tracker {
+            tracker.mark_capped();
+        }
         complete = false;
         raw_bytes
     } else {
@@ -1641,7 +1663,12 @@ pub fn measure_size_with_budget_controlled_tracked(
                 }
                 (bytes, true)
             }
-            Err(_) => (0, false),
+            Err(_) => {
+                if let Some(tracker) = tracker {
+                    tracker.mark_capped();
+                }
+                (0, false)
+            }
         };
         return SubtreeSize {
             bytes,
@@ -1698,6 +1725,9 @@ pub fn measure_size_with_budget_controlled_tracked(
             {
                 Some(unique) => result.unique_bytes = unique,
                 None => {
+                    if let Some(tracker) = tracker {
+                        tracker.mark_capped();
+                    }
                     result.unique_bytes = u64::MAX;
                     result.complete = false;
                 }

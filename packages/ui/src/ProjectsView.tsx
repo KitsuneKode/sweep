@@ -29,6 +29,8 @@ export interface ProjectsViewProps {
   reclaimableBytes: number;
   /** Estimated freed bytes excluding shared hardlinks (pnpm/Bun stores). */
   uniqueReclaimableBytes?: number | undefined;
+  /** True when bounded hardlink tracking hit its cap; fall back to apparent + qualifier. */
+  uniqueBytesPartial?: boolean | undefined;
   /** Dangerous and blocked bytes: found, never part of the total above. */
   guardedBytes?: number | undefined;
   /** Why each item of the last removal failed, by path; shown on its row. */
@@ -319,14 +321,18 @@ export function ProjectsView(props: ProjectsViewProps) {
   // A total is exact only once every size is measured and the scan finished
   // whole: until then it says "~" (or "so far"), and an incomplete scan says so.
   const approx = scanning || props.partial || props.incomplete ? "~" : "";
+  const uniquePartial = !scanning && props.uniqueBytesPartial === true;
   const selectedHasShared =
     !scanning &&
+    !uniquePartial &&
     props.uniqueSelectedBytes !== undefined &&
     props.uniqueSelectedBytes < props.selectedBytes;
   const reclaimHasShared =
     !scanning &&
+    !uniquePartial &&
     props.uniqueReclaimableBytes !== undefined &&
     props.uniqueReclaimableBytes < props.reclaimableBytes;
+  const partialQualifier = uniquePartial ? " (shared hardlinks not fully counted)" : "";
   const answer =
     props.selectedCount > 0
       ? selectedHasShared
@@ -337,7 +343,7 @@ export function ProjectsView(props: ProjectsViewProps) {
           )}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" to review")}`
         : t`${bold(fg(tokens.accent)(formatBytes(props.selectedBytes)))}${fg(tokens.text)(
             " queued",
-          )}${fg(tokens.textMuted)(`  ·  ${plural(props.selectedCount, "item")}  ·  `)}${fg(
+          )}${fg(tokens.textMuted)(`${partialQualifier}  ·  ${plural(props.selectedCount, "item")}  ·  `)}${fg(
             tokens.text,
           )("c")}${fg(tokens.textMuted)(" to review")}`
       : props.reclaimableBytes > 0 || !scanning
@@ -351,7 +357,7 @@ export function ProjectsView(props: ProjectsViewProps) {
               tokens.text,
             )(
               scanning ? " so far" : " you can reclaim",
-            )}${fg(tokens.textMuted)(`  ·  ${plural(props.projectCount, "project")}`)}`
+            )}${fg(tokens.textMuted)(`${partialQualifier}  ·  ${plural(props.projectCount, "project")}`)}`
         : t`${fg(tokens.textMuted)("Looking for build output…")}`;
   // The easy win, named and one key away - only when it fits whole.
   const idleHint = t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.text)(

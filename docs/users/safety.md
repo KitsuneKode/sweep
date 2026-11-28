@@ -185,6 +185,13 @@ inside the scanned candidates. When shared hardlinks reduce what removal can
 free, plan reports, `sweep status`, and `sweep ui` totals show `about X freed`
 alongside the apparent size so reclaimed space is not overstated.
 
+When bounded hardlink tracking hits its identity or memory cap (for example
+under `--resource-profile low-memory` on very large hardlink stores) or a
+candidate containing shared hardlinks cannot be fully sized, Sweep marks the
+plan and status summary with `uniqueBytesPartial: true` and human/TUI surfaces
+fall back to the apparent total with a `shared hardlinks not fully counted`
+qualifier instead of displaying a silently understated freed figure.
+
 Copy-on-write **reflinks / clones** (such as APFS clones on macOS or Btrfs/XFS
 reflinks on Linux) cannot be detected cheaply from file metadata (`lstat`
 reports `nlink = 1` and distinct inodes even when extents are shared on disk),

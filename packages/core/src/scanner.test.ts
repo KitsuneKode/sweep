@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { readdir } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,10 +18,11 @@ import {
   exactSizeAsync,
   exactSizeDetailed,
   apparentSizeDetailed,
+  HardlinkTracker,
   scan,
   ProgressiveSizer,
 } from "./scanner.js";
-import type { SweepConfig } from "@kitsunekode/sweep-protocol";
+import type { ScanEntry, SweepConfig } from "@kitsunekode/sweep-protocol";
 
 // ─── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -779,4 +788,105 @@ test("a failing output consumer cannot be swallowed by sizing fallback", async (
   });
   await expect(sizer.finish()).rejects.toThrow("consumer pipe closed");
   await sizer.dispose();
+});
+
+test("sizing batch error fallback does not double-count hardlinked or unique files", async () => {
+  const storeDir = dir("store");
+  const scanDir = dir("work");
+  const nmA = join(scanDir, "a", "node_modules");
+  const nmB = join(scanDir, "b", "node_modules");
+  mkdirSync(storeDir, { recursive: true });
+  mkdirSync(nmA, { recursive: true });
+  mkdirSync(nmB, { recursive: true });
+
+  // External store file hardlinked into proj-a only (nlink = 2; 1 link in scan).
+  // Double-counting proj-a would bump seen to 2 == nlink and falsely count 4096 bytes.
+  const storeFile = join(storeDir, "pkg.js");
+  writeFileSync(storeFile, "s".repeat(4096));
+  linkSync(storeFile, join(nmA, "pkg.js"));
+
+  // Unique single-link files: double-counting would overstate uniqueTotalBytes.
+  writeFileSync(join(nmA, "own-a.js"), "a".repeat(500));
+  writeFileSync(join(nmB, "own-b.js"), "b".repeat(300));
+
+  const tracker = new HardlinkTracker(100);
+  let calls = 0;
+  const sizer = new ProgressiveSizer(
+    {
+      onEntrySized: () => {
+        calls += 1;
+        // Throw on the first sized callback to force ProgressiveSizer's batch fallback.
+        if (calls === 1) throw new Error("forced batch hook failure");
+      },
+    },
+    undefined,
+    new ResourceBudget(),
+    tracker,
+  );
+  const entryA: ScanEntry = {
+    path: nmA,
+    name: "node_modules",
+    entryType: "directory",
+    isSymlink: false,
+    estimatedBytes: 0,
+    bytesKnown: false,
+  };
+  const entryB: ScanEntry = {
+    path: nmB,
+    name: "node_modules",
+    entryType: "directory",
+    isSymlink: false,
+    estimatedBytes: 0,
+    bytesKnown: false,
+  };
+  sizer.add(entryA);
+  sizer.add(entryB);
+  await sizer.finish();
+
+  expect(entryA.estimatedBytes).toBe(4096 + 500);
+  expect(entryA.uniqueBytes).toBe(500);
+  expect(entryA.bytesKnown).toBe(true);
+  expect(entryB.estimatedBytes).toBe(300);
+  expect(entryB.uniqueBytes).toBe(300);
+  expect(entryB.bytesKnown).toBe(true);
+  expect(tracker.uniqueTotalBytes()).toBe(500 + 300);
+  expect(tracker.isCapped()).toBe(false);
+});
+
+test("scan marks uniqueBytesPartial when hardlink tracker hits identity cap", async () => {
+  const storeDir = dir("store");
+  const scanDir = dir("work");
+  const nm = join(scanDir, "app", "node_modules");
+  mkdirSync(storeDir, { recursive: true });
+  mkdirSync(nm, { recursive: true });
+
+  for (let i = 0; i < 12; i += 1) {
+    const f = join(storeDir, `pkg-${i}.js`);
+    writeFileSync(f, "x".repeat(256));
+    linkSync(f, join(nm, `pkg-${i}.js`));
+  }
+  writeFileSync(join(nm, "own.js"), "o".repeat(128));
+
+  const capped = await scan(scanDir, DEFAULT_CONFIG, false, {
+    limits: { maxIdentities: 6 },
+  });
+  expect(capped.uniqueBytesPartial).toBe(true);
+  expect(capped.uniqueTotalBytes).toBe(128);
+
+  const uncapped = await scan(scanDir, DEFAULT_CONFIG, false);
+  expect(uncapped.uniqueBytesPartial).toBeUndefined();
+  expect(uncapped.uniqueTotalBytes).toBe(128);
+});
+
+test("HardlinkTracker respects ResourceBudget without poisoning discovery", () => {
+  const budget = new ResourceBudget({ maxIdentities: 100, maxRetainedBytes: 256 });
+  const tracker = new HardlinkTracker(100, budget);
+  tracker.recordMultiLink(1n, 10n, 100, 2n);
+  tracker.recordMultiLink(1n, 11n, 100, 2n);
+  expect(tracker.isCapped()).toBe(false);
+  // Third distinct inode exceeds maxRetainedBytes (3 * 128 > 256): caps gracefully.
+  tracker.recordMultiLink(1n, 12n, 100, 2n);
+  expect(tracker.isCapped()).toBe(true);
+  // Budget itself must remain unpoisoned so discovery/sizing never fail fatally.
+  expect(() => budget.check()).not.toThrow();
 });

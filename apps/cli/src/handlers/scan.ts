@@ -122,6 +122,7 @@ export async function handleScan(
           ...(plan.summary.uniqueTotalBytes !== undefined
             ? { uniqueTotalBytes: plan.summary.uniqueTotalBytes }
             : {}),
+          ...(plan.summary.uniqueBytesPartial ? { uniqueBytesPartial: true } : {}),
           scannedDirs: plan.summary.scannedDirs,
           // Sparse - same convention as ScanPlan.summary.skippedDirs.
           ...(result.skippedDirs > 0 ? { skippedDirs: result.skippedDirs } : {}),
