@@ -21,7 +21,7 @@
     },
     "apps/cli": {
       "name": "@kitsunekode/sweep",
-      "version": "0.5.3",
+      "version": "0.5.4",
       "bin": {
         "sweep": "dist/sweep.js",
       },
@@ -40,13 +40,13 @@
         "typescript": "catalog:",
       },
       "optionalDependencies": {
-        "@kitsunekode/sweep-engine-darwin-64": "0.5.3",
-        "@kitsunekode/sweep-engine-darwin-arm64": "0.5.3",
-        "@kitsunekode/sweep-engine-linux-64": "0.5.3",
-        "@kitsunekode/sweep-engine-linux-64-musl": "0.5.3",
-        "@kitsunekode/sweep-engine-linux-arm64": "0.5.3",
-        "@kitsunekode/sweep-engine-linux-arm64-musl": "0.5.3",
-        "@kitsunekode/sweep-engine-windows-64": "0.5.3",
+        "@kitsunekode/sweep-engine-darwin-64": "0.5.4",
+        "@kitsunekode/sweep-engine-darwin-arm64": "0.5.4",
+        "@kitsunekode/sweep-engine-linux-64": "0.5.4",
+        "@kitsunekode/sweep-engine-linux-64-musl": "0.5.4",
+        "@kitsunekode/sweep-engine-linux-arm64": "0.5.4",
+        "@kitsunekode/sweep-engine-linux-arm64-musl": "0.5.4",
+        "@kitsunekode/sweep-engine-windows-64": "0.5.4",
         "@opentui/core": "catalog:",
       },
     },
@@ -419,17 +419,7 @@
 
     "@kitsunekode/sweep-display": ["@kitsunekode/sweep-display@workspace:packages/display"],
 
-    "@kitsunekode/sweep-engine-darwin-64": ["@kitsunekode/sweep-engine-darwin-64@0.5.3", "", { "os": "darwin", "cpu": "x64" }, "sha512-ZfeWD5u224FTQWb6SaqgfCA0whu2vf+TVXgzXZTRIsKRG4Z/a/qz75H987h8VagB+sK0QlOKBCsPy9yiodfXLg=="],
-
-    "@kitsunekode/sweep-engine-darwin-arm64": ["@kitsunekode/sweep-engine-darwin-arm64@0.5.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-rqEiVbQPgQKxgCqmH+kU2qnbaVGCFx44t6EI6flTUYpIcwcgFJsxzEj0R71+/yFR5+8RwuPq4G1V7LsNPgCcTg=="],
-
-    "@kitsunekode/sweep-engine-linux-64": ["@kitsunekode/sweep-engine-linux-64@0.5.3", "", { "os": "linux", "cpu": "x64" }, "sha512-QrnxrnOF5dA/KXtK8whEomXKTGyIivxaYvHlX+rENe9dPmDO7kaUBDOW9TSb/M6jck2Bcb/nFXDsSEkCAPZnhw=="],
-
-    "@kitsunekode/sweep-engine-linux-arm64": ["@kitsunekode/sweep-engine-linux-arm64@0.5.3", "", { "os": "linux", "cpu": "arm64" }, "sha512-LGtvPBuLyIwrzO0VwQ6cA74w5dakt/nVmMXf3XjiV4iOCJBuMFVsE5m1PTNPVPbDw99kjEcfTzseGSyHngnUyQ=="],
-
     "@kitsunekode/sweep-engine-native": ["@kitsunekode/sweep-engine-native@workspace:packages/engine-native"],
-
-    "@kitsunekode/sweep-engine-windows-64": ["@kitsunekode/sweep-engine-windows-64@0.5.3", "", { "os": "win32", "cpu": "x64" }, "sha512-yq3Kz6/EdbwN4I38eLwOPFQNGpEgr7QkyhLYUkX+xC4oWsGF56xi8mZ6UM5OdqnpVstTCUXc1Gbfgxn+4md6bg=="],
 
     "@kitsunekode/sweep-integration-tests": ["@kitsunekode/sweep-integration-tests@workspace:packages/integration-tests"],
 

@@ -1,5 +1,47 @@
 # @kitsunekode/sweep
 
+## 0.5.4
+
+### Patch Changes
+
+- 1a4cce8: Cross-platform distribution and installer hardening:
+
+  - Lower the Linux glibc native engine npm package ABI floor from glibc 2.39 (which prevented the native npm engine from starting on Ubuntu 22.04, Debian 12, and RHEL 9) to glibc 2.17 via `cargo-zigbuild`, and enforce that glibc 2.17 floor across native engines, standalones (which already ran on older glibc systems), and embedded OpenTUI shared objects with an automated ELF ABI CI gate (rejecting `GLIBC_ABI_DT_RELR` and symbols above `2.17`) and `debian:11-slim` container smoke tests.
+  - Add static Linux musl native engine packages (`@kitsunekode/sweep-engine-linux-64-musl`, `@kitsunekode/sweep-engine-linux-arm64-musl`) and dynamic musl standalone release binaries (`sweep-linux-x64-musl`, `sweep-linux-arm64-musl`) with interpreter-first Linux libc detection and explicit `unknown` JS fallback diagnostics.
+  - Harden `install.sh` to stage inside `INSTALL_DIR`, refuse directory destinations, cap download and decompression sizes, prefer verified `.gz` downloads, distinguish HTTP 404 from write/network curl failures, accept `SWEEP_VERSION` with or without a leading `v`, detect musl across `/lib` and `/usr/lib`, verify `--version` (with an Alpine `libstdc++`/`libgcc` hint) before replacing any existing binary, and point Windows shells to `install.ps1`.
+  - Add `install.ps1` (hardened for Windows PowerShell 5.1 and PowerShell 7) and a Scoop manifest (`packaging/scoop/sweep.json`) for Windows x64, move the Homebrew formula template into this repo with `chmod 0755`, `.gz` downloads, and shell completions, add GitHub build provenance attestations (`gh attestation verify`) for all release binaries and archives, and harden the release pipeline with canonical source gates, a protected `release-downstream` environment, and idempotent release reconciliation.
+
+- eb5ed6d: Re-verify the native engine's identity before apply. The first native engine use in a process binds the engine file (real path, metadata and SHA-256); every later scan, tracked check, discovery, doctor or apply call in that process must run that same file, and apply re-reads its bytes before starting. A changed engine is refused with nothing removed. On POSIX, the engine file and its directories must be owned by you or root (or, under `sudo`, by the user in `SUDO_UID`) and must not be group- or world-writable; otherwise `--engine auto` falls back to the JS engine with a note and `--engine rust` refuses, with a message that says to use `--engine js` or reinstall the engine. Homebrew prefixes with group-writable folders fall back to JS until tightened. Script files at the engine path are refused.
+
+  The terminal UI's local size cache now loads with the same rules as the view preferences file: the config directory must be private to you, and the file is opened without blocking.
+
+  Worktree inspection during scans now runs `git` only from an absolute `PATH` entry, the same lookup the other git checks use.
+
+- 824023e: Surface unique-inode freed byte estimates alongside apparent sizes for hardlinked package stores (pnpm/Bun) across both JS and Rust engines:
+
+  - Add bounded `(dev, ino)` + `nlink` tracking (`HardlinkTracker`) to both the JS scanner and the Rust `sweep-fs` engine, emitting optional `uniqueBytes` per candidate and `uniqueTotalBytes` on `ScanPlan.summary` / `scan_completed` (with older-engine compatibility stripping on native apply).
+  - Exclude hardlinked store files whose remaining links live outside scanned candidates (`seen < nlink`) while counting cross-candidate hardlinks once when all links are inside the scan (`seen >= nlink`).
+  - Show honest `about X freed (Y apparent · shared hardlinks)` totals in scan reports (including disk projection), `sweep status` (`uniqueReclaimableBytes`), and `sweep ui` totals whenever shared hardlinks reduce freed space, and document why copy-on-write reflinks cannot be detected cheaply in `docs/users/safety.md`.
+
+- ace04cb: Harden project idle detection with activity confidence (owner decision D4):
+
+  - Replace the unsorted 256-entry `readdirSync` slice in project and git root discovery with direct marker probes (`lstatSync`), and stop `projectRoot()` and `gitActivity()` at `$HOME` so home-directory manifests or dotfiles repos are never adopted as a project root.
+  - Inspect nested non-generated source files with a bounded breadth-first walk (depth, directory, entry, and 100 ms time caps; directories are iterated so caps stop reading early) so in-place edits inside `src/` keep a project active instead of appearing idle.
+  - Treat any project whose activity cannot be proven (walk depth, directory, entry, or time limits exceeded, unreadable directory/git metadata, a symlinked directory that is not followed, a future-dated mtime, or no readable signal) as unknown (`projectActiveMs` omitted): displayed as unknown idle (`idle ?` in scan reports, `?` / `No activity found` / `worked on unknown` in the TUI), never treated as idle, and excluded from `--idle` and interactive idle queues.
+
+- 8f04ea4: Fix a sizing race where hardlink dedup reservations could exhaust the shared sizing identity lane and make a concurrent candidate report zero bytes. Directory-cycle and hardlink sizing identities now use separate budget lanes in both engines, and hardlink dedup is capped to a byte share that preserves directory-traversal headroom; exhausting hardlink dedup marks unique bytes partial while directory sizing continues.
+- 3646dc0: Improve `sweep status` and `sweep status --json` coverage and parity:
+
+  - Surface scan and sizing completeness (`skippedDirs`, `bytesPartial`, `partialByteCount`, `complete`) in `StatusSummary` and warn clearly in human output (with `~` on partial totals) whenever folders were unreadable or items were partially sized.
+  - Preserve exact idle thresholds (`idle.windowMs`, `idle.windowLabel`) and per-project elapsed durations (`idleMs`) so sub-day flags like `--idle 12h` render accurately instead of rounding to days.
+  - Distinguish guarded-only trees from truly empty ones (`protectedBytes` added alongside `protectedCount`; human output reports "Nothing automatically reclaimable here." and lists guarded items instead of claiming "Nothing to free here.").
+  - Match Projects view worktree semantics (D5): expose `finishedWorktrees` (clean merged worktrees quiet >= 24h, excluded from `idle` to prevent double counting), `branchMissingWorktrees` (`upstream_gone`, never treated as finished), and `worktreeOf`/`worktreeState` on project entries.
+
+- 69b88b8: Align `sweep scan --json-stream` final candidate tiers with `sweep scan --json` and enrich `sweep apply --plan` confirmation prompts:
+
+  - Reconcile streamed candidates with the post-enrichment plan before emitting `scan_completed`, emitting final `candidate_updated` events carrying git-tracked blocks, tool-home/marker risk tiers, workspace-stub/symlink-alias reasons, project metadata, and worktree state so streamed consumers see the same final tiers as `sweep scan --json`.
+  - Share the confirmation prompt formatter between `sweep clean` and `sweep apply --plan` so `apply --plan` displays the target directory (including symlink resolution when applicable), item count, estimated size, and live-verified dangerous item count.
+
 ## 0.5.3
 
 ### Patch Changes
