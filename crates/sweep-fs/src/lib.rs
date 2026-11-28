@@ -1251,7 +1251,8 @@ impl Drop for SizeContext<'_> {
             .unwrap_or_else(|p| p.into_inner())
             .len();
         let dirs = self.dirs.get_mut().unwrap_or_else(|p| p.into_inner()).len();
-        self.budget.release_sizing_identities(links + dirs);
+        self.budget.release_sizing_hardlink_identities(links);
+        self.budget.release_sizing_directory_identities(dirs);
         self.budget
             .release_sizing_directories(*self.pending.get_mut(), *self.path_bytes.get_mut());
     }
@@ -1369,7 +1370,7 @@ fn price_sizing_inode(
         } else {
             0
         }
-    } else if seen.len() >= ctx.dedup_cap || !ctx.budget.sizing_identity() {
+    } else if seen.len() >= ctx.dedup_cap || !ctx.budget.sizing_hardlink_identity() {
         // Set at cap: count the link anyway (overcount, flagged partial)
         // rather than undercounting zero or killing the scan.
         if let Some(tracker) = ctx.tracker {
@@ -1483,7 +1484,10 @@ fn size_directories(root: &Path, ctx: &SizeContext<'_>, depth: u8) -> SubtreeSiz
             let mut dirs = ctx.dirs.lock().unwrap_or_else(|p| p.into_inner());
             // Skip repeats and capped-set inserts alike - without the dedup
             // entry a hardlinked-dir cycle could recurse forever.
-            if dirs.contains(&key) || dirs.len() >= ctx.dedup_cap || !ctx.budget.sizing_identity() {
+            if dirs.contains(&key)
+                || dirs.len() >= ctx.dedup_cap
+                || !ctx.budget.sizing_directory_identity()
+            {
                 total.complete = false;
                 continue;
             }
@@ -1995,8 +1999,8 @@ mod tests {
             drop(ctx);
             assert!(budget.sizing_directory(bytes));
             budget.release_sizing_directories(1, bytes);
-            assert!(budget.sizing_identity());
-            budget.release_sizing_identities(1);
+            assert!(budget.sizing_directory_identity());
+            budget.release_sizing_directory_identities(1);
             assert!(!budget.failed());
         }
         cancel.store(false, Ordering::Release);
@@ -2099,14 +2103,15 @@ mod tests {
         fs::write(&source, vec![0u8; 64]).unwrap_or_else(|err| panic!("write failed: {err}"));
         fs::hard_link(&source, dir.path().join("copy"))
             .unwrap_or_else(|err| panic!("link failed: {err}"));
-        // The root directory and one inode fill the shared cap=2, so both
-        // links count and the result is a flagged upper bound, not a dead scan.
+        // The root directory uses the dedicated directory lane. With the
+        // hardlink lane capped at one inode, the second pair counts twice and
+        // the result is a flagged upper bound, not a dead scan.
         let other = dir.path().join("other");
         fs::write(&other, vec![0u8; 64]).unwrap_or_else(|err| panic!("write failed: {err}"));
         fs::hard_link(&other, dir.path().join("other2"))
             .unwrap_or_else(|err| panic!("link failed: {err}"));
         let budget = ResourceBudget::new(ScanLimits {
-            max_identities: 2,
+            max_identities: 1,
             ..ScanLimits::default()
         });
         let size = measure_size_with_budget(
@@ -2116,10 +2121,11 @@ mod tests {
         );
         assert_eq!(size.bytes, 192); // source once; other+other2 overcounted
         assert!(!size.complete);
-        assert!(budget.sizing_identity());
-        assert!(budget.sizing_identity());
-        assert!(!budget.sizing_identity());
-        budget.release_sizing_identities(2);
+        assert!(budget.sizing_hardlink_identity());
+        assert!(!budget.sizing_hardlink_identity());
+        assert!(budget.sizing_directory_identity());
+        budget.release_sizing_hardlink_identities(1);
+        budget.release_sizing_directory_identities(1);
         // And critically: the shared budget was never tripped by sizing.
         assert!(!budget.failed());
     }

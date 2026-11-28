@@ -11,11 +11,11 @@ import { enrichCandidates } from "./candidate-insights.js";
 test("discovery and live sizing cannot each consume the combined allowance", () => {
   const budget = new ResourceBudget({ maxRetainedBytes: 2048, maxCombinedBytes: 1156 });
   budget.candidate("a"); // 1028 discovery bytes
-  expect(budget.sizingIdentity()).toBe(true); // 128 live sizing bytes
+  expect(budget.sizingDirectoryIdentity()).toBe(true); // 128 live sizing bytes
   expect(budget.sizingDirectory("b")).toBe(false);
-  budget.releaseSizingIdentities(1);
+  budget.releaseSizingDirectoryIdentities(1);
   expect(budget.sizingDirectory("b")).toBe(false); // 132 would exceed 1156
-  expect(budget.sizingIdentity()).toBe(true);
+  expect(budget.sizingDirectoryIdentity()).toBe(true);
   expect(() => budget.identity()).toThrow("maxCombinedBytes");
 });
 
@@ -26,16 +26,34 @@ test("live sizing reservations are shared, returned, and never poison discovery"
     maxPathBytes: 4,
     maxRetainedBytes: 256,
   });
-  expect(budget.sizingIdentity()).toBe(true);
-  expect(budget.sizingIdentity()).toBe(false);
+  expect(budget.sizingDirectoryIdentity()).toBe(true);
+  expect(budget.sizingDirectoryIdentity()).toBe(false);
   expect(budget.sizingDirectory("a")).toBe(false);
-  budget.releaseSizingIdentities(1);
+  budget.releaseSizingDirectoryIdentities(1);
   expect(budget.sizingDirectory("abcd")).toBe(true);
   expect(budget.sizingDirectory("a")).toBe(false);
   budget.releaseSizingDirectory("abcd");
   expect(budget.sizingDirectory("abcde")).toBe(false);
-  expect(budget.sizingIdentity()).toBe(true);
-  budget.releaseSizingIdentities(1);
+  expect(budget.sizingDirectoryIdentity()).toBe(true);
+  budget.releaseSizingDirectoryIdentities(1);
+  expect(() => budget.check()).not.toThrow();
+});
+
+test("hardlink sizing identities do not consume directory identity slots", () => {
+  const budget = new ResourceBudget({ maxIdentities: 2 });
+  expect(budget.sizingHardlinkIdentity()).toBe(true);
+  expect(budget.sizingHardlinkIdentity()).toBe(true);
+  expect(budget.sizingHardlinkIdentity()).toBe(false);
+
+  expect(budget.sizingDirectoryIdentity()).toBe(true);
+  expect(budget.sizingDirectoryIdentity()).toBe(true);
+  expect(budget.sizingDirectoryIdentity()).toBe(false);
+
+  budget.releaseSizingHardlinkIdentities(1);
+  expect(budget.sizingHardlinkIdentity()).toBe(true);
+  expect(budget.sizingDirectoryIdentity()).toBe(false);
+  budget.releaseSizingHardlinkIdentities(2);
+  budget.releaseSizingDirectoryIdentities(2);
   expect(() => budget.check()).not.toThrow();
 });
 

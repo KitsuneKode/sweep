@@ -43,7 +43,8 @@ export class ResourceBudget {
     maxCombinedBytes: 0,
   };
   private failure: ResourceLimitError | undefined;
-  private sizingIds = 0;
+  private sizingDirectoryIds = 0;
+  private sizingHardlinkIds = 0;
   private sizingDirs = 0;
   private sizingPaths = 0;
   private sizingBytes = 0;
@@ -68,22 +69,46 @@ export class ResourceBudget {
     return true;
   }
 
-  /** Live totals across all sizing jobs; saturation never poisons discovery. */
-  sizingIdentity(): boolean {
+  /**
+   * Live totals across all sizing jobs. Directory-cycle and hardlink dedup
+   * identities use separate lanes so optional hardlink accuracy cannot consume
+   * the identities traversal needs for cycle safety; both lanes still share the
+   * byte reservations. Saturation never poisons discovery.
+   */
+  private reserveSizingIdentity(hardlink: boolean): boolean {
+    const identities = hardlink ? this.sizingHardlinkIds : this.sizingDirectoryIds;
     if (
-      this.sizingIds >= this.limits.maxIdentities ||
+      identities >= this.limits.maxIdentities ||
       this.sizingBytes + 128 > this.limits.maxRetainedBytes ||
       this.used.maxRetainedBytes + this.sizingBytes + 128 > this.limits.maxCombinedBytes
     )
       return false;
-    this.sizingIds++;
+    if (hardlink) this.sizingHardlinkIds++;
+    else this.sizingDirectoryIds++;
     this.sizingBytes += 128;
     return true;
   }
 
-  releaseSizingIdentities(count: number): void {
-    this.sizingIds -= count;
+  sizingDirectoryIdentity(): boolean {
+    return this.reserveSizingIdentity(false);
+  }
+
+  sizingHardlinkIdentity(): boolean {
+    return this.reserveSizingIdentity(true);
+  }
+
+  private releaseSizingIdentity(hardlink: boolean, count: number): void {
+    if (hardlink) this.sizingHardlinkIds -= count;
+    else this.sizingDirectoryIds -= count;
     this.sizingBytes -= count * 128;
+  }
+
+  releaseSizingDirectoryIdentities(count: number): void {
+    this.releaseSizingIdentity(false, count);
+  }
+
+  releaseSizingHardlinkIdentities(count: number): void {
+    this.releaseSizingIdentity(true, count);
   }
 
   sizingDirectory(path: string | Buffer): boolean {

@@ -332,7 +332,7 @@ async function metadataSize(
       if (exact) bytes = checkedBytes(bytes, rawSize);
       return;
     }
-    if (links.size >= dedupCap || !budget.sizingIdentity()) {
+    if (links.size >= dedupCap || !budget.sizingHardlinkIdentity()) {
       // Set at cap: count the link anyway (overcount, flagged partial)
       // rather than undercounting zero or killing the scan.
       localCapped = true;
@@ -365,7 +365,7 @@ async function metadataSize(
           const id = `${stat.dev}:${stat.ino}`;
           // Skip repeats and capped-set inserts alike - without the dedup
           // entry a hardlinked-dir cycle could recurse forever.
-          if (dirs.has(id) || dirs.size >= dedupCap || !budget.sizingIdentity()) {
+          if (dirs.has(id) || dirs.size >= dedupCap || !budget.sizingDirectoryIdentity()) {
             complete = false;
             continue;
           }
@@ -429,7 +429,8 @@ async function metadataSize(
     finished = !signal?.aborted;
     return { bytes, uniqueBytes, complete: complete && finished };
   } finally {
-    budget.releaseSizingIdentities(links.size + dirs.size);
+    budget.releaseSizingHardlinkIdentities(links.size);
+    budget.releaseSizingDirectoryIdentities(dirs.size);
     for (const path of stack) budget.releaseSizingDirectory(path);
     if (finished && tracker) {
       tracker.recordSingleLink(singleLinkBytes);

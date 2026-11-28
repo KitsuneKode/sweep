@@ -1050,7 +1050,7 @@ mod tests {
         assert_eq!(capped.summary.unique_bytes_partial, Some(true));
         assert_eq!(capped.summary.unique_total_bytes, Some(128));
 
-        // Low-memory-style tight max_retained_bytes saturating sizing_identity() also marks partial.
+        // Low-memory-style tight max_retained_bytes saturating sizing reservations also marks partial.
         let low_mem_capped = scan_to_plan_with_config(
             work_utf8,
             &WalkConfig::default(),

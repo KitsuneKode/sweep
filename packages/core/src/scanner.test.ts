@@ -590,19 +590,20 @@ test("a full dedup set overcounts hardlinks but keeps the scan alive", async () 
   const { linkSync } = await import("node:fs");
   const target = dir("node_modules");
   mkdirSync(target);
-  // One directory identity plus the first inode pair fill the shared cap;
-  // the second pair counts twice - an upper bound flagged partial.
+  // The directory identity has its own lane. With one hardlink slot, the
+  // second inode pair counts twice - an upper bound flagged partial.
   writeFileSync(join(target, "a"), Buffer.alloc(64));
   linkSync(join(target, "a"), join(target, "a2"));
   writeFileSync(join(target, "b"), Buffer.alloc(64));
   linkSync(join(target, "b"), join(target, "b2"));
-  const budget = new ResourceBudget({ maxIdentities: 2 });
+  const budget = new ResourceBudget({ maxIdentities: 1 });
   const size = await apparentSizeDetailed(target, undefined, budget);
   expect(size).toEqual({ bytes: 192, uniqueBytes: 64, complete: false });
-  expect(budget.sizingIdentity()).toBe(true);
-  expect(budget.sizingIdentity()).toBe(true);
-  expect(budget.sizingIdentity()).toBe(false);
-  budget.releaseSizingIdentities(2);
+  expect(budget.sizingHardlinkIdentity()).toBe(true);
+  expect(budget.sizingHardlinkIdentity()).toBe(false);
+  expect(budget.sizingDirectoryIdentity()).toBe(true);
+  budget.releaseSizingHardlinkIdentities(1);
+  budget.releaseSizingDirectoryIdentities(1);
 });
 
 test("sizing does not charge the scan-wide budget for transient dedup work", async () => {
