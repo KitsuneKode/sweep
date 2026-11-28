@@ -241,9 +241,20 @@ export const INSTALL: { id: string; label: string; command: string }[] = [
   { id: "bun", label: "bun", command: "bun add -g @kitsunekode/sweep" },
   { id: "brew", label: "Homebrew", command: "brew install kitsunekode/tap/sweep" },
   {
+    id: "scoop",
+    label: "Scoop (0.5.4+)",
+    command:
+      "scoop bucket add kitsunekode https://github.com/KitsuneKode/scoop-bucket; scoop install sweep",
+  },
+  {
     id: "binary",
-    label: "Binary",
+    label: "Linux/macOS binary",
     command: "curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh",
+  },
+  {
+    id: "windows",
+    label: "Windows binary",
+    command: "irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 | iex",
   },
 ];
 

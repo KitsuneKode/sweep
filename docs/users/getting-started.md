@@ -5,11 +5,11 @@ description: Install Sweep and complete your first read-only review.
 
 ## Install
 
-### Standalone binary (no Node or Bun required)
+### Standalone binary
 
-macOS and Linux (glibc 2.17+; Linux musl/Alpine downloads ship starting in
-`v0.5.4+`, where minimal Alpine images need `apk add libstdc++ libgcc` before
-`install.sh` because the musl standalone is dynamically linked):
+The standalone binary includes the terminal UI and native engine. It does not need Node.js or Bun.
+
+macOS and Linux:
 
 ```sh
 brew install kitsunekode/tap/sweep
@@ -17,108 +17,95 @@ brew install kitsunekode/tap/sweep
 curl -fsSL https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.sh | sh
 ```
 
-Windows (x64, PowerShell):
+Windows x64, PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 | iex
 ```
 
-Or download and inspect `install.ps1` first (respects execution policy):
+To inspect the Windows installer before running it:
 
 ```powershell
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/KitsuneKode/sweep/main/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-[Scoop](https://scoop.sh) support (`https://github.com/KitsuneKode/scoop-bucket`)
-will be available starting in `v0.5.4+`:
+Scoop is available from 0.5.4:
 
 ```powershell
-# Available from v0.5.4+:
 scoop bucket add kitsunekode https://github.com/KitsuneKode/scoop-bucket
 scoop install sweep
 ```
 
-The standalone installers verify SHA-256 checksums and test `--version` on the
-staged binary before replacing any existing install. You can also verify GitHub
-build provenance attestations on any downloaded release binary or `.gz` archive
-with the GitHub CLI (substitute `vX.Y.Z` with the release tag you downloaded):
-
-```sh
-gh attestation verify sweep-linux-x64.gz -R KitsuneKode/sweep --signer-workflow KitsuneKode/sweep/.github/workflows/cli-binaries.yml --source-ref refs/tags/vX.Y.Z
-```
+The installers download the matching release asset, verify its SHA-256 checksum, test the staged binary with `--version`, and only then replace an existing install. [Platforms](platforms.md) covers direct release downloads, glibc and musl support, Alpine packages, SmartScreen, and build provenance verification.
 
 ### npm or Bun
 
-For command-line scans and cleanup, use Node.js 22.12 or newer:
+Use Node.js 22.12 or newer for CLI commands:
 
 ```sh
 npm install -g @kitsunekode/sweep
 sweep --version
 ```
 
-If you use Bun:
+Use Bun for the full-screen terminal UI without a standalone binary:
 
 ```sh
 bun add -g @kitsunekode/sweep
-sweep --version
+sweep ui .
 ```
 
-The npm package includes bundled JavaScript and selects a matching optional Rust
-engine package (including separate glibc and musl packages on Linux) for
-supported platforms. Keep optional dependencies enabled if you want the native
-engine. [Platforms](platforms.md) explains the Linux ABI floor and fallback
-requirements.
+You can try it without a global install:
 
-The full-screen UI runs on Bun. `@opentui/core` is an optional dependency of
-`@kitsunekode/sweep`: Bun (`bun add -g @kitsunekode/sweep`,
-`bunx @kitsunekode/sweep ui .`) and Yarn 4 install it automatically. On Node
-older than 26.4, pnpm and Yarn 1 skip linking it (Yarn 1 prints an engine
-warning), and npm leaves `@opentui/core` unmet and may still extract a
-`@opentui/core-<platform>` package unless `--omit=optional` is passed. In every
-case, `sweep` installs and runs CLI commands (`sweep`, `sweep scan`,
-`sweep clean`, `sweep plan`, `sweep apply`) on Node.js 22.12+. A standalone
-release embeds the UI and native engine in one executable with no Node or Bun
-required; see the release's checksum and platform instructions.
+```sh
+bunx @kitsunekode/sweep ui .
+npx @kitsunekode/sweep --dry-run .
+```
 
-## Scan one project
+`@opentui/core` is an optional dependency. Bun and Yarn 4 install it in normal installs. On Node older than 26.4, npm, pnpm, and Yarn 1 can leave it unlinked or unmet while still installing the CLI. CLI commands such as `sweep scan`, `sweep clean`, `sweep status`, `sweep plan`, and `sweep apply` still run on Node.js 22.12+. Use Bun or a standalone binary for the terminal UI.
 
-Run this in a project you know, or replace `.` with its path:
+## Scan before changing anything
+
+Run this in a project folder, or replace `.` with another scan target:
 
 ```sh
 sweep scan .
 ```
 
-This only reports matches. Defaults include canonical generated names such as
-`node_modules`, `.next`, `.turbo`, and `target`. Generic names such as `dist` and
-`build` are opt-in because they can also contain authored files.
+This only reports candidates. Default patterns include generated names such as `node_modules`, `.next`, `.turbo`, `target` in Cargo projects, and `*.tsbuildinfo`. Generic names such as `dist` and `build` are opt-in because they can contain authored files.
 
-## Review a proposed cleanup
+For a compact answer instead of a full plan:
 
 ```sh
-sweep clean . --dry-run
+sweep status .
 ```
 
-Check the target path, selected items and estimated size. Rebuilding dependencies
-or build caches takes time even when their contents are regenerable.
+Status reports reclaimable bytes, guarded artifacts, scan coverage, finished worktrees, and projects idle for the selected window. Use `sweep status . --json` in scripts.
 
-For a visual review in an interactive terminal:
+## Preview a cleanup
+
+```sh
+sweep --dry-run .
+```
+
+Check the scan target, selected artifacts, risk tiers, and estimated sizes. `~` means a size is partial or approximate. Nothing is removed.
+
+## Review in the terminal UI
 
 ```sh
 sweep ui .
 ```
 
-The queue starts empty. The largest artifacts appear first. Choose **Queue safe
-items**, or use the checkboxes to pick individual artifacts. Enter opens an
-item's details; folder names change the view without changing your selection.
-Choose **Review queue**, check its paths and deletion mode, then confirm. Nothing
-is removed before confirmation. **Actions** (F2) exposes settings and shortcuts;
-you can complete the review with the mouse.
+The projects view opens first. Projects are grouped as **Finished worktrees**, **Idle 30+ days**, **Worked on recently**, and **No activity found**. The queue starts empty.
 
-To remove only one artifact, open its details and choose **Review removal**.
-Other queued items stay queued. Watch the outcome rather than repeatedly
-confirming: cancellation stops remaining work and does not restore completed
-deletions. Read [Terminal UI](terminal-ui.md) for the complete interaction model.
+1. Move with Up and Down.
+2. Press Space on a project to queue its safe and caution artifacts.
+3. Press Enter to open a project and review its artifacts.
+4. Press `i` to queue safe artifacts in projects idle for at least 30 days. Projects with unknown activity show `?` and are never queued by this key.
+5. Press `c` to review the whole queue.
+6. Press `y` only after checking the target, paths, bytes, and deletion mode. Press Esc or `n` to cancel.
+
+Press `b` for the full view, where you can browse folders, filter artifacts, edit patterns, use visual ranges, and save a plan. Press `b` again to return. Read [Terminal UI](terminal-ui.md) for every key.
 
 ## Your first cleanup
 
@@ -128,8 +115,33 @@ Choose a small project and close active build processes. Run:
 sweep clean . --trash
 ```
 
-Sweep asks for confirmation and moves selected items into a `.sweep-trash-*`
-directory under the target. This uses local disk space; it is not the operating
-system recycle bin. Read [Safety and trash](safety.md) before relying on recovery.
+Sweep asks for confirmation and moves selected artifacts into a `.sweep-trash-<timestamp>` directory under the scan target. This local trash is not the operating system recycle bin and still occupies disk space. Inspect it before deleting it. Read [Safety and trash](safety.md) before relying on recovery.
 
-Use `sweep doctor .` if configuration or engine selection is unclear.
+For permanent deletion, omit `--trash` after you are comfortable with the review:
+
+```sh
+sweep clean .
+```
+
+## Shell completions
+
+Print the script for your shell:
+
+```sh
+sweep completions bash
+sweep completions zsh
+sweep completions fish
+```
+
+Save it where your shell already loads completions. Homebrew installs completions for supported shells. For zsh, the destination directory must be on `fpath`.
+
+## If something looks wrong
+
+Run read-only diagnostics first:
+
+```sh
+sweep doctor .
+sweep doctor . --json
+```
+
+Doctor checks config trust, engine resolution, OpenTUI, filesystem identity support, held apply locks, and a small scan preview. [Troubleshooting](troubleshooting.md) starts from the message you see.

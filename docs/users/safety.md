@@ -1,230 +1,128 @@
 ---
-title: Safety, trash and interruption
-description: Understand what Sweep checks and where recovery has limits.
+title: Safety and trash
+description: Explain what Sweep protects, how trash recovery works, and which checks apply before removal.
 ---
 
-Sweep treats a match as a candidate for review. Generated names are useful hints,
-not proof that every file inside them is disposable. Verify custom names, stop
-active builds and keep backups of work you cannot recreate.
+Sweep separates **scanning** from **applying**. Scans, saved plans, dry runs, and interactive browsing do not write to the scanned tree. `apply` is the only phase that removes selected artifact paths. `sweep recover` only reports journal state. There is no silent undo, repair, or restore mode.
 
-## Checks before cleanup
+## Protected content
 
-Sweep protects filesystem roots and VCS internals, validates candidate paths and
-entry types, rejects blocked selections, deduplicates overlapping candidates and
-refreshes sizes at apply. Normal size ceilings require complete refreshed sizing.
-Changing a plan's numbers cannot authorize unchecked path traversal.
+The scanner and apply phase protect these independently of artifact names:
 
-New scans record the filesystem identity of the root and each artifact. If a
-directory or file has been replaced since scanning, apply refuses the changed
-entry. Replacing the root refuses the whole apply. Older saved plans without
-these snapshots remain inspectable; scan again to create an applicable plan.
-These identifiers detect replacement, not every content change inside the same
-directory. Preview totals remain estimates, and plans are not authenticated
-proof of who created them: review the target and selected paths.
+- git-tracked files inside a worktree
+- files inside a git repository whose tracked status cannot be verified
+- project files such as manifests and `.env*`
+- `.git`, `.hg`, and `.svn` internals
+- operating-system roots, mount roots, your home folder, and common system folders
+- tool and package-manager homes such as version managers, Docker contexts, package caches, and credential folders
 
-A failed discovery or resource limit does not produce a usable complete plan.
-The UI blocks apply and export for that scan generation, including after you
-close the error dialog.
+A directory candidate containing a `.git` entry is at least dangerous. It is refused in automated `--yes` cleanup unless the operator deliberately includes dangerous candidates and approves their listed paths. Git-tracked content is always blocked. An unknown git check is never treated as clean; it is blocked and checked again during apply.
 
-These checks reduce risk but do not eliminate every concurrent filesystem race.
-Native Linux removal uses directory descriptors and kernel resolution
-restrictions to refuse symlinked ancestors and mount crossings, including bind
-mounts. It requires `openat2` support and retains at most 16 directory handles
-and 1 MiB of traversal-frame metadata. Deep traversal reopens ancestors through
-the pinned root and rechecks their identities. A refusal during removal may
-leave a partially removed artifact. JS checks the Linux mount table for mounts
-inside a candidate and boundaries crossed below the chosen scan root. A mounted
-workspace can be chosen explicitly as that root. JS still uses pathname
-operations, so this is a preflight snapshot,
-not atomic containment. Other platforms retain their existing removal paths and
-need actual runtime qualification. A leaf name or contents can still change
-near an unlink syscall. Avoid cleaning trees whose paths or mounts are being
-actively replaced. Do not run as administrator merely
-to bypass a refusal.
+Sweep does not know which untracked files matter to you. Generated artifacts can contain experiments, scratch outputs, credentials copied by accident, or files that a tool does not recreate. Review every dangerous or unusual path before selecting it. Git protection is a floor, not proof that untracked content is disposable.
 
-## What is never removed
+## Selection and unknown state
 
-Some things are not Sweep's to remove, whatever a pattern or flag says. They
-appear in a scan as **blocked** and cannot be selected:
+Safe artifacts can be pre-selected because their names are machine-created and canonical. Caution artifacts are visible but not automatically selected. Dangerous artifacts require explicit per-item intent. Blocked artifacts cannot be selected.
 
-- **Files tracked by a discoverable git repository.** Sweep protects files
-  tracked by any repository whose `.git` is at or above the candidate path
-  (including committed symlinks named like an artifact) and detects repositories
-  inside a candidate. When `git` is available, Sweep verifies each enclosing
-  repository's root with `git rev-parse --show-toplevel` and lists tracked paths
-  once via a sanitized `git ls-files -z --cached --full-name` invocation
-  (`core.fsmonitor` disabled and inherited `GIT_*` overrides cleared), matching
-  candidates locally with that repository's `core.ignorecase` and
-  `core.precomposeunicode` (or macOS NFC/NFD) folding rules. A valid repository
-  with a deleted index matches `git`, while any toplevel mismatch, error, or
-  timeout marks those items `dangerous` (`tracked-status-unknown`). When `git`
-  is unavailable, Sweep uses the native index reader only if the repository
-  validates (gitdir, regular config + `extensions.objectFormat`, regular `HEAD`,
-  and verified index checksum for that hash format) with a non-empty index; any
-  validation failure, empty native result, or missing check marks items
-  `tracked-status-unknown`, never pre-selected, and refused again just before
-  removal regardless of flags or tier. A detached work tree configured only
-  through a bare repository's `core.worktree` or `GIT_DIR`/`GIT_WORK_TREE` in
-  the environment has no `.git` entry in the tree and is not detected.
-- **Candidates containing a git repository.** Any directory candidate that
-  contains a `.git` entry at or below it (checked by a bounded,
-  non-symlink-following walk; hitting the bound marks the candidate
-  `tracked-status-unknown`) becomes at least `dangerous` with reason
-  `contains-git-repository`. It is never pre-selected and is refused at apply
-  (`contains_git_repository`) unless explicitly selected one at a time in the
-  interactive UI (and stays `blocked` if its own or an enclosing repository
-  tracks files inside it).
-- **Project files**: `src`, `.sweeprc`, `.env` and `.env.*`, and manifests and
-  lockfiles such as `package.json`, `Cargo.toml`, `go.mod` and `pyproject.toml`.
-  A repository's own `.sweeprc` can add patterns, but it cannot make these
-  removable.
-- **Version-control internals** (`.git`, `.hg`, `.jj`, ...) and protected roots.
-  Sweep refuses to scan filesystem roots, your home folder directly, and
-  operating-system trees: anything under `/etc`, `/sys`, `/proc`, `/dev`
-  (except `/dev/shm`), `/boot`, `/bin`, `/sbin`, `/lib`, `/lib64` (plus
-  `/private/etc` on macOS) or `C:\Windows` (on any Windows drive, including
-  `\\?\` verbatim paths) is refused as a scan target. `/run`, `/usr`, and `/var`
-  themselves are refused, while directories beneath them such as
-  `/run/media/<user>/<drive>`, `/run/user/<uid>/gvfs`, `/var/www`, `/var/tmp`,
-  and `/usr/local/src` remain scannable.
+Project activity is evidence, not a guess. If no trustworthy activity signal exists, the project shows idle `?` and is never treated as idle. `sweep status` counts only projects with proven inactivity. `--idle` selection also excludes unknown projects.
 
-## Dangerous items need consent by name
+## Scan scope and symlinks
 
-Dangerous items (custom and opt-in patterns, names that can hold authored files,
-and matches inside tool or system folders) are never pre-selected.
-Interactively, they are listed by path before you confirm. An unattended run
-(`--yes`) refuses them unless you also pass `--allow-dangerous`; it still prints
-each path before removing it.
+The scan target itself is not an artifact. Artifact symlinks are scanned as filesystem entries but their targets are never traversed or removed. Deleting a symlink artifact removes only that link.
 
-Matches inside POSIX operating-system trees (except `/dev/shm`), system installs
-(such as `/usr`, `/opt`, `/home/linuxbrew/.linuxbrew`, `Windows`, `Program
-Files`; Unix OS root names do not demote Windows drive paths such as `C:\dev`),
-or personal tool, editor, agent, and package-manager homes under your home
-folder (including `~/.bun`, `~/.cargo`, `~/.npm-global`, `~/.asdf`, `~/.mise`,
-`~/.conda`, `~/miniconda3`, `~/anaconda3`, `~/go/pkg`, `~/scoop`, `~/snap`,
-`~/.var/app`, `~/.vscode-insiders`, `~/.vscode-oss`, `~/.windsurf`, `~/.claude`,
-`~/.codex`, `~/.t3/userdata`, `~/.cache`, `~/Applications`, `~/Library`, and
-`~/AppData`) are marked **dangerous** (`tool-home`) instead of safe so global
-installs and editor runtimes are never queued by default. Real project spaces
-such as `~/go/src`, `~/.t3/worktrees`, and `~/.codex/worktrees` stay cleanable
-by default. On macOS, a folder ending in `.app` is treated as an app bundle only
-when it contains `Contents/Info.plist`; outside macOS, or without
-`Contents/Info.plist`, a project folder named `example.app` is treated as an
-ordinary project folder.
+The scanner does not cross filesystem boundaries. It does not descend through ordinary symlinks. It does not use `..` segments to escape the scan target. Linux native scans use directory descriptors and a path lookup constrained by `RESOLVE_BENEATH` and `RESOLVE_NO_MAGICLINKS` where supported. These controls are one layer of containment, not the whole safety model.
 
-Candidates inside cloud-synced folders (`~/Dropbox`, `~/OneDrive`,
-`~/OneDrive - <Org>`, `~/Google Drive`, `~/My Drive`, and macOS
-`~/Library/CloudStorage/*`) keep their normal tier and selection and carry a
-non-blocking `cloud-sync` notice in scan output, because removing build output
-inside a synced folder can trigger a large sync.
+## What apply checks again
 
-To clean a project that legitimately lives under a tool home, either select that
-entry explicitly in `sweep ui` (a single explicit selection) or pass
-`--include-dangerous` (with `--allow-dangerous` when combined with `-y`):
+Apply validates the complete candidate set before writing a journal. For each selected artifact it verifies:
 
-```sh
-sweep --dry-run --select all --include-dangerous   # look first
-sweep --select all --include-dangerous -y --allow-dangerous
-```
+- the path stays inside the scan target and is not a protected root
+- the filesystem identity still matches the reviewed plan or confirmed UI operation
+- no selected path is a symlink
+- the artifact does not unexpectedly contain project files, nested tool homes, or VCS internals
+- repositories are still readable and selected content is not git-tracked
+- directories that contained repositories do not gain a new repository interior
+- parent and artifact paths have not been replaced to redirect removal
 
-## Delete versus trash
+Fresh sizes are measured immediately before apply when a size ceiling applies. The reviewed selection can be stale. A changed or unverifiable artifact is refused rather than adapted silently.
 
-Permanent deletion removes the selected entry and, for a directory, its contents.
-Trash moves selected artifacts into a
-`.sweep-trash-*` directory under the scan target. This is a local holding directory,
-not the desktop recycle bin, and it does not free the occupied storage yet.
+Removal is failure-first: a failed directory operation leaves the artifact in `failed` state instead of falling back to a different filesystem shape. When removing a non-empty directory would remove more entries than the scan observed, Sweep refuses that whole directory. A same-artifact move failure does not silently fall back to copy-and-delete.
 
-To recover, inspect the trash contents and move the desired artifact back manually.
-On Windows, each reserved trash slot contains a `payload` file or directory;
-restore that payload to the original artifact location.
-Check its original location first: do not overwrite a newly recreated directory.
-There is no documented automatic `undo` command. Remove trash only after you have
-verified the recovered project and no longer need those contents.
+## Size and hardlink accounting
 
-## Symbolic links
+`bytes` is apparent size: logical file bytes plus directory metadata. It is the amount the paths appear to occupy.
 
-When the selected artifact is a symbolic link, Sweep removes or moves the link
-itself. It does not traverse or remove the linked directory. A tiny `node_modules`
-or `target` row may therefore represent a link to a much larger directory.
-Inspect the entry type before confirming; the displayed bytes describe the link,
-not the contents at its destination.
+Package managers can hardlink one store file into several `node_modules` trees. Sweep tracks shared inodes and reports **unique-inode bytes** (`uniqueBytes` per candidate and `uniqueTotalBytes` in summaries). A shared inode contributes only when all observed links are inside the scanned candidates. When shared hardlinks reduce what removal can free, plan reports, `sweep status`, and `sweep ui` show `about X freed` beside the apparent size.
 
-Builds, package installs and fixture-generation commands can recreate an entry
-after a successful removal. A rescan describes the filesystem at that time; it
-does not mean an earlier removal failed. Compare the full path and final outcome
-before retrying.
+Linux Btrfs, XFS, APFS, and Windows ReFS can also share extents through copy-on-write clones. Those clones do not have cheap portable detection, so Sweep does not promise extent-aware space accounting.
 
-## Ctrl-C during apply
+When a candidate containing shared hardlinks cannot be fully sized, Sweep marks unique-byte accounting partial (`uniqueBytesPartial`) instead of silently reporting the apparent total as exact. Interfaces that cannot distinguish that partial state fall back to the apparent total with `shared hardlinks not fully counted`.
 
-Sweep requests cooperative cancellation: stop admitting new candidates, allow
-the current operation to settle and report outcomes. Cancellation does not roll
-back deletions. Reports distinguish deleted, failed, covered by a parent deletion,
-and unattempted selections. Keep the final report before retrying.
+`~` means partial or approximate sizing. Status exposes `bytesPartial` and `partialByteCount`, plus skipped-directory coverage. A zero or exact-looking number is not proof that every unreadable subtree was measured.
 
-A failed recursive removal may already have removed some files inside that
-artifact. A failed outcome is not a rollback, and an unattempted nested selection
-is not proof that its contents survived a failed parent operation. Inspect or
-re-scan the tree before retrying.
+## Resource limits and scan resource failures
 
-If a native engine stops responding, the host's watchdog may terminate it and
-report an unknown outcome. An OS crash, forced kill or power loss may also prevent
-a final receipt. Re-scan the actual tree before deciding what remains; do not
-blindly retry an old plan as if no deletion happened.
+Resource allowances stop runaway scans and removals. `balanced` is the default. `low-memory` lowers scan depth, file, byte, and time allowances, disables whole-project source evidence, and uses conservative scheduling. Neither profile is a size ceiling.
 
-## Sizes and disk space
+When the scan reaches an allowance, Sweep exits `2` and does not apply that partial scan. A skip caused only by depth is visible as incomplete coverage. If a scan reports a resource limit, narrow the target or choose a larger explicit allowance. Do not treat partial output as a successful cleanup.
 
-Displayed bytes distinguish **apparent size** (`estimatedBytes`) from
-**unique-inode bytes** (`uniqueBytes` per candidate and `uniqueTotalBytes`
-across the scan). Package managers such as pnpm and Bun hardlink files from a
-global content-addressable store into each `node_modules` directory; deleting
-those `node_modules` directories removes only their directory links while the
-global store still holds the underlying inodes. Sweep deduplicates multi-link
-inodes by `(dev, ino)` using bounded memory tracking (matching across the JS
-and Rust engines) and excludes hardlinks whose link count exceeds links found
-inside the scanned candidates. When shared hardlinks reduce what removal can
-free, plan reports, `sweep status`, and `sweep ui` totals show `about X freed`
-alongside the apparent size so reclaimed space is not overstated.
+## Cloud-synced folders
 
-When bounded hardlink tracking hits its identity or memory cap (for example
-under `--resource-profile low-memory` on very large hardlink stores) or a
-candidate containing shared hardlinks cannot be fully sized, Sweep marks the
-plan and status summary with `uniqueBytesPartial: true` and human/TUI surfaces
-fall back to the apparent total with a `shared hardlinks not fully counted`
-qualifier instead of displaying a silently understated freed figure.
+Candidates under common cloud-sync roots receive a non-blocking `cloud-sync` reason. The scan notice names roots under `~/Dropbox`, `~/OneDrive`, `~/OneDrive - <Org>`, `~/Google Drive`, `~/My Drive`, and macOS `~/Library/CloudStorage/*` when candidates are present.
 
-Copy-on-write **reflinks / clones** (such as APFS clones on macOS or Btrfs/XFS
-reflinks on Linux) cannot be detected cheaply from file metadata (`lstat`
-reports `nlink = 1` and distinct inodes even when extents are shared on disk),
-so Sweep cannot discount reflinked files before deletion. Sparse files,
-reflinks, filesystem compression, snapshots, and concurrent changes can still
-make physical storage reclaimed differ substantially. History reports estimated
-removed or moved bytes, not a measured before/after free-space guarantee.
+This notice does not change risk tier or default selection. Pause sync before applying in those folders. A cloud service can recreate, replace, or conflict-copy files while Sweep is measuring or removing artifacts.
 
-## Interrupted-process journals
+## Confirmation and selection authority
 
-CLI apply records intent in the private config directory before removal starts,
-then commits outcomes when the engine returns a complete report. Inspect one
-with `sweep recover --journal /absolute/path/to/journal.jsonl` (or `--json`).
-The command reads receipts; it never restores, unlocks or retries deletion.
-An incomplete armed journal reports unknown outcomes. An unresolved apply lock
-blocks another CLI apply using that config directory, because a detached engine
-may still be active. This cooperative lock does not stop external filesystem
-writers or callers invoking the core engine API directly.
+Interactive CLI and UI operations confirm the scan target, count, estimated bytes, dangerous artifacts, and deletion mode. The terminal UI captures the candidate IDs visible in that confirmation. Applying does not silently use a newly changed queue.
 
-A size-ceiling refusal or a lock conflict before removal preserves the TUI scan
-and queue. A fresh-size refusal commits an all-unattempted journal; an early
-estimate refusal creates no apply journal. Missing or inconsistent final reports
-still block another apply until rescan. `doctor --json` reports held apply locks,
-and recovery cross-references the journal with its recorded host PID. Neither
-command automatically unlocks a crashed session.
+`--yes` skips the interactive prompt but does not weaken guardrails. Pass `--yes` only after separately reviewing the target and exact selection. `--allow-dangerous` is still required for automated dangerous deletion, and every dangerous path is listed. Blocked paths cannot be authorized.
 
-Pause builds, package installs and sync tools inside artifacts being removed.
-Candidate and ancestor identities are rechecked; interior contents are not a
-frozen snapshot. Newly created files may be removed by the active directory walk.
-The per-config lock serializes Sweep CLI sessions sharing that config directory;
-other users, config directories, native-only invocations and external tools do
-not participate. Advisory locks cannot stop arbitrary filesystem writers.
+## Trash behavior and recovery
 
-Trash slot identities are checked again before a move. Pathname checks on
-Windows/JS still have a check-to-syscall race; they are not a descriptor-pinned
-transaction against a hostile writer. Do not use shared writable trash roots.
+`--trash` moves artifacts into `.sweep-trash-<timestamp>` inside the scan target. This is not the operating system recycle bin. It still uses disk space.
+
+Trash moves are ordered by depth so nested selected artifacts move with their parent. Before each move, Sweep revalidates the artifact. Because a move creates a new path, an attacker with write access could attempt to race it. Sweep uses targeted rename and descriptor-based controls on supported platforms, but no local trash implementation can make an actively hostile writable directory fully safe.
+
+After a trash operation:
+
+1. Read the apply report or journal.
+2. Verify the artifact is gone from its original path.
+3. Verify the exact `.sweep-trash-<timestamp>` folder.
+4. Copy back anything you need.
+5. Delete the trash folder when satisfied.
+
+Interrupting a move can leave an artifact at either location. There is no transaction across independent filesystem operations.
+
+## Journals, locks, and interrupted apply
+
+Apply writes recovery records in a journal before destructive work. Entries are append-only. Write failure closes the operation instead of silently continuing without evidence.
+
+CLI applies hold a cooperative lock. Other CLI instances report `apply_busy`. `sweep recover` reports journal and lock state but never retries, restores, or releases a lock. A PID being absent or reused is not enough to delete a lock safely. If the owner is still running, wait. If you intentionally stop it, inspect the artifacts and then choose the next reviewed operation yourself.
+
+After SIGINT, SIGTERM, process failure, terminal failure, or an uncertain native-engine report, do not assume completion or safety. Use the journal and disk state as evidence, then scan again before retrying. A native engine that crashes or loses its final report makes the outcome unknown even if some deletion already happened.
+
+## Native engine identity and trust
+
+The Rust engine is a high-privilege filesystem component even though Sweep runs unprivileged. On POSIX systems Sweep trusts an engine only when the engine file and every ancestor directory are owned by the effective user or root and are not writable by group or others. When running through `sudo`, the original user from `SUDO_UID` is also accepted for the actual sudo invocation. Generic inherited `SUDO_UID` values do not widen trust.
+
+The engine file content is fingerprinted after the ownership check. Before destructive use, Sweep revalidates metadata and content. On Linux it also compares the running process image identity with the reviewed engine. A changed, replaced, or untrusted engine is refused before removal. If the engine descriptor or process image cannot be rechecked, native apply is conservative.
+
+`--engine auto` falls back to the JavaScript engine with an explicit note. `--engine rust` refuses instead. Homebrew prefixes often use group-writable directories. That is normal for Homebrew, but Sweep treats group-writable ancestry as untrusted and uses the JavaScript engine until permissions are tightened. These checks do not make a compromised user account safe; they prevent writable install locations and replacement races from silently becoming trusted deletion engines.
+
+## Config trust
+
+Automatically discovered `.sweeprc` files, the global config, and their directories are rejected on POSIX systems when owned by another user or writable by other users. Files or directories writable by a non-primary group are rejected. A primary-group group-writable file is accepted.
+
+An explicit `--config` path is still parsed and schema-validated, but discovery ownership rules do not apply to it. Apply creates missing operational state with owner-only permissions and rejects symlinked or group-writable state directories.
+
+## What Sweep does not protect
+
+- files deleted or replaced by other programs while Sweep runs
+- untracked work you did not review
+- data loss after you explicitly authorize dangerous artifacts
+- hostile processes already running as your user
+- complete recovery after permanent deletion
+- cloud synchronization behavior outside the local filesystem
+
+Sweep reduces accidental cleanup risk. It does not replace backups, version control, or operator review.
