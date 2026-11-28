@@ -279,20 +279,40 @@ Both engines re-validate before deleting:
   64 MB, then validates against the ScanPlan schema. Engine apply reports
   are validated against the ApplyReport schema for the same reason:
   `SWEEP_ENGINE_PATH` can point the subprocess at any binary.
-- **The engine that applies is the engine that was checked** - native apply
-  fingerprints the resolved engine file (real path, device/inode, size,
-  mtime/ctime, SHA-256 cached per identity) before its capability check, and
-  refuses (`engine_unavailable`, nothing removed, journal unattempted) when
-  that file differs from the one `--engine auto` probed, or changes before the
-  apply spawn. The spawn uses the real path; right after it, before any plan
-  is written, the path is re-checked and on Linux the child's
-  `/proc/<pid>/exe` must be the same file, else the child is killed. macOS and
-  Windows have no such process-image check, so their window is the spawn
-  call itself (Windows also refuses to replace a running image). On POSIX
-  the engine file and its directories must be owned by you or root, or by
-  the `SUDO_UID` user when running as root. `#!` script engines (dev/test only) skip the process-image
-  check because their image is the interpreter. Implemented in
-  `packages/core/src/engine-identity.ts`.
+- **One checked engine per operation** - the first native engine use in a
+  process (the `--engine auto` probe, or the first scan, tracked check,
+  discovery, doctor or apply call under `--engine rust`) binds the file it
+  resolved: real path, device/inode, size, mtime/ctime and a SHA-256 from a
+  fresh read. Every later engine spawn in that process (a CLI command or a
+  whole terminal UI session) resolves again, re-runs the trust check, and must
+  land on that same file, or it is refused; restarting sweep binds again.
+  `acquireRustEngine` in `packages/core/src/rust-engine.ts` is the only way
+  to get an engine path to spawn.
+- **Apply runs the bound engine and nothing else** - after the capability
+  check apply re-reads the engine and compares the SHA-256 with the bound one
+  (metadata alone cannot prove unchanged bytes on filesystems with coarse
+  timestamps), then spawns the real path. Right after the spawn, before any
+  plan is written, the path is re-checked (metadata only) and on Linux the
+  child's `/proc/<pid>/exe` must be the same file, else the child is killed.
+  Any mismatch refuses with `engine_unavailable`, nothing removed, journal
+  unattempted. macOS and Windows have no process-image check, so there the
+  remaining window is the spawn call itself (Windows also refuses to replace
+  a running image). Implemented in `packages/core/src/engine-identity.ts`.
+- **Engine trust (POSIX)** - the engine file and every directory above it
+  must be owned by you or root (when running as root, also by the user in a
+  valid `SUDO_UID`) and must not be group- or world-writable, whatever the
+  group. This is stricter than the config rule, which allows group-write for
+  your primary group: a primary group is not proof of a private group, and
+  this program deletes files. Sticky directories (such as `/tmp`) are
+  exempt from the write check. Consequences: a Homebrew prefix with
+  group-writable `admin` directories makes `--engine auto` fall back to JS
+  until the prefix is tightened (`chmod g-w`); an elevated run needs a
+  root-owned install, an install owned by the `SUDO_UID` user, or
+  `--engine js`. Explicit `--engine rust` refuses instead of falling back.
+- **Native engines only** - a `#!` script at the engine path is refused
+  unless `SWEEP_ALLOW_SCRIPT_ENGINE=1`, a development and test opt-in. A
+  script's process image is its interpreter, so the Linux image check cannot
+  apply to it.
 - **Nested + duplicate candidates** - `deduplicateNestedEntries` drops any
   entry inside a retained parent (and exact-path repeats from crafted
   plans) so one path is never deleted or counted twice.

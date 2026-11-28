@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { lookupExecutable } from "./executable-lookup.js";
 import { isReparsePointOrSymlink } from "./guardrails.js";
-import { probeRustEngine } from "./rust-engine.js";
+import { acquireRustEngine, probeRustEngine } from "./rust-engine.js";
 
 /**
  * Build output is never committed. A candidate that contains (or is) a file
@@ -288,8 +288,14 @@ export function gitTrackedPaths(paths: readonly string[]): GitTrackedResult {
 /** Null when the engine is unavailable or did not speak `SWEEP_TRACKED_V4` cleanly. */
 export function gitTrackedPathsViaEngine(paths: readonly string[]): GitTrackedResult | null {
   const probe = probeRustEngine();
-  if (!probe.available || !probe.resolvedPath) return null;
-  const result = spawnSync(probe.resolvedPath, ["tracked", "--status"], {
+  if (!probe.available) return null;
+  let engine: string;
+  try {
+    engine = acquireRustEngine().identity.path;
+  } catch {
+    return null;
+  }
+  const result = spawnSync(engine, ["tracked", "--status"], {
     input: `${paths.join("\0")}\0`,
     encoding: "utf8",
     timeout: 60_000,

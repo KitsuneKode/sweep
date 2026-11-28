@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -25,6 +25,16 @@ import {
   probeRustEngine,
 } from "@kitsunekode/sweep-core/rust-engine";
 import type { ScanPlan } from "@kitsunekode/sweep-protocol";
+
+// Fake engines in this file are `#!` scripts, which need the development opt-in.
+const previousScriptEngineOptIn = process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+beforeAll(() => {
+  process.env.SWEEP_ALLOW_SCRIPT_ENGINE = "1";
+});
+afterAll(() => {
+  if (previousScriptEngineOptIn === undefined) delete process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+  else process.env.SWEEP_ALLOW_SCRIPT_ENGINE = previousScriptEngineOptIn;
+});
 
 const CLI_BIN = join(import.meta.dir, "..", "bin.ts");
 const HAS_GIT = spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;

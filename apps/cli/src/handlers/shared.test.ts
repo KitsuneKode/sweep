@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
@@ -30,6 +30,16 @@ import {
   resolveEngineBackend,
   resolveScanTarget,
 } from "./shared.js";
+
+// Fake engines in this file are `#!` scripts, which need the development opt-in.
+const previousScriptEngineOptIn = process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+beforeAll(() => {
+  process.env.SWEEP_ALLOW_SCRIPT_ENGINE = "1";
+});
+afterAll(() => {
+  if (previousScriptEngineOptIn === undefined) delete process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+  else process.env.SWEEP_ALLOW_SCRIPT_ENGINE = previousScriptEngineOptIn;
+});
 
 const roots: string[] = [];
 const previousConfig = process.env.SWEEP_CONFIG_DIR;

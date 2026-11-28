@@ -29,9 +29,12 @@ export interface EngineIdentity {
   size: bigint;
   mtimeNs: bigint;
   ctimeNs: bigint;
-  /** SHA-256 of the file contents, computed once per stat identity. */
+  /** SHA-256 of the file contents, read fresh when the identity is captured. */
   sha256: string;
-  /** False for `#!` scripts (dev/test engines): the process image is their interpreter. */
+  /**
+   * False for `#!` scripts, which are refused unless `SWEEP_ALLOW_SCRIPT_ENGINE=1`
+   * (development and tests only). Their process image is the interpreter.
+   */
   nativeImage: boolean;
 }
 
@@ -80,14 +83,9 @@ function sameInode(a: StatIdentity, b: StatIdentity): boolean {
   return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeNs === b.mtimeNs;
 }
 
-function statKey(id: StatIdentity): string {
-  return `${id.path}\0${id.dev}\0${id.ino}\0${id.size}\0${id.mtimeNs}\0${id.ctimeNs}`;
-}
-
 /** Who may own the engine and its directories, from the effective user's view. */
 export interface EngineTrustContext {
   uid: number;
-  gid: number | undefined;
   /** `SUDO_UID`, honored only when running as root. */
   sudoUid?: string | undefined;
 }
@@ -95,7 +93,7 @@ export interface EngineTrustContext {
 function currentTrustContext(): EngineTrustContext | undefined {
   const uid = process.geteuid?.() ?? process.getuid?.();
   if (uid === undefined) return undefined;
-  return { uid, gid: process.getegid?.() ?? process.getgid?.(), sudoUid: process.env.SUDO_UID };
+  return { uid, sudoUid: process.env.SUDO_UID };
 }
 
 /** Owners whose files the engine may run from: you, root, and under sudo the invoking user. */
@@ -115,16 +113,17 @@ export function trustedEngineOwners(context: EngineTrustContext): ReadonlySet<nu
   return owners;
 }
 
-type TrustStat = Pick<Stats, "uid" | "gid" | "mode">;
+type TrustStat = Pick<Stats, "uid" | "mode">;
 
 /**
- * POSIX trust for the engine file and every directory above it, matching the
- * config trust rule (`checkPosixTrust`): owned by a trusted owner (see
- * `trustedEngineOwners`), not world-writable, and not group-writable by
- * another group. A sticky directory (such as `/tmp`) only lets other users
- * replace entries they own, so its write bits are allowed. Without this,
- * anyone who can rename entries along the path can swap the program sweep
- * runs for destructive work.
+ * POSIX trust for the engine file and every directory above it: owned by a
+ * trusted owner (see `trustedEngineOwners`) and writable by nobody else.
+ * Stricter than the config rule (`checkPosixTrust`), which allows group-write
+ * for the primary group: a primary group is not proof that a group is
+ * private, and this file deletes things. A sticky directory (such as `/tmp`)
+ * only lets other users replace entries they own, so its write bits are
+ * allowed. Without this, anyone who can rename entries along the path can
+ * swap the program sweep runs.
  */
 export function engineTrustIssue(
   realPath: string,
@@ -133,14 +132,12 @@ export function engineTrustIssue(
 ): string | null {
   if (process.platform === "win32" || context === undefined) return null;
   const owners = trustedEngineOwners(context);
-  const { gid } = context;
   const check = (path: string, isDirectory: boolean): string | null => {
     const meta = stat(path);
     if (!owners.has(meta.uid)) return `${path} is owned by another user (uid ${meta.uid})`;
     const sticky = isDirectory && (meta.mode & 0o1000) !== 0;
     if (!sticky && (meta.mode & 0o002) !== 0) return `${path} is world-writable`;
-    if (!sticky && (meta.mode & 0o020) !== 0 && (gid === undefined || meta.gid !== gid))
-      return `${path} is group-writable by another group`;
+    if (!sticky && (meta.mode & 0o020) !== 0) return `${path} is group-writable`;
     return null;
   };
   const fileIssue = check(realPath, false);
@@ -195,20 +192,17 @@ export function inspectEngineFile(executable: string): StatIdentity {
   return statIdentity(path, stat);
 }
 
-const hashed = new Map<string, { sha256: string; nativeImage: boolean }>();
+/** Development and tests only: allow a `#!` script at the engine path. */
+export function scriptEnginesAllowed(): boolean {
+  return process.env.SWEEP_ALLOW_SCRIPT_ENGINE === "1";
+}
 
 /**
- * Inspect the engine and fingerprint its contents. Hashing reads through one
- * descriptor whose stat must match the path both before and after the read, so
- * the digest belongs to the identity it is cached under. Cached per identity:
- * one read per process for an unchanged engine.
+ * Read the whole file through one descriptor whose stat must equal `file`
+ * before and after the read, so the digest belongs to exactly that file.
+ * Never cached: callers get a digest of the bytes on disk now.
  */
-export function captureEngineIdentity(executable: string): EngineIdentity {
-  const file = inspectEngineFile(executable);
-  const key = statKey(file);
-  const cached = hashed.get(key);
-  if (cached) return { ...file, ...cached };
-
+function readFingerprint(file: StatIdentity): Pick<EngineIdentity, "sha256" | "nativeImage"> {
   let fd: number;
   try {
     fd = openSync(file.path, "r");
@@ -220,11 +214,7 @@ export function captureEngineIdentity(executable: string): EngineIdentity {
   }
   try {
     const before = statIdentity(file.path, fstatSync(fd, { bigint: true }));
-    if (!sameEngineFile(before, file))
-      throw new EngineIdentityError(
-        `The native engine at ${file.path} changed while it was being verified`,
-        "changed",
-      );
+    if (!sameEngineFile(before, file)) throw changedError(file.path);
     if (file.size > BigInt(MAX_ENGINE_BYTES))
       throw new EngineIdentityError(
         `The native engine at ${file.path} is larger than ${MAX_ENGINE_BYTES} bytes`,
@@ -242,15 +232,8 @@ export function captureEngineIdentity(executable: string): EngineIdentity {
       offset += read;
     }
     const after = statIdentity(file.path, fstatSync(fd, { bigint: true }));
-    if (BigInt(offset) !== file.size || !sameEngineFile(after, file))
-      throw new EngineIdentityError(
-        `The native engine at ${file.path} changed while it was being verified`,
-        "changed",
-      );
-    const fingerprint = { sha256: hash.digest("hex"), nativeImage: head !== "#!" };
-    if (hashed.size >= 8) hashed.clear();
-    hashed.set(key, fingerprint);
-    return { ...file, ...fingerprint };
+    if (BigInt(offset) !== file.size || !sameEngineFile(after, file)) throw changedError(file.path);
+    return { sha256: hash.digest("hex"), nativeImage: head !== "#!" };
   } catch (error) {
     if (error instanceof EngineIdentityError) throw error;
     throw new EngineIdentityError(
@@ -262,11 +245,39 @@ export function captureEngineIdentity(executable: string): EngineIdentity {
   }
 }
 
+/**
+ * Inspect the engine (resolution, trust) and fingerprint its contents from a
+ * fresh read. A `#!` script is refused unless `scriptEnginesAllowed()`.
+ */
+export function captureEngineIdentity(executable: string): EngineIdentity {
+  const file = inspectEngineFile(executable);
+  const fingerprint = readFingerprint(file);
+  if (!fingerprint.nativeImage && !scriptEnginesAllowed())
+    throw new EngineIdentityError(
+      `Refusing to run ${file.path} because it is a script, not a native engine. ` +
+        "Reinstall the native engine, or use --engine js",
+      "untrusted",
+    );
+  return { ...file, ...fingerprint };
+}
+
 function changedError(path: string): EngineIdentityError {
   return new EngineIdentityError(
     `The native engine at ${path} changed after it was verified`,
     "changed",
   );
+}
+
+/**
+ * Re-read the engine and compare its SHA-256 with the verified identity.
+ * Metadata alone cannot prove the bytes are unchanged on filesystems with
+ * coarse timestamps, so destructive apply pays one fresh read before it
+ * spawns the engine (a few milliseconds for a release engine).
+ */
+export function assertEngineContent(expected: EngineIdentity): void {
+  assertEngineUnchanged(expected);
+  const { sha256 } = readFingerprint(expected);
+  if (sha256 !== expected.sha256) throw changedError(expected.path);
 }
 
 /** Cheap re-check (realpath + stats, no hashing) before a destructive spawn. */
@@ -313,9 +324,4 @@ export function assertSpawnedEngine(pid: number, expected: EngineIdentity): void
     image = readProcessImage(pid);
   }
   if (!image || !sameInode(image, expected)) throw changedError(expected.path);
-}
-
-/** @internal Test seam: forget cached fingerprints. */
-export function resetEngineIdentityCacheForTest(): void {
-  hashed.clear();
 }

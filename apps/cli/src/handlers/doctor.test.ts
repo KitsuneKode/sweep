@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { chmodSync, chownSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -10,6 +19,16 @@ import {
 } from "./doctor.js";
 import { resolveEngineBackend } from "./shared.js";
 import { registerUiModule, type SweepUiModule } from "./ui.js";
+
+// Fake engines in this file are `#!` scripts, which need the development opt-in.
+const previousScriptEngineOptIn = process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+beforeAll(() => {
+  process.env.SWEEP_ALLOW_SCRIPT_ENGINE = "1";
+});
+afterAll(() => {
+  if (previousScriptEngineOptIn === undefined) delete process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+  else process.env.SWEEP_ALLOW_SCRIPT_ENGINE = previousScriptEngineOptIn;
+});
 
 describe("doctor missing rust engine diagnostics", () => {
   test("reports inconclusive Linux libc reasonKind, reason, and detail when libc is unknown and no override is set", () => {

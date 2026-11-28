@@ -15,24 +15,29 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  assertEngineContent,
   assertEngineUnchanged,
   assertSpawnedEngine,
   captureEngineIdentity,
   engineTrustIssue,
   EngineIdentityError,
   inspectEngineFile,
-  resetEngineIdentityCacheForTest,
 } from "./engine-identity.js";
 
 let root: string;
+const previousScriptOptIn = process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "sweep-engine-identity-")));
-  resetEngineIdentityCacheForTest();
+  // Most fixtures here are `#!` scripts; the opt-in test removes this.
+  process.env.SWEEP_ALLOW_SCRIPT_ENGINE = "1";
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  if (previousScriptOptIn === undefined) delete process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+  else process.env.SWEEP_ALLOW_SCRIPT_ENGINE = previousScriptOptIn;
+  // Windows keeps an executable's image locked briefly after its process ends.
+  rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 function identityIssue(fn: () => unknown): string | undefined {
@@ -101,26 +106,35 @@ function spawnCopy(path: string) {
     process.platform === "win32"
       ? spawn(path, [], { stdio: "ignore" })
       : spawn(path, ["5"], { stdio: "ignore", argv0: "sleep" });
-  child.on("error", () => {});
-  return child;
+  // Registered at spawn so a fast exit (hostname.exe) is never missed.
+  const exited = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  /** Kill and wait, so the image file is released before cleanup. */
+  const stop = async () => {
+    child.kill("SIGKILL");
+    await exited;
+  };
+  return { child, stop };
 }
 
 const exe = (name: string) => (process.platform === "win32" ? `${name}.exe` : name);
 
-test("the spawned process must still be the verified engine", () => {
+test("the spawned process must still be the verified engine", async () => {
   const engine = join(root, exe("engine"));
   copyFileSync(nativeSample(), engine);
   chmodSync(engine, 0o700);
   const identity = captureEngineIdentity(engine);
-  const child = spawnCopy(engine);
+  const { child, stop } = spawnCopy(engine);
   try {
     expect(() => assertSpawnedEngine(child.pid!, identity)).not.toThrow();
   } finally {
-    child.kill("SIGKILL");
+    await stop();
   }
 });
 
-test("a swap between verification and spawn is caught right after the spawn", () => {
+test("a swap between verification and spawn is caught right after the spawn", async () => {
   // Every platform: the path re-check after spawn sees that the file the
   // child was started from is not the verified one.
   const engine = join(root, exe("engine"));
@@ -131,17 +145,17 @@ test("a swap between verification and spawn is caught right after the spawn", ()
   chmodSync(other, 0o700);
   const identity = captureEngineIdentity(engine);
   renameSync(other, engine);
-  const child = spawnCopy(engine);
+  const { child, stop } = spawnCopy(engine);
   try {
     expect(identityIssue(() => assertSpawnedEngine(child.pid!, identity))).toBe("changed");
   } finally {
-    child.kill("SIGKILL");
+    await stop();
   }
 });
 
 test.skipIf(process.platform === "win32")(
   "posix: a swap while the engine runs is caught after the spawn",
-  () => {
+  async () => {
     // Windows refuses to replace a running image, so this case cannot occur there.
     const engine = join(root, "engine");
     const other = join(root, "other");
@@ -149,19 +163,19 @@ test.skipIf(process.platform === "win32")(
     copyFileSync(nativeSample(), other);
     chmodSync(engine, 0o700);
     const identity = captureEngineIdentity(engine);
-    const child = spawnCopy(engine);
+    const { child, stop } = spawnCopy(engine);
     try {
       renameSync(other, engine);
       expect(identityIssue(() => assertSpawnedEngine(child.pid!, identity))).toBe("changed");
     } finally {
-      child.kill("SIGKILL");
+      await stop();
     }
   },
 );
 
 test.skipIf(process.platform !== "linux")(
   "linux: a swap reverted around the spawn is caught from the process image",
-  () => {
+  async () => {
     const engine = join(root, "engine");
     const impostor = join(root, "impostor");
     copyFileSync(nativeSample(), engine);
@@ -170,11 +184,11 @@ test.skipIf(process.platform !== "linux")(
     chmodSync(engine, 0o700);
     chmodSync(impostor, 0o700);
     const identity = captureEngineIdentity(engine);
-    const child = spawnCopy(impostor);
+    const { child, stop } = spawnCopy(impostor);
     try {
       expect(identityIssue(() => assertSpawnedEngine(child.pid!, identity))).toBe("changed");
     } finally {
-      child.kill("SIGKILL");
+      await stop();
     }
   },
 );
@@ -224,11 +238,11 @@ describe("posix: engine owners", () => {
     (path: string) => {
       const base =
         path === "/" || path === "/home"
-          ? { uid: 0, gid: 0, mode: 0o40755 }
-          : { uid: owner, gid: owner, mode: path === enginePath ? 0o100755 : 0o40755 };
+          ? { uid: 0, mode: 0o40755 }
+          : { uid: owner, mode: path === enginePath ? 0o100755 : 0o40755 };
       return { ...base, ...overrides[path] };
     };
-  const asRoot = (sudoUid?: string) => ({ uid: 0, gid: 0, sudoUid });
+  const asRoot = (sudoUid?: string) => ({ uid: 0, sudoUid });
 
   test.skipIf(process.platform === "win32")(
     "root accepts an engine owned by the user sudo acts for",
@@ -282,8 +296,26 @@ describe("posix: engine owners", () => {
     },
   );
 
+  test.skipIf(process.platform === "win32")(
+    "group-writable directories are refused even for your own primary group",
+    () => {
+      // The config rule allows this; the engine rule does not.
+      const asUser = { uid: USER };
+      expect(
+        engineTrustIssue(
+          enginePath,
+          asUser,
+          tree(USER, { "/home/user/.local": { mode: 0o40775 } }),
+        ),
+      ).toContain("/home/user/.local is group-writable");
+      expect(
+        engineTrustIssue(enginePath, asUser, tree(USER, { [enginePath]: { mode: 0o100775 } })),
+      ).toContain("group-writable");
+    },
+  );
+
   test.skipIf(process.platform === "win32")("SUDO_UID means nothing to a non-root user", () => {
-    const asUser = { uid: USER, gid: USER, sudoUid: String(OTHER) };
+    const asUser = { uid: USER, sudoUid: String(OTHER) };
     expect(engineTrustIssue(enginePath, asUser, tree(USER))).toBeNull();
     expect(engineTrustIssue(enginePath, asUser, tree(0))).toBeNull();
     expect(engineTrustIssue(enginePath, asUser, tree(OTHER))).toContain("owned by another user");
@@ -303,4 +335,55 @@ test.skipIf(process.platform === "win32")("an untrusted-engine refusal says how 
     expect((error as Error).message).toContain("Use --engine js, or reinstall the engine");
     expect((error as Error).message).not.toMatch(/disable|skip|--no-/i);
   }
+});
+
+test.skipIf(process.platform === "win32")(
+  "posix: a group-writable engine directory is refused on disk",
+  () => {
+    const shared = join(root, "group");
+    mkdirSync(shared);
+    const engine = join(shared, "engine");
+    writeFileSync(engine, "#!/bin/sh\nexit 0\n");
+    chmodSync(engine, 0o700);
+    // Owned by you and your primary group: still refused for the engine.
+    chmodSync(shared, 0o770);
+    expect(identityIssue(() => inspectEngineFile(engine))).toBe("untrusted");
+    chmodSync(shared, 0o700);
+  },
+);
+
+test("a script at the engine path needs the development opt-in", () => {
+  const engine = join(root, "engine");
+  writeFileSync(engine, "#!/bin/sh\nexit 0\n");
+  chmodSync(engine, 0o700);
+  delete process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+  expect(identityIssue(() => captureEngineIdentity(engine))).toBe("untrusted");
+  try {
+    captureEngineIdentity(engine);
+  } catch (error) {
+    expect((error as Error).message).toContain("is a script, not a native engine");
+  }
+  for (const value of ["0", "true", ""]) {
+    process.env.SWEEP_ALLOW_SCRIPT_ENGINE = value;
+    expect(identityIssue(() => captureEngineIdentity(engine))).toBe("untrusted");
+  }
+  process.env.SWEEP_ALLOW_SCRIPT_ENGINE = "1";
+  expect(captureEngineIdentity(engine).nativeImage).toBe(false);
+  // A native engine never needs it.
+  delete process.env.SWEEP_ALLOW_SCRIPT_ENGINE;
+  expect(captureEngineIdentity(nativeSample()).nativeImage).toBe(true);
+});
+
+test("the pre-apply content check re-reads the bytes instead of trusting metadata", () => {
+  const engine = join(root, "engine");
+  writeFileSync(engine, "#!/bin/sh\nexit 0\n");
+  const identity = captureEngineIdentity(engine);
+  expect(() => assertEngineContent(identity)).not.toThrow();
+  // Same metadata, different bytes: what a write on a filesystem with coarse
+  // timestamps can look like. Only the fresh digest can tell.
+  const forged = { ...identity, sha256: "0".repeat(64) };
+  expect(identityIssue(() => assertEngineContent(forged))).toBe("changed");
+  // And a metadata change is caught before any read.
+  writeFileSync(engine, "#!/bin/sh\nexit 1\n");
+  expect(identityIssue(() => assertEngineContent(identity))).toBe("changed");
 });

@@ -8,7 +8,7 @@ import { hasCanonicalPathSpelling, isPathWithinRoot } from "./guardrails.js";
 import { validatePlan, validateScanEvent } from "./plan.js";
 import { checkedBytes } from "./resource-budget.js";
 import { lookupExecutable } from "./executable-lookup.js";
-import { resolveRustEngineExecutable } from "./rust-engine.js";
+import { acquireRustEngine } from "./rust-engine.js";
 
 const MAX_FRAME = 1024 * 1024;
 const MAX_SNAPSHOT = 64 * 1024 * 1024;
@@ -398,14 +398,15 @@ export class DiscoveryIndexSession {
       executable = resolved;
       extraArgs = options.command.slice(1);
     } else {
-      const resolved = resolveRustEngineExecutable();
-      if (!resolved.executable) {
+      // The bound, trust-checked engine for this session (acquireRustEngine).
+      try {
+        executable = acquireRustEngine().identity.path;
+      } catch (error) {
         throw new DiscoveryIndexError(
           "discovery_protocol",
-          "Native Rust engine binary was not found.",
+          error instanceof Error ? error.message : String(error),
         );
       }
-      executable = resolved.executable;
       extraArgs = [];
     }
     const child = spawn(executable, [...extraArgs, "index"], { stdio: "pipe" });
