@@ -10,6 +10,7 @@ import { loadConfig } from "@kitsunekode/sweep-core/config";
 import { getSelectedBytes, loadPlan } from "@kitsunekode/sweep-core/plan";
 import {
   formatBytes,
+  plural,
   printCleanResult,
   printDeclined,
   printInterrupted,
@@ -88,7 +89,7 @@ export async function handleApply(opts: ApplyHandlerOptions): Promise<void> {
         writeJson(plan);
       } else {
         console.log(
-          `Dry run: would ${opts.trash ? "move to .sweep-trash" : "delete"} ${selectedCount} item(s) (~${formatBytes(totalBytes)}).`,
+          `Dry run: would ${opts.trash ? "move to .sweep-trash" : "delete"} ${plural(selectedCount, "item")} (~${formatBytes(totalBytes)}).`,
         );
       }
       await drainStdout();

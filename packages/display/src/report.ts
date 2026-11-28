@@ -1,11 +1,11 @@
 import { statfsSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import pc from "picocolors";
 import type { RiskTier, ScanCandidate, ScanPlan } from "@kitsunekode/sweep-protocol";
 import { IDLE_WINDOW_MS, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes, formatScanElapsed } from "./bytes.js";
 import { groupCandidatesByKind } from "./grouping.js";
+import { costCategoryForKind, costDot, createPalette, type Palette } from "./palette.js";
 
 /**
  * The terminal scan report: the answer first (what would be reclaimed), then
@@ -28,8 +28,12 @@ export interface ScanReportOptions {
   disk?: { free: number; total: number } | null;
   /** Clock for idle math (tests). */
   now?: number;
+  /** Explicit color palette (defaults to dynamic stdout capability). */
+  palette?: Palette;
 }
 
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 const DAY = 86_400_000;
 /** Suggest `--idle` at the same window the projects view calls idle. */
 const SUGGESTED_IDLE_DAYS = IDLE_WINDOW_MS / DAY;
@@ -43,12 +47,24 @@ function readDisk(targetDir: string): { free: number; total: number } | null {
   }
 }
 
-/** "5h", "12d", "3mo", "1.5y" since the project was last worked on. */
+/** "now", "<1h", "5h", "12d", "3mo", "1.5y" since the project was last worked on. */
 export function idleLabel(activeMs: number | undefined, now = Date.now()): string {
   if (activeMs === undefined) return "";
   const ms = Math.max(0, now - activeMs);
+  if (ms < MINUTE) return "now";
+  if (ms < HOUR) return "<1h";
   const days = ms / DAY;
-  if (days < 1) return `${Math.max(1, Math.round(ms / 3_600_000))}h`;
+  if (days < 1) return `${Math.round(ms / HOUR)}h`;
+  if (days < 60) return `${Math.round(days)}d`;
+  if (days < 365) return `${Math.round(days / 30)}mo`;
+  return `${(days / 365).toFixed(1).replace(/\.0$/, "")}y`;
+}
+
+function idleWindowToken(idleMs: number): string {
+  const safe = Math.max(0, idleMs);
+  if (safe < HOUR) return `${Math.max(1, Math.round(safe / MINUTE))}m`;
+  if (safe < DAY) return `${Math.round(safe / HOUR)}h`;
+  const days = safe / DAY;
   if (days < 60) return `${Math.round(days)}d`;
   if (days < 365) return `${Math.round(days / 30)}mo`;
   return `${(days / 365).toFixed(1).replace(/\.0$/, "")}y`;
@@ -106,36 +122,40 @@ export function truncateMiddle(text: string, width: number): string {
   return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
 }
 
-function rail(selected: boolean, tier: RiskTier): string {
-  if (selected) return pc.green("●");
-  if (tier === "caution") return pc.yellow("○");
-  if (tier === "dangerous" || tier === "blocked") return pc.red("◌");
-  return pc.dim("○");
+function rail(selected: boolean, tier: RiskTier, palette: Palette): string {
+  if (selected) return palette.positive("●");
+  if (tier === "caution") return palette.warning("○");
+  if (tier === "dangerous" || tier === "blocked") return palette.danger("◌");
+  return palette.dim("○");
 }
 
-function note(candidate: ScanCandidate): string {
+function note(candidate: ScanCandidate, palette: Palette): string {
   const parts: string[] = [];
   if (candidate.riskTier === "blocked") {
     parts.push(
-      pc.red(candidate.reasons.includes(GIT_TRACKED_REASON) ? "blocked · git-tracked" : "blocked"),
+      palette.danger(
+        candidate.reasons.includes(GIT_TRACKED_REASON) ? "blocked · git-tracked" : "blocked",
+      ),
     );
   } else if (candidate.riskTier === "dangerous") {
-    parts.push(pc.red("dangerous"));
+    parts.push(palette.danger("dangerous"));
   } else if (candidate.riskTier === "caution") {
-    parts.push(pc.yellow("caution"));
+    parts.push(palette.warning("caution"));
   }
-  if (isStub(candidate)) parts.push(pc.dim("workspace stub"));
-  else if (candidate.reasons.includes(SYMLINK_ALIAS_REASON)) parts.push(pc.dim("symlink alias"));
-  else if (candidate.isSymlink) parts.push(pc.dim("symlink"));
-  if (candidate.reasons.includes(CLOUD_SYNC_REASON)) parts.push(pc.dim("cloud-synced"));
-  return parts.join(pc.dim(" · "));
+  if (isStub(candidate)) parts.push(palette.dim("workspace stub"));
+  else if (candidate.reasons.includes(SYMLINK_ALIAS_REASON))
+    parts.push(palette.dim("symlink alias"));
+  else if (candidate.isSymlink) parts.push(palette.dim("symlink"));
+  if (candidate.reasons.includes(CLOUD_SYNC_REASON)) parts.push(palette.dim("cloud-synced"));
+  return parts.join(palette.dim(" · "));
 }
 
-function bar(bytes: number, maxBytes: number): string {
+function bar(bytes: number, maxBytes: number, kind: string, palette: Palette): string {
   if (maxBytes <= 0 || bytes <= 0) return " ".repeat(BAR_WIDTH);
   // Never round a real size down to nothing: one sliver still says "some".
   const filled = Math.max(1, Math.round((bytes / maxBytes) * BAR_WIDTH));
-  return pc.cyan("━".repeat(filled)) + pc.dim("─".repeat(BAR_WIDTH - filled));
+  const category = costCategoryForKind(kind);
+  return palette.cost[category]("━".repeat(filled)) + palette.dim("─".repeat(BAR_WIDTH - filled));
 }
 
 function size(bytes: number, approx: boolean): string {
@@ -155,6 +175,7 @@ export function formatScanReport(
   targetDir: string,
   options: ScanReportOptions = {},
 ): string[] {
+  const palette = options.palette ?? createPalette();
   const columns = Math.max(48, Math.min(options.columns ?? process.stdout.columns ?? 100, 120));
   const verbose = options.verbose ?? false;
   const rowsPerGroup = verbose ? Infinity : (options.rowsPerGroup ?? 6);
@@ -169,6 +190,12 @@ export function formatScanReport(
   const hiddenStubs = plan.candidates.length - visible.length;
   const selected = plan.candidates.filter((c) => selectedIds.has(c.id));
   const selectedBytes = selected.reduce((sum, c) => sum + c.estimatedBytes, 0);
+  const selectedApprox = approx || selected.some((c) => c.bytesKnown === false);
+  const guarded = plan.candidates.filter(
+    (c) => c.riskTier === "dangerous" || c.riskTier === "blocked",
+  );
+  const guardedBytes = guarded.reduce((sum, c) => sum + c.estimatedBytes, 0);
+  const guardedApprox = approx || guarded.some((c) => c.bytesKnown === false);
   const unselectedBytes = plan.candidates
     .filter((c) => !selectedIds.has(c.id))
     .reduce((sum, c) => sum + c.estimatedBytes, 0);
@@ -189,39 +216,44 @@ export function formatScanReport(
     !uniqueBytesPartial && hasUniqueBytes && selectedUniqueBytes < selectedBytes;
 
   const meta = [
-    `${plan.summary.scannedDirs} dirs`,
+    `${plan.summary.scannedDirs} ${plan.summary.scannedDirs === 1 ? "dir" : "dirs"}`,
     plan.summary.skippedDirs ? `${plan.summary.skippedDirs} skipped` : "",
     sanitizeTerminalText(displayTarget(targetDir)),
     options.elapsedMs !== undefined ? formatScanElapsed(options.elapsedMs) : "",
     options.engine ?? "",
   ].filter(Boolean);
   lines.push(
-    ` ${pc.green("✓")} ${pc.dim(truncateMiddle(`Scanned ${meta.join(" · ")}`, columns - 4))}`,
+    ` ${palette.positive("✓")} ${palette.dim(truncateMiddle(`Scanned ${meta.join(" · ")}`, columns - 4))}`,
   );
   lines.push("");
 
   if (plan.candidates.length === 0) {
-    lines.push(` ${pc.bold("Nothing to clean.")} ${pc.dim("No build output or caches here.")}`);
+    lines.push(
+      ` ${palette.bold("Nothing to clean.")} ${palette.dim("No build output or caches here.")}`,
+    );
     lines.push("");
     return lines;
   }
 
-  // The answer, before the evidence.
+  // The answer, before the evidence. Guarded (dangerous + blocked) bytes stay
+  // strictly separate from reclaimable bytes.
   const idleScope =
-    options.idleMs !== undefined
-      ? ` from projects idle ${idleLabel(now - options.idleMs, now)}+`
-      : "";
+    options.idleMs !== undefined ? ` from projects idle ${idleWindowToken(options.idleMs)}+` : "";
+  const guardedNote =
+    guarded.length > 0 ? `  ·  +${size(guardedBytes, guardedApprox)} guarded` : "";
+  const selectedTally = `${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`;
   lines.push(
     hasSharedHardlinks
-      ? ` ${pc.bold(pc.yellow(`about ${formatBytes(selectedUniqueBytes)} freed`))}${idleScope}` +
-          pc.dim(
-            ` (${size(selectedBytes, approx)} apparent · shared hardlinks)  ·  ${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`,
+      ? ` ${palette.bold(palette.positive(`about ${formatBytes(selectedUniqueBytes)} freed`))}${palette.bold(idleScope)}` +
+          palette.dim(
+            ` (${size(selectedBytes, selectedApprox)} apparent · shared hardlinks)  ·  ${selectedTally}${guardedNote}`,
           )
-      : ` ${pc.bold(pc.yellow(size(selectedBytes, approx)))} ${pc.bold(`to reclaim${idleScope}`)}` +
-          pc.dim(
-            `${uniqueBytesPartial ? " (apparent · shared hardlinks not fully counted)" : ""}  ·  ${visible.filter((c) => selectedIds.has(c.id)).length} of ${visible.length} selected`,
+      : ` ${palette.bold(palette.positive(size(selectedBytes, selectedApprox)))} ${palette.bold(`to reclaim${idleScope}`)}` +
+          palette.dim(
+            `${uniqueBytesPartial ? " (apparent · shared hardlinks not fully counted)" : ""}  ·  ${selectedTally}${guardedNote}`,
           ),
   );
+
   // Disk context: what the cleanup means for the space actually left.
   const disk = options.disk === undefined ? readDisk(targetDir) : options.disk;
   if (disk && disk.total > 0) {
@@ -229,9 +261,11 @@ export function formatScanReport(
     const after = Math.min(disk.total, disk.free + expectedGain);
     const tight = disk.free / disk.total < 0.1;
     lines.push(
-      ` ${pc.dim("disk")} ${(tight ? pc.yellow : (text: string) => text)(formatBytes(disk.free))}` +
-        pc.dim(` free of ${formatBytes(disk.total)}`) +
-        (expectedGain > 0 ? pc.dim("  →  ") + pc.green(`up to ${formatBytes(after)} free`) : ""),
+      ` ${palette.dim("disk")} ${(tight ? palette.warning : (text: string) => text)(formatBytes(disk.free))}` +
+        palette.dim(` free of ${formatBytes(disk.total)}`) +
+        (expectedGain > 0
+          ? palette.dim("  →  ") + palette.positive(`up to ${formatBytes(after)} free`)
+          : ""),
     );
   }
 
@@ -243,19 +277,30 @@ export function formatScanReport(
     const bytes = activeToday.reduce((sum, c) => sum + c.estimatedBytes, 0);
     const all = projectNames(activeToday);
     const names = all.slice(0, 3).map(sanitizeTerminalText);
-    advice.push(
-      `${pc.yellow("!")} ${size(bytes, approx)} ${pc.dim("of that is in projects worked on today")} ` +
-        pc.dim(`(${names.join(", ")}${all.length > names.length ? ", …" : ""}); `) +
-        pc.dim("the next build or install brings it back"),
-    );
+    const head = `${size(bytes, approx)} of that is in projects worked on today (${names.join(", ")}${all.length > names.length ? ", …" : ""});`;
+    const tail = "the next build or install brings it back";
+    const singleLine = `${head} ${tail}`;
+    if (3 + singleLine.length <= columns) {
+      advice.push(
+        `${palette.warning("!")} ${size(bytes, approx)} ${palette.dim("of that is in projects worked on today")} ` +
+          palette.dim(`(${names.join(", ")}${all.length > names.length ? ", …" : ""}); `) +
+          palette.dim(tail),
+      );
+    } else {
+      advice.push(
+        `${palette.warning("!")} ${size(bytes, approx)} ${palette.dim("of that is in projects worked on today")} ` +
+          palette.dim(`(${names.join(", ")}${all.length > names.length ? ", …" : ""});`),
+      );
+      advice.push(`  ${palette.dim(tail)}`);
+    }
   }
   if (options.idleMs === undefined) {
     const idle = selected.filter((c) => (idleDays(c) ?? 0) >= SUGGESTED_IDLE_DAYS);
     const idleBytes = idle.reduce((sum, c) => sum + c.estimatedBytes, 0);
     if (idle.length > 0 && idleBytes < selectedBytes) {
       advice.push(
-        `${pc.cyan("→")} ${size(idleBytes, approx)} ${pc.dim(`is in projects idle ${SUGGESTED_IDLE_DAYS}+ days, safe to clear first:`)} ` +
-          pc.cyan(`sweep --idle ${SUGGESTED_IDLE_DAYS}d`),
+        `${palette.accent("→")} ${size(idleBytes, approx)} ${palette.dim(`is in projects idle ${SUGGESTED_IDLE_DAYS}+ days, safe to clear first:`)} ` +
+          palette.accent(`sweep --idle ${SUGGESTED_IDLE_DAYS}d`),
       );
     }
   }
@@ -272,10 +317,10 @@ export function formatScanReport(
   // One shared note column, so every size lines up down the whole report.
   const noteWidth = Math.min(
     26,
-    Math.max(0, ...shownRows.flat().map((c) => stripVTControlCharacters(note(c)).length)),
+    Math.max(0, ...shownRows.flat().map((c) => stripVTControlCharacters(note(c, palette)).length)),
   );
   const sizeWidth = 11;
-  const idleWidth = 10;
+  const idleWidth = 12;
   const longestPath = Math.max(
     0,
     ...shownRows.flat().map((c) => sanitizeTerminalText(displayPath(c.path, targetDir)).length),
@@ -293,17 +338,18 @@ export function formatScanReport(
 
   for (const [index, group] of groups.entries()) {
     const picked = group.entries.filter((c) => selectedIds.has(c.id)).length;
+    const groupApprox = approx || group.entries.some((c) => c.bytesKnown === false);
     lines.push(
-      ` ${pc.bold(sanitizeTerminalText(group.label).padEnd(labelWidth))}` +
-        `${bar(group.totalBytes, maxGroupBytes)}  ` +
-        `${pc.yellow(size(group.totalBytes, approx).padStart(10))}` +
-        pc.dim(`   ${picked} of ${group.entries.length}`),
+      ` ${costDot(group.kind, palette)} ${palette.bold(sanitizeTerminalText(group.label).padEnd(labelWidth))}` +
+        `${bar(group.totalBytes, maxGroupBytes, group.kind, palette)}  ` +
+        `${palette.bold(size(group.totalBytes, groupApprox).padStart(10))}` +
+        palette.dim(`   ${picked} of ${group.entries.length}`),
     );
 
     const shown = shownRows[index] ?? [];
     const folded = group.entries.length - shown.length;
     for (const candidate of shown) {
-      const tail = note(candidate);
+      const tail = note(candidate, palette);
       const path = truncateMiddle(
         sanitizeTerminalText(displayPath(candidate.path, targetDir)),
         pathWidth,
@@ -311,17 +357,23 @@ export function formatScanReport(
       const amount = size(candidate.estimatedBytes, approx || candidate.bytesKnown === false);
       const days = idleDays(candidate);
       const idle = idleLabel(candidate.projectActiveMs, now);
-      // Recent work reads at full strength, long-idle recedes: the easy call.
-      // Not yellow - that is the caution tier's colour.
-      const idleRaw = idle ? `idle ${idle}` : candidate.projectRoot !== undefined ? "idle ?" : "";
+      // Recent work reads in Direction C+ info cyan; long-idle recedes.
+      const idleRaw =
+        idle === "now"
+          ? "active now"
+          : idle
+            ? `idle ${idle}`
+            : candidate.projectRoot !== undefined
+              ? "idle ?"
+              : "";
       const idleText = idleRaw.padEnd(idleWidth - 2);
       const idleCell = idleRaw
-        ? `  ${days !== undefined && days < 7 ? pc.bold(idleText) : pc.dim(idleText)}`
+        ? `  ${days !== undefined && days < 7 ? palette.info(idleText) : palette.dim(idleText)}`
         : " ".repeat(idleWidth);
       lines.push(
-        `   ${rail(selectedIds.has(candidate.id), candidate.riskTier)} ` +
+        `   ${rail(selectedIds.has(candidate.id), candidate.riskTier, palette)} ` +
           `${path.padEnd(pathWidth)}` +
-          `${pc.dim(amount.padStart(sizeWidth))}` +
+          `${palette.dim(amount.padStart(sizeWidth))}` +
           idleCell +
           (tail ? `  ${tail}` : ""),
       );
@@ -329,7 +381,7 @@ export function formatScanReport(
     if (folded > 0) {
       const shownBytes = shown.reduce((sum, c) => sum + c.estimatedBytes, 0);
       lines.push(
-        pc.dim(
+        palette.dim(
           `     + ${folded} more · ${size(group.totalBytes - shownBytes, approx)}  (--verbose lists all)`,
         ),
       );
@@ -345,23 +397,23 @@ export function formatScanReport(
   const notes: string[] = [];
   if (unselectedReview > 0) {
     notes.push(
-      `${pc.yellow("○")} ${unselectedReview} left for you to decide ${pc.dim("(caution or dangerous) · review with")} ${pc.cyan("sweep ui")}`,
+      `${palette.warning("○")} ${unselectedReview} left for you to decide ${palette.dim("(caution or dangerous) · review with")} ${palette.accent("sweep ui")}`,
     );
   }
   if (counts.blocked > 0) {
     notes.push(
-      `${pc.red("◌")} ${counts.blocked} blocked ${pc.dim("· git-tracked, project files or protected paths; never removed")}`,
+      `${palette.danger("◌")} ${counts.blocked} blocked ${palette.dim("· git-tracked, project files or protected paths; never removed")}`,
     );
   }
   const cloudSynced = visible.filter((c) => c.reasons.includes(CLOUD_SYNC_REASON)).length;
   if (cloudSynced > 0) {
     notes.push(
-      `${pc.yellow("!")} ${cloudSynced} ${cloudSynced === 1 ? "candidate is" : "candidates are"} inside a cloud-synced folder ${pc.dim("(removing build output may trigger a large sync)")}`,
+      `${palette.warning("!")} ${cloudSynced} ${cloudSynced === 1 ? "candidate is" : "candidates are"} inside a cloud-synced folder ${palette.dim("(removing build output may trigger a large sync)")}`,
     );
   }
   if (hiddenStubs > 0) {
     notes.push(
-      pc.dim(
+      palette.dim(
         `  ${hiddenStubs} workspace node_modules ${hiddenStubs === 1 ? "stub" : "stubs"} hidden · --verbose to list`,
       ),
     );

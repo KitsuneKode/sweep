@@ -8,6 +8,7 @@ import {
   PROTOCOL_SHARED_SCHEMA,
   sanitizeTerminalText,
 } from "@kitsunekode/sweep-protocol";
+import { createPalette, formatError } from "@kitsunekode/sweep-display";
 import { writeJson, drainStdout } from "./handlers/shared.js";
 import { setFatalErrorJsonMode, EXIT, exitWith, handleFatalError } from "./errors.js";
 import type { CliOptions } from "@kitsunekode/sweep-protocol";
@@ -29,92 +30,135 @@ import { handleUi } from "./handlers/ui.js";
 declare const __SWEEP_VERSION__: string | undefined;
 export const VERSION = typeof __SWEEP_VERSION__ !== "undefined" ? __SWEEP_VERSION__ : "0.0.0-dev";
 
-const HELP_EXAMPLES = `
-Examples:
-  $ sweep                         Clean current directory (prompts before delete)
-  $ sweep clean ~/projects/app    Same as default, explicit clean command
-  $ sweep --dry-run               Preview deletions without changes
-  $ sweep --trash                 Move candidates to .sweep-trash-<ts>/ (reversible)
-  $ sweep init                    Scan, then write .sweeprc for this project
-  $ sweep scan . --json           Emit a machine-readable cleanup plan
-  $ sweep ui .                    Interactive TUI for monorepo review
-  $ sweep doctor --json           Environment + config + dry-scan report
-  $ sweep apply --plan plan.json --yes
-  $ sweep inspect --plan plan.json
-  $ sweep stats                   Show total reclaimed space
-`;
+const HELP_EXAMPLE_ROWS: readonly (readonly [string, string])[] = [
+  ["sweep", "Clean current directory (prompts before delete)"],
+  ["sweep clean ~/projects/app", "Same as default, explicit clean command"],
+  ["sweep --dry-run", "Preview deletions without changes"],
+  ["sweep --trash", "Move candidates to .sweep-trash-<ts>/ (reversible)"],
+  ["sweep init", "Scan, then write .sweeprc for this project"],
+  ["sweep scan . --json", "Emit a machine-readable cleanup plan"],
+  ["sweep ui .", "Interactive TUI for monorepo review"],
+  ["sweep doctor --json", "Environment + config + dry-scan report"],
+  ["sweep apply --plan plan.json --yes", "Apply a saved plan non-interactively"],
+  ["sweep inspect --plan plan.json", "Inspect a saved plan without applying it"],
+  ["sweep stats", "Show total reclaimed space"],
+];
+
+function formatHelpExamples(colorDisabled: boolean): string {
+  const palette = createPalette(colorDisabled ? { depth: "none" } : {});
+  const cmdWidth = Math.max(...HELP_EXAMPLE_ROWS.map(([cmd]) => cmd.length)) + 3;
+  const rows = HELP_EXAMPLE_ROWS.map(
+    ([cmd, desc]) =>
+      `  ${palette.dim("$")} ${palette.accent(cmd.padEnd(cmdWidth))}${palette.dim(desc)}`,
+  );
+  return `\n${palette.bold("Examples:")}\n${rows.join("\n")}\n`;
+}
 
 function addOutputOptions<T extends Command>(command: T): T {
   return command
-    .option("--json", "Emit structured JSON output", false)
-    .option("-q, --quiet", "Suppress non-essential output", false)
-    .option("--verbose", "Show per-candidate scan progress", false);
+    .addOption(
+      new Option("--json", "Emit structured JSON output")
+        .default(false)
+        .helpGroup("OUTPUT & DISPLAY:"),
+    )
+    .addOption(
+      new Option("-q, --quiet", "Suppress non-essential output")
+        .default(false)
+        .helpGroup("OUTPUT & DISPLAY:"),
+    )
+    .addOption(
+      new Option("--verbose", "Show per-candidate scan progress")
+        .default(false)
+        .helpGroup("OUTPUT & DISPLAY:"),
+    );
 }
 
 function addScanOptions<T extends Command>(command: T): T {
   return (
     command
-      .option(
-        "-p, --pattern <pattern>",
-        "Add extra pattern, repeatable: -p .output -p .cache",
-        (v: string, acc: string[]) => [...acc, v],
-        [] as string[],
+      .addOption(
+        new Option("-p, --pattern <pattern>", "Add extra pattern, repeatable: -p .output -p .cache")
+          .argParser((v: string, acc: string[]) => [...acc, v])
+          .default([] as string[])
+          .helpGroup("SELECTION & FILTERS:"),
       )
-      .option(
-        "-i, --ignore <pattern>",
-        "Add ignore pattern, repeatable",
-        (v: string, acc: string[]) => [...acc, v],
-        [] as string[],
+      .addOption(
+        new Option("-i, --ignore <pattern>", "Add ignore pattern, repeatable")
+          .argParser((v: string, acc: string[]) => [...acc, v])
+          .default([] as string[])
+          .helpGroup("SELECTION & FILTERS:"),
       )
-      .option(
-        "--disabled-pattern <pattern>",
-        "Disable a default pattern for this run, repeatable",
-        (v: string, acc: string[]) => [...acc, v],
-        [] as string[],
+      .addOption(
+        new Option(
+          "--disabled-pattern <pattern>",
+          "Disable a default pattern for this run, repeatable",
+        )
+          .argParser((v: string, acc: string[]) => [...acc, v])
+          .default([] as string[])
+          .helpGroup("SELECTION & FILTERS:"),
       )
-      .option("--depth <n>", "Max recursion depth (-1 = unlimited)", (v: string) => {
-        // Strict digits only - parseInt("5x") -> 5 would silently mangle intent.
-        if (!/^-?\d+$/.test(v)) {
-          throw new InvalidArgumentError(`expected an integer, got "${v}"`);
-        }
-        return Number.parseInt(v, 10);
-      })
+      .addOption(
+        new Option("--depth <n>", "Max recursion depth (-1 = unlimited)")
+          .argParser((v: string) => {
+            // Strict digits only - parseInt("5x") -> 5 would silently mangle intent.
+            if (!/^-?\d+$/.test(v)) {
+              throw new InvalidArgumentError(`expected an integer, got "${v}"`);
+            }
+            return Number.parseInt(v, 10);
+          })
+          .helpGroup("SELECTION & FILTERS:"),
+      )
       // .choices makes an unknown value a usage error - a typo like
       // `--select safe` mistyped must not silently select MORE (or less) than
       // asked.
       .addOption(
         new Option("--select <mode>", "Default selection policy")
           .choices(["default", "safe", "all", "none"])
-          .default("default"),
+          .default("default")
+          .helpGroup("SELECTION & FILTERS:"),
       )
-      .option("--include-dangerous", "Include dangerous candidates in selection", false)
-      .option(
-        "--idle <age>",
-        "Only select artifacts in projects untouched for at least <age> (e.g. 30d, 3m, 1y)",
-        (text: string) => {
-          try {
-            return parseIdleDuration(text);
-          } catch (error) {
-            throw new InvalidArgumentError((error as Error).message);
-          }
-        },
+      .addOption(
+        new Option("--include-dangerous", "Include dangerous candidates in selection")
+          .default(false)
+          .helpGroup("SELECTION & FILTERS:"),
       )
-      .option("--config <path>", "Explicit config file path")
-      .option(
-        "--max-size-gb <gib>",
-        "Deletion byte ceiling in GiB (none disables a configured cap)",
-        (text: string) => {
-          if (text === "none") return "none";
-          const value = Number(text);
-          if (
-            !/^\d+(?:\.\d+)?$/.test(text) ||
-            !Number.isFinite(value) ||
-            value > Number.MAX_SAFE_INTEGER / 1024 ** 3
-          ) {
-            throw new InvalidArgumentError("expected a non-negative safe GiB value or none");
-          }
-          return value;
-        },
+      .addOption(
+        new Option(
+          "--idle <age>",
+          "Only select artifacts in projects untouched for at least <age> (e.g. 30d, 3m, 1y)",
+        )
+          .argParser((text: string) => {
+            try {
+              return parseIdleDuration(text);
+            } catch (error) {
+              throw new InvalidArgumentError((error as Error).message);
+            }
+          })
+          .helpGroup("SELECTION & FILTERS:"),
+      )
+      .addOption(
+        new Option("--config <path>", "Explicit config file path").helpGroup(
+          "SELECTION & FILTERS:",
+        ),
+      )
+      .addOption(
+        new Option(
+          "--max-size-gb <gib>",
+          "Deletion byte ceiling in GiB (none disables a configured cap)",
+        )
+          .argParser((text: string) => {
+            if (text === "none") return "none";
+            const value = Number(text);
+            if (
+              !/^\d+(?:\.\d+)?$/.test(text) ||
+              !Number.isFinite(value) ||
+              value > Number.MAX_SAFE_INTEGER / 1024 ** 3
+            ) {
+              throw new InvalidArgumentError("expected a non-negative safe GiB value or none");
+            }
+            return value;
+          })
+          .helpGroup("SAFETY & MODE:"),
       )
       .addOption(
         new Option(
@@ -122,7 +166,8 @@ function addScanOptions<T extends Command>(command: T): T {
           "Scan engine: auto (default - rust when its binary is available), rust, or js",
         )
           .choices(["auto", "rust", "js"])
-          .default("auto"),
+          .default("auto")
+          .helpGroup("OUTPUT & DISPLAY:"),
       )
       .addOption(
         new Option(
@@ -130,27 +175,49 @@ function addScanOptions<T extends Command>(command: T): T {
           "Scan resource allowance (logical memory, not RSS)",
         )
           .choices(["balanced", "low-memory"])
-          .default("balanced"),
+          .default("balanced")
+          .helpGroup("OUTPUT & DISPLAY:"),
       )
-      .option(
-        "--cold",
-        "Cold-start run: refresh the engine probe and drop OS page cache when permitted (dev)",
-        false,
+      .addOption(
+        new Option(
+          "--cold",
+          "Cold-start run: refresh the engine probe and drop OS page cache when permitted (dev)",
+        )
+          .default(false)
+          .helpGroup("OUTPUT & DISPLAY:"),
       )
-      .option("--no-color", "Disable color output")
+      .addOption(new Option("--no-color", "Disable color output").helpGroup("OUTPUT & DISPLAY:"))
   );
 }
 
-function addCleanAction(command: Command): Command {
+function addCleanAction(command: Command, groupOptions = false): Command {
+  const withGroup = (opt: Option) => (groupOptions ? opt.helpGroup("SAFETY & MODE:") : opt);
   return command
     .argument("[path]", "Directory to sweep", ".")
-    .option("-n, --dry-run", "Preview deletions without making changes", false)
-    .option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting", false)
-    .option("--force-large", "Allow deletion exceeding maxSizeGB threshold", false)
-    .option(
-      "--allow-dangerous",
-      "With --yes, allow dangerous items to be removed (each is listed first)",
-      false,
+    .addOption(
+      withGroup(
+        new Option("-n, --dry-run", "Preview deletions without making changes").default(false),
+      ),
+    )
+    .addOption(
+      withGroup(
+        new Option("--trash", "Move candidates to .sweep-trash-<ts>/ instead of deleting").default(
+          false,
+        ),
+      ),
+    )
+    .addOption(
+      withGroup(
+        new Option("--force-large", "Allow deletion exceeding maxSizeGB threshold").default(false),
+      ),
+    )
+    .addOption(
+      withGroup(
+        new Option(
+          "--allow-dangerous",
+          "With --yes, allow dangerous items to be removed (each is listed first)",
+        ).default(false),
+      ),
     )
     .action(function (this: Command, pathArg: string) {
       void handleClean(pathArg, this.optsWithGlobals<CliOptions>());
@@ -163,23 +230,55 @@ export function makeProgram(): Command {
   program
     .configureOutput({
       outputError: (message, write) => {
-        const safeMessage = sanitizeTerminalText(message.replace(/\n$/, ""));
-        write(
-          program.opts<{ json?: boolean }>().json
-            ? `${JSON.stringify({ type: "error", protocolVersion: PROTOCOL_VERSION, code: "invalid_arguments", exitCode: EXIT.GUARDRAIL, retryable: false, message: safeMessage })}\n`
-            : `${safeMessage}\n`,
-        );
+        const trimmed = message.replace(/\n$/, "");
+        if (program.opts<{ json?: boolean }>().json) {
+          const safeMessage = sanitizeTerminalText(trimmed);
+          write(
+            `${JSON.stringify({ type: "error", protocolVersion: PROTOCOL_VERSION, code: "invalid_arguments", exitCode: EXIT.GUARDRAIL, retryable: false, message: safeMessage })}\n`,
+          );
+          return;
+        }
+        const cleaned = trimmed.replace(/^error:\s*/i, "");
+        write(formatError(cleaned, { stream: process.stderr }));
       },
+    })
+    .configureHelp({
+      styleTitle: (str) =>
+        createPalette(
+          program.opts<{ color?: boolean }>().color === false ? { depth: "none" } : {},
+        ).bold(str),
+      styleCommandText: (str) => {
+        const palette = createPalette(
+          program.opts<{ color?: boolean }>().color === false ? { depth: "none" } : {},
+        );
+        return palette.bold(palette.accent(str));
+      },
+      styleOptionTerm: (str) =>
+        createPalette(
+          program.opts<{ color?: boolean }>().color === false ? { depth: "none" } : {},
+        ).accent(str),
+      styleSubcommandTerm: (str) =>
+        createPalette(
+          program.opts<{ color?: boolean }>().color === false ? { depth: "none" } : {},
+        ).accent(str),
+      styleArgumentTerm: (str) =>
+        createPalette(
+          program.opts<{ color?: boolean }>().color === false ? { depth: "none" } : {},
+        ).dim(str),
     })
     .exitOverride((error) => exitWith(error.exitCode === 0 ? EXIT.OK : EXIT.GUARDRAIL))
     .name("sweep")
     .description("Safe, fast artifact cleanup for any project tree")
     .version(VERSION, "-V, --version")
-    .addHelpText("after", HELP_EXAMPLES);
+    .addHelpText("after", () =>
+      formatHelpExamples(program.opts<{ color?: boolean }>().color === false),
+    );
 
   addScanOptions(program);
   addOutputOptions(program);
-  program.option("-y, --yes", "Skip confirmation prompt", false);
+  program.addOption(
+    new Option("-y, --yes", "Skip confirmation prompt").default(false).helpGroup("SAFETY & MODE:"),
+  );
 
   // The flag is a bridge: core read sites (engine probe, page-cache drop)
   // check SWEEP_COLD so a TUI rescan honors it without plumbing through
@@ -196,7 +295,7 @@ export function makeProgram(): Command {
     }
   });
 
-  addCleanAction(program);
+  addCleanAction(program, true);
 
   addCleanAction(
     program
@@ -243,7 +342,7 @@ export function makeProgram(): Command {
         .default("projects"),
     )
     .addOption(
-      new Option("--theme <theme>", "Colours: auto follows the terminal's background")
+      new Option("--theme <theme>", "Colors: auto follows the terminal's background")
         .choices(["auto", "dark", "light"])
         .env("SWEEP_THEME"),
     )

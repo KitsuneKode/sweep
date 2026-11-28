@@ -12,6 +12,8 @@ import { EXIT, exitWith, handleFatalError } from "../errors.js";
 import {
   createSpinner,
   formatBytes,
+  printError,
+  printInitDryRunJson,
   printInitNextSteps,
   printInitReport,
   sanitizeTerminalText,
@@ -49,9 +51,7 @@ export async function handleInit(opts: InitHandlerOptions): Promise<void> {
     assertTargetDirectory(targetDir);
     // Refuse before scanning: nobody should wait to be told no.
     if (!opts.dryRun && checkInitSweeprcTarget(configPath, opts.force) === "exists") {
-      console.error(
-        `error: ${sanitizeTerminalText(configPath)} already exists (use --force to overwrite)`,
-      );
+      printError(`${sanitizeTerminalText(configPath)} already exists (use --force to overwrite)`);
       exitWith(EXIT.GUARDRAIL);
     }
 
@@ -113,15 +113,13 @@ export async function handleInit(opts: InitHandlerOptions): Promise<void> {
 
     const contents = { patterns, ignore: [], maxSizeGB: null };
     if (opts.dryRun) {
-      console.log(JSON.stringify(contents, null, 2));
+      printInitDryRunJson(contents);
       printInitNextSteps(configPath, false);
       exitWith(EXIT.OK);
     }
     const result = writeInitSweeprc(configPath, opts.force, contents);
     if (result === "exists") {
-      console.error(
-        `error: ${sanitizeTerminalText(configPath)} already exists (use --force to overwrite)`,
-      );
+      printError(`${sanitizeTerminalText(configPath)} already exists (use --force to overwrite)`);
       exitWith(EXIT.GUARDRAIL);
     }
     printInitNextSteps(configPath, true);

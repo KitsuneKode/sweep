@@ -1,4 +1,4 @@
-import pc from "picocolors";
+import { createPalette } from "./palette.js";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠣", "⠏"] as const;
 
@@ -7,10 +7,16 @@ export interface Spinner {
   stop: () => void;
 }
 
-/** Create a TTY spinner. In non-TTY environments, emits a single static line. */
+/**
+ * Create a TTY spinner. When stdout is not a TTY, never pollute stdout with
+ * transient scan noise; only write a static line to stderr when stderr itself
+ * is an interactive TTY.
+ */
 export function createSpinner(initialText: string): Spinner {
   if (!process.stdout.isTTY) {
-    process.stdout.write(`sweep: ${initialText}\n`);
+    if (process.stderr.isTTY) {
+      process.stderr.write(`sweep: ${initialText}\n`);
+    }
     return {
       update: () => {},
       stop: () => {},
@@ -22,11 +28,12 @@ export function createSpinner(initialText: string): Spinner {
   let stopped = false;
 
   const paint = () => {
+    const palette = createPalette({ stream: process.stdout });
     const frame = SPINNER_FRAMES[frameIdx % SPINNER_FRAMES.length] ?? "⠋";
     // One line, never wrapped: a wrapped line cannot be redrawn with `\r`.
     const room = Math.max(8, (process.stdout.columns ?? 80) - 3);
     const text = current.length > room ? `${current.slice(0, room - 1)}…` : current;
-    process.stdout.write(`\r\x1b[2K${pc.cyan(frame)} ${text}`);
+    process.stdout.write(`\r\x1b[2K${palette.accent(frame)} ${text}`);
   };
 
   const id = setInterval(() => {

@@ -187,7 +187,8 @@ describe("CLI scan/apply", () => {
     const human = runCli(["status", tmpDir, "--idle", "12h", "--no-color"]);
     expect(human.exitCode).toBe(0);
     expect(human.stdout).toContain("Nothing automatically reclaimable here.");
-    expect(human.stdout).toContain("1 guarded item(s) found");
+    expect(human.stdout).toContain("1 guarded item found");
+    expect(human.stdout).not.toContain("\x1b");
 
     const json = runCli(["status", tmpDir, "--idle", "12h", "--json"]);
     expect(json.exitCode).toBe(0);
@@ -335,7 +336,7 @@ describe("CLI scan/apply", () => {
     expect(declined.exitCode).toBe(1);
     expect(declined.stderr).toContain(tmpDir);
     expect(declined.stderr).toContain("1 dangerous");
-    expect(declined.stderr).toContain("1 dangerous item(s) will be removed:");
+    expect(declined.stderr).toContain("1 dangerous item will be removed:");
     expect(existsSync(dir("node_modules"))).toBe(true);
     expect(existsSync(dir("target"))).toBe(true);
   });
@@ -735,4 +736,65 @@ test("schema export provides the complete protocol vocabulary without scanning",
   expect(exported.schemas.scanPlan.$id).toBeDefined();
   expect(exported.schemas.applyReport.properties.outcomes).toBeDefined();
   expect(existsSync(dir("test-config"))).toBe(false);
+});
+
+test("piped scan emits [caution], suppresses stdout spinner noise, and honors NO_COLOR", () => {
+  mkdirSync(dir("app/real-target"), { recursive: true });
+  writeFileSync(dir("app/Cargo.toml"), "[package]\n");
+  writeFileSync(dir("app/real-target/a.o"), "x".repeat(2048));
+  symlinkSync(dir("app/real-target"), dir("app/target"));
+
+  const piped = runCli(["scan", tmpDir], { NO_COLOR: "1" });
+  expect(piped.exitCode).toBe(0);
+  expect(piped.stdout).not.toContain("\x1b");
+  expect(piped.stdout).not.toContain("sweep: Scanning");
+  expect(piped.stdout).toContain("[caution]");
+  expect(piped.stdout).not.toContain("[warning]");
+  expect(piped.stdout).not.toContain("[warn]");
+});
+
+test("piped doctor emits plain text with explicit status words while doctor --json keeps exact schema", () => {
+  mkdirSync(dir("project"), { recursive: true });
+  writeFileSync(dir("project/.sweeprc"), "{ invalid json\n");
+
+  const plain = runCli(["doctor", dir("project")], { NO_COLOR: "1" });
+  expect(plain.exitCode).toBe(5);
+  expect(plain.stdout).not.toContain("\x1b");
+  expect(plain.stdout).toContain("sweep doctor:");
+  expect(plain.stdout).toContain("warn  config");
+
+  const jsonRes = runCli(["doctor", dir("project"), "--json"]);
+  expect(jsonRes.exitCode).toBe(5);
+  const doc = JSON.parse(jsonRes.stdout) as {
+    protocolVersion: string;
+    targetDir: string;
+    hasWarnings: boolean;
+    checks: Array<{
+      name: string;
+      status: string;
+      detail: string;
+      reasonKind?: string;
+      reason?: string;
+    }>;
+  };
+  expect(doc.protocolVersion).toBe("1");
+  expect(doc.hasWarnings).toBe(true);
+  const cfgCheck = doc.checks.find((c) => c.name === "config");
+  expect(cfgCheck?.status).toBe("warn");
+  expect(cfgCheck?.reasonKind).toBe("config_invalid");
+  expect(cfgCheck?.reason).toBeTruthy();
+});
+
+test("--help groups options and uses American spelling for Colors", () => {
+  const rootHelp = runCli(["--help"], { NO_COLOR: "1" });
+  expect(rootHelp.exitCode).toBe(0);
+  expect(rootHelp.stdout).not.toContain("\x1b");
+  expect(rootHelp.stdout).toContain("SELECTION & FILTERS:");
+  expect(rootHelp.stdout).toContain("SAFETY & MODE:");
+  expect(rootHelp.stdout).toContain("OUTPUT & DISPLAY:");
+
+  const uiHelp = runCli(["ui", "--help"], { NO_COLOR: "1" });
+  expect(uiHelp.exitCode).toBe(0);
+  expect(uiHelp.stdout).toContain("Colors:");
+  expect(uiHelp.stdout).not.toContain("Colours:");
 });

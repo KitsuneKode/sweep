@@ -1,6 +1,6 @@
-import pc from "picocolors";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes, formatScanElapsed } from "./bytes.js";
+import { createPalette } from "./palette.js";
 
 /** Format a deletion progress line for terminal output. */
 export function formatDeletionProgress(
@@ -133,12 +133,13 @@ export function printDeletionProgress(
     ...(options.elapsedMs !== undefined ? { elapsedMs: options.elapsedMs } : {}),
     columns,
   });
+  const palette = createPalette({ stream: process.stderr });
   const colored =
-    pc.cyan(`${built.verb} ${built.count}`) +
+    palette.accent(`${built.verb} ${built.count}`) +
     (built.path ? ` ${built.path}` : "") +
-    (built.item ? `  ${pc.yellow(built.item)}` : "") +
-    (built.running ? `  ${pc.green(built.running)}` : "") +
-    (built.elapsed ? `  ${pc.dim(built.elapsed)}` : "");
+    (built.item ? `  ${palette.dim(built.item)}` : "") +
+    (built.running ? `  ${palette.positive(built.running)}` : "") +
+    (built.elapsed ? `  ${palette.dim(built.elapsed)}` : "");
 
   if (process.stderr.isTTY) {
     // Erase the previous path. A shorter update must not leave the tail of a

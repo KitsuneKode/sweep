@@ -1,7 +1,7 @@
-import pc from "picocolors";
 import type { ScanCandidate, ScanEntry } from "@kitsunekode/sweep-protocol";
 import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { formatBytes, formatScanElapsed } from "./bytes.js";
+import { createPalette, plural } from "./palette.js";
 import { createSpinner } from "./spinner.js";
 import { formatRiskBadge } from "./risk.js";
 
@@ -54,15 +54,16 @@ export function createProgressiveScanRenderer(
       count++;
       stopSpinnerIfNeeded();
 
+      const palette = createPalette();
       const size = `${candidate.bytesKnown === false ? "~" : ""}${formatBytes(candidateBytes(candidate))}`;
-      const badge = riskTier ? ` ${formatRiskBadge(riskTier)}` : "";
-      const symlinkBadge = candidate.isSymlink ? pc.dim(" [symlink]") : "";
+      const badge = riskTier ? ` ${formatRiskBadge(riskTier, palette)}` : "";
+      const symlinkBadge = candidate.isSymlink ? palette.dim(" [symlink]") : "";
 
       if (process.stdout.isTTY) {
         console.log(
-          `  ${pc.dim("·")} ${pc.bold(candidateName(candidate))}` +
-            `  ${pc.dim(candidatePath(candidate))}` +
-            `  ${pc.yellow(size)}` +
+          `  ${palette.dim("·")} ${palette.bold(candidateName(candidate))}` +
+            `  ${palette.dim(candidatePath(candidate))}` +
+            `  ${palette.bold(size.padStart(10))}` +
             badge +
             symlinkBadge,
         );
@@ -74,9 +75,14 @@ export function createProgressiveScanRenderer(
     },
     finish(summary) {
       stopSpinnerIfNeeded();
+      const palette = createPalette();
 
       if (summary.count === 0) {
-        console.log(pc.green("✓") + " Nothing to clean.");
+        console.log(
+          process.stdout.isTTY
+            ? `${palette.positive("✓")} Nothing to clean.`
+            : "sweep: nothing to clean.",
+        );
         return;
       }
 
@@ -85,30 +91,32 @@ export function createProgressiveScanRenderer(
 
       const skipped =
         summary.skippedDirs && summary.skippedDirs > 0 ? `, ${summary.skippedDirs} skipped` : "";
-      const engine = summary.engine ? pc.dim(` · engine ${summary.engine}`) : "";
+      const engine = summary.engine ? palette.dim(` · engine ${summary.engine}`) : "";
       const elapsed =
-        summary.elapsedMs !== undefined ? pc.dim(` · ${formatScanElapsed(summary.elapsedMs)}`) : "";
+        summary.elapsedMs !== undefined
+          ? palette.dim(` · ${formatScanElapsed(summary.elapsedMs)}`)
+          : "";
 
       if (process.stdout.isTTY) {
         console.log();
         console.log(
-          `  ${pc.bold(summary.count.toString())} items, ` +
-            `${pc.yellow(`${sizePrefix}${formatBytes(summary.totalBytes)}`)} ${totalLabel}`,
+          `  ${palette.bold(plural(summary.count, "item"))}, ` +
+            `${palette.bold(palette.positive(`${sizePrefix}${formatBytes(summary.totalBytes)}`))} ${totalLabel}`,
         );
         console.log(
-          pc.dim(`Scanned ${pc.bold(summary.scannedDirs.toString())} dirs`) +
-            (skipped ? pc.yellow(skipped) : "") +
+          palette.dim(`Scanned ${plural(summary.scannedDirs, "dir")}`) +
+            (skipped ? palette.warning(skipped) : "") +
             engine +
             elapsed +
-            pc.dim("."),
+            palette.dim("."),
         );
         console.log();
       } else {
         console.log(
-          `sweep: found ${summary.count} items (${sizePrefix}${formatBytes(summary.totalBytes)} ${totalLabel})`,
+          `sweep: found ${plural(summary.count, "item")} (${sizePrefix}${formatBytes(summary.totalBytes)} ${totalLabel})`,
         );
         console.log(
-          `sweep: scanned ${summary.scannedDirs} dirs${skipped}${summary.engine ? `, engine=${summary.engine}` : ""}${summary.elapsedMs !== undefined ? `, ${formatScanElapsed(summary.elapsedMs)}` : ""}`,
+          `sweep: scanned ${plural(summary.scannedDirs, "dir")}${skipped}${summary.engine ? `, engine=${summary.engine}` : ""}${summary.elapsedMs !== undefined ? `, ${formatScanElapsed(summary.elapsedMs)}` : ""}`,
         );
       }
     },
