@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -202,13 +203,87 @@ describe("CLI sweep widget", () => {
     expect(events.at(-1)?.type).toBe("widget_snapshot");
   });
 
-  test("respects existing guardrails (refuses ~ and /) and rejects invalid widget flags with exit code 2", () => {
-    const homeRes = runCli(["widget", homedir(), "--json"]);
-    expect(homeRes.exitCode).toBe(2);
+  test("respects existing guardrails and emits structured target_refused / config_invalid errors across JSON, stream, and cache-only modes", () => {
+    const gitTarget = dir("repo", ".git");
+    mkdirSync(gitTarget, { recursive: true });
 
-    const rootRes = runCli(["widget", "/", "--json"]);
-    expect(rootRes.exitCode).toBe(2);
+    const refusedTargets: string[] = [homedir(), "~", "/", gitTarget];
+    if (process.platform !== "win32") {
+      refusedTargets.push("/etc");
+    }
 
+    for (const target of refusedTargets) {
+      // 1. --json mode: schema-valid error snapshot on stdout, empty stderr, exit 2
+      const jsonRes = runCli(["widget", target, "--json"]);
+      expect(jsonRes.exitCode).toBe(2);
+      expect(jsonRes.stderr.trim()).toBe("");
+      const jsonSnap = JSON.parse(jsonRes.stdout) as WidgetSnapshot;
+      expect(validateSnapshot(jsonSnap)).toBe(true);
+      expect(jsonSnap.state).toBe("error");
+      expect(jsonSnap.error?.code).toBe("target_refused");
+      expect(jsonSnap.error?.retryable).toBe(false);
+      expect(jsonSnap.error?.message).not.toContain(homedir());
+      expect(jsonSnap.error?.message).not.toContain("/");
+
+      // 2. --json-stream mode: single widget_error NDJSON line on stdout, empty stderr, exit 2
+      const streamRes = runCli(["widget", target, "--json-stream"]);
+      expect(streamRes.exitCode).toBe(2);
+      expect(streamRes.stderr.trim()).toBe("");
+      const lines = streamRes.stdout.trim().split("\n").filter(Boolean);
+      expect(lines).toHaveLength(1);
+      const streamEv = JSON.parse(lines[0]!) as WidgetEvent;
+      expect(validateEvent(streamEv)).toBe(true);
+      expect(streamEv.type).toBe("widget_error");
+      if (streamEv.type === "widget_error") {
+        expect(streamEv.error.code).toBe("target_refused");
+        expect(streamEv.error.retryable).toBe(false);
+        expect(streamEv.error.message).not.toContain(homedir());
+        expect(streamEv.error.message).not.toContain("/");
+      }
+
+      // 3. --cache-only --json mode: schema-valid error snapshot on stdout, empty stderr, exit 2
+      const cacheRes = runCli(["widget", target, "--cache-only", "--json"]);
+      expect(cacheRes.exitCode).toBe(2);
+      expect(cacheRes.stderr.trim()).toBe("");
+      const cacheSnap = JSON.parse(cacheRes.stdout) as WidgetSnapshot;
+      expect(validateSnapshot(cacheSnap)).toBe(true);
+      expect(cacheSnap.state).toBe("error");
+      expect(cacheSnap.error?.code).toBe("target_refused");
+      expect(cacheSnap.error?.retryable).toBe(false);
+      expect(cacheSnap.error?.message).not.toContain(homedir());
+      expect(cacheSnap.error?.message).not.toContain("/");
+    }
+
+    // Malformed .sweeprc emits structured config_invalid in --json and --json-stream (exit 3)
+    const badCfgDir = dir("bad-config-workspace");
+    mkdirSync(badCfgDir, { recursive: true });
+    writeFileSync(join(badCfgDir, ".sweeprc"), "{ not valid json");
+
+    const badCfgJson = runCli(["widget", badCfgDir, "--json", "--engine", "js"]);
+    expect(badCfgJson.exitCode).toBe(3);
+    expect(badCfgJson.stderr.trim()).toBe("");
+    const badCfgSnap = JSON.parse(badCfgJson.stdout) as WidgetSnapshot;
+    expect(validateSnapshot(badCfgSnap)).toBe(true);
+    expect(badCfgSnap.state).toBe("error");
+    expect(badCfgSnap.error?.code).toBe("config_invalid");
+    expect(badCfgSnap.error?.retryable).toBe(false);
+    expect(badCfgSnap.error?.message).not.toContain(badCfgDir);
+
+    const badCfgStream = runCli(["widget", badCfgDir, "--json-stream", "--engine", "js"]);
+    expect(badCfgStream.exitCode).toBe(3);
+    expect(badCfgStream.stderr.trim()).toBe("");
+    const badCfgLines = badCfgStream.stdout.trim().split("\n").filter(Boolean);
+    expect(badCfgLines).toHaveLength(1);
+    const badCfgEv = JSON.parse(badCfgLines[0]!) as WidgetEvent;
+    expect(validateEvent(badCfgEv)).toBe(true);
+    expect(badCfgEv.type).toBe("widget_error");
+    if (badCfgEv.type === "widget_error") {
+      expect(badCfgEv.error.code).toBe("config_invalid");
+      expect(badCfgEv.error.retryable).toBe(false);
+      expect(badCfgEv.error.message).not.toContain(badCfgDir);
+    }
+
+    // Usage / flag-combination errors exit 2
     const badView = runCli(["widget", tmpDir, "--view", "space", "--json"]);
     expect(badView.exitCode).toBe(2);
 
@@ -220,6 +295,58 @@ describe("CLI sweep widget", () => {
 
     const zeroTimeout = runCli(["widget", tmpDir, "--timeout", "0s", "--json"]);
     expect(zeroTimeout.exitCode).toBe(2);
+  });
+
+  test("receipt with unknown extra fields yields a schema-valid snapshot and still refreshes L4 cache", () => {
+    const workspace = dir("receipt-extra-workspace");
+    seedProjectsTree(workspace);
+
+    const stateDir = join(dir("test-xdg-state"), "sweep");
+    mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+    const realWorkspace = realpathSync(workspace);
+    writeFileSync(
+      join(stateDir, "last-receipt.json"),
+      JSON.stringify({
+        receiptVersion: 1,
+        id: "01JDX9R6H8Q7N4K2V1M8W5B3C2",
+        completedAt: new Date().toISOString(),
+        targetDir: realWorkspace,
+        mode: "delete",
+        deletedCount: 1,
+        failedCount: 1,
+        unattemptedCount: 0,
+        stopped: false,
+        totalBytesFreed: 1024,
+        freeBytesAfter: 100_000,
+        failureSummary: {
+          busy: 1,
+          permissionDenied: 0,
+          other: 0,
+          unexpectedNested: "drop-me",
+        },
+        unexpectedTopLevel: true,
+      }),
+      { mode: 0o600 },
+    );
+
+    const liveRes = runCli(["widget", workspace, "--json", "--engine", "js"]);
+    expect(liveRes.exitCode).toBe(0);
+    const liveSnap = JSON.parse(liveRes.stdout) as WidgetSnapshot;
+    expect(validateSnapshot(liveSnap)).toBe(true);
+    expect(liveSnap.receipt?.id).toBe("01JDX9R6H8Q7N4K2V1M8W5B3C2");
+    expect(
+      "unexpectedTopLevel" in ((liveSnap.receipt ?? {}) as unknown as Record<string, unknown>),
+    ).toBe(false);
+
+    // Confirm the L4 cache was actually refreshed despite extra fields in last-receipt.json.
+    const cacheRes = runCli(["widget", workspace, "--cache-only", "--json"]);
+    expect(cacheRes.exitCode).toBe(0);
+    const cacheSnap = JSON.parse(cacheRes.stdout) as WidgetSnapshot;
+    expect(validateSnapshot(cacheSnap)).toBe(true);
+    expect(cacheSnap.source).toBe("cache");
+    expect(cacheSnap.projectsSummary?.reclaimableBytes).toBe(
+      liveSnap.projectsSummary?.reclaimableBytes,
+    );
   });
 
   test("emits structured widget errors for missing target, unavailable rust engine, and unreadable folder", () => {

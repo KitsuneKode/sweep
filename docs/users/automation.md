@@ -168,10 +168,13 @@ unconditionally if passed to `sweep apply --plan`.
   `state: "stale"`, and `projectsSummary: null`.
 - **Streaming progress (`--json-stream`):** Emits `widget_started`, coalesced
   `widget_progress` frames (`<= 12 Hz`), and a final `widget_snapshot` (or
-  `widget_error` with a non-zero exit code). Error messages are plain
-  user-facing sentences drawn from the closed `error.code` enum
-  (`engine_missing`, `permission_denied`, `target_missing`, `timeout`,
-  `scan_failed`).
+  `widget_error` with a non-zero exit code). Error messages are plain,
+  path-free user-facing sentences drawn from the closed `error.code` enum
+  (`engine_missing`, `permission_denied`, `target_missing`, `target_refused`,
+  `config_invalid`, `timeout`, `scan_failed`). Refused targets (`~`, `/`,
+  `/etc`, `.git`) emit `target_refused` with exit code `2` in `--json`,
+  `--json-stream`, and `--cache-only --json`; malformed `.sweeprc` configs emit
+  `config_invalid` with exit code `3`.
 
 For JSON scan, inspect, stats, recover, doctor, apply and clean commands, fatal
 errors end stderr with a JSON error record containing `type`, `protocolVersion`,

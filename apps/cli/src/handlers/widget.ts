@@ -34,7 +34,7 @@ import {
   writeWidgetCacheEntry,
 } from "@kitsunekode/sweep-core/widget";
 import { formatBytes, printError } from "@kitsunekode/sweep-display";
-import { EXIT, exitWith, handleFatalError, type ExitCode } from "../errors.js";
+import { EXIT, exitWith, handleFatalError, resolveExitCode, type ExitCode } from "../errors.js";
 import {
   applyNoColor,
   drainStdout,
@@ -214,25 +214,38 @@ export async function handleWidget(pathArg: string, opts: WidgetCliOptions): Pro
   });
 
   const startedAt = performance.now();
-  let resolvedTargetForError = pathArg;
+  const structuredMode = Boolean(opts.json || opts.jsonStream);
+
+  // Flag-combination usage errors stay generic CLI errors (exit 2).
+  if (opts.json && opts.jsonStream) {
+    handleFatalError(
+      new GuardrailError(
+        "Choose one: --json emits a widget snapshot; --json-stream emits NDJSON widget events.",
+      ),
+      { json: true },
+    );
+  }
+  if (opts.cacheOnly && opts.refresh) {
+    handleFatalError(
+      new GuardrailError(
+        "Choose one: --cache-only reads the cached snapshot without scanning; --refresh forces a live scan.",
+      ),
+      { json: structuredMode },
+    );
+  }
+  if (opts.cacheOnly && opts.jsonStream) {
+    handleFatalError(
+      new GuardrailError(
+        "--cache-only returns an immediate snapshot and cannot be combined with --json-stream.",
+      ),
+      { json: true },
+    );
+  }
+
+  let resolvedTargetForError = resolveTargetPath(pathArg);
+  let phase: "target" | "config" | "scan" = "target";
 
   try {
-    if (opts.json && opts.jsonStream) {
-      throw new GuardrailError(
-        "Choose one: --json emits a widget snapshot; --json-stream emits NDJSON widget events.",
-      );
-    }
-    if (opts.cacheOnly && opts.refresh) {
-      throw new GuardrailError(
-        "Choose one: --cache-only reads the cached snapshot without scanning; --refresh forces a live scan.",
-      );
-    }
-    if (opts.cacheOnly && opts.jsonStream) {
-      throw new GuardrailError(
-        "--cache-only returns an immediate snapshot and cannot be combined with --json-stream.",
-      );
-    }
-
     const target = resolveWidgetTarget(pathArg);
     resolvedTargetForError = target.targetDir;
     if (!target.ok) {
@@ -267,10 +280,12 @@ export async function handleWidget(pathArg: string, opts: WidgetCliOptions): Pro
       exitWith(EXIT.OK);
     }
 
+    phase = "config";
     const config = resolveScanConfig(targetDir, opts);
     const projectConfig = resolveProjectScanConfig(targetDir, opts);
     const selectionPolicy = resolveSelectionPolicy(opts);
     const resourceProfile = opts.resourceProfile ?? "low-memory";
+    phase = "scan";
 
     if (opts.engine === "rust" && !probeRustEngine().available) {
       await emitWidgetErrorAndExit(targetDir, widgetErrorForCode("engine_missing"), EXIT.FAILURE, {
@@ -460,8 +475,36 @@ export async function handleWidget(pathArg: string, opts: WidgetCliOptions): Pro
       process.off("SIGTERM", onSignal);
     }
   } catch (err) {
-    if (err instanceof GuardrailError || err instanceof ConfigParseError) {
-      handleFatalError(err, { json: opts.json || opts.jsonStream });
+    if (err instanceof ConfigParseError) {
+      if (!structuredMode) {
+        handleFatalError(err, { json: false });
+      }
+      await emitWidgetErrorAndExit(
+        resolvedTargetForError,
+        widgetErrorForCode("config_invalid"),
+        EXIT.CONFIG_PARSE,
+        {
+          json: opts.json,
+          jsonStream: opts.jsonStream,
+          elapsedMs: Math.round(performance.now() - startedAt),
+        },
+      );
+    }
+    if (err instanceof GuardrailError) {
+      if (!structuredMode) {
+        handleFatalError(err, { json: false });
+      }
+      const widgetErr =
+        phase === "target"
+          ? widgetErrorForCode("target_refused")
+          : phase === "config"
+            ? widgetErrorForCode("config_invalid")
+            : widgetErrorForCode("scan_failed");
+      await emitWidgetErrorAndExit(resolvedTargetForError, widgetErr, resolveExitCode(err), {
+        json: opts.json,
+        jsonStream: opts.jsonStream,
+        elapsedMs: Math.round(performance.now() - startedAt),
+      });
     }
     const code = filesystemErrorCode(err);
     const widgetErr =

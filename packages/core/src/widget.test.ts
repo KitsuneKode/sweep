@@ -290,6 +290,8 @@ describe("widget JSON Schema Ajv contract validation", () => {
       "engine_missing",
       "permission_denied",
       "target_missing",
+      "target_refused",
+      "config_invalid",
       "timeout",
       "scan_failed",
     ] as const) {
@@ -430,6 +432,72 @@ describe("widget L4 cache and receipts", () => {
     expect(
       readRecentWidgetReceipt("/work/projects", { nowMs: NOW + 25 * 3_600_000, receiptPath }),
     ).toBeNull();
+  });
+
+  test("strips unknown extra fields from receipt and never lets receipt quirks skip cache refresh", () => {
+    const dir = makeTempDir("sweep-widget-receipt-extra-");
+    const receiptPath = join(dir, "last-receipt.json");
+    const cachePath = join(dir, "widget-v1.json");
+
+    const receiptWithExtras = {
+      receiptVersion: 1,
+      id: "01JDX9R6H8Q7N4K2V1M8W5B3C1",
+      completedAt: new Date(NOW - 10 * 60_000).toISOString(),
+      targetDir: "/work/projects",
+      mode: "delete",
+      deletedCount: 1,
+      failedCount: 1,
+      unattemptedCount: 0,
+      stopped: false,
+      totalBytesFreed: 2048,
+      freeBytesAfter: 50_000,
+      failureSummary: {
+        busy: 1,
+        permissionDenied: 0,
+        other: 0,
+        extraFailureField: "ignored",
+      },
+      extraTopLevelField: { nested: true },
+    };
+    writeFileSync(receiptPath, JSON.stringify(receiptWithExtras), { mode: 0o600 });
+
+    const parsed = readRecentWidgetReceipt("/work/projects", { nowMs: NOW, receiptPath });
+    expect(parsed).toEqual({
+      receiptVersion: 1,
+      id: "01JDX9R6H8Q7N4K2V1M8W5B3C1",
+      completedAt: receiptWithExtras.completedAt,
+      targetDir: "/work/projects",
+      mode: "delete",
+      deletedCount: 1,
+      failedCount: 1,
+      unattemptedCount: 0,
+      stopped: false,
+      totalBytesFreed: 2048,
+      freeBytesAfter: 50_000,
+      failureSummary: {
+        busy: 1,
+        permissionDenied: 0,
+        other: 0,
+      },
+    });
+    expect(Object.hasOwn(parsed ?? {}, "extraTopLevelField")).toBe(false);
+    expect(Object.hasOwn(parsed?.failureSummary ?? {}, "extraFailureField")).toBe(false);
+
+    const snapshot = buildWidgetSnapshot(
+      makePlan([makeCandidate({ id: "nm", estimatedBytes: 4096 })]),
+      { nowMs: NOW, disk: null, receipt: parsed },
+    );
+    expect(isValidWidgetSnapshot(snapshot)).toBe(true);
+    expect(writeWidgetCacheEntry(snapshot, { cachePath })).toBe(true);
+
+    // Even if a caller directly passes a snapshot with a malformed receipt, cache refresh still succeeds
+    // because validation runs after nulling `receipt` for the stored cache entry.
+    const snapshotWithDirtyReceipt = {
+      ...snapshot,
+      receipt: receiptWithExtras as unknown as WidgetReceipt,
+    };
+    expect(writeWidgetCacheEntry(snapshotWithDirtyReceipt, { cachePath })).toBe(true);
+    expect(readWidgetCacheEntry("/work/projects", { cachePath, nowMs: NOW })).not.toBeNull();
   });
 
   test("parseWidgetDuration accepts valid units and rejects malformed values", () => {

@@ -563,6 +563,19 @@ export function widgetErrorForCode(code: WidgetErrorCode): WidgetError {
         message: "The configured scan folder does not exist.",
         retryable: false,
       };
+    case "target_refused":
+      return {
+        code,
+        message: "Sweep does not scan this folder. Pick the folder that holds your projects.",
+        retryable: false,
+      };
+    case "config_invalid":
+      return {
+        code,
+        message:
+          "Sweep could not load the configuration for this folder. Fix .sweeprc and try again.",
+        retryable: false,
+      };
     case "timeout":
       return {
         code,
@@ -751,8 +764,16 @@ export function writeWidgetCacheEntry(
   snapshot: WidgetSnapshot,
   options: { cachePath?: string } = {},
 ): boolean {
-  if (!isValidWidgetSnapshot(snapshot)) return false;
   if (snapshot.error !== null || snapshot.projectsSummary === null) return false;
+
+  const storedEntry: WidgetSnapshot = {
+    ...snapshot,
+    source: "cache",
+    ageMs: 0,
+    stale: false,
+    receipt: null,
+  };
+  if (!isValidWidgetSnapshot(storedEntry)) return false;
 
   const cachePath = options.cachePath ?? widgetCachePath();
   const dir = dirname(cachePath);
@@ -767,13 +788,6 @@ export function writeWidgetCacheEntry(
   }
 
   const envelope = readWidgetCacheEnvelope(cachePath);
-  const storedEntry: WidgetSnapshot = {
-    ...snapshot,
-    source: "cache",
-    ageMs: 0,
-    stale: false,
-    receipt: null,
-  };
   const nextEntries: Record<string, WidgetSnapshot> = {
     ...envelope.entries,
     [snapshot.targetDir]: storedEntry,
@@ -885,6 +899,7 @@ export function readRecentWidgetReceipt(
     if (!Number.isFinite(completedMs) || nowMs - completedMs > RECEIPT_TTL_MS) {
       return null;
     }
+    let failureSummary: WidgetReceipt["failureSummary"] = null;
     if (r.failureSummary !== null) {
       const f = r.failureSummary;
       if (
@@ -896,8 +911,26 @@ export function readRecentWidgetReceipt(
       ) {
         return null;
       }
+      failureSummary = {
+        busy: f.busy,
+        permissionDenied: f.permissionDenied,
+        other: f.other,
+      };
     }
-    return r as WidgetReceipt;
+    return {
+      receiptVersion: WIDGET_RECEIPT_VERSION,
+      id: r.id,
+      completedAt: r.completedAt,
+      targetDir: r.targetDir,
+      mode: r.mode,
+      deletedCount: r.deletedCount!,
+      failedCount: r.failedCount!,
+      unattemptedCount: r.unattemptedCount!,
+      stopped: r.stopped,
+      totalBytesFreed: r.totalBytesFreed!,
+      freeBytesAfter: r.freeBytesAfter ?? null,
+      failureSummary,
+    };
   } catch {
     return null;
   }

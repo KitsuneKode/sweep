@@ -18,6 +18,8 @@ export const WIDGET_ERROR_CODES = [
   "engine_missing",
   "permission_denied",
   "target_missing",
+  "target_refused",
+  "config_invalid",
   "timeout",
   "scan_failed",
   "schema_mismatch",
