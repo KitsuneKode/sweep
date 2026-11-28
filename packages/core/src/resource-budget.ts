@@ -43,7 +43,8 @@ export class ResourceBudget {
     maxCombinedBytes: 0,
   };
   private failure: ResourceLimitError | undefined;
-  private sizingIds = 0;
+  private sizingDirectoryIds = 0;
+  private sizingHardlinkIds = 0;
   private sizingDirs = 0;
   private sizingPaths = 0;
   private sizingBytes = 0;
@@ -68,22 +69,63 @@ export class ResourceBudget {
     return true;
   }
 
-  /** Live totals across all sizing jobs; saturation never poisons discovery. */
-  sizingIdentity(): boolean {
+  /**
+   * Hardlink dedup is optional accuracy state: at most half of either byte
+   * budget may be held by hardlink identities, preserving headroom for the
+   * directory traversal needed to produce complete apparent sizes.
+   */
+  private hardlinkByteLimit(): number {
+    return Math.floor(Math.min(this.limits.maxRetainedBytes, this.limits.maxCombinedBytes) / 2);
+  }
+
+  sizingHardlinkIdentityCap(): number {
+    return Math.min(this.limits.maxIdentities, Math.floor(this.hardlinkByteLimit() / 128));
+  }
+
+  /**
+   * Live totals across all sizing jobs. Directory-cycle and hardlink dedup
+   * identities use separate count and byte lanes so optional hardlink accuracy
+   * cannot consume the identities or memory traversal needs for cycle safety;
+   * the lanes still share the total byte reservations. Saturation never
+   * poisons discovery.
+   */
+  private reserveSizingIdentity(hardlink: boolean): boolean {
+    const identities = hardlink ? this.sizingHardlinkIds : this.sizingDirectoryIds;
+    const identityCap = hardlink ? this.sizingHardlinkIdentityCap() : this.limits.maxIdentities;
     if (
-      this.sizingIds >= this.limits.maxIdentities ||
+      identities >= identityCap ||
+      (hardlink && (this.sizingHardlinkIds + 1) * 128 > this.hardlinkByteLimit()) ||
       this.sizingBytes + 128 > this.limits.maxRetainedBytes ||
-      this.used.maxRetainedBytes + this.sizingBytes + 128 > this.limits.maxCombinedBytes
+      this.used.maxRetainedBytes + this.sizingBytes + this.hardlinkBytes + 128 >
+        this.limits.maxCombinedBytes
     )
       return false;
-    this.sizingIds++;
+    if (hardlink) this.sizingHardlinkIds++;
+    else this.sizingDirectoryIds++;
     this.sizingBytes += 128;
     return true;
   }
 
-  releaseSizingIdentities(count: number): void {
-    this.sizingIds -= count;
+  sizingDirectoryIdentity(): boolean {
+    return this.reserveSizingIdentity(false);
+  }
+
+  sizingHardlinkIdentity(): boolean {
+    return this.reserveSizingIdentity(true);
+  }
+
+  private releaseSizingIdentity(hardlink: boolean, count: number): void {
+    if (hardlink) this.sizingHardlinkIds -= count;
+    else this.sizingDirectoryIds -= count;
     this.sizingBytes -= count * 128;
+  }
+
+  releaseSizingDirectoryIdentities(count: number): void {
+    this.releaseSizingIdentity(false, count);
+  }
+
+  releaseSizingHardlinkIdentities(count: number): void {
+    this.releaseSizingIdentity(true, count);
   }
 
   sizingDirectory(path: string | Buffer): boolean {
@@ -93,7 +135,8 @@ export class ResourceBudget {
       this.sizingDirs >= this.limits.maxQueuedDirs ||
       this.sizingPaths + bytes > this.limits.maxPathBytes ||
       this.sizingBytes + retained > this.limits.maxRetainedBytes ||
-      this.used.maxRetainedBytes + this.sizingBytes + retained > this.limits.maxCombinedBytes
+      this.used.maxRetainedBytes + this.sizingBytes + this.hardlinkBytes + retained >
+        this.limits.maxCombinedBytes
     )
       return false;
     this.sizingDirs++;

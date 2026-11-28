@@ -27,8 +27,13 @@ import {
   resolveRustEngineBinary,
   scanToPlanViaRust,
 } from "@kitsunekode/sweep-core/rust-engine";
-import type { ScanPlan, SelectionPolicy } from "@kitsunekode/sweep-protocol";
-import { DEFAULT_SELECTION_POLICY } from "@kitsunekode/sweep-protocol";
+import type {
+  ResourceProfile,
+  ScanLimits,
+  ScanPlan,
+  SelectionPolicy,
+} from "@kitsunekode/sweep-protocol";
+import { DEFAULT_SELECTION_POLICY, SCAN_RESOURCE_PROFILES } from "@kitsunekode/sweep-protocol";
 import { normalizePlan } from "../support/normalize-plan.js";
 
 const REPO_ROOT = resolve(import.meta.dir, "../..");
@@ -1249,52 +1254,194 @@ test.skipIf(!NATIVE_AVAILABLE)(
   },
 );
 
+function seedHardlinkCapParityTree(root: string, hardlinkCount = 16): string {
+  const store = join(root, "store");
+  const scanTarget = join(root, "work");
+  const nmA = join(scanTarget, "proj-a", "node_modules");
+  const nmB = join(scanTarget, "proj-b", "node_modules");
+  mkdirSync(store, { recursive: true });
+  mkdirSync(nmA, { recursive: true });
+  mkdirSync(nmB, { recursive: true });
+
+  // 16 distinct hardlinked store files exceed maxIdentities: 8 while
+  // directory discovery (3 real dirs: work, proj-a, proj-b) stays well within it.
+  for (let i = 0; i < hardlinkCount; i += 1) {
+    const src = join(store, `pkg-${i}.js`);
+    writeFileSync(src, "s".repeat(512));
+    linkSync(src, join(nmA, `pkg-${i}.js`));
+    linkSync(src, join(nmB, `pkg-${i}.js`));
+  }
+  writeFileSync(join(nmA, "own-a.js"), "a".repeat(500));
+  writeFileSync(join(nmB, "own-b.js"), "b".repeat(300));
+  return scanTarget;
+}
+
+function lowMemoryHardlinkIdentityCap(): number {
+  const limits = SCAN_RESOURCE_PROFILES["low-memory"];
+  return Math.min(
+    limits.maxIdentities,
+    Math.floor(Math.min(limits.maxRetainedBytes, limits.maxCombinedBytes) / 2 / 128),
+  );
+}
+
+function seedLowMemoryHardlinkTree(root: string): { scanTarget: string; hardlinkCount: number } {
+  const store = join(root, "store");
+  const scanTarget = join(root, "work-low-memory");
+  const nmA = join(scanTarget, "proj-a", "node_modules");
+  const nmB = join(scanTarget, "proj-b", "node_modules");
+  mkdirSync(store, { recursive: true });
+  mkdirSync(nmA, { recursive: true });
+  mkdirSync(nmB, { recursive: true });
+
+  // The low-memory byte share admits 32,768 hardlink identities. One more
+  // distinct inode saturates the optional lane even though maxIdentities is 65,536.
+  const hardlinkCount = lowMemoryHardlinkIdentityCap() + 1;
+  for (let i = 0; i < hardlinkCount; i += 1) {
+    const src = join(store, `pkg-${i}.js`);
+    writeFileSync(src, "s");
+    linkSync(src, join(nmA, `pkg-${i}.js`));
+  }
+  writeFileSync(join(nmA, "own-a.js"), "a".repeat(500));
+  writeFileSync(join(nmB, "own-b.js"), "b".repeat(300));
+  return { scanTarget, hardlinkCount };
+}
+
+function hardlinkCapPlanVariants(
+  scanTarget: string,
+  options: { limits?: Partial<ScanLimits>; resourceProfile?: ResourceProfile },
+): Array<[string, () => Promise<ScanPlan>]> {
+  return [
+    ["js streaming", async () => (await scanToPlan(scanTarget, DEFAULT_CONFIG, options)).plan],
+    [
+      "js post-walk",
+      async () => (await scanToPlan(scanTarget, DEFAULT_CONFIG, { ...options, exact: true })).plan,
+    ],
+    [
+      "rust one-shot",
+      async () =>
+        scanToPlanViaRust(scanTarget, {
+          config: DEFAULT_CONFIG,
+          selectionPolicy: DEFAULT_SELECTION_POLICY,
+          ...options,
+        }),
+    ],
+    [
+      "rust streaming",
+      async () =>
+        scanToPlanViaRust(scanTarget, {
+          config: DEFAULT_CONFIG,
+          selectionPolicy: DEFAULT_SELECTION_POLICY,
+          ...options,
+          onEntry: () => {},
+          onEntrySized: () => {},
+        }),
+    ],
+  ];
+}
+
+function expectHardlinkCapPlan(plan: ScanPlan, scanTarget: string, hardlinkCount = 16): void {
+  const byRel = new Map(
+    plan.candidates.map((candidate) => [
+      candidate.path.slice(scanTarget.length + 1).replaceAll("\\", "/"),
+      { estimatedBytes: candidate.estimatedBytes, uniqueBytes: candidate.uniqueBytes },
+    ]),
+  );
+  expect(byRel.get("proj-a/node_modules")).toEqual({
+    estimatedBytes: hardlinkCount * 512 + 500,
+    uniqueBytes: 500,
+  });
+  expect(byRel.get("proj-b/node_modules")).toEqual({
+    estimatedBytes: hardlinkCount * 512 + 300,
+    uniqueBytes: 300,
+  });
+  expect(plan.summary.uniqueBytesPartial).toBe(true);
+  expect(plan.summary.uniqueTotalBytes).toBe(500 + 300);
+  expect(plan.summary.estimatedTotalBytes).toBe(hardlinkCount * 512 * 2 + 500 + 300);
+}
+
 test.skipIf(!NATIVE_AVAILABLE)(
-  "both engines mark uniqueBytesPartial when hardlink tracking hits its cap",
+  "both engines keep directory sizing complete when hardlink tracking hits its cap",
   async () => {
     const root = mkdtempSync(join(tmpdir(), "sweep-hardlink-cap-parity-"));
     try {
-      const store = join(root, "store");
-      const scanTarget = join(root, "work");
-      const nmA = join(scanTarget, "proj-a", "node_modules");
-      const nmB = join(scanTarget, "proj-b", "node_modules");
-      mkdirSync(store, { recursive: true });
-      mkdirSync(nmA, { recursive: true });
-      mkdirSync(nmB, { recursive: true });
-
-      // 16 distinct hardlinked store files exceed maxIdentities: 8 while
-      // directory discovery (3 real dirs: work, proj-a, proj-b) stays well within it.
-      for (let i = 0; i < 16; i += 1) {
-        const src = join(store, `pkg-${i}.js`);
-        writeFileSync(src, "s".repeat(512));
-        linkSync(src, join(nmA, `pkg-${i}.js`));
-        linkSync(src, join(nmB, `pkg-${i}.js`));
-      }
-      writeFileSync(join(nmA, "own-a.js"), "a".repeat(500));
-      writeFileSync(join(nmB, "own-b.js"), "b".repeat(300));
-
+      const scanTarget = seedHardlinkCapParityTree(root);
       const limits = { maxIdentities: 8 };
-      const jsPlan = (await scanToPlan(scanTarget, DEFAULT_CONFIG, { limits })).plan;
-      const rustPlan = await scanToPlanViaRust(scanTarget, {
-        config: DEFAULT_CONFIG,
-        selectionPolicy: DEFAULT_SELECTION_POLICY,
-        limits,
-      });
-      const rustStreamPlan = await scanToPlanViaRust(scanTarget, {
-        config: DEFAULT_CONFIG,
-        selectionPolicy: DEFAULT_SELECTION_POLICY,
-        limits,
-        onEntry: () => {},
-        onEntrySized: () => {},
-      });
-
-      for (const plan of [jsPlan, rustPlan, rustStreamPlan]) {
-        expect(plan.summary.uniqueBytesPartial).toBe(true);
-        expect(plan.summary.uniqueTotalBytes).toBe(500 + 300);
-        expect(plan.summary.estimatedTotalBytes).toBe(16 * 512 * 2 + 500 + 300);
+      for (const [, scanVariant] of hardlinkCapPlanVariants(scanTarget, { limits })) {
+        expectHardlinkCapPlan(await scanVariant(), scanTarget);
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   },
+);
+
+function expectLowMemoryHardlinkPlan(
+  plan: ScanPlan,
+  scanTarget: string,
+  hardlinkCount: number,
+): void {
+  const byRel = new Map(
+    plan.candidates.map((candidate) => [
+      candidate.path.slice(scanTarget.length + 1).replaceAll("\\", "/"),
+      { estimatedBytes: candidate.estimatedBytes, uniqueBytes: candidate.uniqueBytes },
+    ]),
+  );
+  expect(byRel.get("proj-a/node_modules")).toEqual({
+    estimatedBytes: hardlinkCount + 500,
+    uniqueBytes: 500,
+  });
+  expect(byRel.get("proj-b/node_modules")).toEqual({
+    estimatedBytes: 300,
+    uniqueBytes: 300,
+  });
+  for (const candidate of plan.candidates) expect(candidate.estimatedBytes).toBeGreaterThan(0);
+  expect(plan.summary.uniqueBytesPartial).toBe(true);
+  expect(plan.summary.uniqueTotalBytes).toBe(500 + 300);
+  expect(plan.summary.estimatedTotalBytes).toBe(hardlinkCount + 500 + 300);
+}
+
+test.skipIf(!NATIVE_AVAILABLE)(
+  "low-memory hardlink byte share cannot starve directory sizing",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-low-memory-hardlinks-"));
+    try {
+      const { scanTarget, hardlinkCount } = seedLowMemoryHardlinkTree(root);
+      const plans = await Promise.all(
+        hardlinkCapPlanVariants(scanTarget, { resourceProfile: "low-memory" }).map(
+          ([, scanVariant]) => scanVariant(),
+        ),
+      );
+      for (const plan of plans) expectLowMemoryHardlinkPlan(plan, scanTarget, hardlinkCount);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  120_000,
+);
+
+test.skipIf(!NATIVE_AVAILABLE)(
+  "hardlink cap sizing stays complete under repeated concurrent plans",
+  async () => {
+    const root = mkdtempSync(join(tmpdir(), "sweep-hardlink-cap-stress-"));
+    try {
+      const hardlinkCount = 33;
+      const scanTarget = seedHardlinkCapParityTree(root, hardlinkCount);
+      // Low-memory shape scaled down for test runtime: maxIdentities stays at
+      // 65,536, while the byte share caps hardlink dedup at 32 identities.
+      const limits = {
+        ...SCAN_RESOURCE_PROFILES["low-memory"],
+        maxRetainedBytes: 8 * 1024,
+        maxCombinedBytes: 16 * 1024,
+      };
+      for (const [, scanVariant] of hardlinkCapPlanVariants(scanTarget, { limits })) {
+        for (let offset = 0; offset < 50; offset += 5) {
+          const plans = await Promise.all(Array.from({ length: 5 }, () => scanVariant()));
+          for (const plan of plans) expectHardlinkCapPlan(plan, scanTarget, hardlinkCount);
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  60_000,
 );
