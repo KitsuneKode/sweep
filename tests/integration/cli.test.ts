@@ -164,8 +164,35 @@ describe("CLI scan/apply", () => {
     expect(status.reclaimableBytes).toBe(status.safeBytes + status.cautionBytes);
     expect(status.kinds.map((entry) => entry.kind)).toContain("node_modules");
     expect(status.idle.days).toBe(30);
+    expect(status.idle.windowMs).toBe(30 * 86_400_000);
+    expect(status.idle.windowLabel).toBe("30+ days");
+    expect(status.complete).toBe(true);
+    expect(status.skippedDirs).toBe(0);
+    expect(status.bytesPartial).toBe(false);
+    expect(status.finishedWorktrees.projects).toBe(0);
+    expect(status.branchMissingWorktrees.projects).toBe(0);
     // A summary, not a plan: no candidate list to parse.
     expect(Object.hasOwn(status, "candidates")).toBe(false);
+  });
+
+  test("status reports guarded-only wording and exact sub-day idle window", () => {
+    // Unmarked `target` (no Cargo.toml) is classified as dangerous (guarded).
+    mkdirSync(dir("target"));
+    writeFileSync(dir("target", "notes.txt"), "x".repeat(1024));
+
+    const human = runCli(["status", tmpDir, "--idle", "12h", "--no-color"]);
+    expect(human.exitCode).toBe(0);
+    expect(human.stdout).toContain("Nothing automatically reclaimable here.");
+    expect(human.stdout).toContain("1 guarded item(s) found");
+
+    const json = runCli(["status", tmpDir, "--idle", "12h", "--json"]);
+    expect(json.exitCode).toBe(0);
+    const parsed = JSON.parse(json.stdout) as StatusSummary;
+    expect(parsed.reclaimableBytes).toBe(0);
+    expect(parsed.protectedCount).toBe(1);
+    expect(parsed.protectedBytes).toBeGreaterThan(0);
+    expect(parsed.idle.windowMs).toBe(12 * 3_600_000);
+    expect(parsed.idle.windowLabel).toBe("12+ hours");
   });
 
   test("scan --json emits a plan-shaped document with candidates", () => {
