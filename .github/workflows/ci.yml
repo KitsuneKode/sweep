@@ -213,6 +213,11 @@ jobs:
           python3 scripts/smoke-active-ui.py --exit-signal SIGHUP
           python3 scripts/smoke-active-ui.py --exit-signal SIGTERM
 
+      - name: Qualify one bound native engine across the packaged CLI and UI bundles
+        run: |
+          python3 scripts/smoke-engine-binding-ui.py --mode ui-binds
+          python3 scripts/smoke-engine-binding-ui.py --mode cli-binds
+
       - name: Qualify live UI delivery and update stability
         run: bun run packages/ui/benchmarks/stream-render.tsx --candidates 5000
 

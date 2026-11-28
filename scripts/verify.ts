@@ -88,6 +88,17 @@ const steps: Step[] = [
           ? "Linux-only tmux PTY smoke (tmux not installed)"
           : false,
   },
+  ...(["ui-binds", "cli-binds"] as const).map((mode) => ({
+    name: `engine binding across bundles (${mode}, Linux PTY)`,
+    cmd: ["python3", "scripts/smoke-engine-binding-ui.py", "--mode", mode],
+    release: true,
+    unless: () =>
+      process.platform !== "linux"
+        ? `Linux-only PTY smoke (not run on ${process.platform})`
+        : engineBin()?.includes("release")
+          ? false
+          : "no release sweep-engine (bun run engine:build first)",
+  })),
   {
     name: "min-Node installed tarball smoke",
     cmd: ["bun", "run", "scripts/smoke-min-node.ts"],

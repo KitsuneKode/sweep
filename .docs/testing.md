@@ -120,7 +120,9 @@ Set `SWEEP_ENGINE_PATH` to point at a custom binary. Fake engines written as
 that use them set it in `beforeAll` and restore it in `afterAll`). A test that
 replaces the engine at the same path inside one process must call
 `resetRustEngineBindingsForTest()`, because the first use binds the engine for
-the process.
+the process. `python3 scripts/smoke-engine-binding-ui.py --mode ui-binds|cli-binds`
+(Linux PTY, needs `target/release/sweep-engine` and a built `apps/cli/dist`)
+checks that the packaged CLI and UI bundles share that binding.
 
 ### Engine A/B comparison
 

@@ -287,9 +287,15 @@ Both engines re-validate before deleting:
   whole terminal UI session) resolves again, re-runs the trust check, and must
   land on that same file, or it is refused; restarting sweep binds again.
   `acquireRustEngine` in `packages/core/src/rust-engine.ts` is the only way
-  to get an engine path to spawn.
+  to get an engine path to spawn. The packaged CLI and UI bundles each carry
+  their own copy of that module in one Bun process, so the binding (and the
+  probe cache) live on `globalThis` under
+  `Symbol.for("@kitsunekode/sweep.engineBinding.v1")`: created once,
+  non-writable and sealed, and validated on every read, failing closed.
+  `scripts/smoke-engine-binding-ui.py` proves it on the built bundles.
 - **Apply runs the bound engine and nothing else** - after the capability
-  check apply re-reads the engine and compares the SHA-256 with the bound one
+  check and payload serialization, immediately before the spawn, apply
+  re-reads the engine and compares the SHA-256 with the bound one
   (metadata alone cannot prove unchanged bytes on filesystems with coarse
   timestamps), then spawns the real path. Right after the spawn, before any
   plan is written, the path is re-checked (metadata only) and on Linux the

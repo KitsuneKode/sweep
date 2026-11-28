@@ -262,7 +262,73 @@ interface EngineBinding {
  * SWEEP_ENGINE_PATH somewhere else gets its own binding; a change on disk
  * under the same settings never does.
  */
-const engineBindings = new Map<string, EngineBinding>();
+interface SharedEngineState {
+  readonly version: 1;
+  readonly bindings: Map<string, EngineBinding>;
+  availability: { key: string; result: RustEngineProbeResult } | undefined;
+}
+
+/**
+ * The packaged CLI (`dist/sweep.js`) and the terminal UI (`dist/sweep-ui.js`)
+ * each bundle their own copy of this module and run in one Bun process. A
+ * module-level map would give each copy its own binding, so the UI could scan
+ * with one file and the CLI apply with another. The state lives on
+ * `globalThis` under a registered symbol so every copy in the process shares
+ * it. Created once, non-writable and sealed; anything unexpected at the key
+ * fails closed rather than being replaced.
+ */
+const ENGINE_STATE_KEY = Symbol.for("@kitsunekode/sweep.engineBinding.v1");
+
+function isSharedEngineState(value: unknown): value is SharedEngineState {
+  if (typeof value !== "object" || value === null || !Object.isSealed(value)) return false;
+  const state = value as Partial<SharedEngineState>;
+  return state.version === 1 && state.bindings instanceof Map;
+}
+
+function sharedEngineState(): SharedEngineState {
+  const holder = globalThis as unknown as Record<symbol, unknown>;
+  const existing = holder[ENGINE_STATE_KEY];
+  if (existing !== undefined) {
+    if (!isSharedEngineState(existing))
+      throw new EngineIdentityError(
+        "The native engine binding for this process is not recognized",
+        "unreadable",
+      );
+    return existing;
+  }
+  const state: SharedEngineState = Object.seal({
+    version: 1 as const,
+    bindings: new Map<string, EngineBinding>(),
+    availability: undefined,
+  });
+  Object.defineProperty(globalThis, ENGINE_STATE_KEY, {
+    value: state,
+    writable: false,
+    configurable: false,
+    enumerable: false,
+  });
+  return state;
+}
+
+const HEX_SHA256 = /^[0-9a-f]{64}$/;
+
+/** A binding read from shared state must have exactly the shape this copy writes. */
+function validBinding(value: unknown): value is EngineBinding {
+  if (typeof value !== "object" || value === null) return false;
+  const { file, identity } = value as Partial<EngineBinding>;
+  if (typeof file !== "string" || typeof identity !== "object" || identity === null) return false;
+  return (
+    typeof identity.path === "string" &&
+    typeof identity.dev === "bigint" &&
+    typeof identity.ino === "bigint" &&
+    typeof identity.size === "bigint" &&
+    typeof identity.mtimeNs === "bigint" &&
+    typeof identity.ctimeNs === "bigint" &&
+    typeof identity.sha256 === "string" &&
+    HEX_SHA256.test(identity.sha256) &&
+    typeof identity.nativeImage === "boolean"
+  );
+}
 
 function engineBindingKey(): string {
   return [
@@ -287,13 +353,22 @@ export function acquireRustEngine(): AcquiredRustEngine {
     throw new RustEngineMissingError(
       missingRustEngineMessage(resolved.binary, resolved.explicitConfigured),
     );
+  const { bindings } = sharedEngineState();
   const key = engineBindingKey();
-  const bound = engineBindings.get(key);
-  if (!bound) {
+  const bound: unknown = bindings.get(key);
+  if (bound === undefined) {
     const identity = captureEngineIdentity(resolved.executable);
-    engineBindings.set(key, { file: resolved.executable, identity });
+    bindings.set(
+      key,
+      Object.freeze({ file: resolved.executable, identity: Object.freeze(identity) }),
+    );
     return { binary: resolved.binary, file: resolved.executable, identity };
   }
+  if (!validBinding(bound))
+    throw new EngineIdentityError(
+      "The native engine binding for this process is not recognized",
+      "unreadable",
+    );
   const current = inspectEngineFile(resolved.executable);
   if (resolved.executable !== bound.file || !sameEngineFile(current, bound.identity))
     throw new EngineIdentityError(
@@ -346,8 +421,9 @@ export function readRustEngineCapabilities(): Record<string, unknown> | undefine
 
 /** @internal Test seam: forget bound engines and the cached probe. */
 export function resetRustEngineBindingsForTest(): void {
-  engineBindings.clear();
-  availability = undefined;
+  const state = sharedEngineState();
+  state.bindings.clear();
+  state.availability = undefined;
 }
 
 interface RunEngineOptions {
@@ -776,12 +852,6 @@ export async function applyPlanViaRust(
       "This Rust engine lacks saved-plan identity checks. Update the native package, then review again. Nothing was removed.",
       "engine_unavailable",
     );
-  // Last check before the destructive spawn: same file, same bytes (fresh read).
-  try {
-    assertEngineContent(engine);
-  } catch (error) {
-    throw engineIdentityRefusal(error);
-  }
   let report: ApplyReport | undefined;
   let refusal: ApplyRefusedError | undefined;
   let preparedCount = 0;
@@ -797,10 +867,18 @@ export async function applyPlanViaRust(
       ({ worktreeOf: _worktreeOf, worktreeState: _worktreeState, ...candidate }) => candidate,
     ),
   };
+  const request = `${JSON.stringify({ plan: applyPayloadPlan, maxSizeBytes, ...(preflightProgress ? { preflightProgress: true } : {}), ...(removalProgress ? { removalProgress: true } : {}) })}\n{"type":"start"}\n`;
+  // Last check before the destructive spawn, after the (possibly large)
+  // payload is serialized: same file, same bytes (fresh read).
+  try {
+    assertEngineContent(engine);
+  } catch (error) {
+    throw engineIdentityRefusal(error);
+  }
   try {
     await runEngineAsync(
       ["apply", "--json-control"],
-      `${JSON.stringify({ plan: applyPayloadPlan, maxSizeBytes, ...(preflightProgress ? { preflightProgress: true } : {}), ...(removalProgress ? { removalProgress: true } : {}) })}\n{"type":"start"}\n`,
+      request,
       (line) => {
         let event: {
           type?: string;
@@ -992,11 +1070,12 @@ function firstNonEmptyLine(text: string | undefined): string | undefined {
   return undefined;
 }
 
-// Cache only the last resolved binary; replacements and environment changes
+// Cache only the last resolved binary (shared across bundled copies; see
+// sharedEngineState); replacements and environment changes
 // invalidate the probe. Bound runtime/output even for user-supplied binaries.
-let availability: { key: string; result: RustEngineProbeResult } | undefined;
 
 export function probeRustEngine(): RustEngineProbeResult {
+  const state = sharedEngineState();
   const explicitConfigured = Boolean(process.env.SWEEP_ENGINE_PATH);
   const binary = resolveRustEngineBinary();
   let key = `${explicitConfigured ? "env:" : ""}${binary}:${process.cwd()}:${process.env.PATH ?? ""}:${process.env.PATHEXT ?? ""}`;
@@ -1018,7 +1097,7 @@ export function probeRustEngine(): RustEngineProbeResult {
             reasonKind: "not_installed",
             reason: "Native Rust engine binary was not found.",
           };
-      availability = { key, result };
+      state.availability = { key, result };
       return result;
     }
     // Binds the engine for this operation on first use (see acquireRustEngine).
@@ -1027,7 +1106,7 @@ export function probeRustEngine(): RustEngineProbeResult {
       inspected = acquireRustEngine().identity;
     } catch (error) {
       if (!(error instanceof EngineIdentityError) || error.issue === "unreadable") throw error;
-      availability = undefined;
+      state.availability = undefined;
       return {
         available: false,
         binary,
@@ -1039,7 +1118,7 @@ export function probeRustEngine(): RustEngineProbeResult {
     key += `:${file}:${inspected.path}:${inspected.dev}:${inspected.ino}:${inspected.size}:${inspected.mtimeNs}:${inspected.ctimeNs}`;
     // Cold runs pay the probe spawn every time - the memo would answer
     // instantly and make dev timings read warmer than a real cold start.
-    if (!isColdRequested() && availability?.key === key) return availability.result;
+    if (!isColdRequested() && state.availability?.key === key) return state.availability.result;
 
     // Spawn the exact resolved file we just inspected, never the bare name.
     const proc = spawnSync(inspected.path, ["--version"], {
@@ -1054,7 +1133,7 @@ export function probeRustEngine(): RustEngineProbeResult {
         binary,
         resolvedPath: file,
       };
-      availability = { key, result };
+      state.availability = { key, result };
       return result;
     }
 
@@ -1093,7 +1172,7 @@ export function probeRustEngine(): RustEngineProbeResult {
       signal: proc.signal,
       ...(stderrFirstLine ? { stderrFirstLine } : {}),
     };
-    availability = { key, result };
+    state.availability = { key, result };
     return result;
   } catch (error) {
     const result: RustEngineProbeResult = {
@@ -1103,7 +1182,7 @@ export function probeRustEngine(): RustEngineProbeResult {
       reasonKind: "spawn_error",
       reason: error instanceof Error ? error.message : String(error),
     };
-    availability = { key, result };
+    state.availability = { key, result };
     return result;
   }
 }
