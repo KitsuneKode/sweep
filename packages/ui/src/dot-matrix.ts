@@ -1,8 +1,12 @@
 /**
- * Dot-matrix loaders, after dot-matrix-animations.vercel.app.
+ * Dot-matrix loaders and C+ dot-matrix bar helpers.
  *
- * A fixed grid, shared pulse curve and per-dot delay map. Only brightness
- * changes; widgets own the timer and reduced-motion preference.
+ * Loaders use a fixed grid, shared pulse curve and per-dot delay map. Only
+ * brightness changes; widgets own the timer and reduced-motion preference.
+ *
+ * The C+ dot-matrix storage bar shares `BAYER_2X2`, `bayerEdgeFactor`, and
+ * `allocateSegmentCells` across both the Kitty pixel renderer and the Braille
+ * text fallback so segment boundaries and seams stay consistent.
  */
 
 export const DOT_GRID = 5;
@@ -14,6 +18,102 @@ export type DotPattern = "pulseRings" | "wave" | "scan" | "spiral";
 
 /** Frames in one cycle. With the widget's 160 ms step, a cycle takes 3.84 s. */
 export const DOT_CYCLE = 24;
+
+/** Ordered 2×2 Bayer dither matrix for crisp edge transitions on C+ dot bars. */
+export const BAYER_2X2: readonly [readonly [number, number], readonly [number, number]] = [
+  [0, 2],
+  [3, 1],
+];
+
+/**
+ * Brightness multiplier for a dot near a segment's right edge (`distFromEnd`:
+ * 0 = final dot column, 1 = penultimate column, >= 2 = interior).
+ */
+export function bayerEdgeFactor(col: number, row: number, distFromEnd: number): number {
+  const threshold = BAYER_2X2[Math.abs(row) % 2]![Math.abs(col) % 2]!;
+  if (distFromEnd === 0 && threshold >= 2) return 0.42;
+  if (distFromEnd === 1 && threshold === 3) return 0.72;
+  return 1;
+}
+
+export interface AllocatedSegment<T extends { fraction: number }> {
+  segment: T;
+  cells: number;
+  seamAfter: boolean;
+}
+
+/**
+ * Allocate integer cell counts across non-zero segments with min 1 cell per
+ * segment (when width permits) and optional 1-cell seams between adjacent runs.
+ */
+export function allocateSegmentCells<T extends { fraction: number }>(
+  segments: readonly T[],
+  totalWidth: number,
+  withSeams = true,
+): AllocatedSegment<T>[] {
+  const nonZero = segments.filter((segment) => segment.fraction > 0);
+  if (nonZero.length === 0 || totalWidth <= 0) return [];
+  const seamCount = withSeams && totalWidth >= nonZero.length * 3 ? nonZero.length - 1 : 0;
+  const usable = Math.max(nonZero.length, totalWidth - seamCount);
+  const sum = nonZero.reduce((acc, segment) => acc + segment.fraction, 0);
+  const raw = nonZero.map((segment) => (segment.fraction / sum) * usable);
+  const cells = raw.map((value) => Math.max(1, Math.floor(value)));
+  let used = cells.reduce((a, b) => a + b, 0);
+
+  while (used < usable) {
+    let bestIdx = 0;
+    let bestRem = -1;
+    for (let i = 0; i < raw.length; i++) {
+      const rem = raw[i]! - cells[i]!;
+      if (rem > bestRem) {
+        bestRem = rem;
+        bestIdx = i;
+      }
+    }
+    cells[bestIdx] = cells[bestIdx]! + 1;
+    used += 1;
+  }
+
+  while (used > usable) {
+    let maxIdx = 0;
+    for (let i = 1; i < cells.length; i++) {
+      if (cells[i]! > cells[maxIdx]!) maxIdx = i;
+    }
+    if (cells[maxIdx]! <= 1) break;
+    cells[maxIdx] = cells[maxIdx]! - 1;
+    used -= 1;
+  }
+
+  // If totalWidth < nonZero.length, trim from the smallest segments so output never overflows.
+  while (used > totalWidth && cells.length > 0) {
+    let minIdx = 0;
+    for (let i = 1; i < cells.length; i++) {
+      if (
+        cells[i]! > 0 &&
+        (cells[minIdx]! === 0 || nonZero[i]!.fraction < nonZero[minIdx]!.fraction)
+      ) {
+        minIdx = i;
+      }
+    }
+    if (cells[minIdx]! <= 0) break;
+    cells[minIdx] = cells[minIdx]! - 1;
+    used -= 1;
+  }
+
+  const kept: AllocatedSegment<T>[] = [];
+  for (let i = 0; i < nonZero.length; i++) {
+    const count = cells[i]!;
+    if (count > 0) {
+      kept.push({ segment: nonZero[i]!, cells: count, seamAfter: false });
+    }
+  }
+  if (seamCount > 0) {
+    for (let i = 0; i < kept.length - 1; i++) {
+      kept[i]!.seamAfter = true;
+    }
+  }
+  return kept;
+}
 
 /**
  * Delay map: how far into the cycle this dot lights up, in `[0, 1)`.

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
 import { ProjectsView } from "./ProjectsView.js";
+import { categoryGlyph, type CategoryIconId } from "./presentation.js";
+import { cellWidth } from "./text-cells.js";
 import { darkTheme } from "./theme.js";
 
 let teardown: (() => void) | undefined;
@@ -141,5 +143,37 @@ describe("ProjectsView search box", () => {
     expect(frame).not.toContain("about 2.0 MiB freed");
     expect(frame).toContain("20.0 MiB you can reclaim");
     expect(frame).toContain("shared hardlinks not fully counted");
+  });
+});
+
+describe("C+ category glyphs", () => {
+  test("every category icon stays <= 1 cell across plain, nerd, letter, and NO_COLOR modes", () => {
+    const ids: CategoryIconId[] = [
+      "cache",
+      "install",
+      "build",
+      "unknown",
+      "custom",
+      "developer",
+      "apps",
+      "photos",
+      "videos",
+      "music",
+      "documents",
+      "downloads",
+      "system",
+      "caches",
+      "trash",
+      "other",
+    ];
+    for (const id of ids) {
+      for (const mode of ["plain", "nerd", "letter"] as const) {
+        const gColor = categoryGlyph(id, mode, false);
+        const gNoColor = categoryGlyph(id, mode, true);
+        expect(gColor.length).toBeGreaterThan(0);
+        expect(cellWidth(gColor), `${id}:${mode}`).toBeLessThanOrEqual(1);
+        expect(cellWidth(gNoColor), `${id}:nocolor`).toBeLessThanOrEqual(1);
+      }
+    }
   });
 });

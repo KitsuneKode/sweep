@@ -15,9 +15,73 @@ import {
   patternAtCursor,
   visiblePatternRows,
 } from "./state.js";
-import { type ThemeTokens, riskColor } from "./theme.js";
+import { type CostCategory, type DiskCategory, type ThemeTokens, riskColor } from "./theme.js";
 import type { KeyInput } from "./keymap.js";
 import { cellWidth, clipCells, padCells } from "./text-cells.js";
+
+export type IconMode = "plain" | "nerd" | "letter";
+export type CategoryIconId = CostCategory | DiskCategory | "custom";
+
+const CATEGORY_NERD_GLYPH: Record<CategoryIconId, string> = {
+  cache: "\uF021",
+  install: "\uF487",
+  build: "\uF4BC",
+  unknown: "\uF06E",
+  custom: "\uF06E",
+  developer: "\uF121",
+  apps: "\uF2D0",
+  photos: "\uF03E",
+  videos: "\uF008",
+  music: "\uF001",
+  documents: "\uF15C",
+  downloads: "\uF019",
+  system: "\uF0A0",
+  caches: "\uF021",
+  trash: "\uF1F8",
+  other: "\uF07B",
+};
+
+const CATEGORY_LETTER_GLYPH: Record<CategoryIconId, string> = {
+  cache: "c",
+  install: "i",
+  build: "b",
+  unknown: "?",
+  custom: "?",
+  developer: "D",
+  apps: "A",
+  photos: "P",
+  videos: "V",
+  music: "M",
+  documents: "F",
+  downloads: "↓",
+  system: "S",
+  caches: "C",
+  trash: "T",
+  other: "O",
+};
+
+/** Resolve icon style from `SWEEP_ICONS` (plain `●` by default; `nerd` or `letter` opt-in). */
+export function resolveIconMode(env: NodeJS.ProcessEnv = process.env): IconMode {
+  const raw = env.SWEEP_ICONS?.trim().toLowerCase();
+  if (raw === "nerd") return "nerd";
+  if (raw === "letter") return "letter";
+  return "plain";
+}
+
+/**
+ * Strictly <= 1-cell category icon glyph for rebuild-cost and whole-disk buckets.
+ * Under `NO_COLOR`, automatically selects the single-cell letter fallback so
+ * category identity survives with zero hue.
+ */
+export function categoryGlyph(
+  id: CategoryIconId,
+  mode: IconMode = resolveIconMode(),
+  isNoColor = Boolean(process.env.NO_COLOR),
+): string {
+  if (isNoColor || mode === "letter") return CATEGORY_LETTER_GLYPH[id];
+  if (mode === "nerd") return CATEGORY_NERD_GLYPH[id];
+  return "●";
+}
 
 function padCount(value: number, width = 2): string {
   return value.toLocaleString().padStart(width, " ");
@@ -641,6 +705,11 @@ export function buildContextLine(state: SweepUiState, tokens: ThemeTokens): Styl
 /** A key rendered as a keycap: ` space ` on the control fill. */
 export function keycap(label: string, tokens: ThemeTokens) {
   return bg(tokens.controlBg)(fg(tokens.text)(` ${label} `));
+}
+
+/** Primary action keycap: bold inverse on the Clove blue accent fill. */
+export function primaryKeycap(label: string, tokens: ThemeTokens) {
+  return bg(tokens.accent)(bold(fg(tokens.accentContrast)(` ${label} `)));
 }
 
 /** Which key hints the statusline should show. Modals own the footer too. */

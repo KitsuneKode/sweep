@@ -1,4 +1,5 @@
 import { NativeImage, StyledText, fg, t } from "@opentui/core";
+import { allocateSegmentCells, bayerEdgeFactor } from "./dot-matrix.js";
 
 export const EASE_MS = 180;
 
@@ -144,12 +145,12 @@ export function glidePixels(
         const dx = px < start ? start - px : px > end ? px - end : 0;
         return Math.min(1, Math.max(0, radius + 0.5 - Math.hypot(dx, dy)));
       };
-      const t = cover(x0, x0 + span);
+      const tCov = cover(x0, x0 + span);
       const f = b > a ? cover(a, b) : 0;
       // Fill over track, both straight alpha.
-      const alpha = f + t * (1 - f);
+      const alpha = f + tCov * (1 - f);
       const mix = (c: 0 | 1 | 2) =>
-        alpha > 0 ? (fillRgb[c] * f + trackRgb[c] * t * (1 - f)) / alpha : 0;
+        alpha > 0 ? (fillRgb[c] * f + trackRgb[c] * tCov * (1 - f)) / alpha : 0;
       if (ground) {
         pixels[i] = Math.round(mix(0) * alpha + ground[0] * (1 - alpha));
         pixels[i + 1] = Math.round(mix(1) * alpha + ground[1] * (1 - alpha));
@@ -184,6 +185,8 @@ export interface StackSegment {
   color: string;
   /** Recede behind the segment someone is resting on. */
   dim?: boolean;
+  /** Distinct Braille density glyph used under NO_COLOR. */
+  noColorGlyph?: string;
 }
 
 /** How much of a dimmed segment still shows: enough to read its share, not to compete. */
@@ -289,6 +292,170 @@ export function stackLine(width: number, segments: StackSegment[]): StyledText {
   return new StyledText(chunks.flatMap((chunk) => chunk.chunks));
 }
 
+export interface DotMatrixBarOptions {
+  background?: string | null | undefined;
+  trackColor?: string | undefined;
+  dimColor?: string | undefined;
+  fillFraction?: number | undefined;
+  isNoColor?: boolean | undefined;
+}
+
+const NO_COLOR_BRAILLE = ["⣿", "⣶", "⣤", "⠒", "⠿", "⡇", "⡄", "⠄", "⠛", "⠶", "⠴"] as const;
+
+/**
+ * Direction C+ Kitty RGBA dot-matrix strip: crisp 2×2 pixel dots on a 4px grid
+ * with ordered 2×2 Bayer dithering at segment right edges, 1-dot ground seams
+ * between buckets, unlit `trackColor` dots, and opaque `background` baking so
+ * `auto` theme card surfaces never bleed through Kitty placements.
+ */
+export function dotMatrixPixels(
+  width: number,
+  height: number,
+  segments: readonly StackSegment[],
+  options: DotMatrixBarOptions = {},
+): Uint8Array {
+  const pixels = new Uint8Array(width * height * 4);
+  const ground =
+    options.background && /^#[0-9a-f]{6}/i.test(options.background)
+      ? rgb(options.background)
+      : null;
+  if (ground) {
+    for (let i = 0; i < pixels.length; i += 4) {
+      pixels[i] = ground[0];
+      pixels[i + 1] = ground[1];
+      pixels[i + 2] = ground[2];
+      pixels[i + 3] = 255;
+    }
+  }
+  const nonZero = segments.filter((segment) => segment.fraction > 0);
+  if (width < 4 || height < 4 || nonZero.length === 0) return pixels;
+
+  const pitch = 4;
+  const dotSize = 2;
+  const cols = Math.floor(width / pitch);
+  const rows = Math.max(2, Math.floor((height - 2) / pitch));
+  const yOff = Math.max(0, Math.floor((height - rows * pitch) / 2) + 1);
+  const xOff = Math.max(0, Math.floor((width - cols * pitch) / 2));
+
+  const frac = options.fillFraction === undefined ? 1 : clamp01(options.fillFraction);
+  const litCols = Math.round(cols * frac);
+  const allocated = allocateSegmentCells(nonZero, litCols, true);
+
+  const runs: {
+    from: number;
+    to: number;
+    seg: StackSegment;
+    idx: number;
+    color: [number, number, number];
+  }[] = [];
+  let cursor = 0;
+  allocated.forEach((item, idx) => {
+    runs.push({
+      from: cursor,
+      to: cursor + item.cells,
+      seg: item.segment,
+      idx,
+      color: rgb(item.segment.color),
+    });
+    cursor += item.cells + (item.seamAfter ? 1 : 0);
+  });
+
+  const trackRgb = rgb(options.trackColor ?? "#2a2c32");
+  const isNoColor = Boolean(options.isNoColor);
+
+  const paintDot = (px: number, py: number, color: [number, number, number], alpha: number) => {
+    const a = clamp01(alpha);
+    for (let dy = 0; dy < dotSize && py + dy < height; dy++) {
+      for (let dx = 0; dx < dotSize && px + dx < width; dx++) {
+        const i = ((py + dy) * width + (px + dx)) * 4;
+        if (ground) {
+          pixels[i] = Math.round(color[0] * a + ground[0] * (1 - a));
+          pixels[i + 1] = Math.round(color[1] * a + ground[1] * (1 - a));
+          pixels[i + 2] = Math.round(color[2] * a + ground[2] * (1 - a));
+          pixels[i + 3] = 255;
+        } else {
+          pixels[i] = color[0];
+          pixels[i + 1] = color[1];
+          pixels[i + 2] = color[2];
+          pixels[i + 3] = Math.round(a * 255);
+        }
+      }
+    }
+  };
+
+  for (let cx = 0; cx < cols; cx++) {
+    const run = runs.find((r) => cx >= r.from && cx < r.to);
+    for (let ry = 0; ry < rows; ry++) {
+      const px = xOff + cx * pitch;
+      const py = yOff + ry * pitch;
+      if (!run) {
+        // Columns inside `litCols` not claimed by a run are 1-dot ground seams.
+        if (cx >= litCols) {
+          paintDot(px, py, trackRgb, 0.9);
+        }
+        continue;
+      }
+      const distFromEnd = run.to - 1 - cx;
+      let alpha = (run.seg.dim ? 0.3 : 1) * bayerEdgeFactor(cx, ry, distFromEnd);
+      if (isNoColor) {
+        if (run.idx % 4 === 1 && (cx + ry) % 4 === 0) alpha *= 0.35;
+        if (run.idx % 4 === 2 && ry % 2 === 1 && cx % 2 === 0) alpha *= 0.25;
+        if (run.idx % 4 === 3 && (cx + ry) % 2 === 1) alpha *= 0.2;
+      }
+      paintDot(px, py, run.color, alpha);
+    }
+  }
+  return pixels;
+}
+
+/**
+ * Direction C+ Braille dot-matrix fallback for non-Kitty terminals (tmux,
+ * foot, Alacritty, iTerm2, Windows Terminal, and NO_COLOR). Shares segment
+ * allocation with the pixel bar and keeps every non-zero share visible with
+ * 1-cell seams and Bayer-inspired soft right edges (`⣿` -> `⣷`).
+ */
+export function dotMatrixLine(
+  width: number,
+  segments: readonly StackSegment[],
+  options: DotMatrixBarOptions = {},
+): StyledText {
+  if (width <= 0) return t``;
+  const frac = options.fillFraction === undefined ? 1 : clamp01(options.fillFraction);
+  const activeW = Math.max(0, Math.min(width, Math.round(frac * width)));
+  const unlitW = Math.max(0, width - activeW);
+  const alloc = allocateSegmentCells(segments, activeW, true);
+  if (alloc.length === 0) {
+    return t`${fg(options.trackColor ?? "#2a2c32")("⣀".repeat(width))}`;
+  }
+
+  const isNoColor = Boolean(options.isNoColor);
+  const chunks: StyledText[] = [];
+  let drawn = 0;
+  alloc.forEach((item, idx) => {
+    const seg = item.segment;
+    const n = item.cells;
+    const baseGlyph = isNoColor
+      ? (seg.noColorGlyph ?? NO_COLOR_BRAILLE[idx % NO_COLOR_BRAILLE.length]!)
+      : seg.dim
+        ? "⣀"
+        : "⣿";
+    const edgeGlyph = isNoColor ? baseGlyph : seg.dim ? "⠂" : "⣷";
+    const text = n > 1 ? baseGlyph.repeat(n - 1) + edgeGlyph : baseGlyph;
+    const color = seg.dim && options.dimColor ? options.dimColor : seg.color;
+    chunks.push(t`${fg(color)(text)}`);
+    drawn += n;
+    if (item.seamAfter) {
+      chunks.push(t` `);
+      drawn += 1;
+    }
+  });
+  const remaining = Math.max(0, width - drawn);
+  if (unlitW > 0 || remaining > 0) {
+    chunks.push(t`${fg(options.trackColor ?? "#2a2c32")("⣀".repeat(remaining))}`);
+  }
+  return new StyledText(chunks.flatMap((chunk) => chunk.chunks));
+}
+
 const EIGHTHS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
 
 /**
@@ -302,11 +469,11 @@ export function magnitudeBar(fraction: number, width: number): string {
 }
 
 /**
- * Images are shared by everything that draws the same pixels (row bars of
- * equal size and tone), and the oldest are released once enough newer ones
- * exist - long after any renderer still points at them.
+ * Images are shared by everything that draws the same pixels, capped at 64
+ * entries per `.plans/kitty-graphics.md` §4 so RSS stays flat and active bars
+ * never thrash the cache. Evicted handles dispose after the next paint frame.
  */
-const IMAGE_CACHE_MAX = 256;
+export const IMAGE_CACHE_MAX = 64;
 const imageCache = new Map<string, NativeImage>();
 
 export function cachedImage(
@@ -328,7 +495,8 @@ export function cachedImage(
       const [oldestKey, oldest] = imageCache.entries().next().value!;
       imageCache.delete(oldestKey);
       // Not this frame: a placement may still reference it until the next render.
-      setTimeout(() => oldest.dispose(), 1_000);
+      const timer = setTimeout(() => oldest.dispose(), 1_000);
+      timer.unref?.();
     }
     return image;
   } catch {

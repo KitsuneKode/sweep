@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  allocateSegmentCells,
+  bayerEdgeFactor,
   DOT_CYCLE,
   DOT_GRID,
   DOT_LEVELS,
@@ -88,5 +90,28 @@ describe("dotRamp", () => {
     const ramp = dotRamp("#94a3b824", "red");
     expect(ramp.length).toBe(DOT_LEVELS);
     expect(ramp[DOT_LEVELS - 1]).toBe("red");
+  });
+});
+
+describe("C+ dot-matrix helpers", () => {
+  test("bayerEdgeFactor dithers right edges and leaves interior at full alpha", () => {
+    expect(bayerEdgeFactor(0, 0, 2)).toBe(1);
+    expect(bayerEdgeFactor(1, 0, 0)).toBe(0.42);
+    expect(bayerEdgeFactor(0, 1, 1)).toBe(0.72);
+    expect(bayerEdgeFactor(0, 0, 0)).toBe(1);
+  });
+
+  test("allocateSegmentCells fills exact width including 1-cell seams and min 1 cell per share", () => {
+    const alloc = allocateSegmentCells(
+      [{ fraction: 100 }, { fraction: 10 }, { fraction: 1 }],
+      40,
+      true,
+    );
+    expect(alloc).toHaveLength(3);
+    const total = alloc.reduce((sum, item) => sum + item.cells + (item.seamAfter ? 1 : 0), 0);
+    expect(total).toBe(40);
+    expect(alloc[2]?.cells).toBeGreaterThanOrEqual(1);
+    expect(alloc[0]?.seamAfter).toBe(true);
+    expect(alloc[2]?.seamAfter).toBe(false);
   });
 });

@@ -1692,7 +1692,7 @@ export function SweepApp({
                   : {})}
             footer={
               <KeyHints
-                variant="plain"
+                variant="caps"
                 tokens={tokens}
                 onPress={pressKey}
                 hints={

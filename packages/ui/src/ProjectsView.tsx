@@ -1,19 +1,29 @@
 import { formatBytes } from "@kitsunekode/sweep-display";
-import { IDLE_WINDOW_DAYS, sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
+import { sanitizeTerminalText } from "@kitsunekode/sweep-protocol";
 import { bold, fg, t, type MouseEvent, type StyledText } from "@opentui/core";
 import { dirname } from "node:path";
-import { type ReactNode, useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { formatAge, RECENT_WINDOW_MS } from "./age.js";
 import { filterAdvice } from "./filter-query.js";
+import { buildIdleInsight, pickInsight } from "./insights.js";
 import { Meter, ScanMeter, StackBar, useCountUp } from "./Meter.js";
 import type { StackSegment } from "./meter-draw.js";
-import type { CostShare, RebuildCost } from "./project-details.js";
 import { useMotionEnabled } from "./motion.js";
+import { rebuildFor, type CostShare, type RebuildCost } from "./project-details.js";
 import { ProjectDetails } from "./ProjectDetails.js";
-import { concatStyled, QUEUE_GLYPH, queueState } from "./presentation.js";
+import {
+  categoryGlyph,
+  concatStyled,
+  keycap,
+  primaryKeycap,
+  QUEUE_GLYPH,
+  queueState,
+  resolveIconMode,
+  type IconMode,
+} from "./presentation.js";
 import { SECTION_TITLE, diskGainedText, type Project, type ProjectRow } from "./projects.js";
 import { cellWidth, clipCells, clipStart } from "./text-cells.js";
-import { mixHex, ROW_BAR_SOFT, ROW_BAR_STRONG, type ThemeTokens } from "./theme.js";
+import { costColors, mixHex, ROW_BAR_SOFT, ROW_BAR_STRONG, type ThemeTokens } from "./theme.js";
 
 export interface ProjectsViewProps {
   tokens: ThemeTokens;
@@ -86,6 +96,13 @@ export interface ProjectsReceipt {
   stopped: boolean;
 }
 
+const COST_NOCOLOR_GLYPH: Record<RebuildCost, string> = {
+  cache: "⣿",
+  install: "⣶",
+  build: "⣤",
+  unknown: "⠒",
+};
+
 /**
  * The hero bar's parts: each cost in order, queued bytes solid and the rest
  * receding once anything is queued; solid throughout while nothing is.
@@ -96,32 +113,39 @@ function heroSegments(
 ): StackSegment[] {
   const anyQueued = byCost.some((share) => share.queuedBytes > 0);
   return byCost.flatMap((share): StackSegment[] => {
-    if (!anyQueued) return [{ fraction: share.bytes, color: color[share.cost] }];
+    const noColorGlyph = COST_NOCOLOR_GLYPH[share.cost];
+    if (!anyQueued) return [{ fraction: share.bytes, color: color[share.cost], noColorGlyph }];
     const rest = share.bytes - share.queuedBytes;
     return [
-      ...(share.queuedBytes > 0 ? [{ fraction: share.queuedBytes, color: color[share.cost] }] : []),
-      ...(rest > 0 ? [{ fraction: rest, color: color[share.cost], dim: true }] : []),
+      ...(share.queuedBytes > 0
+        ? [{ fraction: share.queuedBytes, color: color[share.cost], noColorGlyph }]
+        : []),
+      ...(rest > 0 ? [{ fraction: rest, color: color[share.cost], dim: true, noColorGlyph }] : []),
     ];
   });
 }
 
-/** "● cache 0.4 GiB  ● install 6.0 GiB": whole entries only, as many as fit. */
+/** "● cache 2.1 GiB   ● install 38.6 GiB": whole entries only, 1-cell category icons. */
 function costLegend(
   byCost: readonly CostShare[],
   color: Record<RebuildCost, string>,
   tokens: ThemeTokens,
   width: number,
+  iconMode: IconMode,
+  isNoColor: boolean,
 ): StyledText {
   let out = t``;
   let used = 0;
   for (const share of byCost) {
     const label = share.cost === "unknown" ? "custom" : share.cost;
-    const text = `${label} ${formatBytes(share.bytes)}`;
-    const cost = (used > 0 ? 2 : 0) + 2 + cellWidth(text);
+    const sizeStr = formatBytes(share.bytes);
+    const glyph = categoryGlyph(share.cost, iconMode, isNoColor);
+    const text = `${label} ${sizeStr}`;
+    const cost = (used > 0 ? 3 : 0) + cellWidth(glyph) + 1 + cellWidth(text);
     if (used + cost > width) break;
     out = concatStyled(
       out,
-      t`${used > 0 ? "  " : ""}${fg(color[share.cost])("● ")}${fg(tokens.textMuted)(text)}`,
+      t`${used > 0 ? "   " : ""}${fg(color[share.cost])(glyph)} ${fg(tokens.text)(label)} ${fg(tokens.textSecondary)(sizeStr)}`,
     );
     used += cost;
   }
@@ -130,8 +154,7 @@ function costLegend(
 
 /**
  * The success state, said once in the answer line's place: a check, the
- * bytes counting up to what came back, and the disk as it is now. A short
- * count is the delight; a removal is rare enough to earn it.
+ * bytes counting up to what came back, and the disk as it is now.
  */
 function ReceiptLine({
   receipt,
@@ -164,22 +187,24 @@ function ReceiptLine({
 }
 
 /**
- * A line of this view never runs wider than this: on a wide terminal the name,
- * its size and its idle time stay within one glance instead of spreading
- * across 200 columns.
+ * Width budgets across 80 / 100 / 120+ column terminals:
+ * - >= 116 cols (120-col terminal): list + C+ right ProjectDetails card margin
+ * - 88..115 cols (100-col terminal): full-width list with size bars, where, and kinds
+ * - < 88 cols (80-col terminal): compact list shedding bars while preserving every label
  */
-const CONTENT_MAX = 104;
+const CONTENT_MAX = 116;
+const LIST_MAX = 104;
 const LEAD = 5; // "› ○  " - cursor, checkbox, gap
 const SIZE_W = 10;
 const IDLE_W = 5;
 const BAR_W = 8;
-/** The details margin: shown once the list keeps its size bars beside it. */
-const PANEL_LIST_MIN = 84;
+const PANEL_LIST_MIN = 72;
 const PANEL_MIN = 38;
-const PANEL_MAX = 52;
-const PANEL_GAP = 3;
+const PANEL_MAX = 48;
+const PANEL_GAP = 2;
+const GIB = 1024 ** 3;
 
-/** A row in three parts, so the size bar between them can be drawn in pixels. */
+/** A row in three parts, so the size bar sits cleanly between name/size and trailing metadata. */
 interface RowParts {
   lead: StyledText;
   bar?: { fraction: number; color: string };
@@ -204,45 +229,74 @@ function riskLabel(project: Project): string {
 }
 /** "node_modules · .next +2": the biggest two, then how many more. */
 function kindSummary(project: Project, width: number): string {
-  // As many whole names as fit, biggest first; never a name cut mid-word.
   for (let count = Math.min(2, project.kinds.length); count >= 1; count--) {
     const rest = project.kinds.length - count;
     const text = `${project.kinds.slice(0, count).join(" · ")}${rest > 0 ? ` +${rest}` : ""}`;
     if (cellWidth(text) <= width) return text;
   }
-  // A one- or two-letter stub ("n…") says nothing; leave the column empty.
   return width >= 6 ? clipCells(project.kinds[0] ?? "", width) : "";
 }
 
 /**
- * The calm default screen. No boxes and no column headers. A sentence answers
- * "how much can I get back"; projects follow in two groups, what nobody is
- * using and what someone is, the biggest few of each with the rest folded.
- * Each row leads with what decides it (name, size as a number and as length,
- * idle) and trails the quiet detail (risk, where it lives, what it holds).
+ * Direction C+ (Refined Clove) Projects view and Storage Card.
+ *
+ * Top: elevated Storage Card answering "how much can come back, by rebuild cost"
+ * with one bold tabular headline number, a dithered dot-matrix bar (Kitty pixels
+ * with Braille fallback), colored 1-cell category icons in the legend, and a
+ * width-tiered insight sentence that never truncates at 80, 100, or 120 cols.
+ *
+ * Body: grouped project list (Finished worktrees, Idle 30+ days, Worked on
+ * recently) with a boxed C+ details margin on >= 120-column terminals.
  */
 export function ProjectsView(props: ProjectsViewProps) {
   const { tokens, width, height, rows, cursor, now, scanning, footer, filter, searchFocused } =
     props;
-  // The app frame and this view each pad one cell per side. A wide terminal
-  // gives the cursor's project a details margin; the list keeps its bars.
+  const isNoColor = Boolean(process.env.NO_COLOR);
+  const iconMode = resolveIconMode();
+
+  // Outer app box pads 1 cell/side; this view pads 1 cell/side plus 2-cell right breathing room.
+  const usable = Math.max(20, Math.min(CONTENT_MAX, width - 6));
   const panelW =
-    width - 6 >= PANEL_LIST_MIN + PANEL_GAP + PANEL_MIN
-      ? Math.min(PANEL_MAX, width - 6 - PANEL_GAP - PANEL_LIST_MIN)
+    usable >= PANEL_LIST_MIN + PANEL_GAP + PANEL_MIN
+      ? Math.min(PANEL_MAX, usable - PANEL_GAP - PANEL_LIST_MIN)
       : 0;
-  const inner = Math.max(
+  const listInner = Math.max(
     20,
-    Math.min(CONTENT_MAX, width - 6 - (panelW > 0 ? panelW + PANEL_GAP : 0)),
+    Math.min(LIST_MAX, panelW > 0 ? usable - panelW - PANEL_GAP : usable),
   );
+  // Storage Card spans full usable width above the list + details columns.
+  const useCardSurface = height >= 20 && usable >= 56;
+  const cardBg = useCardSurface ? tokens.surface : tokens.bg;
+  const cardInner = Math.max(20, usable - (useCardSurface ? 2 : 0));
+
   const focusRow = rows[cursor];
   const focusProject = focusRow && "project" in focusRow ? focusRow.project : null;
   const showSearch = searchFocused || filter.length > 0;
   const advice = showSearch ? filterAdvice(filter) : null;
-  // Header (brand, blank, answer, meter), search (+ optional advice), the list, blank, footer.
-  // The cost legend under the bar is the first thing to go when height is short.
+
   const byCost = props.byCost ?? [];
   const showLegend = !scanning && byCost.length > 0 && height >= 20;
-  const chrome = 4 + (showSearch ? (advice ? 3 : 2) : 0) + 2 + (showLegend ? 1 : 0);
+
+  // Count idle projects and finished worktrees for the tied insight sentence.
+  let idleProjectCount = 0;
+  let finishedWorktreeCount = 0;
+  for (const row of rows) {
+    if (row.kind === "section") {
+      if (row.section === "idle") idleProjectCount = row.count;
+      else if (row.section === "finished") finishedWorktreeCount = row.count;
+    }
+  }
+  const showInsightRow =
+    !scanning &&
+    props.selectedCount === 0 &&
+    !props.receipt &&
+    props.idleBytes > 0 &&
+    height >= 22 &&
+    usable >= 56;
+
+  // Chrome budget: card rows (brand, headline, bar, optional legend, optional insight) + spacer + search + notice + footer.
+  const cardRows = 3 + (showLegend ? 1 : 0) + (showInsightRow ? 1 : 0);
+  const chrome = cardRows + 1 + (showSearch ? (advice ? 3 : 2) : 0) + 2;
   const room = Math.max(3, height - chrome);
 
   // Keep the cursor in view without jumping the page on every move.
@@ -255,25 +309,21 @@ export function ProjectsView(props: ProjectsViewProps) {
   const shown = rows.slice(top, top + room);
 
   const projectRows = rows.flatMap((row) => (row.kind === "project" ? [row.project] : []));
-  // Opened items sit two cells deeper, and must fit as whole names too:
-  // short project names left "node_modules" clipped to "node…les".
   const longestName = Math.max(
     10,
     ...projectRows.map((project) => cellWidth(project.name)),
-    ...rows.flatMap((row) => (row.kind === "artifact" ? [cellWidth(row.candidate.name) + 2] : [])),
+    ...rows.flatMap((row) => (row.kind === "artifact" ? [cellWidth(row.candidate.name) + 4] : [])),
   );
-  // The size bar only where the detail keeps room to say something.
-  const barW = inner >= 84 ? BAR_W : 0;
+  // Show size bars when the list has comfortable room beside metadata.
+  const barW = listInner >= 84 ? BAR_W : 0;
   const barGap = barW > 0 ? barW + 2 : 0;
   const nameW = Math.min(
     26,
     longestName,
-    Math.max(10, inner - LEAD - SIZE_W - barGap - IDLE_W - 6),
+    Math.max(10, listInner - LEAD - SIZE_W - barGap - IDLE_W - 6),
   );
-  const detailW = Math.max(0, inner - LEAD - nameW - 2 - SIZE_W - 2 - barGap - IDLE_W - 3);
-  // One scale for every project row, so lengths compare down the list.
+  const detailW = Math.max(0, listInner - LEAD - nameW - 2 - SIZE_W - 2 - barGap - IDLE_W - 3);
   const largest = Math.max(1, ...projectRows.map((project) => project.queueableBytes));
-  // Risk is its own column when any row carries it, so what follows lines up.
   const riskColW = Math.max(
     0,
     ...projectRows.map((project) => {
@@ -281,45 +331,39 @@ export function ProjectsView(props: ProjectsViewProps) {
       return label ? cellWidth(label) + 2 : 0;
     }),
   );
-  // The location column only when the detail has room for both; it fits the
-  // longest location shown, up to just over half of what is left.
   const longestWhere = Math.max(0, ...projectRows.map((project) => cellWidth(project.parent)));
   const restW = Math.max(0, detailW - riskColW);
   const whereW = restW >= 30 ? Math.min(longestWhere, Math.floor(restW * 0.55)) : 0;
-  // Bars are quiet: a step above the meter track, louder only under the cursor.
-  const costColor: Record<RebuildCost, string> = {
-    cache: tokens.positive,
-    install: tokens.info,
-    build: tokens.textSecondary,
-    unknown: tokens.textMuted,
-  };
+
+  const costColor = costColors(tokens);
   const barSoft = mixHex(tokens.meterTrack, tokens.textMuted, ROW_BAR_SOFT);
   const barStrong = mixHex(tokens.meterTrack, tokens.textMuted, ROW_BAR_STRONG);
 
-  // ── Header ──────────────────────────────────────────────────────────────
+  // ── Storage Card Header ─────────────────────────────────────────────────
   const modes = [props.dryRun ? "DRY RUN" : "", props.trash ? "TRASH" : ""].filter(Boolean);
-  const progress = scanning
+  const rightMeta = scanning
     ? t`${fg(tokens.info)(props.sizedLabel)}`
-    : props.diskFree !== null
-      ? t`${fg(tokens.textMuted)(`${formatBytes(props.diskFree)} free`)}`
-      : t``;
+    : props.selectedCount > 0
+      ? t`${bold(fg(tokens.accent)(`${props.selectedCount.toLocaleString()} queued`))}`
+      : props.diskFree !== null
+        ? t`${fg(tokens.textSecondary)(`${formatBytes(props.diskFree)} free`)}`
+        : t``;
   const status =
     modes.length > 0
       ? concatStyled(
-          t`${bold(fg(tokens.warning)(modes.join(" · ")))}${fg(tokens.textDim)("   ")}`,
-          progress,
+          t`${bold(fg(tokens.warning)(modes.join(" · ")))}${fg(tokens.textDim)("  ")}`,
+          rightMeta,
         )
-      : progress;
-  const brand = t`${bold(fg(tokens.accent)("sweep"))}  ${fg(tokens.textMuted)(
+      : rightMeta;
+  const brand = t`${bold(fg(tokens.accent)("◆ sweep"))}  ${fg(tokens.textSecondary)(
     clipCells(
       sanitizeTerminalText(props.target),
-      Math.max(8, inner - styledWidth(status) - 10),
+      Math.max(8, cardInner - styledWidth(status) - 11),
       true,
     ),
   )}`;
 
-  // A total is exact only once every size is measured and the scan finished
-  // whole: until then it says "~" (or "so far"), and an incomplete scan says so.
+  // One bold tabular headline number per card (reclaimable = safe + caution only).
   const approx = scanning || props.partial || props.incomplete ? "~" : "";
   const uniquePartial = !scanning && props.uniqueBytesPartial === true;
   const selectedHasShared =
@@ -339,13 +383,11 @@ export function ProjectsView(props: ProjectsViewProps) {
         ? t`${bold(fg(tokens.accent)(`about ${formatBytes(props.uniqueSelectedBytes!)} freed`))}${fg(
             tokens.textMuted,
           )(
-            ` (${formatBytes(props.selectedBytes)} apparent)  ·  ${plural(props.selectedCount, "item")}  ·  `,
-          )}${fg(tokens.text)("c")}${fg(tokens.textMuted)(" to review")}`
+            ` (${formatBytes(props.selectedBytes)} apparent)  ·  ${plural(props.selectedCount, "item")}  `,
+          )}`
         : t`${bold(fg(tokens.accent)(formatBytes(props.selectedBytes)))}${fg(tokens.text)(
             " queued",
-          )}${fg(tokens.textMuted)(`${partialQualifier}  ·  ${plural(props.selectedCount, "item")}  ·  `)}${fg(
-            tokens.text,
-          )("c")}${fg(tokens.textMuted)(" to review")}`
+          )}${fg(tokens.textMuted)(`${partialQualifier}  ·  ${plural(props.selectedCount, "item")}  `)}`
       : props.reclaimableBytes > 0 || !scanning
         ? reclaimHasShared
           ? t`${bold(fg(tokens.text)(`about ${formatBytes(props.uniqueReclaimableBytes!)} freed`))}${fg(
@@ -354,22 +396,19 @@ export function ProjectsView(props: ProjectsViewProps) {
               ` (${approx}${formatBytes(props.reclaimableBytes)} apparent)  ·  ${plural(props.projectCount, "project")}`,
             )}`
           : t`${bold(fg(tokens.text)(`${approx}${formatBytes(props.reclaimableBytes)}`))}${fg(
-              tokens.text,
+              tokens.textSecondary,
             )(
               scanning ? " so far" : " you can reclaim",
             )}${fg(tokens.textMuted)(`${partialQualifier}  ·  ${plural(props.projectCount, "project")}`)}`
         : t`${fg(tokens.textMuted)("Looking for build output…")}`;
-  // The easy win, named and one key away - only when it fits whole.
-  const idleHint = t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.text)(
-    formatBytes(props.idleBytes),
-  )}${fg(tokens.textMuted)(` idle ${IDLE_WINDOW_DAYS}+ days, `)}${fg(tokens.accent)("i")}${fg(
-    tokens.textMuted,
-  )(" queues it")}`;
+
+  const reviewActionChip =
+    props.selectedCount > 0 ? t`${primaryKeycap("c", tokens)}${fg(tokens.text)(" review")}` : null;
   const narrowingHint = props.narrowing
     ? t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.warning)(
         clipCells(
           sanitizeTerminalText(props.narrowing),
-          Math.max(8, inner - styledWidth(answer) - 14),
+          Math.max(8, cardInner - styledWidth(answer) - 14),
           true,
         ),
       )}${fg(tokens.textMuted)(" · ")}${fg(tokens.text)("esc")}${fg(tokens.textMuted)(" clears")}`
@@ -384,18 +423,30 @@ export function ProjectsView(props: ProjectsViewProps) {
     props.incomplete && !scanning
       ? t`${fg(tokens.textMuted)("  ·  ")}${fg(tokens.warning)("scan incomplete")}${fg(tokens.textMuted)(" · ")}${fg(tokens.text)("r")}${fg(tokens.textMuted)(" retries")}`
       : null;
-  let answerBase = answer;
-  for (const extra of [incompleteHint, guardedHint, narrowingHint]) {
-    if (extra && styledWidth(answerBase) + styledWidth(extra) <= inner)
-      answerBase = concatStyled(answerBase, extra);
+
+  let answerLine = answer;
+  for (const extra of [reviewActionChip, incompleteHint, guardedHint, narrowingHint]) {
+    if (extra && styledWidth(answerLine) + styledWidth(extra) <= cardInner) {
+      answerLine = concatStyled(answerLine, extra);
+    }
   }
-  const answerLine =
-    props.selectedCount === 0 &&
-    !scanning &&
-    props.idleBytes > 0 &&
-    styledWidth(answerBase) + styledWidth(idleHint) <= inner
-      ? concatStyled(answerBase, idleHint)
-      : answerBase;
+
+  // Width-tiered insight sentence + keycap (never truncates with `…` at 80/100/120 cols).
+  const insightAction = t`${keycap("i", tokens)}${fg(tokens.textSecondary)(" queue idle")}`;
+  const insightBudget = Math.max(20, cardInner - styledWidth(insightAction) - 3);
+  const idleInsight = buildIdleInsight(
+    props.idleBytes,
+    idleProjectCount,
+    finishedWorktreeCount,
+    formatBytes,
+  );
+  const insightText = pickInsight(idleInsight, insightBudget);
+  const insightLine = concatStyled(
+    t`${fg(tokens.textSecondary)(insightText)}${" ".repeat(
+      Math.max(2, cardInner - cellWidth(insightText) - styledWidth(insightAction)),
+    )}`,
+    insightAction,
+  );
 
   // ── Rows ────────────────────────────────────────────────────────────────
   const line = (index: number, row: ProjectRow): RowParts => {
@@ -404,13 +455,9 @@ export function ProjectsView(props: ProjectsViewProps) {
     if (row.kind === "spacer") return { lead: t`` };
     if (row.kind === "section") {
       const label = SECTION_TITLE[row.section];
-      // Whole parts drop, never characters: the count goes first, the size
-      // is what the section is for.
-      // Reclaimable only (safe + caution): the same number the top line uses.
-      // What is guarded is named after it, never added to it.
       const size = formatBytes(row.bytes);
       const guard = row.guardedBytes > 0 ? `  ·  +${formatBytes(row.guardedBytes)} guarded` : "";
-      const fits = (text: string) => cellWidth(label) + 2 + cellWidth(text) <= inner;
+      const fits = (text: string) => cellWidth(label) + 2 + cellWidth(text) <= listInner;
       const full = `${plural(row.count, "project")}  ·  ${size}`;
       const meta = fits(`${full}${guard}`)
         ? `${full}${guard}`
@@ -419,9 +466,9 @@ export function ProjectsView(props: ProjectsViewProps) {
           : fits(`${size}${guard}`) && guard
             ? `${size}${guard}`
             : size;
-      const gap = Math.max(2, inner - cellWidth(label) - cellWidth(meta));
+      const gap = Math.max(2, listInner - cellWidth(label) - cellWidth(meta));
       return {
-        lead: t`${bold(fg(tokens.textSecondary)(label))}${" ".repeat(gap)}${fg(tokens.textMuted)(meta)}`,
+        lead: t`${fg(tokens.headerText)(label)}${" ".repeat(gap)}${fg(tokens.textMuted)(meta)}`,
       };
     }
     if (row.kind === "more") {
@@ -455,29 +502,36 @@ export function ProjectsView(props: ProjectsViewProps) {
       const nameText = padCells(clipCells(sanitizeTerminalText(p.name), nameW, true), nameW);
       const name = isCursor ? bold(fg(tokens.text)(nameText)) : fg(tokens.text)(nameText);
       const size = `${p.partial ? "~" : ""}${formatBytes(p.queueableBytes)}`.padStart(SIZE_W);
+      // One bold headline per card: row sizes use luminance hierarchy (bright for >= 1 GiB).
+      const sizeColor =
+        state === "all"
+          ? tokens.accent
+          : p.queueableBytes >= GIB
+            ? tokens.text
+            : tokens.textSecondary;
       const idle = (p.section === "unknown" ? "?" : formatAge(p.activeMs, now)).padStart(IDLE_W);
       const recent = p.activeMs !== undefined && now - p.activeMs < RECENT_WINDOW_MS;
-      // Risk leads the detail when there is any: it changes what Space does
-      // (dangerous items stay out of a project-level queue) and needs a look.
       const risk = riskLabel(p);
       const where = p.parent ? sanitizeTerminalText(p.parent) : "";
-      // Worktree labels lead with the repository name ("app · branch missing"),
-      // so clip from the end to keep the repo name visible at narrow widths.
       const clipWhere = (maxW: number) =>
         p.worktreeOf !== undefined ? clipCells(where, maxW, true) : clipStart(where, maxW);
-      // With the details margin open, what a project holds is said there.
-      const detail =
-        restW <= 0
-          ? ""
-          : panelW > 0
-            ? restW >= 16
-              ? clipWhere(restW)
-              : ""
-            : whereW >= 8 && restW > whereW + 6
-              ? `${padCells(clipWhere(whereW), whereW)}  ${kindSummary(p, restW - whereW - 2)}`
-              : kindSummary(p, restW);
+      const detail = (() => {
+        if (restW <= 0) return "";
+        if (!where) return kindSummary(p, restW);
+        if (p.worktreeOf !== undefined) {
+          const wtLabel = clipWhere(restW);
+          const kindRoom = restW - cellWidth(wtLabel) - 2;
+          const kinds = kindRoom >= 8 ? kindSummary(p, kindRoom) : "";
+          return kinds ? `${wtLabel}  ${kinds}` : wtLabel;
+        }
+        if (whereW >= 8 && restW > whereW + 8) {
+          const kinds = kindSummary(p, restW - whereW - 2);
+          return kinds ? `${padCells(clipWhere(whereW), whereW)}  ${kinds}` : clipWhere(restW);
+        }
+        return kindSummary(p, restW) || clipWhere(restW);
+      })();
       return {
-        lead: t`${pointer} ${mark}  ${name}  ${fg(tokens.textSecondary)(size)}  `,
+        lead: t`${pointer} ${mark}  ${name}  ${fg(sizeColor)(size)}  `,
         ...(barW > 0
           ? {
               bar: {
@@ -491,47 +545,60 @@ export function ProjectsView(props: ProjectsViewProps) {
         )(padCells(risk, riskColW))}${fg(tokens.textDim)(detail)}`,
       };
     }
-    // An opened project's artifact: what it is under the name column, its
-    // share of the project as length, and where inside the project it sits.
+
+    // An opened project's artifact: colored 1-cell category icon + name + tabular size + cost/folder.
     const c = row.candidate;
     const queued = props.selectedIds.has(c.id);
+    const rebuild = rebuildFor(c.kind, row.project.key, c.name);
+    const catGlyph = categoryGlyph(rebuild.cost, iconMode, isNoColor);
+    const catColor = c.riskTier === "blocked" ? tokens.blocked : costColor[rebuild.cost];
     const mark =
       c.riskTier === "blocked"
-        ? fg(tokens.textDim)("·")
+        ? fg(tokens.blocked)("⊘")
         : fg(queued ? tokens.accent : tokens.textDim)(queued ? "●" : "○");
     const inside = c.path.startsWith(`${row.project.key}/`)
       ? c.path.slice(row.project.key.length + 1)
       : c.name;
     const folder = dirname(inside) === "." ? "" : sanitizeTerminalText(dirname(inside));
-    const kindText = padCells(clipCells(sanitizeTerminalText(c.name), nameW - 2, true), nameW - 2);
+    const kindColW = Math.max(4, nameW - 4);
+    const kindText = padCells(clipCells(sanitizeTerminalText(c.name), kindColW, true), kindColW);
     const size = `${c.bytesKnown === false ? "~" : ""}${formatBytes(c.estimatedBytes)}`.padStart(
       SIZE_W,
     );
+    const sizeColor = queued
+      ? tokens.accent
+      : c.estimatedBytes >= GIB
+        ? tokens.text
+        : tokens.textSecondary;
     const riskText = c.riskTier === "safe" ? "" : c.riskTier;
     const riskTone =
       c.riskTier === "dangerous"
         ? tokens.danger
         : c.riskTier === "caution"
           ? tokens.warning
-          : tokens.textDim;
-    // One risk column per opened project, so the folders line up under it.
+          : tokens.blocked;
     const riskW = row.project.artifacts.some((a) => a.riskTier === "dangerous")
       ? 11
       : row.project.artifacts.some((a) => a.riskTier !== "safe")
         ? 9
         : 0;
     const where = clipStart(folder, Math.max(0, detailW - riskW));
-    // A removal that failed says why on its own row, until the next apply.
     const failure = props.failures?.get(c.path);
     const failedTail = failure
       ? t`${barW > 0 ? "  " : ""}${fg(tokens.danger)(
           `✗ ${clipCells(sanitizeTerminalText(failure), Math.max(8, detailW + IDLE_W - 2), true)}`,
         )}`
       : null;
+    const nameStyled =
+      c.riskTier === "blocked"
+        ? fg(tokens.blocked)(kindText)
+        : c.riskTier === "dangerous"
+          ? fg(tokens.danger)(kindText)
+          : isCursor
+            ? bold(fg(tokens.text)(kindText))
+            : fg(tokens.textSecondary)(kindText);
     return {
-      lead: t`${pointer}   ${mark}  ${
-        isCursor ? bold(fg(tokens.text)(kindText)) : fg(tokens.textSecondary)(kindText)
-      }  ${fg(tokens.textMuted)(size)}  `,
+      lead: t`${pointer}   ${mark} ${fg(catColor)(catGlyph)} ${nameStyled}  ${fg(sizeColor)(size)}  `,
       ...(barW > 0
         ? {
             bar: {
@@ -549,44 +616,54 @@ export function ProjectsView(props: ProjectsViewProps) {
   };
 
   return (
-    <box
-      width={inner + 2 + (panelW > 0 ? panelW + PANEL_GAP : 0)}
-      height="100%"
-      flexDirection="column"
-      paddingLeft={1}
-      paddingRight={1}
-    >
-      <box height={1} width={inner} flexDirection="row" justifyContent="space-between">
-        <text content={brand} wrapMode="none" />
-        <text content={status} wrapMode="none" />
+    <box width={usable + 2} height="100%" flexDirection="column" paddingLeft={1} paddingRight={1}>
+      {/* Direction C+ Storage Card header */}
+      <box
+        width={usable}
+        flexDirection="column"
+        flexShrink={0}
+        backgroundColor={cardBg}
+        paddingLeft={useCardSurface ? 1 : 0}
+        paddingRight={useCardSurface ? 1 : 0}
+      >
+        <box height={1} width={cardInner} flexDirection="row" justifyContent="space-between">
+          <text content={brand} wrapMode="none" />
+          <text content={status} wrapMode="none" />
+        </box>
+        {props.receipt && props.selectedCount === 0 && !scanning ? (
+          <ReceiptLine receipt={props.receipt} diskFree={props.diskFree} tokens={tokens} />
+        ) : (
+          <text content={answerLine} wrapMode="none" />
+        )}
+        {scanning ? (
+          <ScanMeter
+            width={cardInner}
+            fill={tokens.info}
+            track={tokens.meterTrack}
+            background={cardBg}
+          />
+        ) : byCost.length > 0 ? (
+          <StackBar
+            width={cardInner}
+            segments={heroSegments(byCost, costColor)}
+            trackColor={tokens.meterTrack}
+            dimColor={tokens.textDim}
+            background={cardBg}
+            isNoColor={isNoColor}
+            variant="dots"
+          />
+        ) : (
+          <text content="" />
+        )}
+        {showLegend ? (
+          <text
+            content={costLegend(byCost, costColor, tokens, cardInner, iconMode, isNoColor)}
+            wrapMode="none"
+          />
+        ) : null}
+        {showInsightRow ? <text content={insightLine} wrapMode="none" /> : null}
       </box>
       <text content="" />
-      {props.receipt && props.selectedCount === 0 && !scanning ? (
-        <ReceiptLine receipt={props.receipt} diskFree={props.diskFree} tokens={tokens} />
-      ) : (
-        <text content={answerLine} wrapMode="none" />
-      )}
-      {scanning ? (
-        // The end of a scan is unknown until it arrives: the bar glides and
-        // claims no fraction; "N of M sized" above is the only number.
-        <ScanMeter
-          width={inner}
-          fill={tokens.info}
-          track={tokens.meterTrack}
-          background={tokens.bg}
-        />
-      ) : byCost.length > 0 ? (
-        // Done scanning: where the space is, by what it costs to get back.
-        // Once something is queued, the queued share of each part is solid and
-        // the rest recedes, so one bar says what is there and what is chosen.
-        // It follows the keyboard, so it changes at once and never eases.
-        <StackBar width={inner} segments={heroSegments(byCost, costColor)} background={tokens.bg} />
-      ) : (
-        <text content="" />
-      )}
-      {showLegend ? (
-        <text content={costLegend(byCost, costColor, tokens, inner)} wrapMode="none" />
-      ) : null}
       {showSearch ? (
         <>
           <box height={1} flexDirection="row">
@@ -615,7 +692,7 @@ export function ProjectsView(props: ProjectsViewProps) {
       ) : null}
       <box flexGrow={1} minHeight={0} flexDirection="row">
         <box
-          width={inner}
+          width={listInner}
           flexShrink={0}
           flexDirection="column"
           onMouseScroll={(event: MouseEvent) => {
@@ -661,8 +738,6 @@ export function ProjectsView(props: ProjectsViewProps) {
                       animate={false}
                       variant="blocks"
                       thickness={0.42}
-                      // Kitty fills an image's clear pixels with the terminal's
-                      // colour, so the bar carries the row's own behind it.
                       background={index === cursor ? tokens.selectionSoftBg : tokens.bg}
                     />
                   ) : null}

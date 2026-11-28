@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { CliRenderer } from "@opentui/core";
 import { testRender } from "@opentui/react/test-utils";
 import { act } from "react";
-import { Meter } from "./Meter.js";
+import { canUseKittyGraphics, Meter } from "./Meter.js";
 import {
+  dotMatrixLine,
+  dotMatrixPixels,
+  IMAGE_CACHE_MAX,
   meterLine,
   meterPixels,
   releaseMeterImages,
@@ -26,7 +29,15 @@ function pretendKitty() {
   });
 }
 
+const originalNoColor = process.env.NO_COLOR;
+
+beforeEach(() => {
+  delete process.env.NO_COLOR;
+});
+
 afterEach(() => {
+  if (originalNoColor === undefined) delete process.env.NO_COLOR;
+  else process.env.NO_COLOR = originalNoColor;
   Object.defineProperty(CliRenderer.prototype, "capabilities", capabilities);
   Object.defineProperty(CliRenderer.prototype, "resolution", resolution);
   releaseMeterImages();
@@ -142,5 +153,92 @@ describe("stackPixels", () => {
   test("nothing to split draws nothing", () => {
     const pixels = stackPixels(40, 10, [{ fraction: 0, color: "#ff0000" }]);
     expect(pixels.every((byte) => byte === 0)).toBe(true);
+  });
+});
+
+describe("C+ dot-matrix bar and Kitty gating", () => {
+  test("canUseKittyGraphics disables Kitty in tmux, Zellij, Screen, NO_COLOR, and SWEEP_GRAPHICS=off", () => {
+    const caps = { kitty_graphics: true, multiplexer: "none" };
+    const res = { width: 1000, height: 600 };
+    expect(canUseKittyGraphics(caps, res, 100, 30, {})).toBe(true);
+    expect(
+      canUseKittyGraphics({ kitty_graphics: true, multiplexer: "tmux" }, res, 100, 30, {}),
+    ).toBe(false);
+    expect(canUseKittyGraphics(caps, res, 100, 30, { TMUX: "/tmp/tmux-1000/default,1,0" })).toBe(
+      false,
+    );
+    expect(canUseKittyGraphics(caps, res, 100, 30, { ZELLIJ: "0" })).toBe(false);
+    expect(canUseKittyGraphics(caps, res, 100, 30, { STY: "1234.pts" })).toBe(false);
+    expect(canUseKittyGraphics(caps, res, 100, 30, { NO_COLOR: "1" })).toBe(false);
+    expect(canUseKittyGraphics(caps, res, 100, 30, { SWEEP_GRAPHICS: "off" })).toBe(false);
+    expect(canUseKittyGraphics(caps, res, 100, 30, { OPENTUI_GRAPHICS: "false" })).toBe(false);
+    expect(IMAGE_CACHE_MAX).toBeLessThanOrEqual(64);
+  });
+
+  test("dotMatrixPixels bakes opaque ground and draws distinct segments with seams", () => {
+    const pixels = dotMatrixPixels(
+      200,
+      20,
+      [
+        { fraction: 3, color: "#55d7be" },
+        { fraction: 1, color: "#ad9efd" },
+      ],
+      { background: "#1b1c1f", trackColor: "#2a2c32" },
+    );
+    expect(pixels.length).toBe(200 * 20 * 4);
+    for (let i = 3; i < pixels.length; i += 4) expect(pixels[i]).toBe(255);
+  });
+
+  test("dotMatrixLine renders Braille dots with seams and distinct NO_COLOR patterns", () => {
+    const colored = dotMatrixLine(20, [
+      { fraction: 2, color: "#55d7be", noColorGlyph: "⣿" },
+      { fraction: 1, color: "#ad9efd", noColorGlyph: "⣶" },
+    ]);
+    const coloredText = colored.chunks.map((c) => c.text).join("");
+    expect(coloredText.length).toBe(20);
+    expect(coloredText).toContain("⣿");
+    expect(coloredText).toContain("⣷");
+    expect(coloredText).toContain(" ");
+
+    const noColor = dotMatrixLine(
+      20,
+      [
+        { fraction: 2, color: "#d0d0d0", noColorGlyph: "⣿" },
+        { fraction: 1, color: "#f5f5f5", noColorGlyph: "⣶" },
+      ],
+      { isNoColor: true },
+    );
+    const noColorText = noColor.chunks.map((c) => c.text).join("");
+    expect(noColorText).toContain("⣿");
+    expect(noColorText).toContain("⣶");
+  });
+
+  test("dotMatrixPixels and dotMatrixLine both keep a tiny trailing category visible (parity)", () => {
+    const segments = [
+      { fraction: 205, color: "#00ff00", noColorGlyph: "⣿" },
+      { fraction: 1, color: "#0000ff", noColorGlyph: "⣶" },
+    ];
+    // Braille fallback keeps both segments visible.
+    const line = dotMatrixLine(50, segments);
+    expect(
+      line.chunks.filter((chunk) => chunk.text.trim().length > 0).length,
+    ).toBeGreaterThanOrEqual(2);
+
+    // Kitty pixel renderer (400×22 = 100 dot columns) must also paint the tiny trailing blue segment.
+    const pixels = dotMatrixPixels(400, 22, segments, {
+      background: "#000000",
+      trackColor: "#222222",
+    });
+    let greenPixels = 0;
+    let bluePixels = 0;
+    for (let i = 0; i < pixels.length; i += 4) {
+      const r = pixels[i]!;
+      const g = pixels[i + 1]!;
+      const b = pixels[i + 2]!;
+      if (g > 100 && b < 40 && r < 40) greenPixels += 1;
+      if (b > 100 && g < 40 && r < 40) bluePixels += 1;
+    }
+    expect(greenPixels).toBeGreaterThan(0);
+    expect(bluePixels).toBeGreaterThan(0);
   });
 });

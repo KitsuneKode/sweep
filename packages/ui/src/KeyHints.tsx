@@ -7,9 +7,9 @@ import type { ThemeTokens } from "./theme.js";
 /**
  * The statusline hints as buttons. A click sends the hint's key through the
  * same handler a keypress takes, so the mouse can never do something the
- * keyboard would not. "caps" draws keys as filled keycaps (the full view);
- * "plain" keeps the calm view's quiet key-then-label voice. Hover lifts the
- * whole hint one step, with no motion: these are pressed many times a session.
+ * keyboard would not. "caps" draws keys as filled keycaps (primary next steps
+ * use the Clove blue accent fill, secondary hints use the neutral control fill);
+ * "plain" keeps a quiet key-then-label voice. Hover lifts one step with no motion.
  */
 export function KeyHints({
   hints,
@@ -52,7 +52,9 @@ function Hint({
   const lit = press.hovered;
   const content =
     variant === "caps"
-      ? t`${bg(lit ? tokens.border : tokens.controlBg)(fg(tokens.text)(` ${hint.key} `))}${fg(lit ? tokens.text : tokens.textMuted)(` ${hint.label}`)}`
+      ? hint.next
+        ? t`${bg(tokens.accent)(bold(fg(tokens.accentContrast)(` ${hint.key} `)))}${fg(tokens.text)(` ${hint.label}`)}`
+        : t`${bg(lit ? tokens.border : tokens.controlBg)(fg(tokens.text)(` ${hint.key} `))}${fg(lit ? tokens.text : tokens.textSecondary)(` ${hint.label}`)}`
       : hint.next
         ? t`${bold(fg(tokens.accent)(hint.key))}${fg(lit ? tokens.text : tokens.accent)(` ${hint.label}`)}`
         : t`${fg(lit ? tokens.text : tokens.textSecondary)(hint.key)}${fg(lit ? tokens.textSecondary : tokens.textDim)(` ${hint.label}`)}`;

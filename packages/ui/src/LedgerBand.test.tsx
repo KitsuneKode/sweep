@@ -82,11 +82,14 @@ async function render(
 }
 
 describe("ledger facts", () => {
-  test("blocked bytes are found but never reclaimable", () => {
-    const ledger = buildLedger(plan(["safe", "caution", "blocked"], [10, 20, 40]).candidates);
+  test("blocked and dangerous bytes are guarded, never reclaimable", () => {
+    const ledger = buildLedger(
+      plan(["safe", "caution", "dangerous", "blocked"], [10, 20, 35, 40]).candidates,
+    );
     expect(ledger.reclaimable).toBe(30);
+    expect(ledger.guarded).toBe(75);
     expect(ledger.bytes.blocked).toBe(40);
-    expect(ledger.counts).toEqual({ safe: 1, caution: 1, dangerous: 0, blocked: 1 });
+    expect(ledger.counts).toEqual({ safe: 1, caution: 1, dangerous: 1, blocked: 1 });
   });
 
   test("queue safe counts only listed safe items that are not queued yet", () => {
@@ -162,5 +165,61 @@ describe("ledger band", () => {
     setup = await render({ ...state, riskFilter: "caution" }, 120, (tier) => calls.push(tier));
     await click("caution");
     expect(calls).toEqual(["caution", "all"]);
+  });
+
+  test("queue ruler keeps numerator and denominator consistent with D3 when dangerous items are queued", async () => {
+    const mib = 1024 * 1024;
+    const mixed = plan(["safe", "caution", "dangerous"], [100 * mib, 30 * mib, 80 * mib]);
+    const initial = createUiState(mixed);
+
+    // Selecting only the dangerous item must NOT compute 80/130 = 62% of reclaimable bytes.
+    let setup = await render({ ...initial, selectedIds: new Set(["cand_2"]) }, 120);
+    let frame = setup.captureCharFrame();
+    expect(frame).toContain("1 queued · 80.0 MiB");
+    expect(frame).toContain("+80 MiB guarded");
+    expect(frame).not.toContain("62% of bytes");
+    expect(frame).not.toContain("━");
+    setup.renderer.destroy();
+
+    // Selecting all 3 shows 100% reclaimable + 80 MiB guarded, and 210.0 MiB total queued.
+    setup = await render({ ...initial, selectedIds: new Set(["cand_0", "cand_1", "cand_2"]) }, 120);
+    frame = setup.captureCharFrame();
+    expect(frame).toContain("3 queued · 210.0 MiB");
+    expect(frame).toContain("100% + 80 MiB guarded");
+  });
+
+  test("partial-byte qualifiers apply strictly to the subtotal containing the unsized entry", async () => {
+    const mib = 1024 * 1024;
+    const p = plan(
+      ["safe", "caution", "dangerous", "blocked"],
+      [100 * mib, 30 * mib, 80 * mib, 70 * mib],
+    );
+    p.candidates[3] = { ...p.candidates[3]!, bytesKnown: false };
+    const ledger = buildLedger(p.candidates);
+    expect(ledger.reclaimablePartial).toBe(false);
+    expect(ledger.guardedPartial).toBe(true);
+
+    const setup = await render(createUiState(p), 140);
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("130.0 MiB reclaimable");
+    expect(frame).not.toContain("~130.0 MiB reclaimable");
+    expect(frame).toContain("+~150 MiB guarded");
+  });
+
+  test("right-side queue size never clips across 60, 80, 100, 120, and 160 columns with all 4 tiers", async () => {
+    const mib = 1024 * 1024;
+    const p = plan(
+      ["safe", "caution", "dangerous", "blocked"],
+      [100 * mib, 30 * mib, 80 * mib, 70 * mib],
+    );
+    const state = { ...createUiState(p), selectedIds: new Set(["cand_2"]) };
+
+    for (const width of [60, 80, 100, 120, 160]) {
+      const setup = await render(state, width);
+      const frame = setup.captureCharFrame();
+      expect(frame, `width=${width}`).toContain("1 queued · 80.0 MiB");
+      expect(frame, `width=${width}`).toContain("130.0 MiB reclaimable");
+      setup.renderer.destroy();
+    }
   });
 });

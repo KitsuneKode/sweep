@@ -1,16 +1,18 @@
-import { fg, t } from "@opentui/core";
+import { CliRenderEvents, fg, t } from "@opentui/core";
 import { useRenderer } from "@opentui/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cachedImage,
   clamp01,
+  dotMatrixLine,
+  dotMatrixPixels,
   EASE_MS,
   easeOut,
+  glideLine,
+  glidePixels,
   magnitudeBar,
   meterLine,
   meterPixels,
-  glideLine,
-  glidePixels,
   stackLine,
   stackPixels,
   type StackSegment,
@@ -18,13 +20,10 @@ import {
 import { useMotionEnabled } from "./motion.js";
 
 /**
- * One thin meter under the answer line. In a terminal that speaks the kitty
- * graphics protocol it is drawn in pixels - a rounded track with an
- * anti-aliased fill on a transparent background - so it reads as a hairline
- * rather than a row of glyphs. Everywhere else it is the same line in box
- * drawing characters. A change in value eases over 180ms (state indication);
- * with reduced motion it jumps.
+ * Capped frame interval for animated meters (<= 15 fps per `.plans/kitty-graphics.md`).
+ * Stops immediately once settled (0 fps at rest).
  */
+const ANIMATION_FRAME_MS = 66;
 
 export interface MeterProps {
   width: number;
@@ -37,7 +36,7 @@ export interface MeterProps {
   track: string | null;
   /** Ease value changes; off for rows that only ever show a fixed size. */
   animate?: boolean;
-  /** "line": a hairline meter. "blocks": a size bar in eighths of a cell. */
+  /** "line": a hairline meter. "blocks": a size bar in eighths of a cell (text only). */
   variant?: "line" | "blocks";
   /** Stroke thickness as a share of the cell height, in pixels. */
   thickness?: number;
@@ -64,7 +63,7 @@ export function useEased(target: number, enabled: boolean): number {
       shownRef.current = from + (target - from) * easeOut(progress);
       setShown(shownRef.current);
       if (progress >= 1) clearInterval(timer);
-    }, 16);
+    }, ANIMATION_FRAME_MS);
     return () => clearInterval(timer);
   }, [target, enabled]);
   return shown;
@@ -86,24 +85,85 @@ export function useCountUp(target: number, enabled: boolean, ms = 420): number {
       const progress = Math.min(1, (performance.now() - started) / ms);
       setShown(target * easeOut(progress));
       if (progress >= 1) clearInterval(timer);
-    }, 16);
+    }, ANIMATION_FRAME_MS);
     return () => clearInterval(timer);
   }, [target, enabled, ms]);
   return shown;
 }
 
 /**
- * Whether meters draw in pixels here: the terminal speaks kitty graphics and
- * has reported its pixel size. Callers that lay a meter over text use it to
- * leave a gap only when an image will fill it.
+ * Evaluate whether direct Kitty pixel rendering is safe in this environment
+ * (`.plans/kitty-graphics.md` §3):
+ * - Terminal reports `kitty_graphics: true` and valid pixel `resolution`
+ * - Not inside a multiplexer (tmux / Zellij / GNU Screen) until U=1 placeholders land
+ * - Not disabled via `NO_COLOR`, `SWEEP_GRAPHICS=off`, or `OPENTUI_GRAPHICS=false`
+ */
+export function canUseKittyGraphics(
+  capabilities: { kitty_graphics?: boolean; multiplexer?: string } | null | undefined,
+  resolution: { width: number; height: number } | null | undefined,
+  width: number,
+  height: number,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.NO_COLOR) return false;
+  if (env.SWEEP_GRAPHICS?.toLowerCase() === "off") return false;
+  if (env.OPENTUI_GRAPHICS?.toLowerCase() === "false") return false;
+  if (env.TMUX || env.ZELLIJ || env.STY) return false;
+  if (capabilities?.kitty_graphics !== true) return false;
+  if (capabilities.multiplexer && capabilities.multiplexer !== "none") return false;
+  return resolution !== null && resolution !== undefined && width > 0 && height > 0;
+}
+
+const capabilityListeners = new WeakMap<
+  object,
+  { listeners: Set<() => void>; onEvent: () => void }
+>();
+
+function subscribeCapabilities(
+  renderer: ReturnType<typeof useRenderer>,
+  listener: () => void,
+): () => void {
+  let entry = capabilityListeners.get(renderer);
+  if (!entry) {
+    const listeners = new Set<() => void>();
+    const onEvent = () => {
+      for (const notify of listeners) notify();
+    };
+    entry = { listeners, onEvent };
+    capabilityListeners.set(renderer, entry);
+    renderer.on(CliRenderEvents.CAPABILITIES, onEvent);
+  }
+  entry.listeners.add(listener);
+  return () => {
+    const current = capabilityListeners.get(renderer);
+    if (!current) return;
+    current.listeners.delete(listener);
+    if (current.listeners.size === 0) {
+      renderer.off(CliRenderEvents.CAPABILITIES, current.onEvent);
+      capabilityListeners.delete(renderer);
+    }
+  };
+}
+
+/**
+ * Whether meters draw in pixels here: shares one `CliRenderEvents.CAPABILITIES`
+ * listener per renderer so late-arriving terminal probes upgrade cleanly
+ * without hitting EventEmitter listener limits.
  */
 export function useKittyGraphics(): boolean {
   const renderer = useRenderer();
-  return (
-    renderer.capabilities?.kitty_graphics === true &&
-    renderer.resolution !== null &&
-    renderer.width > 0 &&
-    renderer.height > 0
+  const [, setCapabilityRevision] = useState(0);
+
+  useEffect(
+    () => subscribeCapabilities(renderer, () => setCapabilityRevision((n) => n + 1)),
+    [renderer],
+  );
+
+  return canUseKittyGraphics(
+    renderer.capabilities,
+    renderer.resolution,
+    renderer.width,
+    renderer.height,
   );
 }
 
@@ -114,14 +174,13 @@ export function Meter(props: MeterProps & { previewColor: string }) {
   const value = useEased(clamp01(props.value), animate);
   const preview = useEased(clamp01(props.preview ?? 0), animate);
 
+  // Per `.plans/kitty-graphics.md` §4 & §5: scrollable row magnitude bars
+  // ("blocks") always render as Unicode eighths, never per-row Kitty images.
+  const isBlocks = props.variant === "blocks";
+  const kitty = useKittyGraphics() && !isBlocks;
   const resolution = renderer.resolution;
-  const kitty =
-    renderer.capabilities?.kitty_graphics === true &&
-    resolution !== null &&
-    renderer.width > 0 &&
-    renderer.height > 0;
-  const cellWidth = kitty ? resolution.width / renderer.width : 0;
-  const cellHeight = kitty ? resolution.height / renderer.height : 0;
+  const cellWidth = kitty && resolution ? resolution.width / renderer.width : 0;
+  const cellHeight = kitty && resolution ? resolution.height / renderer.height : 0;
   const pixelWidth = Math.round(props.width * cellWidth);
   const pixelHeight = Math.round(cellHeight);
   // Whole pixels are the finest step there is: identical frames reuse one image.
@@ -163,9 +222,9 @@ export function Meter(props: MeterProps & { previewColor: string }) {
   ]);
 
   if (image) {
-    return <image source={image} width={props.width} height={1} fit="fill" protocol="kitty" />;
+    return <image source={image} width={props.width} height={1} fit="fill" protocol="auto" />;
   }
-  if (props.variant === "blocks") {
+  if (isBlocks) {
     return (
       <text content={t`${fg(props.fill)(magnitudeBar(value, props.width))}`} wrapMode="none" />
     );
@@ -186,20 +245,30 @@ export function Meter(props: MeterProps & { previewColor: string }) {
 }
 
 /**
- * One bar split by share: where a total goes, part by part. Pixels in kitty,
- * a coloured line elsewhere. Static: it describes a size, not a change. A
- * segment marked `dim` recedes so the one under the cursor reads; focus
- * follows the keyboard, so it changes at once and never eases.
+ * One bar split by share: where a total goes, part by part. Renders the
+ * Direction C+ dithered dot-matrix bar in Kitty graphics terminals (with
+ * opaque card-ground baking) and falls back cleanly to a Braille dot-matrix
+ * strip (`⣿`/`⣷`/`⣀`/`⠂`) everywhere else. Static at rest (0 fps).
  */
 export function StackBar({
   width,
   segments,
   background,
+  trackColor,
+  dimColor,
+  fillFraction = 1,
+  isNoColor = Boolean(process.env.NO_COLOR),
+  variant = "dots",
   thickness = 0.5,
 }: {
   width: number;
   segments: StackSegment[];
   background?: string | undefined;
+  trackColor?: string | undefined;
+  dimColor?: string | undefined;
+  fillFraction?: number | undefined;
+  isNoColor?: boolean | undefined;
+  variant?: "dots" | "capsule";
   thickness?: number;
 }) {
   const renderer = useRenderer();
@@ -214,6 +283,20 @@ export function StackBar({
     .join(",");
   const image = useMemo(() => {
     if (!kitty || pixelWidth < 8 || pixelHeight < 4) return null;
+    if (variant === "dots") {
+      return cachedImage(
+        `dots:${pixelWidth}x${pixelHeight}:${fillFraction.toFixed(3)}:${isNoColor}:${trackColor ?? ""}:${ground}:${key}`,
+        () =>
+          dotMatrixPixels(pixelWidth, pixelHeight, segments, {
+            background: ground,
+            trackColor,
+            fillFraction,
+            isNoColor,
+          }),
+        pixelWidth,
+        pixelHeight,
+      );
+    }
     return cachedImage(
       `stack:${pixelWidth}x${pixelHeight}:${thickness}:${ground}:${key}`,
       () => stackPixels(pixelWidth, pixelHeight, segments, thickness, ground),
@@ -222,19 +305,43 @@ export function StackBar({
     );
     // `key` is the content of `segments`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kitty, pixelWidth, pixelHeight, thickness, ground, key]);
-  if (image) return <image source={image} width={width} height={1} fit="fill" protocol="kitty" />;
+  }, [
+    kitty,
+    pixelWidth,
+    pixelHeight,
+    variant,
+    thickness,
+    fillFraction,
+    isNoColor,
+    trackColor,
+    ground,
+    key,
+  ]);
+  if (image) return <image source={image} width={width} height={1} fit="fill" protocol="auto" />;
+  if (variant === "dots") {
+    return (
+      <text
+        content={dotMatrixLine(width, segments, {
+          trackColor,
+          dimColor,
+          fillFraction,
+          isNoColor,
+        })}
+        wrapMode="none"
+      />
+    );
+  }
   return <text content={stackLine(width, segments)} wrapMode="none" />;
 }
 
 const GLIDE_MS = 1400;
-const GLIDE_STEPS = 56;
+/** 20 steps across 1400 ms = 70 ms/frame (~14.3 fps, within <= 15 fps Kitty budget). */
+const GLIDE_STEPS = 20;
 const GLIDE_RUN = 0.24;
 
 /**
  * Work whose end is not known yet: a short run glides along the track at a
- * constant speed. It claims no fraction, so the count beside it is the only
- * number on screen. Under reduced motion the run holds still at the start.
+ * bounded rate (<= 15 fps). Under reduced motion the run holds still at start.
  */
 export function ScanMeter({
   width,
@@ -283,6 +390,6 @@ export function ScanMeter({
     // `from`/`to` follow from `step` and `motion`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kitty, pixelWidth, pixelHeight, step, motion, fill, track, ground]);
-  if (image) return <image source={image} width={width} height={1} fit="fill" protocol="kitty" />;
+  if (image) return <image source={image} width={width} height={1} fit="fill" protocol="auto" />;
   return <text content={glideLine(width, from, to, fill, track)} wrapMode="none" />;
 }
