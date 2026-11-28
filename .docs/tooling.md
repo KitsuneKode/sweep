@@ -100,7 +100,9 @@ Root `optionalDependencies` on the CLI package are synced via `bun run sync-engi
 Whatever the source, on POSIX the resolved engine file and every directory above
 it must be owned by the current user or root and not writable by other users
 (sticky directories such as `/tmp` excepted), the same rule as auto-discovered
-config. Otherwise the probe reports `untrusted` and `--engine auto` falls back
+config. When running as root, the user named by a valid `SUDO_UID` also counts
+as an owner, so `sudo sweep` can use an engine that user installed; any other
+owner is still refused. Otherwise the probe reports `untrusted` and `--engine auto` falls back
 to JS. See `.docs/architecture.md` for how apply pins the engine file.
 
 **Release CI:** `.github/workflows/release.yml` builds all five platforms, packs

@@ -288,7 +288,9 @@ Both engines re-validate before deleting:
   is written, the path is re-checked and on Linux the child's
   `/proc/<pid>/exe` must be the same file, else the child is killed. macOS and
   Windows have no such process-image check, so their window is the spawn
-  call itself. `#!` script engines (dev/test only) skip the process-image
+  call itself (Windows also refuses to replace a running image). On POSIX
+  the engine file and its directories must be owned by you or root, or by
+  the `SUDO_UID` user when running as root. `#!` script engines (dev/test only) skip the process-image
   check because their image is the interpreter. Implemented in
   `packages/core/src/engine-identity.ts`.
 - **Nested + duplicate candidates** - `deduplicateNestedEntries` drops any

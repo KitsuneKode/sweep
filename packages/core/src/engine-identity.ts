@@ -8,6 +8,7 @@ import {
   realpathSync,
   statSync,
   type BigIntStats,
+  type Stats,
 } from "node:fs";
 import { dirname } from "node:path";
 
@@ -83,28 +84,63 @@ function statKey(id: StatIdentity): string {
   return `${id.path}\0${id.dev}\0${id.ino}\0${id.size}\0${id.mtimeNs}\0${id.ctimeNs}`;
 }
 
+/** Who may own the engine and its directories, from the effective user's view. */
+export interface EngineTrustContext {
+  uid: number;
+  gid: number | undefined;
+  /** `SUDO_UID`, honored only when running as root. */
+  sudoUid?: string | undefined;
+}
+
+function currentTrustContext(): EngineTrustContext | undefined {
+  const uid = process.geteuid?.() ?? process.getuid?.();
+  if (uid === undefined) return undefined;
+  return { uid, gid: process.getegid?.() ?? process.getgid?.(), sudoUid: process.env.SUDO_UID };
+}
+
+/** Owners whose files the engine may run from: you, root, and under sudo the invoking user. */
+export function trustedEngineOwners(context: EngineTrustContext): ReadonlySet<number> {
+  const owners = new Set([context.uid, 0]);
+  // `sudo sweep` with an engine the invoking user installed: that user could
+  // already replace it, and is the person sudo is acting for. Any other uid
+  // stays refused. A malformed value is ignored, never widened.
+  if (
+    context.uid === 0 &&
+    context.sudoUid !== undefined &&
+    /^(0|[1-9][0-9]{0,9})$/.test(context.sudoUid)
+  ) {
+    const sudoUid = Number(context.sudoUid);
+    if (sudoUid <= 0xffff_ffff) owners.add(sudoUid);
+  }
+  return owners;
+}
+
+type TrustStat = Pick<Stats, "uid" | "gid" | "mode">;
+
 /**
  * POSIX trust for the engine file and every directory above it, matching the
- * config trust rule (`checkPosixTrust`): owned by the current user (root is
- * also accepted, for system-wide installs), not world-writable, and not
- * group-writable by another group. A sticky directory (such as `/tmp`) only
- * lets other users replace entries they own, so its write bits are allowed.
- * Without this, anyone who can rename entries along the path can swap the
- * program sweep runs for destructive work.
+ * config trust rule (`checkPosixTrust`): owned by a trusted owner (see
+ * `trustedEngineOwners`), not world-writable, and not group-writable by
+ * another group. A sticky directory (such as `/tmp`) only lets other users
+ * replace entries they own, so its write bits are allowed. Without this,
+ * anyone who can rename entries along the path can swap the program sweep
+ * runs for destructive work.
  */
-export function engineTrustIssue(realPath: string): string | null {
-  if (process.platform === "win32") return null;
-  const uid = process.getuid?.();
-  const gid = process.getgid?.();
-  if (uid === undefined) return null;
+export function engineTrustIssue(
+  realPath: string,
+  context: EngineTrustContext | undefined = currentTrustContext(),
+  stat: (path: string) => TrustStat = lstatSync,
+): string | null {
+  if (process.platform === "win32" || context === undefined) return null;
+  const owners = trustedEngineOwners(context);
+  const { gid } = context;
   const check = (path: string, isDirectory: boolean): string | null => {
-    const stat = lstatSync(path);
-    if (stat.uid !== uid && stat.uid !== 0) return `${path} is owned by another user`;
-    const sticky = isDirectory && (stat.mode & 0o1000) !== 0;
-    if (!sticky && (stat.mode & 0o002) !== 0)
-      return `${path} is world-writable; run \`chmod o-w\` on it`;
-    if (!sticky && (stat.mode & 0o020) !== 0 && (gid === undefined || stat.gid !== gid))
-      return `${path} is group-writable by another group; run \`chmod g-w\` on it`;
+    const meta = stat(path);
+    if (!owners.has(meta.uid)) return `${path} is owned by another user (uid ${meta.uid})`;
+    const sticky = isDirectory && (meta.mode & 0o1000) !== 0;
+    if (!sticky && (meta.mode & 0o002) !== 0) return `${path} is world-writable`;
+    if (!sticky && (meta.mode & 0o020) !== 0 && (gid === undefined || meta.gid !== gid))
+      return `${path} is group-writable by another group`;
     return null;
   };
   const fileIssue = check(realPath, false);
@@ -152,7 +188,8 @@ export function inspectEngineFile(executable: string): StatIdentity {
   }
   if (issue)
     throw new EngineIdentityError(
-      `Refusing to run the native engine because ${issue}`,
+      `Refusing to run the native engine because ${issue}. Use --engine js, or reinstall ` +
+        "the engine so it and its directories are owned by you or root and not writable by other users",
       "untrusted",
     );
   return statIdentity(path, stat);

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -18,6 +18,7 @@ import {
   assertEngineUnchanged,
   assertSpawnedEngine,
   captureEngineIdentity,
+  engineTrustIssue,
   EngineIdentityError,
   inspectEngineFile,
   resetEngineIdentityCacheForTest,
@@ -104,8 +105,10 @@ function spawnCopy(path: string) {
   return child;
 }
 
-test("the spawned process must still be the verified engine", async () => {
-  const engine = join(root, process.platform === "win32" ? "engine.exe" : "engine");
+const exe = (name: string) => (process.platform === "win32" ? `${name}.exe` : name);
+
+test("the spawned process must still be the verified engine", () => {
+  const engine = join(root, exe("engine"));
   copyFileSync(nativeSample(), engine);
   chmodSync(engine, 0o700);
   const identity = captureEngineIdentity(engine);
@@ -115,17 +118,46 @@ test("the spawned process must still be the verified engine", async () => {
   } finally {
     child.kill("SIGKILL");
   }
-  // The path no longer names the verified file once the spawn returns.
-  const other = join(root, process.platform === "win32" ? "other.exe" : "other");
+});
+
+test("a swap between verification and spawn is caught right after the spawn", () => {
+  // Every platform: the path re-check after spawn sees that the file the
+  // child was started from is not the verified one.
+  const engine = join(root, exe("engine"));
+  const other = join(root, exe("other"));
+  copyFileSync(nativeSample(), engine);
   copyFileSync(nativeSample(), other);
-  const late = spawnCopy(engine);
+  chmodSync(engine, 0o700);
+  chmodSync(other, 0o700);
+  const identity = captureEngineIdentity(engine);
+  renameSync(other, engine);
+  const child = spawnCopy(engine);
   try {
-    renameSync(other, engine);
-    expect(identityIssue(() => assertSpawnedEngine(late.pid!, identity))).toBe("changed");
+    expect(identityIssue(() => assertSpawnedEngine(child.pid!, identity))).toBe("changed");
   } finally {
-    late.kill("SIGKILL");
+    child.kill("SIGKILL");
   }
 });
+
+test.skipIf(process.platform === "win32")(
+  "posix: a swap while the engine runs is caught after the spawn",
+  () => {
+    // Windows refuses to replace a running image, so this case cannot occur there.
+    const engine = join(root, "engine");
+    const other = join(root, "other");
+    copyFileSync(nativeSample(), engine);
+    copyFileSync(nativeSample(), other);
+    chmodSync(engine, 0o700);
+    const identity = captureEngineIdentity(engine);
+    const child = spawnCopy(engine);
+    try {
+      renameSync(other, engine);
+      expect(identityIssue(() => assertSpawnedEngine(child.pid!, identity))).toBe("changed");
+    } finally {
+      child.kill("SIGKILL");
+    }
+  },
+);
 
 test.skipIf(process.platform !== "linux")(
   "linux: a swap reverted around the spawn is caught from the process image",
@@ -181,3 +213,94 @@ test.skipIf(process.platform === "win32")(
     expect(identityIssue(() => assertEngineUnchanged(identity))).toBe("untrusted");
   },
 );
+
+describe("posix: engine owners", () => {
+  const USER = 1001;
+  const OTHER = 1002;
+  const enginePath = "/home/user/.local/sweep/sweep-engine";
+  /** Every path on the way to the engine is owned by `owner`, except root-owned `/` and `/home`. */
+  const tree =
+    (owner: number, overrides: Record<string, { uid?: number; mode?: number }> = {}) =>
+    (path: string) => {
+      const base =
+        path === "/" || path === "/home"
+          ? { uid: 0, gid: 0, mode: 0o40755 }
+          : { uid: owner, gid: owner, mode: path === enginePath ? 0o100755 : 0o40755 };
+      return { ...base, ...overrides[path] };
+    };
+  const asRoot = (sudoUid?: string) => ({ uid: 0, gid: 0, sudoUid });
+
+  test.skipIf(process.platform === "win32")(
+    "root accepts an engine owned by the user sudo acts for",
+    () => {
+      expect(engineTrustIssue(enginePath, asRoot(String(USER)), tree(USER))).toBeNull();
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "root refuses an engine owned by a user other than SUDO_UID",
+    () => {
+      expect(engineTrustIssue(enginePath, asRoot(String(OTHER)), tree(USER))).toContain(
+        `owned by another user (uid ${USER})`,
+      );
+      // One foreign directory on the way is enough to refuse.
+      expect(
+        engineTrustIssue(
+          enginePath,
+          asRoot(String(USER)),
+          tree(USER, { "/home/user/.local": { uid: OTHER } }),
+        ),
+      ).toContain("/home/user/.local is owned by another user");
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "root without a usable SUDO_UID refuses a user-owned engine",
+    () => {
+      for (const sudoUid of [undefined, "", "abc", "-1", "1001x", " 1001", "99999999999"]) {
+        expect(engineTrustIssue(enginePath, asRoot(sudoUid), tree(USER))).toContain(
+          "owned by another user",
+        );
+      }
+      expect(engineTrustIssue(enginePath, asRoot(), tree(0))).toBeNull();
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "under sudo, writable files and directories stay refused",
+    () => {
+      const sudo = asRoot(String(USER));
+      expect(
+        engineTrustIssue(enginePath, sudo, tree(USER, { [enginePath]: { mode: 0o100777 } })),
+      ).toContain("world-writable");
+      expect(
+        engineTrustIssue(enginePath, sudo, tree(USER, { "/home/user": { mode: 0o40775 } })),
+      ).toContain("group-writable");
+      expect(
+        engineTrustIssue(enginePath, sudo, tree(USER, { "/home/user": { mode: 0o41777 } })),
+      ).toBeNull();
+    },
+  );
+
+  test.skipIf(process.platform === "win32")("SUDO_UID means nothing to a non-root user", () => {
+    const asUser = { uid: USER, gid: USER, sudoUid: String(OTHER) };
+    expect(engineTrustIssue(enginePath, asUser, tree(USER))).toBeNull();
+    expect(engineTrustIssue(enginePath, asUser, tree(0))).toBeNull();
+    expect(engineTrustIssue(enginePath, asUser, tree(OTHER))).toContain("owned by another user");
+  });
+});
+
+test.skipIf(process.platform === "win32")("an untrusted-engine refusal says how to proceed", () => {
+  const shared = join(root, "shared");
+  mkdirSync(shared);
+  const engine = join(shared, "engine");
+  writeFileSync(engine, "#!/bin/sh\nexit 0\n");
+  chmodSync(shared, 0o777);
+  try {
+    inspectEngineFile(engine);
+    throw new Error("expected a refusal");
+  } catch (error) {
+    expect((error as Error).message).toContain("Use --engine js, or reinstall the engine");
+    expect((error as Error).message).not.toMatch(/disable|skip|--no-/i);
+  }
+});

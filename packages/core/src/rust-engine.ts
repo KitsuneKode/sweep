@@ -831,10 +831,14 @@ export async function applyPlanViaRust(
 
 function engineIdentityRefusal(error: unknown): ApplyRefusedError {
   const detail = error instanceof Error ? error.message : String(error);
+  const issue = error instanceof EngineIdentityError ? error.issue : undefined;
+  // An untrusted-engine message already says how to proceed.
   const remedy =
-    error instanceof EngineIdentityError && error.issue === "changed"
+    issue === "changed"
       ? "Review again so sweep re-checks the engine."
-      : "Repair or reinstall the native engine, or use --engine js, then review again.";
+      : issue === "untrusted"
+        ? "Then review again."
+        : "Repair or reinstall the native engine, or use --engine js, then review again.";
   return new ApplyRefusedError(`${detail}. ${remedy} Nothing was removed.`, "engine_unavailable");
 }
 
