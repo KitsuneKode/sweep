@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kitsunekode.dev/sweep/schemas/widget-event.schema.json",
+  "title": "WidgetEvent",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "widgetSchemaVersion", "view", "targetDir", "startedAt"],
+      "properties": {
+        "type": { "const": "widget_started" },
+        "widgetSchemaVersion": { "const": 1 },
+        "view": { "type": "string", "enum": ["projects"] },
+        "targetDir": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "startedAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "widgetSchemaVersion",
+        "view",
+        "scannedDirs",
+        "found",
+        "sizedCount",
+        "estimatedBytes",
+        "byCost"
+      ],
+      "properties": {
+        "type": { "const": "widget_progress" },
+        "widgetSchemaVersion": { "const": 1 },
+        "view": { "type": "string", "enum": ["projects"] },
+        "scannedDirs": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "found": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "sizedCount": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "estimatedBytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+        "currentDir": { "type": "string", "maxLength": 4096 },
+        "byCost": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cost", "bytes"],
+            "properties": {
+              "cost": {
+                "$ref": "https://kitsunekode.dev/sweep/schemas/widget-snapshot.schema.json#/$defs/rebuildCost"
+              },
+              "bytes": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "widgetSchemaVersion", "snapshot"],
+      "properties": {
+        "type": { "const": "widget_snapshot" },
+        "widgetSchemaVersion": { "const": 1 },
+        "snapshot": {
+          "$ref": "https://kitsunekode.dev/sweep/schemas/widget-snapshot.schema.json"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "widgetSchemaVersion", "error"],
+      "properties": {
+        "type": { "const": "widget_error" },
+        "widgetSchemaVersion": { "const": 1 },
+        "error": {
+          "$ref": "https://kitsunekode.dev/sweep/schemas/widget-snapshot.schema.json#/$defs/widgetError"
+        }
+      }
+    }
+  ]
+}

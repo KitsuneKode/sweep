@@ -597,6 +597,9 @@ test("schema export provides the complete protocol vocabulary without scanning",
     "scanEvent",
     "scanPlan",
     "shared",
+    "widgetCache",
+    "widgetEvent",
+    "widgetSnapshot",
   ]);
   expect(exported.schemas.scanPlan.$id).toBeDefined();
   expect(exported.schemas.applyReport.properties.outcomes).toBeDefined();

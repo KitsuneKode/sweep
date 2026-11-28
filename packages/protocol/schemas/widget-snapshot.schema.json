@@ -1,0 +1,510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kitsunekode.dev/sweep/schemas/widget-snapshot.schema.json",
+  "title": "WidgetSnapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "widgetSchemaVersion",
+    "protocolVersion",
+    "readOnly",
+    "view",
+    "supportedViews",
+    "targetDir",
+    "generatedAt",
+    "ageMs",
+    "elapsedMs",
+    "source",
+    "state",
+    "stale",
+    "partial",
+    "skippedDirs",
+    "disk",
+    "projectsSummary",
+    "suggestion",
+    "receipt",
+    "space",
+    "error"
+  ],
+  "properties": {
+    "widgetSchemaVersion": {
+      "const": 1
+    },
+    "protocolVersion": {
+      "const": "1"
+    },
+    "readOnly": {
+      "const": true
+    },
+    "view": {
+      "type": "string",
+      "enum": ["projects"]
+    },
+    "supportedViews": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["projects"]
+      }
+    },
+    "targetDir": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 64
+    },
+    "ageMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "elapsedMs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "source": {
+      "type": "string",
+      "enum": ["live", "cache"]
+    },
+    "state": {
+      "type": "string",
+      "enum": ["ok", "empty", "stale", "error"]
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "partial": {
+      "type": "boolean"
+    },
+    "skippedDirs": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "disk": {
+      "anyOf": [{ "$ref": "#/$defs/widgetDiskInfo" }, { "type": "null" }]
+    },
+    "projectsSummary": {
+      "anyOf": [{ "$ref": "#/$defs/widgetProjectsSummary" }, { "type": "null" }]
+    },
+    "suggestion": {
+      "anyOf": [{ "$ref": "#/$defs/widgetSuggestion" }, { "type": "null" }]
+    },
+    "receipt": {
+      "anyOf": [{ "$ref": "#/$defs/widgetReceipt" }, { "type": "null" }]
+    },
+    "space": {
+      "type": "null"
+    },
+    "error": {
+      "anyOf": [{ "$ref": "#/$defs/widgetError" }, { "type": "null" }]
+    }
+  },
+  "$defs": {
+    "rebuildCost": {
+      "type": "string",
+      "enum": ["cache", "install", "build", "custom"]
+    },
+    "widgetDiskInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["totalBytes", "usedBytes", "freeBytes"],
+      "properties": {
+        "mountPoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "totalBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "usedBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "freeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "widgetCostBucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cost", "label", "bytes", "count", "hint"],
+      "properties": {
+        "cost": { "$ref": "#/$defs/rebuildCost" },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "hint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "widgetKindSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "bytes", "count"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "widgetProjectSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "bytes"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "idleDays": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "worktreeState": {
+          "type": "string",
+          "enum": ["merged", "upstream_gone"]
+        }
+      }
+    },
+    "widgetProjectsSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reclaimableBytes",
+        "safeBytes",
+        "cautionBytes",
+        "guardedBytes",
+        "protectedCount",
+        "projectCount",
+        "idle",
+        "worktrees",
+        "byCost",
+        "topKinds",
+        "topProjects"
+      ],
+      "properties": {
+        "reclaimableBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "safeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cautionBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "guardedBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "protectedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "projectCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "idle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["days", "projects", "bytes"],
+          "properties": {
+            "days": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "projects": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        },
+        "worktrees": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finished", "bytes", "byCost"],
+          "properties": {
+            "finished": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "byCost": {
+              "type": "array",
+              "maxItems": 4,
+              "items": { "$ref": "#/$defs/widgetCostBucket" }
+            }
+          }
+        },
+        "byCost": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/widgetCostBucket" }
+        },
+        "topKinds": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/widgetKindSummary" }
+        },
+        "topProjects": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/widgetProjectSummary" }
+        }
+      }
+    },
+    "widgetAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent", "label", "view"],
+      "properties": {
+        "intent": {
+          "type": "string",
+          "enum": [
+            "review_projects",
+            "review_space_developer",
+            "review_space_caches",
+            "review_space_trash",
+            "inspect_receipt"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "view": {
+          "type": "string",
+          "enum": ["projects"]
+        },
+        "focus": {
+          "type": "string",
+          "enum": ["worktrees", "idle"]
+        }
+      }
+    },
+    "widgetSuggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "full", "short", "action"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["worktrees", "idle", "reclaimable"]
+        },
+        "full": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "short": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "action": { "$ref": "#/$defs/widgetAction" }
+      }
+    },
+    "widgetReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receiptVersion",
+        "id",
+        "completedAt",
+        "targetDir",
+        "mode",
+        "deletedCount",
+        "failedCount",
+        "unattemptedCount",
+        "stopped",
+        "totalBytesFreed",
+        "freeBytesAfter",
+        "failureSummary"
+      ],
+      "properties": {
+        "receiptVersion": { "const": 1 },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time",
+          "maxLength": 64
+        },
+        "targetDir": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["delete", "trash"]
+        },
+        "deletedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "failedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unattemptedCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "stopped": { "type": "boolean" },
+        "totalBytesFreed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "freeBytesAfter": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            { "type": "null" }
+          ]
+        },
+        "failureSummary": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["busy", "permissionDenied", "other"],
+              "properties": {
+                "busy": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                "permissionDenied": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "other": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+              }
+            },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "widgetError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "not_installed",
+            "engine_missing",
+            "permission_denied",
+            "target_missing",
+            "timeout",
+            "scan_failed",
+            "schema_mismatch"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "fallbackAvailable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

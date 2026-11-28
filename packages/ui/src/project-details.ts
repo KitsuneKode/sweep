@@ -1,7 +1,6 @@
 import {
   closeSync,
   constants as fsConstants,
-  existsSync,
   fstatSync,
   lstatSync,
   openSync,
@@ -9,80 +8,16 @@ import {
   realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { catalogEntryFor } from "@kitsunekode/sweep-core/catalog";
-import type { CandidateKind, ScanCandidate } from "@kitsunekode/sweep-protocol";
+import {
+  packageManager,
+  rebuildFor,
+  type Rebuild,
+  type RebuildCost,
+} from "@kitsunekode/sweep-core/rebuild";
+import type { ScanCandidate } from "@kitsunekode/sweep-protocol";
 import type { Project } from "./projects.js";
 
-/**
- * What it costs to get an artifact back, in the three amounts that decide a
- * removal: a cache refills by itself, an install needs the network or a
- * package store, a build spends CPU. The command is what brings it back.
- */
-export type RebuildCost = "cache" | "install" | "build" | "unknown";
-
-export interface Rebuild {
-  cost: RebuildCost;
-  /** How it comes back, short enough for a 40-cell panel. */
-  how: string;
-}
-
-/** Which package manager reinstalls node_modules here, from its lockfile. */
-export function packageManager(root: string): string {
-  const has = (file: string) => existsSync(join(root, file));
-  if (has("bun.lock") || has("bun.lockb")) return "bun";
-  if (has("pnpm-lock.yaml")) return "pnpm";
-  if (has("yarn.lock")) return "yarn";
-  return "npm";
-}
-
-const rebuildCache = new Map<string, Rebuild>();
-
-export function rebuildFor(kind: CandidateKind, root: string, name?: string): Rebuild {
-  const key = `${kind}\0${root}\0${name ?? ""}`;
-  const cached = rebuildCache.get(key);
-  if (cached) return cached;
-  const rebuild = readRebuild(kind, root, name);
-  rebuildCache.set(key, rebuild);
-  return rebuild;
-}
-
-function readRebuild(kind: CandidateKind, root: string, name?: string): Rebuild {
-  switch (kind) {
-    case "node_modules":
-      return { cost: "install", how: `${packageManager(root)} install` };
-    case "target":
-      if (existsSync(join(root, "Cargo.toml"))) return { cost: "build", how: "cargo build" };
-      if (existsSync(join(root, "pom.xml"))) return { cost: "build", how: "mvn package" };
-      return { cost: "build", how: "the project's build" };
-    case ".next":
-      return { cost: "build", how: "next build or next dev" };
-    case ".nuxt":
-      return { cost: "build", how: "nuxt build or nuxt dev" };
-    case ".svelte-kit":
-      return { cost: "build", how: "vite dev or vite build" };
-    case "dist":
-    case "build":
-    case "out":
-      return { cost: "build", how: "the project's build" };
-    case ".turbo":
-      return { cost: "cache", how: "turbo refills it" };
-    case ".vite":
-      return { cost: "cache", how: "vite refills it" };
-    case ".parcel-cache":
-      return { cost: "cache", how: "parcel refills it" };
-    case "tsbuildinfo":
-      return { cost: "cache", how: "tsc refills it" };
-    case "coverage":
-    case ".nyc_output":
-      return { cost: "cache", how: "the next coverage run" };
-    default: {
-      // Opt-in names the catalog knows (.venv, __pycache__...) carry their own
-      // note; only a pattern the user wrote is "your pattern".
-      const note = name ? catalogEntryFor(name)?.note : undefined;
-      return { cost: "unknown", how: note ?? "your pattern" };
-    }
-  }
-}
+export { packageManager, rebuildFor, type Rebuild, type RebuildCost };
 
 const GIT_META_MAX_BYTES = 4096;
 
@@ -213,7 +148,7 @@ export interface CostShare {
   queuedBytes: number;
 }
 
-const COST_ORDER: RebuildCost[] = ["cache", "install", "build", "unknown"];
+const COST_ORDER: RebuildCost[] = ["cache", "install", "build", "custom"];
 
 /**
  * Everything reclaimable, split by what it costs to get back, cheapest first:
@@ -268,7 +203,6 @@ export function rebuildSummary(
   return COST_ORDER.flatMap((cost) => {
     const group = groups.get(cost);
     if (!group || group.bytes <= 0) return [];
-    const label = cost === "unknown" ? "custom" : cost;
-    return [`${label} ${format(group.bytes)}${cost === "unknown" ? "" : ` (${group.how})`}`];
+    return [`${cost} ${format(group.bytes)}${cost === "custom" ? "" : ` (${group.how})`}`];
   }).join(" · ");
 }
