@@ -13,7 +13,7 @@ description: Check supported operating systems, release binaries, and resource b
 | Linux arm64 musl  | From 0.5.4. Static native engine through npm and standalone binary through Releases. |
 | macOS x64         | npm native engine, standalone binary, installer, and Homebrew.                       |
 | macOS arm64       | npm native engine, standalone binary, installer, and Homebrew.                       |
-| Windows x64       | npm package and standalone `.exe`; JavaScript engine only.                           |
+| Windows x64       | npm native engine and standalone `.exe`.                                             |
 | Windows arm64     | Not shipped.                                                                         |
 
 Sweep runs as the current user. It does not install a service, kernel extension, or elevated helper.
@@ -60,7 +60,7 @@ On macOS, direct downloads can be quarantined until you approve them in system s
 
 On Windows, the standalone executable can trigger SmartScreen because it is a new unsigned binary. Verify the `.sha256` sidecar and provenance before running it. PowerShell execution policy can also block `install.ps1`; download it, inspect it, then run it with an explicit `ExecutionPolicy Bypass` for that process if appropriate.
 
-Windows currently uses the JavaScript engine. The scanner still applies the same plan, guardrail, and confirmation model, with platform-specific performance and descriptor enforcement differences.
+Windows ships a native engine. The scanner still applies the same plan, guardrail, and confirmation model, with platform-specific performance and descriptor enforcement differences.
 
 ## Terminal UI runtime
 

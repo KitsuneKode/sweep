@@ -42,7 +42,8 @@ Linked worktrees name their repository. `app · merged` means the worktree is pr
 | Page Up / Page Down or Ctrl+U / Ctrl+D | Move one viewport                                                           |
 | Home / End or `g` / `G`                | First or last row                                                           |
 | Space                                  | Queue or unqueue the project or focused artifact; open a folded section row |
-| Enter or Right / `l`                   | Open a project, artifact details, or folded section                         |
+| Enter                                  | Open artifact details, a project, or a folded section                       |
+| Right / `l`                            | Open a project or folded section                                            |
 | Left / `h`                             | Close an opened project or return to its row                                |
 | `i`                                    | Queue safe artifacts in projects idle 30+ days                              |
 | `x` or `d`                             | Request confirmation for only the focused artifact or project               |
