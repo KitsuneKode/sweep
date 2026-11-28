@@ -351,6 +351,13 @@ describe.skipIf(!hasGit)("worktree info", () => {
     writeFileSync(join(cleanWithIgnored, "node_modules", "pkg", "index.js"), "module.exports={}\n");
     writeFileSync(join(cleanWithIgnored, "debug.log"), "ok\n");
 
+    const racilyGitDir = git(racilyClean, "rev-parse", "--git-dir");
+    const racilyMtimeSec = Number(
+      lstatSync(join(racilyClean, "racily-clean.txt"), { bigint: true }).mtimeNs / 1_000_000_000n,
+    );
+    const racilyMtime = new Date(racilyMtimeSec * 1000);
+    utimesSync(join(racilyGitDir, "index"), racilyMtime, racilyMtime);
+
     // Same-length modification catches edits via stat mismatch.
     writeFileSync(join(dirtyTracked, "dirty-tracked.txt"), "654321\n");
 
