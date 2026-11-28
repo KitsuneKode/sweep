@@ -1,8 +1,6 @@
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, opendirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-
-const HOME = resolve(homedir());
 
 /**
  * When was a project last worked on? An artifact's own mtime is the wrong
@@ -12,13 +10,16 @@ const HOME = resolve(homedir());
  *
  * Signals, newest wins:
  * - git activity: the index (rewritten by add, commit, checkout and even a
- *   `status` refresh) and the HEAD reflog (commits, checkouts, pulls);
- * - the project root's own entries: manifests, lockfiles, config, and the
- *   source folders whose mtimes move when an editor saves by rename.
+ *   `status` refresh), HEAD, reflog, and merge/commit state files;
+ * - a bounded walk of the project's own non-generated files and folders,
+ *   catching in-place edits inside `src/`, `packages/`, etc.
  * Build output, caches and dependency folders never count.
  *
- * One readdir and a few dozen stats per project; results are cached per
- * project root, so a monorepo with forty `node_modules` pays once.
+ * Owner decision D4: if activity cannot be proven (a bounded check hits its
+ * depth, directory, entry, or time cap, hits an unreadable directory, skips a
+ * symlinked directory it will not follow, drops a future-dated signal, or
+ * finds no readable signal), activity is `"unknown"` (`activeMs: undefined`)
+ * and is never treated as idle or auto-selected for idle cleanup.
  */
 
 /** Files whose presence makes a folder a project root. */
@@ -55,8 +56,10 @@ const IGNORED = new Set([
   ".nuxt",
   ".svelte-kit",
   ".turbo",
+  ".vite",
   ".cache",
   ".parcel-cache",
+  ".nyc_output",
   "coverage",
   "vendor",
   "__pycache__",
@@ -67,49 +70,117 @@ const IGNORED = new Set([
   ".mypy_cache",
   ".DS_Store",
 ]);
-const MAX_ROOT_ENTRIES = 256;
+
+const GIT_ACTIVITY_FILES = [
+  "index",
+  join("logs", "HEAD"),
+  "HEAD",
+  "FETCH_HEAD",
+  "MERGE_HEAD",
+  "ORIG_HEAD",
+  "COMMIT_EDITMSG",
+];
+
+const DEFAULT_MAX_SOURCE_DEPTH = 8;
+const DEFAULT_MAX_SOURCE_DIRS = 512;
+const DEFAULT_MAX_SOURCE_ENTRIES = 4096;
+const DEFAULT_TIME_BUDGET_MS = 100;
+/** Clock skew tolerated before an mtime counts as future-dated. */
+const FUTURE_TOLERANCE_MS = 60_000;
+
+export type ProjectActivityConfidence = "proven" | "unknown";
 
 export interface ProjectActivity {
   /** The folder treated as the project. */
   root: string;
-  /** Newest human-activity signal, epoch ms; undefined when none could be read. */
+  /**
+   * Newest provable human-activity signal, epoch ms; undefined when activity
+   * cannot be proven (unknown confidence).
+   */
   activeMs: number | undefined;
+  /** Whether activity was proven by a complete bounded inspection. */
+  confidence: ProjectActivityConfidence;
 }
 
-function mtimeMs(path: string): number | undefined {
+export interface ProjectActivityOptions {
+  /** Maximum directory depth below the project root to inspect (default: 8). */
+  maxDepth?: number;
+  /** Maximum non-ignored directories to read per project (default: 512). */
+  maxDirs?: number;
+  /** Maximum non-ignored entries to inspect per project (default: 4096). */
+  maxEntries?: number;
+  /** Wall-clock budget for one project's source walk, ms (default: 100). */
+  timeBudgetMs?: number;
+  /** Monotonic clock for the time budget (defaults to `performance.now`). */
+  clock?: () => number;
+  /** Override home directory stop boundary (defaults to `os.homedir()`). */
+  homeDir?: string;
+}
+
+interface ActivityMeasurement {
+  activeMs: number | undefined;
+  confidence: ProjectActivityConfidence;
+}
+
+interface GitActivityMeasurement {
+  activeMs: number | undefined;
+  unreadable: boolean;
+}
+
+function normalizeForCompare(path: string): string {
+  const resolved = resolve(path);
+  return process.platform === "darwin" || process.platform === "win32"
+    ? resolved.toLowerCase()
+    : resolved;
+}
+
+function isSameDir(a: string, b: string): boolean {
+  return normalizeForCompare(a) === normalizeForCompare(b);
+}
+
+function hasEntry(dir: string, name: string): boolean {
   try {
-    return lstatSync(path).mtimeMs;
+    lstatSync(join(dir, name));
+    return true;
   } catch {
-    return undefined;
+    return false;
   }
 }
 
-const MARKER_SET = new Set(PROJECT_MARKERS);
+function isMissingError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
 
 /** The git directory for a work tree: `.git` itself, or a worktree's `gitdir:`. */
-function gitDir(root: string): string | undefined {
+function gitDir(root: string): { path: string | undefined; unreadable: boolean } {
   const dotGit = join(root, ".git");
   try {
     const meta = lstatSync(dotGit);
-    if (meta.isDirectory()) return dotGit;
-    if (!meta.isFile() || meta.size > 4096) return undefined;
+    if (meta.isDirectory()) return { path: dotGit, unreadable: false };
+    if (!meta.isFile() || meta.size > 4096) return { path: undefined, unreadable: true };
     const line = readFileSync(dotGit, "utf8").split("\n")[0] ?? "";
     const target = line.startsWith("gitdir:") ? line.slice(7).trim() : "";
-    if (!target) return undefined;
-    return isAbsolute(target) ? target : resolve(root, target);
-  } catch {
-    return undefined;
+    if (!target) return { path: undefined, unreadable: true };
+    return { path: isAbsolute(target) ? target : resolve(root, target), unreadable: false };
+  } catch (error) {
+    if (isMissingError(error)) return { path: undefined, unreadable: false };
+    return { path: undefined, unreadable: true };
   }
 }
 
 export class ProjectActivityIndex {
   private readonly roots = new Map<string, string | null>();
-  /** One readdir per folder, shared by root detection and activity. */
-  private readonly listings = new Map<string, string[]>();
-  private readonly activity = new Map<string, number | undefined>();
+  private readonly activity = new Map<string, ActivityMeasurement>();
   /** Repeat size updates of one artifact must not walk the tree again. */
   private readonly byPath = new Map<string, ProjectActivity>();
-  private readonly repos = new Map<string, number | undefined>();
+  private readonly repos = new Map<string, GitActivityMeasurement>();
+  private readonly maxDepth: number;
+  private readonly maxDirs: number;
+  private readonly maxEntries: number;
+  private readonly timeBudgetMs: number;
+  private readonly clock: () => number;
+  private readonly home: string;
 
   /**
    * @param exclude every candidate path in the plan: an artifact named by a
@@ -118,21 +189,31 @@ export class ProjectActivityIndex {
   constructor(
     private readonly exclude: ReadonlySet<string> = new Set(),
     private readonly now = Date.now(),
-  ) {}
+    options: ProjectActivityOptions = {},
+  ) {
+    this.maxDepth = Math.max(0, options.maxDepth ?? DEFAULT_MAX_SOURCE_DEPTH);
+    this.maxDirs = Math.max(1, options.maxDirs ?? DEFAULT_MAX_SOURCE_DIRS);
+    this.maxEntries = Math.max(1, options.maxEntries ?? DEFAULT_MAX_SOURCE_ENTRIES);
+    this.timeBudgetMs = Math.max(0, options.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
+    this.clock = options.clock ?? (() => performance.now());
+    this.home = resolve(options.homeDir ?? homedir());
+  }
 
-  /** Activity for the project that owns `artifactPath`. */
   /**
+   * Activity for the project that owns `artifactPath`.
+   *
    * The project a person thinks of: the git work tree when there is one (a
    * monorepo, its packages and its caches are one project; each worktree is
    * its own), else the nearest folder with a manifest, else the artifact's
-   * parent. A dotfiles repository at the home folder never counts.
+   * parent. A dotfiles repository or manifest at the home folder never counts.
    */
   forArtifact(artifactPath: string): ProjectActivity {
     const cached = this.byPath.get(artifactPath);
     if (cached) return cached;
     const start = dirname(artifactPath);
     const root = this.workTree(start) ?? this.projectRoot(start) ?? start;
-    const found = { root, activeMs: this.projectActivity(root) };
+    const { activeMs, confidence } = this.projectActivity(root);
+    const found: ProjectActivity = { root, activeMs, confidence };
     this.byPath.set(artifactPath, found);
     return found;
   }
@@ -150,8 +231,8 @@ export class ProjectActivityIndex {
       }
       visited.push(dir);
       const parent = dirname(dir);
-      if (parent === dir || dir === HOME) break;
-      if (this.list(dir).includes(".git")) {
+      if (parent === dir || isSameDir(dir, this.home)) break;
+      if (hasEntry(dir, ".git")) {
         found = dir;
         break;
       }
@@ -159,19 +240,6 @@ export class ProjectActivityIndex {
     }
     for (const seen of visited) this.trees.set(seen, found);
     return found;
-  }
-
-  private list(dir: string): string[] {
-    let names = this.listings.get(dir);
-    if (names === undefined) {
-      try {
-        names = readdirSync(dir).slice(0, MAX_ROOT_ENTRIES);
-      } catch {
-        names = [];
-      }
-      this.listings.set(dir, names);
-    }
-    return names;
   }
 
   private projectRoot(start: string): string | null {
@@ -185,60 +253,169 @@ export class ProjectActivityIndex {
         break;
       }
       visited.push(dir);
-      if (this.list(dir).some((name) => MARKER_SET.has(name))) {
+      const parent = dirname(dir);
+      if (parent === dir || isSameDir(dir, this.home)) break;
+      if (PROJECT_MARKERS.some((marker) => hasEntry(dir, marker))) {
         found = dir;
         break;
       }
-      const parent = dirname(dir);
-      if (parent === dir) break;
       dir = parent;
     }
     for (const seen of visited) this.roots.set(seen, found);
     return found;
   }
 
-  private projectActivity(root: string): number | undefined {
-    if (this.activity.has(root)) return this.activity.get(root);
+  private projectActivity(root: string): ActivityMeasurement {
+    const cached = this.activity.get(root);
+    if (cached !== undefined) return cached;
+
     let newest: number | undefined;
+    let complete = true;
     const consider = (value: number | undefined) => {
-      // A clock-skewed future mtime must not make a project look busy forever.
-      if (value === undefined || value > this.now + 60_000) return;
+      if (value === undefined) return;
+      // A clock-skewed future mtime must not make a project look busy forever,
+      // but dropping it leaves a newer signal unaccounted for: not provable.
+      if (value > this.now + FUTURE_TOLERANCE_MS) {
+        complete = false;
+        return;
+      }
       if (newest === undefined || value > newest) newest = value;
     };
-    // An unreadable root lists nothing: only git can speak for it.
-    for (const name of this.list(root)) {
-      const path = join(root, name);
-      if (IGNORED.has(name) || this.exclude.has(path)) continue;
-      consider(mtimeMs(path));
+
+    const queue: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
+    let cursor = 0;
+    let dirsVisited = 0;
+    let entriesVisited = 0;
+    const deadline = this.clock() + this.timeBudgetMs;
+
+    walk: while (cursor < queue.length) {
+      const current = queue[cursor++]!;
+      if (dirsVisited >= this.maxDirs) {
+        complete = false;
+        break;
+      }
+      dirsVisited += 1;
+
+      // Iterate instead of materializing the listing, so the entry and time
+      // caps stop reading a huge directory early.
+      let dir;
+      try {
+        dir = opendirSync(current.dir);
+      } catch {
+        complete = false;
+        continue;
+      }
+      try {
+        for (;;) {
+          if (this.clock() > deadline) {
+            complete = false;
+            break walk;
+          }
+          let entry;
+          try {
+            entry = dir.readSync();
+          } catch {
+            complete = false;
+            break;
+          }
+          if (entry === null) break;
+
+          const name = entry.name;
+          if (IGNORED.has(name) || name.startsWith(".sweep-trash-")) continue;
+          const childPath = join(current.dir, name);
+          if (this.exclude.has(childPath)) continue;
+
+          entriesVisited += 1;
+          if (entriesVisited > this.maxEntries) {
+            complete = false;
+            break walk;
+          }
+
+          let stat;
+          try {
+            stat = lstatSync(childPath);
+          } catch {
+            complete = false;
+            continue;
+          }
+          consider(stat.mtimeMs);
+
+          if (stat.isSymbolicLink()) {
+            // Symlinks are never followed. A linked directory may hold newer
+            // edits we cannot see, so its project is not provable; a linked
+            // file's own mtime is one cheap stat away.
+            try {
+              const target = statSync(childPath);
+              if (target.isDirectory()) complete = false;
+              else consider(target.mtimeMs);
+            } catch (error) {
+              if (!isMissingError(error) && (error as NodeJS.ErrnoException).code !== "ELOOP") {
+                complete = false;
+              }
+            }
+          } else if (stat.isDirectory()) {
+            if (current.depth >= this.maxDepth) {
+              complete = false;
+            } else {
+              queue.push({ dir: childPath, depth: current.depth + 1 });
+            }
+          }
+        }
+      } finally {
+        dir.closeSync();
+      }
     }
-    consider(this.gitActivity(root));
-    this.activity.set(root, newest);
-    return newest;
+
+    const git = this.gitActivity(root);
+    consider(git.activeMs);
+    if (git.unreadable) complete = false;
+
+    const result: ActivityMeasurement =
+      complete && newest !== undefined
+        ? { activeMs: newest, confidence: "proven" }
+        : { activeMs: undefined, confidence: "unknown" };
+    this.activity.set(root, result);
+    return result;
   }
 
   /** Index and HEAD reflog mtimes of the repository containing `root`. */
-  private gitActivity(root: string): number | undefined {
+  private gitActivity(root: string): GitActivityMeasurement {
+    const visited: string[] = [];
     let dir = root;
+    let result: GitActivityMeasurement = { activeMs: undefined, unreadable: false };
     for (;;) {
-      if (this.repos.has(dir)) return this.repos.get(dir);
+      const cached = this.repos.get(dir);
+      if (cached !== undefined) {
+        result = cached;
+        break;
+      }
+      visited.push(dir);
+      const parent = dirname(dir);
+      if (parent === dir || isSameDir(dir, this.home)) break;
+
       const git = gitDir(dir);
-      if (git) {
+      if (git.unreadable) {
+        result = { activeMs: undefined, unreadable: true };
+        break;
+      }
+      if (git.path) {
         let newest: number | undefined;
-        for (const file of ["index", join("logs", "HEAD"), "HEAD", "FETCH_HEAD"]) {
+        let unreadable = false;
+        for (const file of GIT_ACTIVITY_FILES) {
           try {
-            const value = statSync(join(git, file)).mtimeMs;
+            const value = statSync(join(git.path, file)).mtimeMs;
             if (newest === undefined || value > newest) newest = value;
-          } catch {
-            /* absent in this repository */
+          } catch (error) {
+            if (!isMissingError(error)) unreadable = true;
           }
         }
-        this.repos.set(dir, newest);
-        return newest;
+        result = { activeMs: newest, unreadable };
+        break;
       }
-      const parent = dirname(dir);
-      if (parent === dir) return undefined;
       dir = parent;
     }
+    for (const seen of visited) this.repos.set(seen, result);
+    return result;
   }
 }
 

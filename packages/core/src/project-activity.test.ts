@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lutimesSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatIdle, parseIdleDuration, ProjectActivityIndex } from "./project-activity.js";
@@ -9,6 +18,8 @@ import type { ScanPlan } from "@kitsunekode/sweep-protocol";
 const DAY = 86_400_000;
 const NOW = Date.parse("2026-10-26T12:00:00Z");
 let root: string;
+/** Windows needs elevation or developer mode for symlinks; skip there. */
+const canSymlink = process.platform !== "win32";
 const at = (path: string, daysAgo: number) => {
   const when = new Date(NOW - daysAgo * DAY);
   utimesSync(path, when, when);
@@ -31,7 +42,265 @@ describe("project activity", () => {
     const activity = new ProjectActivityIndex(new Set([join(project, "node_modules")]), NOW);
     const result = activity.forArtifact(join(project, "node_modules"));
     expect(result.root).toBe(project);
+    expect(result.confidence).toBe("proven");
     expect(Math.round((NOW - result.activeMs!) / DAY)).toBe(90);
+  });
+
+  test("in-place edits to nested source files keep the project active even when top-level dirs are old", () => {
+    const project = join(root, "nested-app");
+    const deepDir = join(project, "src", "components", "forms");
+    mkdirSync(deepDir, { recursive: true });
+    mkdirSync(join(project, "node_modules"));
+    writeFileSync(join(project, "package.json"), "{}");
+    const editedFile = join(deepDir, "Login.tsx");
+    writeFileSync(editedFile, "export const Login = () => null;");
+
+    // Simulate editing Login.tsx in-place without bumping parent directory mtimes.
+    at(join(project, "package.json"), 90);
+    at(join(project, "src"), 90);
+    at(join(project, "src", "components"), 90);
+    at(deepDir, 90);
+    at(editedFile, 2);
+    at(join(project, "node_modules"), 0);
+
+    const activity = new ProjectActivityIndex(new Set([join(project, "node_modules")]), NOW);
+    const result = activity.forArtifact(join(project, "node_modules"));
+    expect(result.root).toBe(project);
+    expect(result.confidence).toBe("proven");
+    expect(Math.round((NOW - result.activeMs!) / DAY)).toBe(2);
+  });
+
+  test("direct marker probes find .git and package.json even when a folder has >300 entries", () => {
+    const project = join(root, "crowded");
+    mkdirSync(join(project, ".git", "logs"), { recursive: true });
+    mkdirSync(join(project, "packages", "sub", "node_modules"), { recursive: true });
+    for (let i = 0; i < 300; i += 1) {
+      const f = join(project, `entry-${String(i).padStart(3, "0")}.txt`);
+      writeFileSync(f, "x");
+      at(f, 60);
+    }
+    writeFileSync(join(project, "package.json"), "{}");
+    writeFileSync(join(project, ".git", "index"), "");
+    at(join(project, "package.json"), 60);
+    at(join(project, ".git", "index"), 5);
+    at(join(project, "packages"), 60);
+    at(join(project, "packages", "sub"), 60);
+
+    const activity = new ProjectActivityIndex(
+      new Set([join(project, "packages", "sub", "node_modules")]),
+      NOW,
+    );
+    const result = activity.forArtifact(join(project, "packages", "sub", "node_modules"));
+    expect(result.root).toBe(project);
+    expect(result.confidence).toBe("proven");
+    expect(Math.round((NOW - result.activeMs!) / DAY)).toBe(5);
+  });
+
+  test("projectRoot() and gitActivity() stop at $HOME and never adopt home manifests or dotfiles .git", () => {
+    const fakeHome = join(root, "fake-home");
+    const scratch = join(fakeHome, "scratch");
+    const artifact = join(scratch, "node_modules");
+    mkdirSync(join(fakeHome, ".git"), { recursive: true });
+    mkdirSync(artifact, { recursive: true });
+    writeFileSync(join(fakeHome, "package.json"), "{}");
+    writeFileSync(join(fakeHome, ".git", "index"), "");
+    writeFileSync(join(scratch, "notes.txt"), "hi");
+    at(join(fakeHome, "package.json"), 1);
+    at(join(fakeHome, ".git", "index"), 1);
+    at(join(scratch, "notes.txt"), 50);
+
+    const activity = new ProjectActivityIndex(new Set([artifact]), NOW, { homeDir: fakeHome });
+    const result = activity.forArtifact(artifact);
+    expect(result.root).toBe(scratch);
+    expect(result.confidence).toBe("proven");
+    expect(Math.round((NOW - result.activeMs!) / DAY)).toBe(50);
+  });
+
+  test("D4: exceeding nested walk bounds (entries, dirs, depth) yields unknown activity", () => {
+    const project = join(root, "bounded");
+    mkdirSync(join(project, "src", "a", "b", "c"), { recursive: true });
+    mkdirSync(join(project, "node_modules"));
+    writeFileSync(join(project, "package.json"), "{}");
+    writeFileSync(join(project, "src", "a", "b", "c", "leaf.ts"), "export {};");
+    at(join(project, "package.json"), 90);
+    at(join(project, "src"), 90);
+    at(join(project, "src", "a"), 90);
+    at(join(project, "src", "a", "b"), 90);
+    at(join(project, "src", "a", "b", "c"), 90);
+    at(join(project, "src", "a", "b", "c", "leaf.ts"), 90);
+
+    const artifact = join(project, "node_modules");
+    const depthCapped = new ProjectActivityIndex(new Set([artifact]), NOW, { maxDepth: 2 });
+    expect(depthCapped.forArtifact(artifact)).toEqual({
+      root: project,
+      activeMs: undefined,
+      confidence: "unknown",
+    });
+
+    const entryCapped = new ProjectActivityIndex(new Set([artifact]), NOW, { maxEntries: 2 });
+    expect(entryCapped.forArtifact(artifact)).toEqual({
+      root: project,
+      activeMs: undefined,
+      confidence: "unknown",
+    });
+
+    const dirCapped = new ProjectActivityIndex(new Set([artifact]), NOW, { maxDirs: 2 });
+    expect(dirCapped.forArtifact(artifact)).toEqual({
+      root: project,
+      activeMs: undefined,
+      confidence: "unknown",
+    });
+  });
+
+  test("D4: unreadable subdirectory yields unknown activity", () => {
+    if (
+      process.platform === "win32" ||
+      (typeof process.geteuid === "function" && process.geteuid() === 0)
+    ) {
+      return;
+    }
+    const project = join(root, "unreadable");
+    const secret = join(project, "src", "secret");
+    mkdirSync(secret, { recursive: true });
+    mkdirSync(join(project, "node_modules"));
+    writeFileSync(join(project, "package.json"), "{}");
+    at(join(project, "package.json"), 90);
+    at(join(project, "src"), 90);
+    chmodSync(secret, 0o000);
+    try {
+      const artifact = join(project, "node_modules");
+      const activity = new ProjectActivityIndex(new Set([artifact]), NOW);
+      expect(activity.forArtifact(artifact)).toEqual({
+        root: project,
+        activeMs: undefined,
+        confidence: "unknown",
+      });
+    } finally {
+      chmodSync(secret, 0o755);
+    }
+  });
+
+  test("D4: directory with only ignored artifacts has unknown activity", () => {
+    const project = join(root, "empty-proj");
+    const artifact = join(project, "node_modules");
+    mkdirSync(artifact, { recursive: true });
+    const activity = new ProjectActivityIndex(new Set([artifact]), NOW);
+    expect(activity.forArtifact(artifact)).toEqual({
+      root: project,
+      activeMs: undefined,
+      confidence: "unknown",
+    });
+  });
+
+  test.skipIf(!canSymlink)(
+    "D4: a symlinked source directory is not followed, so activity is unknown",
+    () => {
+      const shared = join(root, "shared", "src");
+      mkdirSync(shared, { recursive: true });
+      writeFileSync(join(shared, "lib.ts"), "export {};");
+      at(join(shared, "lib.ts"), 1); // the real edit, behind the link
+      at(shared, 90);
+
+      const project = join(root, "linked");
+      mkdirSync(join(project, "node_modules"), { recursive: true });
+      writeFileSync(join(project, "package.json"), "{}");
+      symlinkSync(join("..", "shared", "src"), join(project, "src"));
+      at(join(project, "package.json"), 90);
+      const linkTime = new Date(NOW - 90 * DAY);
+      lutimesSync(join(project, "src"), linkTime, linkTime);
+
+      const artifact = join(project, "node_modules");
+      const activity = new ProjectActivityIndex(new Set([artifact]), NOW);
+      expect(activity.forArtifact(artifact)).toEqual({
+        root: project,
+        activeMs: undefined,
+        confidence: "unknown",
+      });
+    },
+  );
+
+  test.skipIf(!canSymlink)("a symlinked file counts its target's mtime", () => {
+    const real = join(root, "dotfiles", "tsconfig.json");
+    mkdirSync(join(root, "dotfiles"));
+    writeFileSync(real, "{}");
+    at(real, 1);
+
+    const project = join(root, "linked-file");
+    mkdirSync(join(project, "node_modules"), { recursive: true });
+    writeFileSync(join(project, "package.json"), "{}");
+    symlinkSync(real, join(project, "tsconfig.json"));
+    at(join(project, "package.json"), 90);
+    const linkTime = new Date(NOW - 90 * DAY);
+    lutimesSync(join(project, "tsconfig.json"), linkTime, linkTime);
+
+    const artifact = join(project, "node_modules");
+    const result = new ProjectActivityIndex(new Set([artifact]), NOW).forArtifact(artifact);
+    expect(result.confidence).toBe("proven");
+    expect(Math.round((NOW - result.activeMs!) / DAY)).toBe(1);
+  });
+
+  test("D4: a future-dated edit is dropped, so activity is unknown rather than idle", () => {
+    const project = join(root, "skewed");
+    mkdirSync(join(project, "src"), { recursive: true });
+    mkdirSync(join(project, "node_modules"));
+    writeFileSync(join(project, "package.json"), "{}");
+    writeFileSync(join(project, "src", "index.ts"), "export {};");
+    at(join(project, "package.json"), 90);
+    at(join(project, "src"), 90);
+    const future = new Date(NOW + 2 * 3_600_000);
+    utimesSync(join(project, "src", "index.ts"), future, future); // only edit: now + 2h
+
+    const artifact = join(project, "node_modules");
+    const activity = new ProjectActivityIndex(new Set([artifact]), NOW);
+    expect(activity.forArtifact(artifact)).toEqual({
+      root: project,
+      activeMs: undefined,
+      confidence: "unknown",
+    });
+  });
+
+  test("D4: a walk that runs out of time is unknown; the entry cap stops reading early", () => {
+    const project = join(root, "slow");
+    mkdirSync(join(project, "node_modules"), { recursive: true });
+    writeFileSync(join(project, "package.json"), "{}");
+    at(join(project, "package.json"), 90);
+    for (let i = 0; i < 300; i += 1) {
+      const file = join(project, `f-${i}.txt`);
+      writeFileSync(file, "x");
+      at(file, 90);
+    }
+    const artifact = join(project, "node_modules");
+
+    // Each clock read advances 10 ms: a 50 ms budget runs out mid-directory.
+    let fakeNow = 0;
+    const slowClock = () => (fakeNow += 10);
+    const timed = new ProjectActivityIndex(new Set([artifact]), NOW, {
+      timeBudgetMs: 50,
+      clock: slowClock,
+    });
+    expect(timed.forArtifact(artifact)).toEqual({
+      root: project,
+      activeMs: undefined,
+      confidence: "unknown",
+    });
+
+    // Same tree with a frozen clock: fully walked, proven.
+    const frozen = new ProjectActivityIndex(new Set([artifact]), NOW, {
+      timeBudgetMs: 50,
+      clock: () => 0,
+    });
+    const proven = frozen.forArtifact(artifact);
+    expect(proven.confidence).toBe("proven");
+    expect(Math.round((NOW - proven.activeMs!) / DAY)).toBe(90);
+
+    // The entry cap stops iterating the 301-entry directory after a few reads.
+    let reads = 0;
+    const capped = new ProjectActivityIndex(new Set([artifact]), NOW, {
+      maxEntries: 2,
+      clock: () => (reads += 1),
+    });
+    expect(capped.forArtifact(artifact).confidence).toBe("unknown");
+    expect(reads).toBeLessThan(10);
   });
 
   test("git activity counts, and custom-pattern artifacts never do", () => {

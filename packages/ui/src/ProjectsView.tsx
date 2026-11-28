@@ -425,7 +425,7 @@ export function ProjectsView(props: ProjectsViewProps) {
       const nameText = padCells(clipCells(sanitizeTerminalText(p.name), nameW, true), nameW);
       const name = isCursor ? bold(fg(tokens.text)(nameText)) : fg(tokens.text)(nameText);
       const size = `${p.partial ? "~" : ""}${formatBytes(p.queueableBytes)}`.padStart(SIZE_W);
-      const idle = formatAge(p.activeMs, now).padStart(IDLE_W);
+      const idle = (p.section === "unknown" ? "?" : formatAge(p.activeMs, now)).padStart(IDLE_W);
       const recent = p.activeMs !== undefined && now - p.activeMs < RECENT_WINDOW_MS;
       // Risk leads the detail when there is any: it changes what Space does
       // (dangerous items stay out of a project-level queue) and needs a look.

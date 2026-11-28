@@ -289,8 +289,9 @@ export function formatScanReport(
       const idle = idleLabel(candidate.projectActiveMs, now);
       // Recent work reads at full strength, long-idle recedes: the easy call.
       // Not yellow - that is the caution tier's colour.
-      const idleText = `idle ${idle}`.padEnd(idleWidth - 2);
-      const idleCell = idle
+      const idleRaw = idle ? `idle ${idle}` : candidate.projectRoot !== undefined ? "idle ?" : "";
+      const idleText = idleRaw.padEnd(idleWidth - 2);
+      const idleCell = idleRaw
         ? `  ${days !== undefined && days < 7 ? pc.bold(idleText) : pc.dim(idleText)}`
         : " ".repeat(idleWidth);
       lines.push(

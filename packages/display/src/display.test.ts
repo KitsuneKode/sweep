@@ -266,6 +266,32 @@ describe("scan report", () => {
     expect(text).toContain("idle 1h");
   });
 
+  test("unprovable project activity renders as unknown idle and is not suggested as idle", () => {
+    const now = Date.parse("2026-10-26T12:00:00Z");
+    const lines = plain(
+      formatScanReport(
+        plan(
+          [
+            candidate({
+              id: "unk",
+              name: "node_modules",
+              kind: "node_modules",
+              path: "/work/huge/node_modules",
+              projectRoot: "/work/huge",
+              estimatedBytes: 4096,
+            }),
+          ],
+          ["unk"],
+        ),
+        "/work",
+        { columns: 100, disk: null, now },
+      ),
+    );
+    const text = lines.join("\n");
+    expect(text).toContain("idle ?");
+    expect(text).not.toContain("projects idle 30+ days");
+  });
+
   test("cloud-sync candidates keep selection and print an informational notice", () => {
     const lines = plain(
       formatScanReport(

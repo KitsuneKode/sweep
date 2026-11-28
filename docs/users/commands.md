@@ -90,14 +90,20 @@ inclusion for dangerous matches. A `--yes` run with dangerous items selected
 refuses unless `--allow-dangerous` is also passed. Git-tracked content and
 project files are always blocked. Read the plan's actual selection before applying.
 
-Every artifact carries when its project was last worked on: the git index and
-HEAD reflog, and the project root's own files, never its build output. A
-rebuild does not make a forgotten project look busy. `--idle 30d` keeps the
-selection to projects nobody has touched for 30 days; artifacts in active
-projects stay listed, unselected, and a project with no readable activity
-counts as active. The scan report shows each project's idle time, warns when
-the selection includes projects worked on today, and shows how much would be
-cleared from idle projects alone.
+Every artifact carries when its project was last worked on: git metadata (index,
+HEAD, reflog, and merge/commit state) plus a bounded walk of the project's own
+non-generated source files, never its build output. A rebuild does not make a
+forgotten project look busy, and editing a nested source file keeps the project
+active. If a project's activity cannot be proven (for example, the bounded
+source check hits its depth, directory, entry, or time limit, hits an
+unreadable folder, meets a symlinked folder it will not follow, sees a
+future-dated file, or finds no readable signal), its idle time is shown as
+unknown (`?`),
+it is never treated as idle, and `--idle` never selects it. `--idle 30d` keeps
+the selection to projects proven untouched for 30 days; active and unknown
+projects stay listed, unselected. The scan report shows each project's idle
+time, warns when the selection includes projects worked on today, and shows how
+much would be cleared from idle projects alone.
 
 `--yes` skips the plain CLI confirmation. `--force-large` overrides the configured
 size ceiling and requires `--yes`; these are deliberate automation options, not

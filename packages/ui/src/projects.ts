@@ -5,7 +5,6 @@ import {
   type ScanCandidate,
   type WorktreeState,
 } from "@kitsunekode/sweep-protocol";
-import { lastActiveMs } from "./age.js";
 import { formatBytes } from "@kitsunekode/sweep-display";
 
 /**
@@ -139,11 +138,13 @@ export function buildProjects(
   const projects: Project[] = [];
   for (const [key, artifacts] of byKey) {
     artifacts.sort((a, b) => b.estimatedBytes - a.estimatedBytes);
-    const activeMs = artifacts.reduce<number | undefined>((newest, candidate) => {
-      const active = lastActiveMs(candidate);
-      return active === undefined ? newest : Math.max(newest ?? 0, active);
-    }, undefined);
     const known = artifacts.some((candidate) => candidate.projectActiveMs !== undefined);
+    const activeMs = known
+      ? artifacts.reduce<number | undefined>((newest, candidate) => {
+          const active = candidate.projectActiveMs;
+          return active === undefined ? newest : Math.max(newest ?? 0, active);
+        }, undefined)
+      : undefined;
     const worktreeOf = artifacts.find((candidate) => candidate.worktreeOf)?.worktreeOf;
     const worktreeState = artifacts.find((candidate) => candidate.worktreeState)?.worktreeState;
     const section: ProjectSection =
